@@ -11,6 +11,22 @@
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      const isDevServer =
+        window.location.hostname === 'localhost' &&
+        window.location.port === '5173'
+
+      if (!isDevServer) {
+        const stylesheet = document.createElement('link')
+        stylesheet.rel = 'stylesheet'
+        stylesheet.href = './assets/app.css'
+        document.head.appendChild(stylesheet)
+      }
+
+      const script = document.createElement('script')
+      script.type = 'module'
+      script.src = isDevServer ? '/src/main.tsx' : './assets/app.js'
+      document.body.appendChild(script)
+    </script>
   </body>
 </html>

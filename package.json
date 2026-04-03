@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "test:smoke": "npm run build && playwright test"
+    "preview": "npm run build:pages && node scripts/serve-root.cjs 4173",
+    "test:smoke": "npm run build:pages && playwright test",
+    "build:pages": "npm run build && node scripts/sync-pages.cjs"
   },
   "dependencies": {
     "@react-three/drei": "10.0.2",

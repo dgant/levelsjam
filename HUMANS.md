@@ -12,6 +12,7 @@ The repository is being built as a browser game for GitHub Pages. At the moment 
 ## Build
 - After the app scaffold exists, create a production build with `npm run build`.
 - If the project uses a preview server, verify the build with `npm run preview`.
+- Refresh the legacy GitHub Pages publishable files with `npm run build:pages`.
 
 ## Testing
 - Run the production build before handoff.
@@ -23,4 +24,6 @@ The repository is being built as a browser game for GitHub Pages. At the moment 
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.
+- The current GitHub Pages setup publishes directly from the repository root on `main`.
+- Run `npm run build:pages` before pushing when the live site needs updated production assets.
 - After deployment, open the published URL and confirm that the scene loads and responds to input.

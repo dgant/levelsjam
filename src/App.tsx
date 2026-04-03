@@ -17,8 +17,9 @@ import {
 } from 'three'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-const GRASS_TEXTURE_URL = '/textures/grass_1.webp'
-const GROUND_TEXTURE_URL = '/textures/ground_14.webp'
+const assetBase = import.meta.env.BASE_URL
+const GRASS_TEXTURE_URL = `${assetBase}textures/grass_1.webp`
+const GROUND_TEXTURE_URL = `${assetBase}textures/ground_14.webp`
 
 const waterColor = new Color('#4d95c7')
 const groundColor = new Color('#8a7b68')
