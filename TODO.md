@@ -24,6 +24,7 @@
 [x] Enable Bloom, GodRays, DepthOfField, Lensflare, SSAO, Vignette with default settings
 [x] Add an FPS counter to the top right of the screen
 [x] pressing ` should open controls for adjusting the main parameters for each of our lighting and visual effects. directional light angle and intensity, on/off switch and intensity for each post processing effect
+- The items below remain unchecked until the implementation lands and the docs can be verified against code.
 [] Find a way for you to run a single instance of Vite headlessly in the background instead of repeatedly opening windows, sometimes multiple, that block my screen (this is my desktop computer!)
 [] Quadruple deceleration
 [] Quadruple acceleration

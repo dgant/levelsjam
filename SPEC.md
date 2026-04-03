@@ -30,6 +30,9 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - The cube and the lower ground plane use extracted PBR texture packs with tiling that assumes 1 meter by 1 meter world scale unless the source specifies a different implied scale.
 - The water plane uses the official three.js `Water` implementation from the examples/docs.
 - The sun is positioned 30 degrees above the horizon line.
+- The atmosphere sun information is driven by the actual sun direction and intensity.
+- The scene exposes a sun rotation slider.
+- The scene exposes a sky light intensity slider that defaults to the sun-linked value.
 - The renderer uses `AgXToneMapping`.
 - The scene enables Bloom, GodRays, DepthOfField, Lensflare, SSAO, and Vignette with default settings.
 - The UI shows an FPS counter in the top-right corner.
@@ -65,6 +68,7 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - Collision keeps the cube solid and keeps the plane below the water as an active surface boundary.
 - The water surface uses the official three.js `Water` material and animation path rather than a generic translucent plane.
 - The water and seabed remain separated by 1 meter.
+- The water and seabed use a footprint that is 10x the baseline scene size.
 - The sun direction matches a 30-degree-elevation outdoor lighting setup.
 - Highlight values remain available before tone mapping so bloom can respond proportionally to bright sources.
 - The page shows an FPS counter in the top-right corner during play.
@@ -81,6 +85,7 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - The page becomes interactive quickly on load.
 - The scene uses browser-friendly asset sizes and avoids unnecessary blocking work.
 - The frame rate remains stable during ordinary movement and camera motion.
+- The project documents startup-time and test-duration benchmarks and treats regressions in those measurements as actionable.
 
 ## Testing Expectations
 - A production build succeeds before a change is considered complete.

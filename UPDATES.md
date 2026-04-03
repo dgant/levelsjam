@@ -6,3 +6,5 @@
 - When the user asks for the official three.js `Water`, document that requirement explicitly rather than approximating it with a generic translucent plane.
 - When tuning movement, keep the documented speed, acceleration, deceleration, gravity, and jetpack targets in the spec so the controller and tests stay aligned.
 - When a key is assigned to a requested tooling or debug control, reserve that key from generic gameplay relock handling instead of letting it fall through to pointer-lock logic.
+- When a sun-linked control is requested, keep the atmosphere sun and sky light defaults coupled unless the user explicitly asks for them to diverge.
+- When benchmarking startup and test duration, write the target in the docs next to the measurement so regressions can be judged quickly.

@@ -5,3 +5,4 @@
 - This repository's current GitHub Pages token cannot switch Pages to workflow mode. The reliable publish path is legacy `main` root hosting with committed built assets at the repository root.
 - Runtime-served textures must live under `public/` in source. The root-level `textures/` directory is generated Pages output and gets replaced by `npm run build:pages`.
 - When movement tuning is specified in both speed and distance terms, preserve both constraints in the spec so tests can validate the intended feel instead of a single derived number.
+- When agent workflows need live Vite access, prefer one persistent headless instance over repeatedly starting visible windows.

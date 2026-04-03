@@ -8,6 +8,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Install dependencies with `npm install`.
 - Start the dev server with `npm run dev`.
 - Open the local URL printed by the dev server.
+- For agent work, prefer one long-lived headless Vite instance instead of repeatedly opening new visible windows.
 
 ## Build
 - Create a production build with `npm run build`.
@@ -34,6 +35,8 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify pressing backquote opens the visual controls panel.
 - Verify the panel adjusts sun angle, sun intensity, and the enabled/intensity controls for Bloom, GodRays, DepthOfField, Lensflare, SSAO, and Vignette.
 - Verify opening the panel releases mouse lock and clicking inside the panel does not relock the pointer.
+- Benchmark startup time and test duration before handoff and treat regressions as blocking issues.
+- Keep unit tests under 20 seconds and end-to-end tests under 1 minute.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.
