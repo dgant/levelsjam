@@ -67,15 +67,10 @@ const GROUND_TEXTURE_REPEAT = 5000
 const LOOK_SENSITIVITY = 0.003
 const MAX_PITCH = Math.PI / 2 - 0.05
 const INITIAL_PITCH = 0
+const BACKQUOTE_CODE = 'Backquote'
+const SUN_DISTANCE = 6000
 const cameraEuler = new Euler(0, 0, 0, 'YXZ')
 const INITIAL_LOOK_TARGET = new Vector3(0, 5, 0)
-const SUN_DIRECTION = new Vector3(
-  0,
-  Math.sin(Math.PI / 6),
-  -Math.cos(Math.PI / 6)
-).normalize()
-const SUN_POSITION = SUN_DIRECTION.clone().multiplyScalar(6000)
-const WATER_SUN_DIRECTION = SUN_DIRECTION.clone()
 const POINTER_UNLOCK_CODES = new Set([
   'Escape',
   'AltLeft',
@@ -85,6 +80,37 @@ const POINTER_UNLOCK_CODES = new Set([
   'MetaLeft',
   'MetaRight'
 ])
+
+type EffectSettings = {
+  enabled: boolean
+  intensity: number
+}
+
+type VisualSettings = {
+  sunElevationDeg: number
+  sunIntensity: number
+  bloom: EffectSettings
+  godRays: EffectSettings
+  depthOfField: EffectSettings
+  lensFlare: EffectSettings
+  ssao: EffectSettings
+  vignette: EffectSettings
+}
+
+type EffectSettingKey = Exclude<keyof VisualSettings, 'sunElevationDeg' | 'sunIntensity'>
+
+function createDefaultVisualSettings(): VisualSettings {
+  return {
+    sunElevationDeg: 30,
+    sunIntensity: 1,
+    bloom: { enabled: true, intensity: 1 },
+    godRays: { enabled: true, intensity: 0.6 },
+    depthOfField: { enabled: true, intensity: 1 },
+    lensFlare: { enabled: true, intensity: 1 },
+    ssao: { enabled: true, intensity: 1 },
+    vignette: { enabled: true, intensity: 0.5 }
+  }
+}
 
 function configureRepeatedTexture(
   texture: Texture,
@@ -131,7 +157,11 @@ function usePbrTextures(
   }
 }
 
-function FlightRig() {
+function FlightRig({
+  controlsOpen
+}: {
+  controlsOpen: boolean
+}) {
   const camera = useThree((state) => state.camera)
   const canvas = useThree((state) => state.gl.domElement)
   const keys = useRef<Record<string, boolean>>({})
@@ -196,7 +226,11 @@ function FlightRig() {
       updateRotation()
     }
 
-    const onPointerDown = () => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Node) || !canvas.contains(event.target)) {
+        return
+      }
+
       requestLock()
     }
 
@@ -212,6 +246,19 @@ function FlightRig() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code === BACKQUOTE_CODE) {
+        if (document.pointerLockElement === canvas) {
+          document.exitPointerLock()
+        }
+        keys.current[event.code] = false
+        return
+      }
+
+      if (controlsOpen) {
+        keys.current[event.code] = false
+        return
+      }
+
       if (POINTER_UNLOCK_CODES.has(event.code) || event.key === 'Meta') {
         if (document.pointerLockElement === canvas) {
           document.exitPointerLock()
@@ -252,7 +299,13 @@ function FlightRig() {
       window.removeEventListener('keyup', onKeyUp)
       window.removeEventListener('blur', onBlur)
     }
-  }, [canvas])
+  }, [canvas, controlsOpen])
+
+  useEffect(() => {
+    if (controlsOpen) {
+      keys.current = {}
+    }
+  }, [controlsOpen])
 
   useFrame((_, delta) => {
     camera.getWorldDirection(forward.current)
@@ -337,7 +390,11 @@ function FlightRig() {
   return null
 }
 
-function WaterSurface() {
+function WaterSurface({
+  sunDirection
+}: {
+  sunDirection: Vector3
+}) {
   const camera = useThree((state) => state.camera)
   const waterNormals = useLoader(TextureLoader, WATER_NORMALS_URL)
   const water = useMemo(() => {
@@ -348,7 +405,7 @@ function WaterSurface() {
       textureWidth: 1024,
       textureHeight: 1024,
       waterNormals,
-      sunDirection: WATER_SUN_DIRECTION.clone(),
+      sunDirection: sunDirection.clone(),
       sunColor: 0xffffff,
       waterColor: 0x2d6f96,
       distortionScale: 3.7,
@@ -359,7 +416,7 @@ function WaterSurface() {
     surface.position.y = 9
     surface.receiveShadow = true
     return surface
-  }, [waterNormals])
+  }, [sunDirection, waterNormals])
 
   useFrame((_, delta) => {
     const material = water.material as ShaderMaterial
@@ -384,14 +441,16 @@ function WaterSurface() {
 }
 
 function GodRaysPrimitive({
-  sun
+  sun,
+  intensity
 }: {
   sun: Mesh
+  intensity: number
 }) {
   const camera = useThree((state) => state.camera)
   const effect = useMemo(
-    () => new GodRaysEffect(camera, sun, {}),
-    [camera, sun]
+    () => new GodRaysEffect(camera, sun, { exposure: intensity }),
+    [camera, intensity, sun]
   )
 
   useEffect(() => () => effect.dispose(), [effect])
@@ -399,7 +458,13 @@ function GodRaysPrimitive({
   return <primitive object={effect} dispose={null} />
 }
 
-function LensFlarePrimitive() {
+function LensFlarePrimitive({
+  intensity,
+  sunPosition
+}: {
+  intensity: number
+  sunPosition: Vector3
+}) {
   const camera = useThree((state) => state.camera)
   const viewport = useThree((state) => state.viewport)
   const raycaster = useThree((state) => state.raycaster)
@@ -418,7 +483,7 @@ function LensFlarePrimitive() {
         flareShape: 0.01,
         animated: true,
         anamorphic: false,
-        colorGain: new Color(20, 20, 20),
+        colorGain: new Color(20 * intensity, 20 * intensity, 20 * intensity),
         lensDirtTexture: null,
         haloScale: 0.5,
         secondaryGhosts: true,
@@ -427,7 +492,7 @@ function LensFlarePrimitive() {
         opacity: 1,
         starBurst: false
       }),
-    [viewport.height, viewport.width]
+    [intensity, viewport.height, viewport.width]
   )
   const screenPosition = useMemo(() => new Vector2(), [])
   const projectedPosition = useMemo(() => new Vector3(), [])
@@ -448,7 +513,7 @@ function LensFlarePrimitive() {
       return
     }
 
-    projectedPosition.copy(SUN_POSITION).project(camera)
+    projectedPosition.copy(sunPosition).project(camera)
     if (projectedPosition.z > 1) {
       return
     }
@@ -514,7 +579,11 @@ function FpsReporter({
   return null
 }
 
-function Terrain() {
+function Terrain({
+  sunDirection
+}: {
+  sunDirection: Vector3
+}) {
   const grass = usePbrTextures(GRASS_TEXTURE_URLS, CUBE_TEXTURE_REPEAT)
   const ground = usePbrTextures(GROUND_TEXTURE_URLS, GROUND_TEXTURE_REPEAT)
 
@@ -530,7 +599,7 @@ function Terrain() {
         />
       </mesh>
 
-      <WaterSurface />
+      <WaterSurface sunDirection={sunDirection} />
 
       <mesh position={[0, 8, 0]} rotation-x={-Math.PI / 2} receiveShadow>
         <planeGeometry args={[5000, 5000]} />
@@ -545,12 +614,31 @@ function Terrain() {
   )
 }
 
-function Scene() {
+function Scene({
+  controlsOpen,
+  visualSettings
+}: {
+  controlsOpen: boolean
+  visualSettings: VisualSettings
+}) {
   const atmosphere = useRef<AtmosphereApi | null>(null)
   const [sunMesh, setSunMesh] = useState<Mesh | null>(null)
   const worldOrigin = useMemo(
     () => new Geodetic(0, 0, 5).toECEF(new Vector3()),
     []
+  )
+  const sunDirection = useMemo(() => {
+    const elevationRadians = (visualSettings.sunElevationDeg * Math.PI) / 180
+
+    return new Vector3(
+      0,
+      Math.sin(elevationRadians),
+      -Math.cos(elevationRadians)
+    ).normalize()
+  }, [visualSettings.sunElevationDeg])
+  const sunPosition = useMemo(
+    () => sunDirection.clone().multiplyScalar(SUN_DISTANCE),
+    [sunDirection]
   )
 
   useEffect(() => {
@@ -571,9 +659,9 @@ function Scene() {
       textures={DEFAULT_PRECOMPUTED_TEXTURES_URL}
     >
       <Sky />
-      <group position={[SUN_POSITION.x, SUN_POSITION.y, SUN_POSITION.z]}>
-        <SkyLight />
-        <SunLight />
+      <group position={[sunPosition.x, sunPosition.y, sunPosition.z]}>
+        <SkyLight intensity={Math.max(0.1, visualSettings.sunIntensity * 0.5)} />
+        <SunLight intensity={visualSettings.sunIntensity} />
       </group>
       <mesh
         ref={(value) => {
@@ -581,32 +669,216 @@ function Scene() {
             setSunMesh(value)
           }
         }}
-        position={[SUN_POSITION.x, SUN_POSITION.y, SUN_POSITION.z]}
+        position={[sunPosition.x, sunPosition.y, sunPosition.z]}
       >
         <sphereGeometry args={[220, 24, 24]} />
         <meshBasicMaterial color="#fff4c2" toneMapped={false} />
       </mesh>
-      <Terrain />
+      <Terrain sunDirection={sunDirection} />
       <EffectComposer enableNormalPass>
         <AerialPerspective />
-        <Bloom />
-        {sunMesh ? <GodRaysPrimitive sun={sunMesh} /> : null}
-        <DepthOfField />
-        <LensFlarePrimitive />
-        <SSAO />
-        <Vignette />
+        {visualSettings.bloom.enabled ? (
+          <Bloom intensity={visualSettings.bloom.intensity} />
+        ) : null}
+        {visualSettings.godRays.enabled && sunMesh ? (
+          <GodRaysPrimitive
+            intensity={visualSettings.godRays.intensity}
+            sun={sunMesh}
+          />
+        ) : null}
+        {visualSettings.depthOfField.enabled ? (
+          <DepthOfField bokehScale={visualSettings.depthOfField.intensity} />
+        ) : null}
+        {visualSettings.lensFlare.enabled ? (
+          <LensFlarePrimitive
+            intensity={visualSettings.lensFlare.intensity}
+            sunPosition={sunPosition}
+          />
+        ) : null}
+        {visualSettings.ssao.enabled ? (
+          <SSAO intensity={visualSettings.ssao.intensity} />
+        ) : null}
+        {visualSettings.vignette.enabled ? (
+          <Vignette darkness={visualSettings.vignette.intensity} />
+        ) : null}
       </EffectComposer>
-      <FlightRig />
+      <FlightRig controlsOpen={controlsOpen} />
     </Atmosphere>
   )
 }
 
+function VisualControls({
+  controlsOpen,
+  visualSettings,
+  onEffectSettingChange,
+  onSunSettingChange
+}: {
+  controlsOpen: boolean
+  visualSettings: VisualSettings
+  onEffectSettingChange: (
+    effect: EffectSettingKey,
+    patch: Partial<EffectSettings>
+  ) => void
+  onSunSettingChange: (
+    key: 'sunElevationDeg' | 'sunIntensity',
+    value: number
+  ) => void
+}) {
+  if (!controlsOpen) {
+    return null
+  }
+
+  const effectControls: Array<{
+    key: EffectSettingKey
+    label: string
+    max: number
+    min: number
+    step: number
+  }> = [
+    { key: 'bloom', label: 'Bloom', min: 0, max: 3, step: 0.05 },
+    { key: 'godRays', label: 'God Rays', min: 0, max: 2, step: 0.05 },
+    { key: 'depthOfField', label: 'Depth Of Field', min: 0, max: 5, step: 0.05 },
+    { key: 'lensFlare', label: 'Lens Flare', min: 0, max: 2, step: 0.05 },
+    { key: 'ssao', label: 'SSAO', min: 0, max: 5, step: 0.05 },
+    { key: 'vignette', label: 'Vignette', min: 0, max: 1, step: 0.05 }
+  ]
+
+  return (
+    <aside
+      className="visual-controls"
+      data-testid="visual-controls"
+    >
+      <div className="visual-controls-header">
+        <strong>Visual Controls</strong>
+        <span>Press ` to close</span>
+      </div>
+
+      <label className="visual-control-row">
+        <span>Sun Elevation</span>
+        <input
+          aria-label="Sun Elevation"
+          max={90}
+          min={0}
+          onChange={(event) => {
+            onSunSettingChange('sunElevationDeg', Number(event.target.value))
+          }}
+          step={1}
+          type="range"
+          value={visualSettings.sunElevationDeg}
+        />
+        <output>{visualSettings.sunElevationDeg.toFixed(0)} deg</output>
+      </label>
+
+      <label className="visual-control-row">
+        <span>Sun Intensity</span>
+        <input
+          aria-label="Sun Intensity"
+          max={4}
+          min={0}
+          onChange={(event) => {
+            onSunSettingChange('sunIntensity', Number(event.target.value))
+          }}
+          step={0.05}
+          type="range"
+          value={visualSettings.sunIntensity}
+        />
+        <output>{visualSettings.sunIntensity.toFixed(2)}</output>
+      </label>
+
+      {effectControls.map((effectControl) => (
+        <div
+          className="visual-effect-row"
+          key={effectControl.key}
+        >
+          <label className="visual-effect-toggle">
+            <input
+              checked={visualSettings[effectControl.key].enabled}
+              onChange={(event) => {
+                onEffectSettingChange(effectControl.key, {
+                  enabled: event.target.checked
+                })
+              }}
+              type="checkbox"
+            />
+            <span>{effectControl.label}</span>
+          </label>
+
+          <label className="visual-control-row">
+            <span>{effectControl.label} Intensity</span>
+            <input
+              aria-label={`${effectControl.label} Intensity`}
+              max={effectControl.max}
+              min={effectControl.min}
+              onChange={(event) => {
+                onEffectSettingChange(effectControl.key, {
+                  intensity: Number(event.target.value)
+                })
+              }}
+              step={effectControl.step}
+              type="range"
+              value={visualSettings[effectControl.key].intensity}
+            />
+            <output>{visualSettings[effectControl.key].intensity.toFixed(2)}</output>
+          </label>
+        </div>
+      ))}
+    </aside>
+  )
+}
+
 export default function App() {
+  const [controlsOpen, setControlsOpen] = useState(false)
   const [fps, setFps] = useState(0)
+  const [visualSettings, setVisualSettings] = useState(createDefaultVisualSettings)
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== BACKQUOTE_CODE) {
+        return
+      }
+
+      event.preventDefault()
+      setControlsOpen((open) => !open)
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [])
+
+  const onSunSettingChange = (
+    key: 'sunElevationDeg' | 'sunIntensity',
+    value: number
+  ) => {
+    setVisualSettings((current) => ({
+      ...current,
+      [key]: value
+    }))
+  }
+
+  const onEffectSettingChange = (
+    effect: EffectSettingKey,
+    patch: Partial<EffectSettings>
+  ) => {
+    setVisualSettings((current) => ({
+      ...current,
+      [effect]: {
+        ...current[effect],
+        ...patch
+      }
+    }))
+  }
 
   return (
     <div className="app-shell">
       <div className="fps-counter">{Math.round(fps)} FPS</div>
+      <VisualControls
+        controlsOpen={controlsOpen}
+        onEffectSettingChange={onEffectSettingChange}
+        onSunSettingChange={onSunSettingChange}
+        visualSettings={visualSettings}
+      />
       <Canvas
         camera={{
           position: [
@@ -625,7 +897,10 @@ export default function App() {
           gl.toneMappingExposure = 1.2
         }}
       >
-        <Scene />
+        <Scene
+          controlsOpen={controlsOpen}
+          visualSettings={visualSettings}
+        />
         <FpsReporter onSample={setFps} />
       </Canvas>
     </div>

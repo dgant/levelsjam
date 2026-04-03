@@ -33,17 +33,22 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - The renderer uses `AgXToneMapping`.
 - The scene enables Bloom, GodRays, DepthOfField, Lensflare, SSAO, and Vignette with default settings.
 - The UI shows an FPS counter in the top-right corner.
+- Pressing backquote opens and closes a visual controls panel during play.
+- The visual controls panel exposes the sun elevation angle and sun intensity.
+- The visual controls panel exposes enabled and intensity controls for Bloom, GodRays, DepthOfField, Lensflare, SSAO, and Vignette.
 - The player can move with first-person WASD controls.
 - The player can look around with mouse look controls.
 - Holding `Space` applies vertical thrust in a jetpack-like motion.
 - Pressing `Escape`, `Alt`, `Control`, `Meta`, or the Windows key releases mouse lock.
-- Any other key press or mouse click restores mouse lock while playing.
+- Pressing backquote is reserved for the visual controls panel and does not restore mouse lock.
+- Any other non-reserved key press or mouse click on the scene restores mouse lock while playing.
 - The initial scene contains no speculative HUD copy, branding caption, or click-to-enter gate.
 
 ## Player Experience
 - The camera starts in a playable 3D view with immediate control.
 - Movement feels continuous and responsive rather than tile-based or turn-based.
 - Mouse look changes camera orientation directly.
+- Pressing backquote reveals a live visual tuning panel without a rebuild or page refresh.
 - Jetpack thrust adds upward motion while `Space` remains held and stops when `Space` is released.
 - Horizontal motion feels capped and responsive rather than indefinitely accelerating.
 - Vertical motion feels capped and responsive rather than indefinitely accelerating.
@@ -70,6 +75,7 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - Movement responds continuously to key state changes.
 - Vertical thrust is sustained while the key is held, not toggled.
 - Mouse lock unlocks on escape-style modifier keys and relocks on normal interaction.
+- Opening the visual controls panel releases mouse lock so the panel can be adjusted.
 
 ## Performance Requirements
 - The page becomes interactive quickly on load.
@@ -82,3 +88,4 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - The controls are checked in the browser for movement, looking, and thrust behavior.
 - Visual layout changes are reviewed in the rendered scene, not only in source code.
 - Collision behavior is checked in the browser for resting contact on the ground and stable interaction with the cube.
+- The backquote shortcut is checked in the browser and verified to open the visual controls panel.

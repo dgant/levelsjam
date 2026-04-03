@@ -31,6 +31,9 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the sun sits at a 30-degree elevation and the tone mapper is `AgXToneMapping`.
 - Verify the requested postprocessing effects are present with their default settings.
 - Verify the FPS counter appears in the top-right corner.
+- Verify pressing backquote opens the visual controls panel.
+- Verify the panel adjusts sun angle, sun intensity, and the enabled/intensity controls for Bloom, GodRays, DepthOfField, Lensflare, SSAO, and Vignette.
+- Verify opening the panel releases mouse lock and clicking inside the panel does not relock the pointer.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.

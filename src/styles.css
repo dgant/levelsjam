@@ -39,6 +39,66 @@ body {
   pointer-events: none;
 }
 
+.visual-controls {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 3;
+  width: min(360px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  padding: 14px;
+  background: rgb(7 11 18 / 88%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 16px;
+  box-shadow: 0 18px 60px rgb(0 0 0 / 35%);
+  color: #f2f7ff;
+  font:
+    500 13px/1.4 ui-monospace,
+    "SFMono-Regular",
+    "Cascadia Code",
+    monospace;
+  backdrop-filter: blur(10px);
+}
+
+.visual-controls-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.visual-controls-header span,
+.visual-control-row output {
+  color: rgb(209 220 236 / 78%);
+  font-size: 12px;
+}
+
+.visual-control-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.visual-control-row input[type='range'] {
+  width: 100%;
+}
+
+.visual-effect-row {
+  padding-top: 10px;
+  margin-top: 10px;
+  border-top: 1px solid rgb(255 255 255 / 10%);
+}
+
+.visual-effect-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
 .app-shell canvas {
   display: block;
   width: 100%;

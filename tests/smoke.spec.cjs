@@ -1,6 +1,8 @@
 const { PNG } = require('pngjs')
 const { expect, test } = require('@playwright/test')
 
+test.setTimeout(45_000)
+
 test('loads the flight scaffold without runtime errors', async ({ page }) => {
   const consoleErrors = []
   const pageErrors = []
@@ -28,6 +30,10 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
   await expect(page.locator('.start-button')).toHaveCount(0)
   await expect(page.getByText('Cursor / levels.io jam')).toHaveCount(0)
   await expect(page.getByText('WebGL ready')).toHaveCount(0)
+
+  await page.keyboard.press('Backquote')
+  await expect(page.locator('[data-testid="visual-controls"]')).toBeVisible()
+  await expect(page.getByLabel('Sun Elevation')).toBeVisible()
 
   await page.mouse.move(400, 300)
   await page.waitForTimeout(500)
