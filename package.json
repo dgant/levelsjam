@@ -1,0 +1,28 @@
+{
+  "name": "levelsjam",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@react-three/drei": "10.0.2",
+    "@react-three/fiber": "^9.3.0",
+    "@react-three/postprocessing": "^3.0.4",
+    "@takram/three-atmosphere": "^0.17.1",
+    "postprocessing": "^6.37.7",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "three": "^0.181.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "4.4.1",
+    "typescript": "^5.9.2",
+    "vite": "5.4.21"
+  }
+}
