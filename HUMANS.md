@@ -25,6 +25,12 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the player starts 1 meter above the cube, lands on the cube top, and cannot fall through the lower ground plane.
 - Verify ground contact is stable: the character should rest on collision instead of popping upward and falling again in a loop.
 - Verify the water surface uses the official three.js `Water` implementation and animates as expected.
+- Verify the water plane is 1 meter below the cube top and the seabed is 1 meter below the water.
+- Verify horizontal speed, vertical speed, fall speed, acceleration, deceleration, and gravity match the documented targets.
+- Verify mouse lock releases on escape-style modifier keys and re-engages on ordinary input.
+- Verify the sun sits at a 30-degree elevation and the tone mapper is `AgXToneMapping`.
+- Verify the requested postprocessing effects are present with their default settings.
+- Verify the FPS counter appears in the top-right corner.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.

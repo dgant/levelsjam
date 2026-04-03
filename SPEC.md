@@ -10,21 +10,34 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 
 ## Current Scope
 - The scene contains a 10m x 10m cube with a grass texture on its visible surfaces.
-- The scene contains an infinite water plane positioned 1m below the cube surface.
-- The scene contains an infinite ground plane below the water plane with a separate ground texture.
+- The scene contains an infinite water plane positioned 1m below the top of the cube.
+- The scene contains an infinite ground plane positioned 1m below the water plane with a separate ground texture.
 - The cube and the plane below the water participate in collision.
 - The player spawns 1 meter above the top of the cube.
 - The character collision volume is a capsule that is 1.75m tall and 0.25m in radius.
 - The character comes to rest on ground contact instead of bouncing or entering a jump loop.
+- The player reaches a horizontal top speed of 20 mph.
+- The player reaches a vertical top speed of 5 mph.
+- The player reaches a maximum fall speed of 40 mph.
+- The player accelerates to horizontal top speed over a travel distance of 8 meters.
+- The player decelerates from horizontal top speed to zero over a travel distance of 2 meters.
+- Gravity applies at 1g.
+- Jetpack thrust applies at 1.25g so the net upward acceleration is 0.25g while `Space` is held.
 - The scene uses `@takram/three-atmosphere` for atmospheric rendering.
 - The scene uses the library's light-source lighting pattern with `SkyLight`, `SunLight`, and `AerialPerspective` as the reference atmosphere setup.
 - The scene uses lighting and exposure values that keep the cube, water, and terrain readable on first load.
 - Texture links that point to ShareTextures are treated as downloadable PBR packs rather than preview images.
 - The cube and the lower ground plane use extracted PBR texture packs with tiling that assumes 1 meter by 1 meter world scale unless the source specifies a different implied scale.
 - The water plane uses the official three.js `Water` implementation from the examples/docs.
+- The sun is positioned 30 degrees above the horizon line.
+- The renderer uses `AgXToneMapping`.
+- The scene enables Bloom, GodRays, DepthOfField, Lensflare, SSAO, and Vignette with default settings.
+- The UI shows an FPS counter in the top-right corner.
 - The player can move with first-person WASD controls.
 - The player can look around with mouse look controls.
 - Holding `Space` applies vertical thrust in a jetpack-like motion.
+- Pressing `Escape`, `Alt`, `Control`, `Meta`, or the Windows key releases mouse lock.
+- Any other key press or mouse click restores mouse lock while playing.
 - The initial scene contains no speculative HUD copy, branding caption, or click-to-enter gate.
 
 ## Player Experience
@@ -32,8 +45,11 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - Movement feels continuous and responsive rather than tile-based or turn-based.
 - Mouse look changes camera orientation directly.
 - Jetpack thrust adds upward motion while `Space` remains held and stops when `Space` is released.
-- The game responds to movement and look input without requiring any preliminary button click.
+- Horizontal motion feels capped and responsive rather than indefinitely accelerating.
+- Vertical motion feels capped and responsive rather than indefinitely accelerating.
 - Ground contact resolves the character to a resting state instead of repeatedly lifting and dropping the collision volume.
+- The game responds to movement and look input without requiring any preliminary button click.
+- Mouse lock behavior is available during play for relative look input.
 
 ## Visual Requirements
 - The cube reads as the central landmark in the scene.
@@ -43,12 +59,17 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - The sky and lighting avoid a black first frame by using a known-good atmosphere configuration from the library's documented light-source example pattern.
 - Collision keeps the cube solid and keeps the plane below the water as an active surface boundary.
 - The water surface uses the official three.js `Water` material and animation path rather than a generic translucent plane.
+- The water and seabed remain separated by 1 meter.
+- The sun direction matches a 30-degree-elevation outdoor lighting setup.
+- Highlight values remain available before tone mapping so bloom can respond proportionally to bright sources.
+- The page shows an FPS counter in the top-right corner during play.
 - The page avoids a blocking loading screen.
 
 ## Animation And Motion
 - Camera rotation responds smoothly to pointer movement.
 - Movement responds continuously to key state changes.
 - Vertical thrust is sustained while the key is held, not toggled.
+- Mouse lock unlocks on escape-style modifier keys and relocks on normal interaction.
 
 ## Performance Requirements
 - The page becomes interactive quickly on load.
