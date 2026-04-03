@@ -12,9 +12,13 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - The scene contains a 10m x 10m cube with a grass texture on its visible surfaces.
 - The scene contains an infinite water plane positioned 1m below the cube surface.
 - The scene contains an infinite ground plane below the water plane with a separate ground texture.
+- The cube and the plane below the water participate in collision.
+- The player spawns 1 meter above the top of the cube.
 - The scene uses `@takram/three-atmosphere` for atmospheric rendering.
 - The scene uses the library's light-source lighting pattern with `SkyLight`, `SunLight`, and `AerialPerspective` as the reference atmosphere setup.
 - The scene uses lighting and exposure values that keep the cube, water, and terrain readable on first load.
+- Texture links that point to ShareTextures are treated as downloadable PBR packs rather than preview images.
+- The cube and the lower ground plane use extracted PBR texture packs with tiling that assumes 1 meter by 1 meter world scale unless the source specifies a different implied scale.
 - The player can move with first-person WASD controls.
 - The player can look around with mouse look controls.
 - Holding `Space` applies vertical thrust in a jetpack-like motion.
@@ -33,6 +37,7 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - The ground plane extends beyond the visible area so it reads as infinite.
 - Atmosphere and lighting combine to produce a sky-backed outdoor scene.
 - The sky and lighting avoid a black first frame by using a known-good atmosphere configuration from the library's documented light-source example pattern.
+- Collision keeps the cube solid and keeps the plane below the water as an active surface boundary.
 - The page avoids a blocking loading screen.
 
 ## Animation And Motion

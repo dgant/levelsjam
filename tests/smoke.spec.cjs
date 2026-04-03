@@ -4,6 +4,7 @@ const { expect, test } = require('@playwright/test')
 test('loads the flight scaffold without runtime errors', async ({ page }) => {
   const consoleErrors = []
   const pageErrors = []
+  const resourceUrls = new Set()
 
   page.on('console', (message) => {
     if (message.type() === 'error') {
@@ -13,6 +14,10 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
 
   page.on('pageerror', (error) => {
     pageErrors.push(String(error))
+  })
+
+  page.on('response', (response) => {
+    resourceUrls.add(response.url())
   })
 
   await page.goto('/', { waitUntil: 'networkidle' })
@@ -34,6 +39,19 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
 
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
+  expect(
+    [...resourceUrls].some((url) => url.includes('grass_1_basecolor-1K.png'))
+  ).toBe(true)
+  expect(
+    [...resourceUrls].some((url) => url.includes('ground_14_Basecolor-1K.png'))
+  ).toBe(true)
+  expect(
+    [...resourceUrls].some(
+      (url) =>
+        url.includes('textures/grass_1.webp') ||
+        url.includes('textures/ground_14.webp')
+    )
+  ).toBe(false)
   expect(
     screenshot.data[pixelOffset] +
       screenshot.data[pixelOffset + 1] +

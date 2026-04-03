@@ -1,5 +1,5 @@
 import { EffectComposer } from '@react-three/postprocessing'
-import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
 import { DEFAULT_PRECOMPUTED_TEXTURES_URL } from '@takram/three-atmosphere'
 import type { AtmosphereApi } from '@takram/three-atmosphere/r3f'
 import {
@@ -16,35 +16,84 @@ import {
   Matrix4,
   RepeatWrapping,
   SRGBColorSpace,
+  Texture,
   TextureLoader,
   Vector2,
   Vector3
 } from 'three'
 import { useEffect, useMemo, useRef } from 'react'
+import {
+  PLAYER_SPAWN_POSITION,
+  resolvePlayerCollision
+} from './lib/playerCollision.js'
 
 const assetBase = import.meta.env.BASE_URL
-const GRASS_TEXTURE_URL = `${assetBase}textures/grass_1.webp`
-const GROUND_TEXTURE_URL = `${assetBase}textures/ground_14.webp`
+const GRASS_TEXTURE_URLS = {
+  color: `${assetBase}textures/grass_1/grass_1-1K/grass_1_basecolor-1K.png`,
+  normal: `${assetBase}textures/grass_1/grass_1-1K/grass_1_normal-1K.png`,
+  roughness: `${assetBase}textures/grass_1/grass_1-1K/grass_1_roughness-1K.png`,
+  metalness: `${assetBase}textures/grass_1/grass_1-1K/grass_1_metallic-1K.png`,
+  bump: `${assetBase}textures/grass_1/grass_1-1K/grass_1_height-1K.png`
+}
+const GROUND_TEXTURE_URLS = {
+  color: `${assetBase}textures/ground_14/ground_14-1K/ground_14_Basecolor-1K.png`,
+  normal: `${assetBase}textures/ground_14/ground_14-1K/ground_14_Normal-1K.png`,
+  roughness: `${assetBase}textures/ground_14/ground_14-1K/ground_14_Roughness-1K.png`,
+  metalness: `${assetBase}textures/ground_14/ground_14-1K/ground_14_Metallic-1K.png`,
+  bump: `${assetBase}textures/ground_14/ground_14-1K/ground_14_Height-1K.png`
+}
 const ATMOSPHERE_DATE = new Date('2026-04-03T12:00:00Z')
+const CUBE_TEXTURE_REPEAT = 10
+const GROUND_TEXTURE_REPEAT = 5000
 const LOOK_SENSITIVITY = 0.003
 const MAX_PITCH = Math.PI / 2 - 0.05
-const INITIAL_PITCH = -0.35
+const INITIAL_PITCH = 0
 const cameraEuler = new Euler(0, 0, 0, 'YXZ')
+const INITIAL_LOOK_TARGET = new Vector3(0, 5, 0)
 
-function useLoadedTexture(url: string) {
-  const texture = useMemo(() => {
-    const loader = new TextureLoader()
-    const loaded = loader.load(url)
-    loaded.colorSpace = SRGBColorSpace
-    loaded.wrapS = RepeatWrapping
-    loaded.wrapT = RepeatWrapping
-    loaded.anisotropy = 8
-    return loaded
-  }, [url])
+function configureRepeatedTexture(
+  texture: Texture,
+  repeat: number,
+  anisotropy: number,
+  isColorMap = false
+) {
+  texture.wrapS = RepeatWrapping
+  texture.wrapT = RepeatWrapping
+  texture.repeat.set(repeat, repeat)
+  texture.anisotropy = anisotropy
+  texture.colorSpace = isColorMap ? SRGBColorSpace : texture.colorSpace
+  texture.needsUpdate = true
+}
 
-  useEffect(() => () => texture.dispose(), [texture])
+function usePbrTextures(
+  textureUrls: typeof GRASS_TEXTURE_URLS,
+  repeat: number
+) {
+  const maxAnisotropy = useThree((state) => state.gl.capabilities.getMaxAnisotropy())
+  const textures = useLoader(TextureLoader, [
+    textureUrls.color,
+    textureUrls.normal,
+    textureUrls.roughness,
+    textureUrls.metalness,
+    textureUrls.bump
+  ]) as [Texture, Texture, Texture, Texture, Texture]
 
-  return texture
+  useEffect(() => {
+    const anisotropy = Math.min(maxAnisotropy, 8)
+    configureRepeatedTexture(textures[0], repeat, anisotropy, true)
+    configureRepeatedTexture(textures[1], repeat, anisotropy)
+    configureRepeatedTexture(textures[2], repeat, anisotropy)
+    configureRepeatedTexture(textures[3], repeat, anisotropy)
+    configureRepeatedTexture(textures[4], repeat, anisotropy)
+  }, [maxAnisotropy, repeat, textures])
+
+  return {
+    map: textures[0],
+    normalMap: textures[1],
+    roughnessMap: textures[2],
+    metalnessMap: textures[3],
+    bumpMap: textures[4]
+  }
 }
 
 function FlightRig() {
@@ -58,10 +107,18 @@ function FlightRig() {
   const yaw = useRef(0)
   const pitch = useRef(INITIAL_PITCH)
   const up = useMemo(() => new Vector3(0, 1, 0), [])
+  const intendedPosition = useRef(new Vector3())
 
   useEffect(() => {
     camera.rotation.order = 'YXZ'
-    camera.rotation.set(pitch.current, yaw.current, 0)
+    camera.position.set(
+      PLAYER_SPAWN_POSITION.x,
+      PLAYER_SPAWN_POSITION.y,
+      PLAYER_SPAWN_POSITION.z
+    )
+    camera.lookAt(INITIAL_LOOK_TARGET)
+    yaw.current = camera.rotation.y
+    pitch.current = camera.rotation.x
   }, [camera])
 
   useEffect(() => {
@@ -170,27 +227,53 @@ function FlightRig() {
     velocity.current.z *= horizontalDamping
     velocity.current.y *= verticalDamping
 
-    camera.position.addScaledVector(velocity.current, delta)
-    camera.position.y = Math.max(camera.position.y, -8)
+    intendedPosition.current
+      .copy(camera.position)
+      .addScaledVector(velocity.current, delta)
+
+    const collision = resolvePlayerCollision(
+      { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+      {
+        x: intendedPosition.current.x,
+        y: intendedPosition.current.y,
+        z: intendedPosition.current.z
+      }
+    )
+
+    if (collision.position.x !== intendedPosition.current.x) {
+      velocity.current.x = 0
+    }
+    if (collision.position.y !== intendedPosition.current.y) {
+      velocity.current.y = 0
+    }
+    if (collision.position.z !== intendedPosition.current.z) {
+      velocity.current.z = 0
+    }
+
+    camera.position.set(
+      collision.position.x,
+      collision.position.y,
+      collision.position.z
+    )
   })
 
   return null
 }
 
 function Terrain() {
-  const grass = useLoadedTexture(GRASS_TEXTURE_URL)
-  const ground = useLoadedTexture(GROUND_TEXTURE_URL)
-
-  useEffect(() => {
-    grass.repeat.set(1, 1)
-    ground.repeat.set(24, 24)
-  }, [grass, ground])
+  const grass = usePbrTextures(GRASS_TEXTURE_URLS, CUBE_TEXTURE_REPEAT)
+  const ground = usePbrTextures(GROUND_TEXTURE_URLS, GROUND_TEXTURE_REPEAT)
 
   return (
     <>
       <mesh position={[0, 5, 0]} castShadow receiveShadow>
         <boxGeometry args={[10, 10, 10]} />
-        <meshStandardMaterial map={grass} roughness={0.95} metalness={0.02} />
+        <meshStandardMaterial
+          {...grass}
+          bumpScale={0.15}
+          roughness={1}
+          metalness={0.04}
+        />
       </mesh>
 
       <mesh position={[0, -1, 0]} rotation-x={-Math.PI / 2} receiveShadow>
@@ -210,10 +293,10 @@ function Terrain() {
       <mesh position={[0, -2.5, 0]} rotation-x={-Math.PI / 2} receiveShadow>
         <planeGeometry args={[5000, 5000]} />
         <meshStandardMaterial
-          map={ground}
-          color="#8a7b68"
-          roughness={1}
-          metalness={0}
+          {...ground}
+          bumpScale={0.08}
+          roughness={0.98}
+          metalness={0.02}
         />
       </mesh>
     </>
@@ -262,7 +345,16 @@ export default function App() {
   return (
     <div className="app-shell">
       <Canvas
-        camera={{ position: [0, 12, 16], fov: 60, near: 0.1, far: 8000 }}
+        camera={{
+          position: [
+            PLAYER_SPAWN_POSITION.x,
+            PLAYER_SPAWN_POSITION.y,
+            PLAYER_SPAWN_POSITION.z
+          ],
+          fov: 60,
+          near: 0.1,
+          far: 8000
+        }}
         dpr={[1, 2]}
         onCreated={({ camera, gl }) => {
           gl.outputColorSpace = SRGBColorSpace
