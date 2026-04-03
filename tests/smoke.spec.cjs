@@ -1,7 +1,7 @@
 const { PNG } = require('pngjs')
 const { expect, test } = require('@playwright/test')
 
-test.setTimeout(45_000)
+test.setTimeout(75_000)
 
 test('loads the flight scaffold without runtime errors', async ({ page }) => {
   const consoleErrors = []
@@ -38,11 +38,29 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
   await page.mouse.move(400, 300)
   await page.waitForTimeout(500)
 
-  const screenshot = PNG.sync.read(await page.screenshot())
+  const canvas = page.locator('canvas')
+  const brightScreenshot = PNG.sync.read(await canvas.screenshot())
   const pixelOffset =
-    ((Math.floor(screenshot.height / 2) * screenshot.width) +
-      Math.floor(screenshot.width / 2)) *
+    ((Math.floor(brightScreenshot.height / 2) * brightScreenshot.width) +
+      Math.floor(brightScreenshot.width / 2)) *
     4
+  const initialExposure = await canvas.getAttribute('data-renderer-exposure')
+
+  await page.getByLabel('Sun Intensity').evaluate((element) => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value'
+    )
+    descriptor.set.call(element, '0.25')
+    element.dispatchEvent(new Event('input', { bubbles: true }))
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await page.waitForTimeout(250)
+  const updatedExposure = await canvas.getAttribute('data-renderer-exposure')
+  const brightPixelSum =
+    brightScreenshot.data[pixelOffset] +
+    brightScreenshot.data[pixelOffset + 1] +
+    brightScreenshot.data[pixelOffset + 2]
 
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
@@ -62,9 +80,7 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
         url.includes('textures/ground_14.webp')
     )
   ).toBe(false)
-  expect(
-    screenshot.data[pixelOffset] +
-      screenshot.data[pixelOffset + 1] +
-      screenshot.data[pixelOffset + 2]
-  ).toBeGreaterThan(30)
+  expect(brightPixelSum).toBeGreaterThan(30)
+  expect(initialExposure).toBe('1.200')
+  expect(updatedExposure).toBe('0.300')
 })

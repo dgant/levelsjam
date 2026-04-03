@@ -69,6 +69,7 @@ const MAX_PITCH = Math.PI / 2 - 0.05
 const INITIAL_PITCH = 0
 const BACKQUOTE_CODE = 'Backquote'
 const SUN_DISTANCE = 6000
+const BASE_EXPOSURE = 1.2
 const cameraEuler = new Euler(0, 0, 0, 'YXZ')
 const INITIAL_LOOK_TARGET = new Vector3(0, 5, 0)
 const POINTER_UNLOCK_CODES = new Set([
@@ -579,6 +580,21 @@ function FpsReporter({
   return null
 }
 
+function RendererSettings({
+  sunIntensity
+}: {
+  sunIntensity: number
+}) {
+  const gl = useThree((state) => state.gl)
+
+  useEffect(() => {
+    gl.toneMappingExposure = BASE_EXPOSURE * sunIntensity
+    gl.domElement.dataset.rendererExposure = gl.toneMappingExposure.toFixed(3)
+  }, [gl, sunIntensity])
+
+  return null
+}
+
 function Terrain({
   sunDirection
 }: {
@@ -894,9 +910,10 @@ export default function App() {
         onCreated={({ camera, gl }) => {
           gl.outputColorSpace = SRGBColorSpace
           gl.toneMapping = AgXToneMapping
-          gl.toneMappingExposure = 1.2
+          gl.toneMappingExposure = BASE_EXPOSURE * visualSettings.sunIntensity
         }}
       >
+        <RendererSettings sunIntensity={visualSettings.sunIntensity} />
         <Scene
           controlsOpen={controlsOpen}
           visualSettings={visualSettings}
