@@ -9,3 +9,17 @@
 [x] When I link to a texture source like ShareTextures, I am not telling you to download and use the preview image. It is a page with a link to a PBR texture pack zip, which you should download, extract, and load as a three.js standard PBR material. Go fix the two current materials. Check if the textures have an implied world scale, assume 1mx1m if not implied otherwise, then tile the meshes appropriately
 [x] When the character collides with the ground, instead of coming to rest, the character jumps up to a point above the ground and resumes falling in a loop. The character should come to rest on collision with the ground. Assume a 1.75m tall, 0.25m radius capsule for the character.
 [x] Use actual three.js water for the water plane: https://threejs.org/docs/#Water
+[x] The water plane should be 1m below the top of the cube
+[x] The seabed plane should be 1m below the water plane
+[x] Player max velocity in the horizontal plane should be 20mph
+[x] Player max velocity in the vertical plane should be 5mph
+[x] Player max fall speed should be 40mph
+[x] Player deceleration should be enough to from top speed to zero within 2m (do the math to get the actual deceleration/frame required)
+[x] Player acceleration should be enough to reach top speed after running 8m (do the math to get the actual acceleration/frame required)
+[x] Force of gravity should be 1g
+[x] Jetpack force should be 1.25g (or net 0.25g after gravity)
+[x] Escape, alt, ctrl, command, windows keys should unlock mouse from screen. Any other keypress or mouse click should lock mouse to screen
+[x] Put sun at 30 degrees from horizontal.
+[x] Switch to AgXToneMapping
+[x] Enable Bloom, GodRays, DepthOfField, Lensflare, SSAO, Vignette with default settings
+[x] Add an FPS counter to the top right of the screen

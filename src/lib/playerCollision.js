@@ -10,7 +10,7 @@ export const CUBE_BOUNDS = Object.freeze({
   maxZ: CUBE_HALF_SIZE
 })
 
-export const LOWER_GROUND_Y = -2.5
+export const LOWER_GROUND_Y = 8
 export const PLAYER_RADIUS = 0.25
 export const PLAYER_HEIGHT = 1.75
 export const PLAYER_EYE_HEIGHT = 1.5

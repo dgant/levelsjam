@@ -44,7 +44,8 @@ test('clamps the player to the cube top when falling into it', () => {
 test('clamps the player to the cube side when moving through it horizontally', () => {
   const result = resolvePlayerCollision(
     { x: -8, y: 5, z: 0 },
-    { x: 0, y: 5, z: 0 }
+    { x: 0, y: 5, z: 0 },
+    { floorY: -100 }
   )
 
   assert.deepEqual(result.position, { x: -5 - PLAYER_RADIUS, y: 5, z: 0 })
@@ -55,11 +56,11 @@ test('clamps the player to the cube side when moving through it horizontally', (
 
 test('clamps the player to the lower ground plane', () => {
   const result = resolvePlayerCollision(
-    { x: 0, y: 0, z: 0 },
-    { x: 0, y: -10, z: 0 }
+    { x: 20, y: 9, z: 0 },
+    { x: 20, y: -10, z: 0 }
   )
 
-  assert.deepEqual(result.position, { x: 0, y: LOWER_GROUND_Y, z: 0 })
+  assert.deepEqual(result.position, { x: 20, y: LOWER_GROUND_Y, z: 0 })
   assert.equal(result.collisions.floor, true)
   assert.equal(result.collisions.cube, false)
   assert.equal(result.grounded, true)

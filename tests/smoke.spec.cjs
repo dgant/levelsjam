@@ -23,6 +23,7 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
   await page.goto('/', { waitUntil: 'networkidle' })
 
   await expect(page.locator('canvas')).toBeVisible()
+  await expect(page.locator('.fps-counter')).toContainText('FPS')
   await expect(page.locator('h1')).toHaveCount(0)
   await expect(page.locator('.start-button')).toHaveCount(0)
   await expect(page.getByText('Cursor / levels.io jam')).toHaveCount(0)
