@@ -46,6 +46,9 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
     [...resourceUrls].some((url) => url.includes('ground_14_Basecolor-1K.png'))
   ).toBe(true)
   expect(
+    [...resourceUrls].some((url) => url.includes('waternormals.jpg'))
+  ).toBe(true)
+  expect(
     [...resourceUrls].some(
       (url) =>
         url.includes('textures/grass_1.webp') ||

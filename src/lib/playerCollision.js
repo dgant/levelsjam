@@ -11,10 +11,12 @@ export const CUBE_BOUNDS = Object.freeze({
 })
 
 export const LOWER_GROUND_Y = -2.5
-export const PLAYER_HEIGHT = 1
+export const PLAYER_RADIUS = 0.25
+export const PLAYER_HEIGHT = 1.75
+export const PLAYER_EYE_HEIGHT = 1.5
 export const PLAYER_SPAWN_POSITION = Object.freeze({
   x: CUBE_CENTER.x,
-  y: CUBE_BOUNDS.maxY + PLAYER_HEIGHT,
+  y: CUBE_BOUNDS.maxY + 1,
   z: 4
 })
 
@@ -45,6 +47,23 @@ export function getPlayerSpawnPosition() {
   return cloneVector(PLAYER_SPAWN_POSITION)
 }
 
+export function getCameraPosition(playerPosition) {
+  return {
+    x: playerPosition.x,
+    y: playerPosition.y + PLAYER_EYE_HEIGHT,
+    z: playerPosition.z
+  }
+}
+
+function isWithinExpandedTopBounds(position, bounds, radius) {
+  return (
+    position.x > bounds.minX - radius &&
+    position.x < bounds.maxX + radius &&
+    position.z > bounds.minZ - radius &&
+    position.z < bounds.maxZ + radius
+  )
+}
+
 export function resolvePlayerCollision(
   previousPosition,
   desiredPosition,
@@ -52,51 +71,109 @@ export function resolvePlayerCollision(
 ) {
   const floorY = options.floorY ?? LOWER_GROUND_Y
   const cubeBounds = options.cubeBounds ?? CUBE_BOUNDS
+  const radius = options.radius ?? PLAYER_RADIUS
+  const height = options.height ?? PLAYER_HEIGHT
   const position = cloneVector(desiredPosition)
   const collisions = { cube: false, floor: false }
+  let grounded = false
 
-  if (position.y < floorY + PLAYER_HEIGHT) {
-    position.y = floorY + PLAYER_HEIGHT
+  if (position.y < floorY) {
+    position.y = floorY
     collisions.floor = true
+    grounded = true
   }
 
-  const insideCube =
-    position.x > cubeBounds.minX &&
-    position.x < cubeBounds.maxX &&
-    position.y > cubeBounds.minY &&
+  if (
+    previousPosition.y >= cubeBounds.maxY &&
     position.y < cubeBounds.maxY &&
-    position.z > cubeBounds.minZ &&
-    position.z < cubeBounds.maxZ
+    isWithinExpandedTopBounds(position, cubeBounds, radius)
+  ) {
+    position.y = cubeBounds.maxY
+    collisions.cube = true
+    grounded = true
+  }
+
+  const capsuleTop = position.y + height
+  const insideCube =
+    position.x > cubeBounds.minX - radius &&
+    position.x < cubeBounds.maxX + radius &&
+    position.y < cubeBounds.maxY &&
+    capsuleTop > cubeBounds.minY &&
+    position.z > cubeBounds.minZ - radius &&
+    position.z < cubeBounds.maxZ + radius
 
   if (!insideCube) {
-    return { position, collisions }
+    if (!grounded && Math.abs(position.y - floorY) < 1e-6) {
+      grounded = true
+    }
+
+    if (
+      !grounded &&
+      Math.abs(position.y - cubeBounds.maxY) < 1e-6 &&
+      isWithinExpandedTopBounds(position, cubeBounds, radius)
+    ) {
+      grounded = true
+    }
+
+    return { position, collisions, grounded }
   }
 
   const candidates = []
-  if (previousPosition.x <= cubeBounds.minX && position.x > cubeBounds.minX) {
-    candidates.push({ axis: 'x', value: cubeBounds.minX, distance: position.x - cubeBounds.minX })
-  }
-  if (previousPosition.x >= cubeBounds.maxX && position.x < cubeBounds.maxX) {
-    candidates.push({ axis: 'x', value: cubeBounds.maxX, distance: cubeBounds.maxX - position.x })
-  }
-  if (previousPosition.y <= cubeBounds.minY && position.y > cubeBounds.minY) {
-    candidates.push({ axis: 'y', value: cubeBounds.minY, distance: position.y - cubeBounds.minY })
-  }
-  if (previousPosition.y >= cubeBounds.maxY && position.y < cubeBounds.maxY) {
+  if (
+    previousPosition.x <= cubeBounds.minX - radius &&
+    position.x > cubeBounds.minX - radius
+  ) {
     candidates.push({
-      axis: 'y',
-      value: cubeBounds.maxY + PLAYER_HEIGHT,
-      distance: cubeBounds.maxY - position.y
+      axis: 'x',
+      value: cubeBounds.minX - radius,
+      distance: position.x - (cubeBounds.minX - radius)
     })
   }
-  if (previousPosition.z <= cubeBounds.minZ && position.z > cubeBounds.minZ) {
-    candidates.push({ axis: 'z', value: cubeBounds.minZ, distance: position.z - cubeBounds.minZ })
+  if (
+    previousPosition.x >= cubeBounds.maxX + radius &&
+    position.x < cubeBounds.maxX + radius
+  ) {
+    candidates.push({
+      axis: 'x',
+      value: cubeBounds.maxX + radius,
+      distance: cubeBounds.maxX + radius - position.x
+    })
   }
-  if (previousPosition.z >= cubeBounds.maxZ && position.z < cubeBounds.maxZ) {
-    candidates.push({ axis: 'z', value: cubeBounds.maxZ, distance: cubeBounds.maxZ - position.z })
+  if (
+    previousPosition.z <= cubeBounds.minZ - radius &&
+    position.z > cubeBounds.minZ - radius
+  ) {
+    candidates.push({
+      axis: 'z',
+      value: cubeBounds.minZ - radius,
+      distance: position.z - (cubeBounds.minZ - radius)
+    })
+  }
+  if (
+    previousPosition.z >= cubeBounds.maxZ + radius &&
+    position.z < cubeBounds.maxZ + radius
+  ) {
+    candidates.push({
+      axis: 'z',
+      value: cubeBounds.maxZ + radius,
+      distance: cubeBounds.maxZ + radius - position.z
+    })
   }
 
-  const face = (candidates.length > 0 ? candidates : [chooseNearestFace(position, cubeBounds)]).reduce(
+  const face = (
+    candidates.length > 0
+      ? candidates
+      : [
+          chooseNearestFace(position, {
+            minX: cubeBounds.minX - radius,
+            maxX: cubeBounds.maxX + radius,
+            minY: cubeBounds.minY,
+            maxY: cubeBounds.maxY,
+            minZ: cubeBounds.minZ - radius,
+            maxZ: cubeBounds.maxZ + radius
+          })
+        ]
+  ).reduce(
     (best, candidate) => {
       if (!best || candidate.distance < best.distance) {
         return candidate
@@ -112,5 +189,5 @@ export function resolvePlayerCollision(
     collisions.cube = true
   }
 
-  return { position, collisions }
+  return { position, collisions, grounded }
 }

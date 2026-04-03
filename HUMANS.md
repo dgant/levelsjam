@@ -23,6 +23,8 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify mouse movement changes view direction without a preliminary click.
 - Verify holding `Space` applies upward thrust and releasing it stops the ascent.
 - Verify the player starts 1 meter above the cube, lands on the cube top, and cannot fall through the lower ground plane.
+- Verify ground contact is stable: the character should rest on collision instead of popping upward and falling again in a loop.
+- Verify the water surface uses the official three.js `Water` implementation and animates as expected.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.

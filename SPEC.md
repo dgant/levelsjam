@@ -14,11 +14,14 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - The scene contains an infinite ground plane below the water plane with a separate ground texture.
 - The cube and the plane below the water participate in collision.
 - The player spawns 1 meter above the top of the cube.
+- The character collision volume is a capsule that is 1.75m tall and 0.25m in radius.
+- The character comes to rest on ground contact instead of bouncing or entering a jump loop.
 - The scene uses `@takram/three-atmosphere` for atmospheric rendering.
 - The scene uses the library's light-source lighting pattern with `SkyLight`, `SunLight`, and `AerialPerspective` as the reference atmosphere setup.
 - The scene uses lighting and exposure values that keep the cube, water, and terrain readable on first load.
 - Texture links that point to ShareTextures are treated as downloadable PBR packs rather than preview images.
 - The cube and the lower ground plane use extracted PBR texture packs with tiling that assumes 1 meter by 1 meter world scale unless the source specifies a different implied scale.
+- The water plane uses the official three.js `Water` implementation from the examples/docs.
 - The player can move with first-person WASD controls.
 - The player can look around with mouse look controls.
 - Holding `Space` applies vertical thrust in a jetpack-like motion.
@@ -30,6 +33,7 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - Mouse look changes camera orientation directly.
 - Jetpack thrust adds upward motion while `Space` remains held and stops when `Space` is released.
 - The game responds to movement and look input without requiring any preliminary button click.
+- Ground contact resolves the character to a resting state instead of repeatedly lifting and dropping the collision volume.
 
 ## Visual Requirements
 - The cube reads as the central landmark in the scene.
@@ -38,6 +42,7 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - Atmosphere and lighting combine to produce a sky-backed outdoor scene.
 - The sky and lighting avoid a black first frame by using a known-good atmosphere configuration from the library's documented light-source example pattern.
 - Collision keeps the cube solid and keeps the plane below the water as an active surface boundary.
+- The water surface uses the official three.js `Water` material and animation path rather than a generic translucent plane.
 - The page avoids a blocking loading screen.
 
 ## Animation And Motion
@@ -55,3 +60,4 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - The public page is verified after deployment.
 - The controls are checked in the browser for movement, looking, and thrust behavior.
 - Visual layout changes are reviewed in the rendered scene, not only in source code.
+- Collision behavior is checked in the browser for resting contact on the ground and stable interaction with the cube.

@@ -7,3 +7,5 @@
 [x] The player's initial position should be 1 meter above the top of the cube
 [x] The cube and the plane below the water should have collision
 [x] When I link to a texture source like ShareTextures, I am not telling you to download and use the preview image. It is a page with a link to a PBR texture pack zip, which you should download, extract, and load as a three.js standard PBR material. Go fix the two current materials. Check if the textures have an implied world scale, assume 1mx1m if not implied otherwise, then tile the meshes appropriately
+[x] When the character collides with the ground, instead of coming to rest, the character jumps up to a point above the ground and resumes falling in a loop. The character should come to rest on collision with the ground. Assume a 1.75m tall, 0.25m radius capsule for the character.
+[x] Use actual three.js water for the water plane: https://threejs.org/docs/#Water

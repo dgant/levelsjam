@@ -14,8 +14,10 @@ import {
   ACESFilmicToneMapping,
   Euler,
   Matrix4,
+  PlaneGeometry,
   RepeatWrapping,
   SRGBColorSpace,
+  ShaderMaterial,
   Texture,
   TextureLoader,
   Vector2,
@@ -23,9 +25,11 @@ import {
 } from 'three'
 import { useEffect, useMemo, useRef } from 'react'
 import {
+  getCameraPosition,
   PLAYER_SPAWN_POSITION,
   resolvePlayerCollision
 } from './lib/playerCollision.js'
+import { Water } from 'three/addons/objects/Water.js'
 
 const assetBase = import.meta.env.BASE_URL
 const GRASS_TEXTURE_URLS = {
@@ -43,13 +47,16 @@ const GROUND_TEXTURE_URLS = {
   bump: `${assetBase}textures/ground_14/ground_14-1K/ground_14_Height-1K.png`
 }
 const ATMOSPHERE_DATE = new Date('2026-04-03T12:00:00Z')
+const WATER_NORMALS_URL = `${assetBase}textures/waternormals.jpg`
 const CUBE_TEXTURE_REPEAT = 10
 const GROUND_TEXTURE_REPEAT = 5000
+const GRAVITY = 16
 const LOOK_SENSITIVITY = 0.003
 const MAX_PITCH = Math.PI / 2 - 0.05
 const INITIAL_PITCH = 0
 const cameraEuler = new Euler(0, 0, 0, 'YXZ')
 const INITIAL_LOOK_TARGET = new Vector3(0, 5, 0)
+const WATER_SUN_DIRECTION = new Vector3(0.70707, 0.70707, 0).normalize()
 
 function configureRepeatedTexture(
   texture: Texture,
@@ -100,6 +107,14 @@ function FlightRig() {
   const camera = useThree((state) => state.camera)
   const canvas = useThree((state) => state.gl.domElement)
   const keys = useRef<Record<string, boolean>>({})
+  const grounded = useRef(false)
+  const playerPosition = useRef(
+    new Vector3(
+      PLAYER_SPAWN_POSITION.x,
+      PLAYER_SPAWN_POSITION.y,
+      PLAYER_SPAWN_POSITION.z
+    )
+  )
   const velocity = useRef(new Vector3())
   const forward = useRef(new Vector3())
   const right = useRef(new Vector3())
@@ -110,11 +125,13 @@ function FlightRig() {
   const intendedPosition = useRef(new Vector3())
 
   useEffect(() => {
+    const initialCameraPosition = getCameraPosition(PLAYER_SPAWN_POSITION)
+
     camera.rotation.order = 'YXZ'
     camera.position.set(
-      PLAYER_SPAWN_POSITION.x,
-      PLAYER_SPAWN_POSITION.y,
-      PLAYER_SPAWN_POSITION.z
+      initialCameraPosition.x,
+      initialCameraPosition.y,
+      initialCameraPosition.z
     )
     camera.lookAt(INITIAL_LOOK_TARGET)
     yaw.current = camera.rotation.y
@@ -219,20 +236,33 @@ function FlightRig() {
 
     velocity.current.x += acceleration.x * delta
     velocity.current.z += acceleration.z * delta
-    velocity.current.y += (keys.current.Space ? 16 : -9.81) * delta
+    if (keys.current.Space) {
+      velocity.current.y += GRAVITY * delta
+      grounded.current = false
+    } else if (!grounded.current) {
+      velocity.current.y -= GRAVITY * delta
+    } else {
+      velocity.current.y = 0
+    }
 
     const horizontalDamping = Math.exp(-4 * delta)
     const verticalDamping = Math.exp(-1.5 * delta)
     velocity.current.x *= horizontalDamping
     velocity.current.z *= horizontalDamping
-    velocity.current.y *= verticalDamping
+    if (!grounded.current || keys.current.Space) {
+      velocity.current.y *= verticalDamping
+    }
 
     intendedPosition.current
-      .copy(camera.position)
+      .copy(playerPosition.current)
       .addScaledVector(velocity.current, delta)
 
     const collision = resolvePlayerCollision(
-      { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+      {
+        x: playerPosition.current.x,
+        y: playerPosition.current.y,
+        z: playerPosition.current.z
+      },
       {
         x: intendedPosition.current.x,
         y: intendedPosition.current.y,
@@ -249,15 +279,72 @@ function FlightRig() {
     if (collision.position.z !== intendedPosition.current.z) {
       velocity.current.z = 0
     }
+    if (collision.position.y !== intendedPosition.current.y && velocity.current.y < 0) {
+      velocity.current.y = 0
+    }
 
-    camera.position.set(
+    grounded.current = collision.grounded && !keys.current.Space
+    playerPosition.current.set(
       collision.position.x,
       collision.position.y,
       collision.position.z
     )
+    const cameraPosition = getCameraPosition(playerPosition.current)
+
+    camera.position.set(
+      cameraPosition.x,
+      cameraPosition.y,
+      cameraPosition.z
+    )
   })
 
   return null
+}
+
+function WaterSurface() {
+  const camera = useThree((state) => state.camera)
+  const waterNormals = useLoader(TextureLoader, WATER_NORMALS_URL)
+  const water = useMemo(() => {
+    waterNormals.wrapS = RepeatWrapping
+    waterNormals.wrapT = RepeatWrapping
+
+    const surface = new Water(new PlaneGeometry(4000, 4000), {
+      textureWidth: 1024,
+      textureHeight: 1024,
+      waterNormals,
+      sunDirection: WATER_SUN_DIRECTION.clone(),
+      sunColor: 0xffffff,
+      waterColor: 0x2d6f96,
+      distortionScale: 3.7,
+      fog: false
+    })
+
+    surface.rotation.x = -Math.PI / 2
+    surface.position.y = -1
+    surface.receiveShadow = true
+    return surface
+  }, [waterNormals])
+
+  useFrame((_, delta) => {
+    const material = water.material as ShaderMaterial
+    const uniforms = material.uniforms as {
+      time: { value: number }
+      eye: { value: Vector3 }
+    }
+
+    uniforms.time.value += delta * 0.35
+    uniforms.eye.value.copy(camera.position)
+  })
+
+  useEffect(
+    () => () => {
+      water.geometry.dispose()
+      water.material.dispose()
+    },
+    [water]
+  )
+
+  return <primitive object={water} />
 }
 
 function Terrain() {
@@ -276,19 +363,7 @@ function Terrain() {
         />
       </mesh>
 
-      <mesh position={[0, -1, 0]} rotation-x={-Math.PI / 2} receiveShadow>
-        <planeGeometry args={[4000, 4000]} />
-        <meshPhysicalMaterial
-          color="#4d95c7"
-          transparent
-          opacity={0.72}
-          roughness={0.08}
-          metalness={0.02}
-          transmission={0.05}
-          thickness={0.4}
-          ior={1.333}
-        />
-      </mesh>
+      <WaterSurface />
 
       <mesh position={[0, -2.5, 0]} rotation-x={-Math.PI / 2} receiveShadow>
         <planeGeometry args={[5000, 5000]} />
