@@ -31,7 +31,13 @@ import {
   Vector2,
   Vector3
 } from 'three'
-import { startTransition, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  startTransition,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react'
 import { BlendFunction, GodRaysEffect } from 'postprocessing'
 import { LensFlareEffect } from '@react-three/postprocessing'
 import {
@@ -63,13 +69,15 @@ const GROUND_TEXTURE_URLS = {
 const ATMOSPHERE_DATE = new Date('2026-04-03T12:00:00Z')
 const WATER_NORMALS_URL = `${assetBase}textures/waternormals.jpg`
 const CUBE_TEXTURE_REPEAT = 10
-const GROUND_TEXTURE_REPEAT = 5000
+const GROUND_TEXTURE_REPEAT = 50000
 const LOOK_SENSITIVITY = 0.003
 const MAX_PITCH = Math.PI / 2 - 0.05
 const INITIAL_PITCH = 0
 const BACKQUOTE_CODE = 'Backquote'
 const SUN_DISTANCE = 6000
 const BASE_EXPOSURE = 1.2
+const WATER_PLANE_SIZE = 40000
+const SEABED_PLANE_SIZE = 50000
 const cameraEuler = new Euler(0, 0, 0, 'YXZ')
 const INITIAL_LOOK_TARGET = new Vector3(0, 5, 0)
 const POINTER_UNLOCK_CODES = new Set([
@@ -89,7 +97,10 @@ type EffectSettings = {
 
 type VisualSettings = {
   sunElevationDeg: number
+  sunRotationDeg: number
   sunIntensity: number
+  skyLightIntensity: number
+  skyLightLinked: boolean
   bloom: EffectSettings
   godRays: EffectSettings
   depthOfField: EffectSettings
@@ -98,12 +109,27 @@ type VisualSettings = {
   vignette: EffectSettings
 }
 
-type EffectSettingKey = Exclude<keyof VisualSettings, 'sunElevationDeg' | 'sunIntensity'>
+type EffectSettingKey = Exclude<
+  keyof VisualSettings,
+  | 'sunElevationDeg'
+  | 'sunRotationDeg'
+  | 'sunIntensity'
+  | 'skyLightIntensity'
+  | 'skyLightLinked'
+>
+type SunSettingKey =
+  | 'sunElevationDeg'
+  | 'sunRotationDeg'
+  | 'sunIntensity'
+  | 'skyLightIntensity'
 
 function createDefaultVisualSettings(): VisualSettings {
   return {
     sunElevationDeg: 30,
+    sunRotationDeg: 0,
     sunIntensity: 1,
+    skyLightIntensity: 1,
+    skyLightLinked: true,
     bloom: { enabled: true, intensity: 1 },
     godRays: { enabled: true, intensity: 0.6 },
     depthOfField: { enabled: true, intensity: 1 },
@@ -392,9 +418,11 @@ function FlightRig({
 }
 
 function WaterSurface({
-  sunDirection
+  sunDirection,
+  sunIntensity
 }: {
   sunDirection: Vector3
+  sunIntensity: number
 }) {
   const camera = useThree((state) => state.camera)
   const waterNormals = useLoader(TextureLoader, WATER_NORMALS_URL)
@@ -402,12 +430,12 @@ function WaterSurface({
     waterNormals.wrapS = RepeatWrapping
     waterNormals.wrapT = RepeatWrapping
 
-    const surface = new Water(new PlaneGeometry(4000, 4000), {
+    const surface = new Water(new PlaneGeometry(WATER_PLANE_SIZE, WATER_PLANE_SIZE), {
       textureWidth: 1024,
       textureHeight: 1024,
       waterNormals,
       sunDirection: sunDirection.clone(),
-      sunColor: 0xffffff,
+      sunColor: new Color().setScalar(sunIntensity),
       waterColor: 0x2d6f96,
       distortionScale: 3.7,
       fog: false
@@ -417,7 +445,18 @@ function WaterSurface({
     surface.position.y = 9
     surface.receiveShadow = true
     return surface
-  }, [sunDirection, waterNormals])
+  }, [sunIntensity, sunDirection, waterNormals])
+
+  useEffect(() => {
+    const material = water.material as ShaderMaterial
+    const uniforms = material.uniforms as {
+      sunDirection: { value: Vector3 }
+      sunColor: { value: Color }
+    }
+
+    uniforms.sunDirection.value.copy(sunDirection)
+    uniforms.sunColor.value.setScalar(sunIntensity)
+  }, [sunDirection, sunIntensity, water])
 
   useFrame((_, delta) => {
     const material = water.material as ShaderMaterial
@@ -595,10 +634,34 @@ function RendererSettings({
   return null
 }
 
+function StartupReporter() {
+  const gl = useThree((state) => state.gl)
+  const hasMarkedReady = useRef(false)
+
+  useEffect(() => {
+    gl.domElement.dataset.sceneReady = 'false'
+    delete gl.domElement.dataset.sceneReadyAt
+  }, [gl])
+
+  useFrame(() => {
+    if (hasMarkedReady.current) {
+      return
+    }
+
+    hasMarkedReady.current = true
+    gl.domElement.dataset.sceneReady = 'true'
+    gl.domElement.dataset.sceneReadyAt = performance.now().toFixed(1)
+  })
+
+  return null
+}
+
 function Terrain({
-  sunDirection
+  sunDirection,
+  sunIntensity
 }: {
   sunDirection: Vector3
+  sunIntensity: number
 }) {
   const grass = usePbrTextures(GRASS_TEXTURE_URLS, CUBE_TEXTURE_REPEAT)
   const ground = usePbrTextures(GROUND_TEXTURE_URLS, GROUND_TEXTURE_REPEAT)
@@ -615,10 +678,13 @@ function Terrain({
         />
       </mesh>
 
-      <WaterSurface sunDirection={sunDirection} />
+      <WaterSurface
+        sunDirection={sunDirection}
+        sunIntensity={sunIntensity}
+      />
 
       <mesh position={[0, 8, 0]} rotation-x={-Math.PI / 2} receiveShadow>
-        <planeGeometry args={[5000, 5000]} />
+        <planeGeometry args={[SEABED_PLANE_SIZE, SEABED_PLANE_SIZE]} />
         <meshStandardMaterial
           {...ground}
           bumpScale={0.08}
@@ -645,16 +711,27 @@ function Scene({
   )
   const sunDirection = useMemo(() => {
     const elevationRadians = (visualSettings.sunElevationDeg * Math.PI) / 180
+    const rotationRadians = (visualSettings.sunRotationDeg * Math.PI) / 180
+    const horizontalMagnitude = Math.cos(elevationRadians)
 
     return new Vector3(
-      0,
+      Math.sin(rotationRadians) * horizontalMagnitude,
       Math.sin(elevationRadians),
-      -Math.cos(elevationRadians)
+      -Math.cos(rotationRadians) * horizontalMagnitude
     ).normalize()
-  }, [visualSettings.sunElevationDeg])
+  }, [visualSettings.sunElevationDeg, visualSettings.sunRotationDeg])
   const sunPosition = useMemo(
     () => sunDirection.clone().multiplyScalar(SUN_DISTANCE),
     [sunDirection]
+  )
+  const sunColor = useMemo(
+    () =>
+      new Color(
+        1.2 * visualSettings.sunIntensity,
+        1.15 * visualSettings.sunIntensity,
+        visualSettings.sunIntensity
+      ),
+    [visualSettings.sunIntensity]
   )
 
   useEffect(() => {
@@ -667,6 +744,14 @@ function Scene({
     )
   }, [worldOrigin])
 
+  useEffect(() => {
+    if (!atmosphere.current) {
+      return
+    }
+
+    atmosphere.current.sunDirection.copy(sunDirection)
+  }, [sunDirection])
+
   return (
     <Atmosphere
       ref={atmosphere}
@@ -674,10 +759,16 @@ function Scene({
       ground={false}
       textures={DEFAULT_PRECOMPUTED_TEXTURES_URL}
     >
-      <Sky />
+      <Sky sunDirection={sunDirection} />
       <group position={[sunPosition.x, sunPosition.y, sunPosition.z]}>
-        <SkyLight intensity={Math.max(0.1, visualSettings.sunIntensity * 0.5)} />
-        <SunLight intensity={visualSettings.sunIntensity} />
+        <SkyLight
+          intensity={visualSettings.skyLightIntensity}
+          sunDirection={sunDirection}
+        />
+        <SunLight
+          intensity={visualSettings.sunIntensity}
+          sunDirection={sunDirection}
+        />
       </group>
       <mesh
         ref={(value) => {
@@ -688,11 +779,14 @@ function Scene({
         position={[sunPosition.x, sunPosition.y, sunPosition.z]}
       >
         <sphereGeometry args={[220, 24, 24]} />
-        <meshBasicMaterial color="#fff4c2" toneMapped={false} />
+        <meshBasicMaterial color={sunColor} toneMapped={false} />
       </mesh>
-      <Terrain sunDirection={sunDirection} />
+      <Terrain
+        sunDirection={sunDirection}
+        sunIntensity={visualSettings.sunIntensity}
+      />
       <EffectComposer enableNormalPass>
-        <AerialPerspective />
+        <AerialPerspective sunDirection={sunDirection} />
         {visualSettings.bloom.enabled ? (
           <Bloom intensity={visualSettings.bloom.intensity} />
         ) : null}
@@ -735,10 +829,7 @@ function VisualControls({
     effect: EffectSettingKey,
     patch: Partial<EffectSettings>
   ) => void
-  onSunSettingChange: (
-    key: 'sunElevationDeg' | 'sunIntensity',
-    value: number
-  ) => void
+  onSunSettingChange: (key: SunSettingKey, value: number) => void
 }) {
   if (!controlsOpen) {
     return null
@@ -786,6 +877,22 @@ function VisualControls({
       </label>
 
       <label className="visual-control-row">
+        <span>Sun Rotation</span>
+        <input
+          aria-label="Sun Rotation"
+          max={180}
+          min={-180}
+          onChange={(event) => {
+            onSunSettingChange('sunRotationDeg', Number(event.target.value))
+          }}
+          step={1}
+          type="range"
+          value={visualSettings.sunRotationDeg}
+        />
+        <output>{visualSettings.sunRotationDeg.toFixed(0)} deg</output>
+      </label>
+
+      <label className="visual-control-row">
         <span>Sun Intensity</span>
         <input
           aria-label="Sun Intensity"
@@ -799,6 +906,25 @@ function VisualControls({
           value={visualSettings.sunIntensity}
         />
         <output>{visualSettings.sunIntensity.toFixed(2)}</output>
+      </label>
+
+      <label className="visual-control-row">
+        <span>Sky Light Intensity</span>
+        <input
+          aria-label="Sky Light Intensity"
+          max={4}
+          min={0}
+          onChange={(event) => {
+            onSunSettingChange('skyLightIntensity', Number(event.target.value))
+          }}
+          step={0.05}
+          type="range"
+          value={visualSettings.skyLightIntensity}
+        />
+        <output>
+          {visualSettings.skyLightIntensity.toFixed(2)}
+          {visualSettings.skyLightLinked ? ' linked' : ''}
+        </output>
       </label>
 
       {effectControls.map((effectControl) => (
@@ -864,12 +990,18 @@ export default function App() {
   }, [])
 
   const onSunSettingChange = (
-    key: 'sunElevationDeg' | 'sunIntensity',
+    key: SunSettingKey,
     value: number
   ) => {
     setVisualSettings((current) => ({
       ...current,
-      [key]: value
+      [key]: value,
+      ...(key === 'sunIntensity' && current.skyLightLinked
+        ? { skyLightIntensity: value }
+        : {}),
+      ...(key === 'skyLightIntensity'
+        ? { skyLightLinked: Math.abs(value - current.sunIntensity) < 1e-6 }
+        : {})
     }))
   }
 
@@ -914,6 +1046,7 @@ export default function App() {
         }}
       >
         <RendererSettings sunIntensity={visualSettings.sunIntensity} />
+        <StartupReporter />
         <Scene
           controlsOpen={controlsOpen}
           visualSettings={visualSettings}

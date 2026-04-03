@@ -7,6 +7,9 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Install Node.js 20 or newer.
 - Install dependencies with `npm install`.
 - Start the dev server with `npm run dev`.
+- Start one reusable headless Vite instance with `npm run dev:bg`.
+- Check that background instance with `npm run dev:bg:status`.
+- Stop that background instance with `npm run dev:bg:stop`.
 - Open the local URL printed by the dev server.
 - For agent work, prefer one long-lived headless Vite instance instead of repeatedly opening new visible windows.
 
@@ -19,6 +22,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Run the production build before handoff.
 - Run `npm run test:unit` to verify player spawn and collision math.
 - Run `npm run test:smoke` to exercise the built page through Playwright.
+- Run `npm run test:smoke:runner` when `npm run build:pages` has already prepared the root-published bundle.
 - Verify the main page renders the 3D scene without console errors.
 - Verify `W`, `A`, `S`, and `D` move the camera.
 - Verify mouse movement changes view direction without a preliminary click.
@@ -35,8 +39,12 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify pressing backquote opens the visual controls panel.
 - Verify the panel adjusts sun angle, sun intensity, and the enabled/intensity controls for Bloom, GodRays, DepthOfField, Lensflare, SSAO, and Vignette.
 - Verify opening the panel releases mouse lock and clicking inside the panel does not relock the pointer.
-- Benchmark startup time and test duration before handoff and treat regressions as blocking issues.
-- Keep unit tests under 20 seconds and end-to-end tests under 1 minute.
+- Benchmark startup with `npm run bench:startup` and test duration with `npm run bench:tests` before handoff.
+- Treat duration regressions as blocking issues.
+- Keep `npm run test:unit` under 20 seconds.
+- Keep the prepared smoke runner `npm run test:smoke:runner` under 1 minute after a single `npm run build:pages`.
+- Latest measured benchmark on April 3, 2026: `npm run bench:startup` reached the first rendered frame in about 1.7 seconds on the background Vite server, with the slowest remaining requests coming from remote `@takram/three-atmosphere` EXR assets.
+- Latest measured benchmark on April 3, 2026: `npm run bench:tests` completed `npm run test:unit` in about 2.6 seconds and `npm run test:smoke:runner` in about 57.8 seconds after one prepared build.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.

@@ -26,8 +26,8 @@ test('converts the requested mph limits to meters per second', () => {
 })
 
 test('matches the requested acceleration and deceleration distances', () => {
-  almostEqual(HORIZONTAL_ACCELERATION, (MAX_HORIZONTAL_SPEED ** 2) / 16)
-  almostEqual(HORIZONTAL_DECELERATION, (MAX_HORIZONTAL_SPEED ** 2) / 4)
+  almostEqual(HORIZONTAL_ACCELERATION, (MAX_HORIZONTAL_SPEED ** 2) / 4)
+  almostEqual(HORIZONTAL_DECELERATION, MAX_HORIZONTAL_SPEED ** 2)
 })
 
 test('matches the requested gravity and jetpack forces', () => {

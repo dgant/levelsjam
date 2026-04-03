@@ -19,8 +19,8 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - The player reaches a horizontal top speed of 20 mph.
 - The player reaches a vertical top speed of 5 mph.
 - The player reaches a maximum fall speed of 40 mph.
-- The player accelerates to horizontal top speed over a travel distance of 8 meters.
-- The player decelerates from horizontal top speed to zero over a travel distance of 2 meters.
+- The player accelerates to horizontal top speed over a travel distance of 2 meters.
+- The player decelerates from horizontal top speed to zero over a travel distance of 0.5 meters.
 - Gravity applies at 1g.
 - Jetpack thrust applies at 1.25g so the net upward acceleration is 0.25g while `Space` is held.
 - The scene uses `@takram/three-atmosphere` for atmospheric rendering.
@@ -30,9 +30,10 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - The cube and the lower ground plane use extracted PBR texture packs with tiling that assumes 1 meter by 1 meter world scale unless the source specifies a different implied scale.
 - The water plane uses the official three.js `Water` implementation from the examples/docs.
 - The sun is positioned 30 degrees above the horizon line.
-- The atmosphere sun information is driven by the actual sun direction and intensity.
+- The atmosphere sun direction is driven by the same canonical sun direction as the scene lights, water highlights, sun mesh, and post-processing source objects.
 - The scene exposes a sun rotation slider.
-- The scene exposes a sky light intensity slider that defaults to the sun-linked value.
+- The sun intensity control drives the direct sun light, the default-linked sky light value, the water sun highlight, the sun mesh brightness, and renderer exposure.
+- The scene exposes a sky light intensity slider that defaults to the sun-linked value and remains linked until manually adjusted.
 - The renderer uses `AgXToneMapping`.
 - The scene enables Bloom, GodRays, DepthOfField, Lensflare, SSAO, and Vignette with default settings.
 - The UI shows an FPS counter in the top-right corner.

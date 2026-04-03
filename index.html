@@ -12,9 +12,10 @@
   <body>
     <div id="root"></div>
     <script>
+      const isLocalHost = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
       const isDevServer =
-        window.location.hostname === 'localhost' &&
-        window.location.port === '5173'
+        isLocalHost &&
+        ['4273', '5173'].includes(window.location.port)
 
       if (!isDevServer) {
         const stylesheet = document.createElement('link')

@@ -25,12 +25,12 @@
 [x] Add an FPS counter to the top right of the screen
 [x] pressing ` should open controls for adjusting the main parameters for each of our lighting and visual effects. directional light angle and intensity, on/off switch and intensity for each post processing effect
 - The items below remain unchecked until the implementation lands and the docs can be verified against code.
-[] Find a way for you to run a single instance of Vite headlessly in the background instead of repeatedly opening windows, sometimes multiple, that block my screen (this is my desktop computer!)
-[] Quadruple deceleration
-[] Quadruple acceleration
-[] Benchmark startup time and figure out why it takes so long for the viewport to be active
-[] Benchmark test duration and instruct yourself to investigate any time it regresses. You are responsible for keeping test duration fast. Unit tests should be under 20 seconds and e2e tests should be under a minute.
-[] The atmosphere sun info should be driven by the actual sun
-[] Add a sun rotation slider too
-[] Add a sky light intensity slider and default the sky light value to the same
-[] 10x the water and seafloor size
+[x] Find a way for you to run a single instance of Vite headlessly in the background instead of repeatedly opening windows, sometimes multiple, that block my screen (this is my desktop computer!)
+[x] Quadruple deceleration
+[x] Quadruple acceleration
+[x] Benchmark startup time and figure out why it takes so long for the viewport to be active
+[x] Benchmark test duration and instruct yourself to investigate any time it regresses. You are responsible for keeping test duration fast. Unit tests should be under 20 seconds and e2e tests should be under a minute.
+[x] The atmosphere sun info should be driven by the actual sun
+[x] Add a sun rotation slider too
+[x] Add a sky light intensity slider and default the sky light value to the same
+[x] 10x the water and seafloor size

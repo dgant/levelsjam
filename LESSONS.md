@@ -6,3 +6,7 @@
 - Runtime-served textures must live under `public/` in source. The root-level `textures/` directory is generated Pages output and gets replaced by `npm run build:pages`.
 - When movement tuning is specified in both speed and distance terms, preserve both constraints in the spec so tests can validate the intended feel instead of a single derived number.
 - When agent workflows need live Vite access, prefer one persistent headless instance over repeatedly starting visible windows.
+- If the root `index.html` chooses between source and committed bundle modes, include every approved Vite dev port in that detection. Otherwise a background server can silently serve stale built assets.
+- The April 3, 2026 startup benchmark showed that the scene reaches its first rendered frame in about 1-2 seconds on the dev server, while the slowest remaining startup requests are remote `@takram/three-atmosphere` EXR files from `media.githubusercontent.com`.
+- Playwright should only match `*.spec.cjs` in this repository. If it scans the Node `--test` files, it wastes time running them inside the browser-test command.
+- For rendered-frame smoke checks in this scene, broad brightness sampling across the whole canvas is more reliable than checking a single center pixel.

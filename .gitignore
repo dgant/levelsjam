@@ -3,5 +3,7 @@ node_modules/
 dist/
 playwright-report/
 test-results/
+logs/
 preview-server*.log
 .preview-pid
+.vite-dev-server.json

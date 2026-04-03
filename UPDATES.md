@@ -8,3 +8,6 @@
 - When a key is assigned to a requested tooling or debug control, reserve that key from generic gameplay relock handling instead of letting it fall through to pointer-lock logic.
 - When a sun-linked control is requested, keep the atmosphere sun and sky light defaults coupled unless the user explicitly asks for them to diverge.
 - When benchmarking startup and test duration, write the target in the docs next to the measurement so regressions can be judged quickly.
+- When the repository root is both a local Vite entrypoint and a committed Pages bundle, keep the root `index.html` dual-mode so the approved local dev ports load `/src/main.tsx` while static preview and Pages keep loading the committed bundle.
+- When a startup regression appears, inspect the resource waterfall before changing rendering code. In this project the dominant late-startup requests are remote `@takram/three-atmosphere` EXR assets rather than local Vite startup.
+- When benchmarking browser tests for the one-minute target, prepare the published build once and time the Playwright runner separately from that build step.
