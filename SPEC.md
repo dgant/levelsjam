@@ -13,22 +13,26 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - The scene contains an infinite water plane positioned 1m below the cube surface.
 - The scene contains an infinite ground plane below the water plane with a separate ground texture.
 - The scene uses `@takram/three-atmosphere` for atmospheric rendering.
-- The scene uses basic lighting so the geometry, water, and terrain remain readable.
+- The scene uses the library's light-source lighting pattern with `SkyLight`, `SunLight`, and `AerialPerspective` as the reference atmosphere setup.
+- The scene uses lighting and exposure values that keep the cube, water, and terrain readable on first load.
 - The player can move with first-person WASD controls.
 - The player can look around with mouse look controls.
 - Holding `Space` applies vertical thrust in a jetpack-like motion.
+- The initial scene contains no speculative HUD copy, branding caption, or click-to-enter gate.
 
 ## Player Experience
 - The camera starts in a playable 3D view with immediate control.
 - Movement feels continuous and responsive rather than tile-based or turn-based.
 - Mouse look changes camera orientation directly.
 - Jetpack thrust adds upward motion while `Space` remains held and stops when `Space` is released.
+- The game responds to movement and look input without requiring any preliminary button click.
 
 ## Visual Requirements
 - The cube reads as the central landmark in the scene.
 - The water plane extends beyond the visible area so it reads as infinite.
 - The ground plane extends beyond the visible area so it reads as infinite.
 - Atmosphere and lighting combine to produce a sky-backed outdoor scene.
+- The sky and lighting avoid a black first frame by using a known-good atmosphere configuration from the library's documented light-source example pattern.
 - The page avoids a blocking loading screen.
 
 ## Animation And Motion
@@ -46,4 +50,3 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - The public page is verified after deployment.
 - The controls are checked in the browser for movement, looking, and thrust behavior.
 - Visual layout changes are reviewed in the rendered scene, not only in source code.
-

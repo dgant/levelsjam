@@ -1,5 +1,7 @@
 import { EffectComposer } from '@react-three/postprocessing'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import { DEFAULT_PRECOMPUTED_TEXTURES_URL } from '@takram/three-atmosphere'
+import type { AtmosphereApi } from '@takram/three-atmosphere/r3f'
 import {
   AerialPerspective,
   Atmosphere,
@@ -7,22 +9,27 @@ import {
   SkyLight,
   SunLight
 } from '@takram/three-atmosphere/r3f'
-import { PointerLockControls } from '@react-three/drei'
+import { Ellipsoid, Geodetic } from '@takram/three-geospatial'
 import {
-  Color,
+  ACESFilmicToneMapping,
+  Euler,
+  Matrix4,
   RepeatWrapping,
   SRGBColorSpace,
   TextureLoader,
+  Vector2,
   Vector3
 } from 'three'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 
 const assetBase = import.meta.env.BASE_URL
 const GRASS_TEXTURE_URL = `${assetBase}textures/grass_1.webp`
 const GROUND_TEXTURE_URL = `${assetBase}textures/ground_14.webp`
-
-const waterColor = new Color('#4d95c7')
-const groundColor = new Color('#8a7b68')
+const ATMOSPHERE_DATE = new Date('2026-04-03T12:00:00Z')
+const LOOK_SENSITIVITY = 0.003
+const MAX_PITCH = Math.PI / 2 - 0.05
+const INITIAL_PITCH = -0.35
+const cameraEuler = new Euler(0, 0, 0, 'YXZ')
 
 function useLoadedTexture(url: string) {
   const texture = useMemo(() => {
@@ -32,7 +39,6 @@ function useLoadedTexture(url: string) {
     loaded.wrapS = RepeatWrapping
     loaded.wrapT = RepeatWrapping
     loaded.anisotropy = 8
-    loaded.repeat.set(1, 1)
     return loaded
   }, [url])
 
@@ -41,26 +47,82 @@ function useLoadedTexture(url: string) {
   return texture
 }
 
-type FlightRigProps = {
-  onLockChange: (locked: boolean) => void
-}
-
-function FlightRig({ onLockChange }: FlightRigProps) {
+function FlightRig() {
+  const camera = useThree((state) => state.camera)
+  const canvas = useThree((state) => state.gl.domElement)
   const keys = useRef<Record<string, boolean>>({})
   const velocity = useRef(new Vector3())
   const forward = useRef(new Vector3())
   const right = useRef(new Vector3())
+  const pointer = useRef<Vector2 | null>(null)
+  const yaw = useRef(0)
+  const pitch = useRef(INITIAL_PITCH)
   const up = useMemo(() => new Vector3(0, 1, 0), [])
-  const [locked, setLocked] = useState(false)
-  const camera = useThree((state) => state.camera)
 
   useEffect(() => {
-    onLockChange(locked)
-  }, [locked, onLockChange])
+    camera.rotation.order = 'YXZ'
+    camera.rotation.set(pitch.current, yaw.current, 0)
+  }, [camera])
+
+  useEffect(() => {
+    const updateRotation = () => {
+      camera.quaternion.setFromEuler(
+        cameraEuler.set(pitch.current, yaw.current, 0, 'YXZ')
+      )
+    }
+
+    const onMouseMove = (event: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect()
+      if (
+        event.clientX < rect.left ||
+        event.clientX > rect.right ||
+        event.clientY < rect.top ||
+        event.clientY > rect.bottom
+      ) {
+        pointer.current = null
+        return
+      }
+
+      if (pointer.current == null) {
+        pointer.current = new Vector2(event.clientX, event.clientY)
+        return
+      }
+
+      const deltaX = event.clientX - pointer.current.x
+      const deltaY = event.clientY - pointer.current.y
+
+      pointer.current.set(event.clientX, event.clientY)
+      yaw.current -= deltaX * LOOK_SENSITIVITY
+      pitch.current = Math.max(
+        -MAX_PITCH,
+        Math.min(MAX_PITCH, pitch.current - deltaY * LOOK_SENSITIVITY)
+      )
+      updateRotation()
+    }
+
+    const clearPointer = () => {
+      pointer.current = null
+    }
+
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('blur', clearPointer)
+    window.addEventListener('mouseleave', clearPointer)
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('blur', clearPointer)
+      window.removeEventListener('mouseleave', clearPointer)
+    }
+  }, [camera, canvas])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.code === 'Space' || event.code === 'KeyW' || event.code === 'KeyA' || event.code === 'KeyS' || event.code === 'KeyD') {
+      if (
+        event.code === 'Space' ||
+        event.code === 'KeyW' ||
+        event.code === 'KeyA' ||
+        event.code === 'KeyS' ||
+        event.code === 'KeyD'
+      ) {
         event.preventDefault()
       }
       keys.current[event.code] = true
@@ -79,11 +141,6 @@ function FlightRig({ onLockChange }: FlightRigProps) {
   }, [])
 
   useFrame((_, delta) => {
-    if (!locked) {
-      velocity.current.multiplyScalar(0.85)
-      return
-    }
-
     camera.getWorldDirection(forward.current)
     forward.current.y = 0
     if (forward.current.lengthSq() > 0) {
@@ -91,22 +148,21 @@ function FlightRig({ onLockChange }: FlightRigProps) {
     } else {
       forward.current.set(0, 0, -1)
     }
+
     right.current.crossVectors(forward.current, up).normalize()
 
-    const accel = new Vector3()
-    if (keys.current.KeyW) accel.add(forward.current)
-    if (keys.current.KeyS) accel.addScaledVector(forward.current, -1)
-    if (keys.current.KeyD) accel.add(right.current)
-    if (keys.current.KeyA) accel.addScaledVector(right.current, -1)
-    if (accel.lengthSq() > 0) {
-      accel.normalize().multiplyScalar(18)
+    const acceleration = new Vector3()
+    if (keys.current.KeyW) acceleration.add(forward.current)
+    if (keys.current.KeyS) acceleration.addScaledVector(forward.current, -1)
+    if (keys.current.KeyD) acceleration.add(right.current)
+    if (keys.current.KeyA) acceleration.addScaledVector(right.current, -1)
+    if (acceleration.lengthSq() > 0) {
+      acceleration.normalize().multiplyScalar(20)
     }
 
-    velocity.current.x += accel.x * delta
-    velocity.current.z += accel.z * delta
-
-    const jetpack = keys.current.Space ? 14 : -9.81
-    velocity.current.y += jetpack * delta
+    velocity.current.x += acceleration.x * delta
+    velocity.current.z += acceleration.z * delta
+    velocity.current.y += (keys.current.Space ? 16 : -9.81) * delta
 
     const horizontalDamping = Math.exp(-4 * delta)
     const verticalDamping = Math.exp(-1.5 * delta)
@@ -118,13 +174,7 @@ function FlightRig({ onLockChange }: FlightRigProps) {
     camera.position.y = Math.max(camera.position.y, -8)
   })
 
-  return (
-    <PointerLockControls
-      selector="#start-flight"
-      onLock={() => setLocked(true)}
-      onUnlock={() => setLocked(false)}
-    />
-  )
+  return null
 }
 
 function Terrain() {
@@ -146,7 +196,7 @@ function Terrain() {
       <mesh position={[0, -1, 0]} rotation-x={-Math.PI / 2} receiveShadow>
         <planeGeometry args={[4000, 4000]} />
         <meshPhysicalMaterial
-          color={waterColor}
+          color="#4d95c7"
           transparent
           opacity={0.72}
           roughness={0.08}
@@ -159,63 +209,68 @@ function Terrain() {
 
       <mesh position={[0, -2.5, 0]} rotation-x={-Math.PI / 2} receiveShadow>
         <planeGeometry args={[5000, 5000]} />
-        <meshStandardMaterial map={ground} color={groundColor} roughness={1} metalness={0} />
+        <meshStandardMaterial
+          map={ground}
+          color="#8a7b68"
+          roughness={1}
+          metalness={0}
+        />
       </mesh>
     </>
   )
 }
 
-type SceneProps = {
-  onLockChange: (locked: boolean) => void
-}
+function Scene() {
+  const atmosphere = useRef<AtmosphereApi | null>(null)
+  const worldOrigin = useMemo(
+    () => new Geodetic(0, 0, 5).toECEF(new Vector3()),
+    []
+  )
 
-function Scene({ onLockChange }: SceneProps) {
+  useEffect(() => {
+    if (!atmosphere.current) {
+      return
+    }
+
+    atmosphere.current.worldToECEFMatrix.copy(
+      Ellipsoid.WGS84.getNorthUpEastFrame(worldOrigin, new Matrix4())
+    )
+  }, [worldOrigin])
+
   return (
-    <Atmosphere>
+    <Atmosphere
+      ref={atmosphere}
+      date={ATMOSPHERE_DATE}
+      ground={false}
+      textures={DEFAULT_PRECOMPUTED_TEXTURES_URL}
+    >
       <Sky />
       <group position={[0, 0, 0]}>
         <SkyLight />
         <SunLight />
       </group>
-      <color attach="background" args={['#9ed0ef']} />
-      <fog attach="fog" args={['#9ed0ef', 80, 500]} />
       <Terrain />
-      <EffectComposer enableNormalPass>
+      <EffectComposer>
         <AerialPerspective />
       </EffectComposer>
-      <FlightRig onLockChange={onLockChange} />
+      <FlightRig />
     </Atmosphere>
   )
 }
 
 export default function App() {
-  const [locked, setLocked] = useState(false)
-
   return (
     <div className="app-shell">
-      <div className="frame">
-        <div className="copy">
-          <p className="eyebrow">Cursor / levels.io jam</p>
-          <h1>Atmospheric flight scaffold</h1>
-          <p className="lede">
-            WASD moves, the mouse looks, and space adds vertical thrust.
-          </p>
-        </div>
-        <div className="status">
-          <span>WebGL ready</span>
-        </div>
-      </div>
-      {!locked ? (
-        <button className="start-button" id="start-flight" type="button">
-          Click to enter
-        </button>
-      ) : null}
       <Canvas
-        camera={{ position: [0, 4, 18], fov: 65, near: 0.1, far: 5000 }}
-        shadows
+        camera={{ position: [0, 12, 16], fov: 60, near: 0.1, far: 8000 }}
         dpr={[1, 2]}
+        onCreated={({ camera, gl }) => {
+          gl.outputColorSpace = SRGBColorSpace
+          gl.toneMapping = ACESFilmicToneMapping
+          gl.toneMappingExposure = 1.2
+        }}
       >
-        <Scene onLockChange={setLocked} />
+        <Scene />
       </Canvas>
     </div>
   )

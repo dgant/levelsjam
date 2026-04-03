@@ -1,12 +1,6 @@
 :root {
   color-scheme: dark;
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    sans-serif;
-  background:
-    radial-gradient(circle at top, rgba(142, 198, 224, 0.35), transparent 46%),
-    linear-gradient(180deg, #08111d 0%, #0d1726 46%, #091018 100%);
-  color: #eff7fb;
+  background: #091018;
 }
 
 html,
@@ -21,94 +15,13 @@ body {
   overflow: hidden;
 }
 
-button {
-  font: inherit;
-}
-
 .app-shell {
-  position: relative;
   width: 100%;
   height: 100%;
-  background:
-    radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.12), transparent 28%),
-    radial-gradient(circle at 80% 10%, rgba(70, 130, 180, 0.2), transparent 30%);
 }
 
 .app-shell canvas {
   display: block;
-}
-
-.frame {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  padding: 32px;
-  pointer-events: none;
-  z-index: 1;
-}
-
-.copy {
-  max-width: 560px;
-  text-shadow: 0 12px 24px rgba(0, 0, 0, 0.35);
-}
-
-.eyebrow {
-  margin: 0 0 10px;
-  font-size: 0.82rem;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: rgba(224, 240, 247, 0.68);
-}
-
-h1 {
-  margin: 0;
-  font-size: clamp(2.6rem, 5vw, 5rem);
-  line-height: 0.95;
-  letter-spacing: -0.05em;
-}
-
-.lede {
-  max-width: 36rem;
-  margin: 18px 0 0;
-  font-size: 1rem;
-  line-height: 1.6;
-  color: rgba(224, 240, 247, 0.8);
-}
-
-.status {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-radius: 999px;
-  background: rgba(7, 18, 31, 0.5);
-  border: 1px solid rgba(214, 235, 246, 0.14);
-  backdrop-filter: blur(12px);
-  color: rgba(239, 247, 251, 0.82);
-}
-
-.start-button {
-  position: absolute;
-  left: 32px;
-  bottom: 32px;
-  z-index: 2;
-  padding: 14px 18px;
-  border: 0;
-  border-radius: 999px;
-  background: linear-gradient(135deg, #e7f4ff, #a6d6ff);
-  color: #06111a;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  cursor: pointer;
-  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.28);
-}
-
-.start-button:hover {
-  transform: translateY(-1px);
-}
-
-.start-button:active {
-  transform: translateY(0);
+  width: 100%;
+  height: 100%;
 }
