@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  base: '/jam2026/',
+  base: './',
   build: {
     chunkSizeWarningLimit: 2000
   }

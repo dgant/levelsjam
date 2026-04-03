@@ -15,6 +15,7 @@ The repository is being built as a browser game for GitHub Pages. At the moment 
 
 ## Testing
 - Run the production build before handoff.
+- Run `npm run test:smoke` to exercise the built page through Playwright.
 - Verify the main page renders the 3D scene without console errors.
 - Verify `W`, `A`, `S`, and `D` move the camera.
 - Verify mouse movement changes view direction.

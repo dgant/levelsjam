@@ -1,6 +1,4 @@
 # Lessons Learned
 
-No concrete implementation lessons have been recorded yet.
-
-Use this file to capture proven build, deployment, or debugging issues once they occur so future changes can avoid them.
-
+- React Three Fiber scene content must be rendered inside a `<Canvas>` host. A production build can succeed while the runtime still fails if hooks like `useFrame` and `useThree` are mounted outside the canvas context.
+- The Vite `base` setting should stay relative for this project unless the repository name is fixed. `base: './'` keeps GitHub Pages assets working under either `/levelsjam/` or a future `/jam2026/` path.

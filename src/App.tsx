@@ -1,5 +1,5 @@
 import { EffectComposer } from '@react-three/postprocessing'
-import { useFrame, useThree } from '@react-three/fiber'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import {
   AerialPerspective,
   Atmosphere,
@@ -16,7 +16,6 @@ import {
   Vector3
 } from 'three'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { PointerLockControls as PointerLockControlsImpl } from 'three-stdlib'
 
 const GRASS_TEXTURE_URL = '/textures/grass_1.webp'
 const GROUND_TEXTURE_URL = '/textures/ground_14.webp'
@@ -41,8 +40,11 @@ function useLoadedTexture(url: string) {
   return texture
 }
 
-function FlightRig() {
-  const controls = useRef<PointerLockControlsImpl | null>(null)
+type FlightRigProps = {
+  onLockChange: (locked: boolean) => void
+}
+
+function FlightRig({ onLockChange }: FlightRigProps) {
   const keys = useRef<Record<string, boolean>>({})
   const velocity = useRef(new Vector3())
   const forward = useRef(new Vector3())
@@ -50,6 +52,10 @@ function FlightRig() {
   const up = useMemo(() => new Vector3(0, 1, 0), [])
   const [locked, setLocked] = useState(false)
   const camera = useThree((state) => state.camera)
+
+  useEffect(() => {
+    onLockChange(locked)
+  }, [locked, onLockChange])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -112,22 +118,11 @@ function FlightRig() {
   })
 
   return (
-    <>
-      <PointerLockControls
-        ref={controls}
-        onLock={() => setLocked(true)}
-        onUnlock={() => setLocked(false)}
-      />
-      {!locked ? (
-        <button
-          className="start-button"
-          type="button"
-          onClick={() => controls.current?.lock()}
-        >
-          Click to enter
-        </button>
-      ) : null}
-    </>
+    <PointerLockControls
+      selector="#start-flight"
+      onLock={() => setLocked(true)}
+      onUnlock={() => setLocked(false)}
+    />
   )
 }
 
@@ -169,7 +164,11 @@ function Terrain() {
   )
 }
 
-function Scene() {
+type SceneProps = {
+  onLockChange: (locked: boolean) => void
+}
+
+function Scene({ onLockChange }: SceneProps) {
   return (
     <Atmosphere>
       <Sky />
@@ -183,12 +182,14 @@ function Scene() {
       <EffectComposer enableNormalPass>
         <AerialPerspective />
       </EffectComposer>
-      <FlightRig />
+      <FlightRig onLockChange={onLockChange} />
     </Atmosphere>
   )
 }
 
 export default function App() {
+  const [locked, setLocked] = useState(false)
+
   return (
     <div className="app-shell">
       <div className="frame">
@@ -203,7 +204,18 @@ export default function App() {
           <span>WebGL ready</span>
         </div>
       </div>
-      <Scene />
+      {!locked ? (
+        <button className="start-button" id="start-flight" type="button">
+          Click to enter
+        </button>
+      ) : null}
+      <Canvas
+        camera={{ position: [0, 4, 18], fov: 65, near: 0.1, far: 5000 }}
+        shadows
+        dpr={[1, 2]}
+      >
+        <Scene onLockChange={setLocked} />
+      </Canvas>
     </div>
   )
 }
