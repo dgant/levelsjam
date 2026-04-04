@@ -31,6 +31,47 @@ function measureBrightness(buffer) {
   }
 }
 
+async function screenshotCanvasRegion(page, canvas, width = 480, height = 300) {
+  const box = await canvas.boundingBox()
+
+  if (!box) {
+    throw new Error('Canvas bounding box unavailable')
+  }
+
+  const clipWidth = Math.min(width, box.width)
+  const clipHeight = Math.min(height, box.height)
+
+  return page.screenshot({
+    clip: {
+      x: box.x + ((box.width - clipWidth) / 2),
+      y: box.y + ((box.height - clipHeight) / 2),
+      width: clipWidth,
+      height: clipHeight
+    }
+  })
+}
+
+async function waitForBrightFrame(page, canvas, minimumAverageBrightness, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs
+  let lastMeasurement = { average: 0, max: 0 }
+
+  while (Date.now() < deadline) {
+    lastMeasurement = measureBrightness(
+      await screenshotCanvasRegion(page, canvas, 256, 160)
+    )
+
+    if (lastMeasurement.average > minimumAverageBrightness) {
+      return lastMeasurement
+    }
+
+    await page.waitForTimeout(150)
+  }
+
+  throw new Error(
+    `Canvas brightness did not exceed ${minimumAverageBrightness}; last measurement was ${lastMeasurement.average.toFixed(2)}`
+  )
+}
+
 test('loads the flight scaffold without runtime errors', async ({ page }) => {
   const consoleErrors = []
   const pageErrors = []
@@ -70,10 +111,7 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
   const canvas = page.locator('canvas')
 
   await expect(canvas).toBeVisible({ timeout: 5_000 })
-  await page.waitForTimeout(1_000)
-  const frameBrightness = measureBrightness(
-    await canvas.screenshot({ scale: 'css' })
-  )
+  const frameBrightness = await waitForBrightFrame(page, canvas, 20)
 
   expect(frameBrightness.average).toBeGreaterThan(20)
   await expect(page.locator('.fps-counter')).toContainText('FPS', { timeout: 5_000 })
@@ -94,13 +132,19 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
   })
   await expect(page.getByLabel('Tone Mapper')).toBeVisible({ timeout: 5_000 })
 
-  await page.getByLabel('Tone Mapper').selectOption('neutral')
+  await page.getByLabel('Tone Mapper').selectOption('linear')
   await expect
     .poll(async () => canvas.getAttribute('data-tone-mapping'), {
       timeout: 5_000,
       intervals: [100, 250, 500]
     })
-    .toBe('neutral')
+    .toBe('linear')
+  const linearToneMappedBrightness = measureBrightness(
+    await screenshotCanvasRegion(page, canvas, 256, 160)
+  )
+  expect(
+    Math.abs(linearToneMappedBrightness.average - frameBrightness.average)
+  ).toBeGreaterThan(5)
 
   await page.getByLabel('Sun Intensity').evaluate((element) => {
     const descriptor = Object.getOwnPropertyDescriptor(

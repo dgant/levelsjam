@@ -34,7 +34,7 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - The atmosphere sun direction is driven by the same canonical sun direction as the scene lights, water highlights, sun mesh, and post-processing source objects.
 - The atmosphere-facing sun direction is expressed in the coordinate space expected by `@takram/three-atmosphere`.
 - The scene exposes a sun rotation slider.
-- The visual controls panel exposes a tone-mapper selector.
+- The visual controls panel exposes a tone-mapper selector that changes the final composited image rather than only updating internal renderer state.
 - The renderer defaults to a sun intensity of `10` and the sun-intensity slider spans `0` through `100`.
 - The sun intensity control drives the direct sun light, the default-linked sky light value, the water sun highlight, the god-rays source brightness, and renderer exposure.
 - The scene exposes a sky light intensity slider that defaults to the sun-linked value and remains linked until manually adjusted.
@@ -81,6 +81,7 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - The sun direction matches a 30-degree-elevation outdoor lighting setup.
 - The atmospheric sun disk remains the only visible sun disk in the beauty image.
 - The god-rays source object supports the post-process effect without adding a second visible sun to the scene.
+- The lens flare effect produces visible flare artifacts when enabled and the sun is on-screen.
 - Highlight values remain available before tone mapping so bloom can respond proportionally to bright sources.
 - The page shows an FPS counter in the top-right corner during play.
 - The page avoids a blocking loading screen.

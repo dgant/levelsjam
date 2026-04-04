@@ -3,6 +3,7 @@ import {
   DepthOfField,
   EffectComposer,
   SSAO,
+  ToneMapping,
   Vignette
 } from '@react-three/postprocessing'
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
@@ -16,19 +17,13 @@ import {
 } from '@takram/three-atmosphere/r3f'
 import { Ellipsoid, Geodetic } from '@takram/three-geospatial'
 import {
-  ACESFilmicToneMapping,
-  AgXToneMapping,
-  CineonToneMapping,
   Color,
   Euler,
-  LinearToneMapping,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
-  NeutralToneMapping,
   NoToneMapping,
   PlaneGeometry,
-  ReinhardToneMapping,
   RepeatWrapping,
   SRGBColorSpace,
   ShaderMaterial,
@@ -45,7 +40,11 @@ import {
   useRef,
   useState
 } from 'react'
-import { BlendFunction, GodRaysEffect } from 'postprocessing'
+import {
+  BlendFunction,
+  GodRaysEffect,
+  ToneMappingMode as PostToneMappingMode
+} from 'postprocessing'
 import { LensFlareEffect } from '@react-three/postprocessing'
 import {
   getCameraPosition,
@@ -100,16 +99,14 @@ const POINTER_UNLOCK_CODES = new Set([
   'MetaRight'
 ])
 const TONE_MAPPING_MODES = {
-  none: NoToneMapping,
-  linear: LinearToneMapping,
-  reinhard: ReinhardToneMapping,
-  cineon: CineonToneMapping,
-  aces: ACESFilmicToneMapping,
-  agx: AgXToneMapping,
-  neutral: NeutralToneMapping
+  linear: PostToneMappingMode.LINEAR,
+  reinhard: PostToneMappingMode.REINHARD,
+  cineon: PostToneMappingMode.CINEON,
+  aces: PostToneMappingMode.ACES_FILMIC,
+  agx: PostToneMappingMode.AGX,
+  neutral: PostToneMappingMode.NEUTRAL
 } as const
 const TONE_MAPPING_OPTIONS = [
-  { key: 'none', label: 'None' },
   { key: 'linear', label: 'Linear' },
   { key: 'reinhard', label: 'Reinhard' },
   { key: 'cineon', label: 'Cineon' },
@@ -580,7 +577,7 @@ function LensFlarePrimitive({
         secondaryGhosts: true,
         aditionalStreaks: true,
         ghostScale: 0,
-        opacity: 1,
+        opacity: 0,
         starBurst: false
       }),
     [intensity, viewport.height, viewport.width]
@@ -606,6 +603,7 @@ function LensFlarePrimitive({
 
     projectedPosition.copy(sunPosition).project(camera)
     if (projectedPosition.z > 1) {
+      opacity.value += (1 - opacity.value) * Math.min(1, delta / 0.07)
       return
     }
 
@@ -614,12 +612,12 @@ function LensFlarePrimitive({
     screenPosition.set(projectedPosition.x, projectedPosition.y)
     raycaster.setFromCamera(screenPosition, camera)
 
-    let nextOpacity = 1
+    let nextVisibility = 1
     const intersections = raycaster.intersectObjects(scene.children, true)
     const hitObject = intersections[0]?.object
 
     if (hitObject?.userData?.lensflare === 'no-occlusion') {
-      nextOpacity = 0
+      nextVisibility = 1
     } else if (hitObject instanceof Mesh) {
       const material = hitObject.material as {
         opacity?: number
@@ -629,13 +627,16 @@ function LensFlarePrimitive({
       }
 
       if ((material.uniforms?._transmission?.value ?? material._transmission ?? 0) > 0.2) {
-        nextOpacity = 0.2
+        nextVisibility = 0.8
       } else if (material.transparent) {
-        nextOpacity = material.opacity ?? 1
+        nextVisibility = 1 - (material.opacity ?? 1)
+      } else {
+        nextVisibility = 0
       }
     }
 
-    opacity.value += (nextOpacity - opacity.value) * Math.min(1, delta / 0.07)
+    const nextSuppression = 1 - nextVisibility
+    opacity.value += (nextSuppression - opacity.value) * Math.min(1, delta / 0.07)
   })
 
   useEffect(() => () => effect.dispose(), [effect])
@@ -680,9 +681,11 @@ function RendererSettings({
   const gl = useThree((state) => state.gl)
 
   useEffect(() => {
-    gl.toneMapping = TONE_MAPPING_MODES[toneMapping]
-    gl.toneMappingExposure = getRendererExposure(sunIntensity)
-    gl.domElement.dataset.rendererExposure = gl.toneMappingExposure.toFixed(3)
+    const exposure = getRendererExposure(sunIntensity)
+
+    gl.toneMapping = NoToneMapping
+    gl.toneMappingExposure = 1
+    gl.domElement.dataset.rendererExposure = exposure.toFixed(3)
     gl.domElement.dataset.toneMapping = toneMapping
   }, [gl, sunIntensity, toneMapping])
 
@@ -880,6 +883,11 @@ function Scene({
         {visualSettings.vignette.enabled ? (
           <Vignette darkness={visualSettings.vignette.intensity} />
         ) : null}
+        <ToneMapping
+          exposure={getRendererExposure(visualSettings.sunIntensity)}
+          mode={TONE_MAPPING_MODES[visualSettings.toneMapping]}
+          resolution={256}
+        />
       </EffectComposer>
       <FlightRig controlsOpen={controlsOpen} />
     </Atmosphere>
@@ -1140,8 +1148,8 @@ export default function App() {
         dpr={[1, 2]}
         onCreated={({ camera, gl }) => {
           gl.outputColorSpace = SRGBColorSpace
-          gl.toneMapping = TONE_MAPPING_MODES[visualSettings.toneMapping]
-          gl.toneMappingExposure = getRendererExposure(visualSettings.sunIntensity)
+          gl.toneMapping = NoToneMapping
+          gl.toneMappingExposure = 1
         }}
       >
         <RendererSettings

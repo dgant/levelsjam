@@ -13,3 +13,5 @@
 - In this project, moving the `three-atmosphere` EXRs into `public/textures/atmosphere` cuts startup latency dramatically compared with loading them from `media.githubusercontent.com`.
 - The `canvas[data-scene-ready]` marker proved less reliable than the rendered image for startup benchmarking, so the benchmark now waits for a bright canvas frame instead of a custom dataset flag.
 - After Playwright diagnostics or benchmarks, explicitly stop the headless browser processes they spawned instead of assuming they will all exit cleanly on their own.
+- `@react-three/postprocessing` forces the renderer to `NoToneMapping` while the composer renders, so visible tone-mapper controls must drive a `ToneMapping` post effect rather than `gl.toneMapping`.
+- The custom lens flare shader from `@react-three/postprocessing` treats its `opacity` uniform as suppression, not visibility, so app-side code must invert that value or the effect stays hidden.
