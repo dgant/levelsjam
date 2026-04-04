@@ -28,6 +28,8 @@
 - Each wall sconce supports a camera-facing torch billboard above it.
 - Each torch billboard and torch point light are positioned one sconce radius outside the wall face with the sconce.
 - Each torch billboard is 0.125 meters square.
+- Each torch billboard uses the linked source flipbook asset rather than a procedurally generated placeholder.
+- Each torch billboard uses the local committed `CampFire_l_nosmoke_front_Loop_01_4K_6x6.png` atlas copied from the linked source asset.
 - Each torch billboard uses a 6x6 fire flipbook atlas and loops across 36 frames in 4 seconds.
 - Each torch billboard uses an unlit material.
 - Each torch billboard brightness is scaled from a 1500 candela torch baseline.
@@ -91,12 +93,19 @@
 - The environment map from `overcast_soil` provides the visible skybox.
 - The environment map from `overcast_soil` provides image-based lighting.
 - The environment map from `overcast_soil` provides specular reflection data for reflective materials.
+- The environment map from `overcast_soil` is treated as canonically authored intensity at an IBL multiplier of `1`.
+- The visible skybox and the environment lighting use the same calibrated HDRI intensity path.
 - The ground, walls, and sconces use extracted PBR texture packs with tiling based on a 1 meter world scale unless a source specifies otherwise.
+- The metal wall sconce uses the linked `metal-13` PBR channels in their correct material slots.
 - Reflective and semi-reflective materials read from the shared environment consistently.
 - The torch billboards face the camera continuously.
 - The torch billboards animate smoothly through the flipbook loop without lighting artifacts from scene lights.
 - Torch point lights and torch billboards read as a matched fire source rather than independent unrelated elements.
 - The scene reads as an overcast exterior space lit primarily by environment light and torches.
+- Exposure EV100 uses a fixed absolute calibration rather than treating the chosen default EV as the calibration pivot.
+- Exposure EV100 uses a fixed `overcast_soil` HDRI calibration rather than treating the current UI default as the calibration pivot.
+- Exposure EV100 compensates for the renderer's internal light-unit scale so the scene can use precision-friendly buffer values without changing the calibrated final look.
+- Raising EV100 darkens the rendered image even if the control's default value changes.
 - Enabling SSR from the debug panel does not halt rendering or introduce runtime errors.
 - The page does not show speculative branding captions, launcher buttons, or click-to-enter copy.
 

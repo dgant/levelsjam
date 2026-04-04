@@ -35,7 +35,11 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify horizontal motion follows the current camera-relative input direction and that directly opposing input decelerates rather than accelerates through the turn.
 - Verify mouse lock releases on escape-style modifier keys and re-engages on ordinary input.
 - Verify the visible skybox comes from local `overcast_soil_1k.hdr`.
+- Verify `IBL Intensity 1.00x` is the canonical authored HDRI baseline rather than a corrective fudge factor.
+- Verify the visible skybox brightness tracks the same calibrated HDRI path as the environment lighting.
 - Verify the ground, walls, and sconces load the committed PBR texture packs instead of preview images.
+- Verify the torch billboard uses the linked flipbook asset rather than a generated placeholder atlas.
+- Verify the sconces are visibly readable outside the walls rather than disappearing behind the torch billboard or wall face.
 - Verify the torch billboards animate and face the camera.
 - Verify each wall has a warm torch point light and the lights cast shadows.
 - Verify the tone mapper is `AgX` by default.
@@ -43,6 +47,8 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify Bloom, Depth Of Field, Lens Flares, and SSR start disabled.
 - Verify the default `Exposure EV100` value is `17.5`.
 - Verify each sconce, billboard, and torch light sits one sconce radius outside the wall face rather than intersecting the wall.
+- Verify changing the default EV value changes rendered brightness according to an absolute EV scale rather than keeping the same baseline look under a new label.
+- Verify changing `Exposure EV100` changes brightness by absolute stop differences while the HDRI stays on its fixed calibration path.
 - Verify changing `Exposure EV100` updates `canvas[data-renderer-exposure]`.
 - Verify enabling SSR from the visual controls panel does not introduce page errors or halt rendering.
 - Verify the FPS counter appears in the top-right corner.
@@ -53,7 +59,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Treat duration regressions as blocking issues.
 - Keep `npm run test:unit` under 20 seconds.
 - Keep the prepared smoke runner `npm run test:smoke:runner` under 1 minute after a single `npm run build:pages`.
-- Latest measured benchmark on April 4, 2026: `npm run bench:startup` reached the first bright frame in about `330.4ms` on the background dev server, `npm run test:unit` took about `975ms`, and the prepared `npm run test:smoke:runner` took about `23.5s`.
+- Latest measured benchmark on April 4, 2026: `npm run bench:startup` reached the first bright frame in about `464.6ms` on the background dev server, `npm run test:unit` took about `977ms`, and the prepared `npm run test:smoke:runner` took about `58.4s`.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.

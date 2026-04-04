@@ -9,7 +9,6 @@ import {
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
 import { LensFlareEffect } from '@react-three/postprocessing'
 import {
-  AdditiveBlending,
   CanvasTexture,
   Color,
   DoubleSide,
@@ -41,7 +40,7 @@ import {
   Effect,
   ToneMappingMode as PostToneMappingMode
 } from 'postprocessing'
-import { RGBELoader } from 'three/addons/loaders/RGBELoader.js'
+import { HDRLoader } from 'three/addons/loaders/HDRLoader.js'
 import { SSREffect } from './vendor/screen-space-reflections.js'
 import {
   DEFAULT_EXPOSURE_EV100,
@@ -51,7 +50,9 @@ import {
   MAX_TORCH_CANDELA_MULTIPLIER,
   MIN_IBL_INTENSITY_MULTIPLIER,
   MIN_TORCH_CANDELA_MULTIPLIER,
-  getRendererExposure
+  getHdrLightingIntensity,
+  getRendererExposure,
+  scalePhotometricIntensity
 } from './lib/lightingCalibration.js'
 import {
   getCameraPosition,
@@ -77,6 +78,8 @@ import {
 
 const assetBase = import.meta.env.BASE_URL
 const ENVIRONMENT_URL = `${assetBase}textures/environment/overcast_soil_1k.hdr`
+const FIRE_FLIPBOOK_URL =
+  `${assetBase}textures/fire/CampFire_l_nosmoke_front_Loop_01_4K_6x6.png`
 const PUDDLE_TEXTURE_URLS = {
   ao: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_AO.jpg`,
   color: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_Diffuse.jpg`,
@@ -120,7 +123,7 @@ const FIRE_FLIPBOOK_GRID = 6
 const FIRE_FLIPBOOK_FRAME_COUNT = FIRE_FLIPBOOK_GRID * FIRE_FLIPBOOK_GRID
 const FIRE_FLIPBOOK_DURATION_SECONDS = 4
 const FIRE_COLOR = new Color('#ffb168')
-const FIRE_EMISSIVE_SCALE = 0.0025
+const FIRE_BILLBOARD_INTENSITY_SCALE = 1 / TORCH_BASE_CANDELA
 const CUBE_BACKGROUND_RESOLUTION = 512
 const TONE_MAPPING_MODES = {
   linear: PostToneMappingMode.LINEAR,
@@ -181,6 +184,15 @@ type PbrMaps = {
   metalnessMap?: Texture
   normalMap?: Texture
   roughnessMap?: Texture
+}
+
+type StandardPbrTextureUrls = {
+  ao?: string
+  color: string
+  height?: string
+  metallic?: string
+  normal?: string
+  roughness?: string
 }
 
 class ExposureEffectImpl extends Effect {
@@ -294,128 +306,59 @@ function usePuddleTextures(repeat: number) {
   } satisfies PbrMaps
 }
 
-function useStandardPbrTextures(
-  urls: Record<string, string>,
-  repeat: number
-) {
+function useStandardPbrTextures(urls: StandardPbrTextureUrls, repeat: number) {
   const maxAnisotropy = useThree((state) => state.gl.capabilities.getMaxAnisotropy())
-  const textures = useLoader(TextureLoader, Object.values(urls)) as Texture[]
+  const textureOrder = useMemo(
+    () =>
+      [
+        ['ao', urls.ao],
+        ['color', urls.color],
+        ['height', urls.height],
+        ['metallic', urls.metallic],
+        ['normal', urls.normal],
+        ['roughness', urls.roughness]
+      ].filter((entry): entry is [keyof StandardPbrTextureUrls, string] => Boolean(entry[1])),
+    [urls]
+  )
+  const textures = useLoader(
+    TextureLoader,
+    textureOrder.map((entry) => entry[1])
+  ) as Texture[]
+  const keyedTextures = useMemo(() => {
+    const entries = textureOrder.map(([key], index) => [key, textures[index]])
+    return Object.fromEntries(entries) as Partial<Record<keyof StandardPbrTextureUrls, Texture>>
+  }, [textureOrder, textures])
 
   useEffect(() => {
     const anisotropy = Math.min(maxAnisotropy, 8)
-
-    textures.forEach((texture, index) => {
-      configureRepeatedTexture(texture, repeat, anisotropy, index === 1)
-    })
-  }, [maxAnisotropy, repeat, textures])
-
-  const [aoMap, map, bumpMap, normalMap, roughnessMap, metalnessMap] = textures
+    for (const [key, texture] of Object.entries(keyedTextures)) {
+      configureRepeatedTexture(texture, repeat, anisotropy, key === 'color')
+    }
+  }, [keyedTextures, maxAnisotropy, repeat])
 
   return {
-    aoMap,
-    bumpMap,
-    map,
-    metalnessMap,
-    normalMap,
-    roughnessMap
+    aoMap: keyedTextures.ao,
+    bumpMap: keyedTextures.height,
+    map: keyedTextures.color!,
+    metalnessMap: keyedTextures.metallic,
+    normalMap: keyedTextures.normal,
+    roughnessMap: keyedTextures.roughness
   } satisfies PbrMaps
 }
 
-function createFireFlipbookTexture() {
-  const cellSize = 64
-  const canvas = document.createElement('canvas')
+function useFireFlipbookTexture() {
+  const maxAnisotropy = useThree((state) => state.gl.capabilities.getMaxAnisotropy())
+  const texture = useLoader(TextureLoader, FIRE_FLIPBOOK_URL)
 
-  canvas.width = cellSize * FIRE_FLIPBOOK_GRID
-  canvas.height = cellSize * FIRE_FLIPBOOK_GRID
-
-  const context = canvas.getContext('2d')
-  if (!context) {
-    throw new Error('Unable to create fire flipbook canvas context')
-  }
-
-  for (let frame = 0; frame < FIRE_FLIPBOOK_FRAME_COUNT; frame += 1) {
-    const column = frame % FIRE_FLIPBOOK_GRID
-    const row = Math.floor(frame / FIRE_FLIPBOOK_GRID)
-    const x = column * cellSize
-    const y = row * cellSize
-    const phase = frame / FIRE_FLIPBOOK_FRAME_COUNT
-    const flare = Math.sin(phase * Math.PI * 4)
-    const flameHeight = (0.45 + (0.35 * Math.sin(phase * Math.PI * 2))) * cellSize
-    const flameWidth = (0.18 + (0.07 * Math.cos(phase * Math.PI * 6))) * cellSize
-    const jitterX = Math.sin(phase * Math.PI * 10) * 4
-    const baseX = x + (cellSize / 2) + jitterX
-    const baseY = y + (cellSize * 0.82)
-
-    context.clearRect(x, y, cellSize, cellSize)
-
-    const outerGlow = context.createRadialGradient(
-      baseX,
-      baseY - (flameHeight * 0.45),
-      cellSize * 0.05,
-      baseX,
-      baseY - (flameHeight * 0.45),
-      cellSize * 0.45
-    )
-    outerGlow.addColorStop(0, 'rgba(255, 214, 134, 0.75)')
-    outerGlow.addColorStop(0.5, 'rgba(255, 132, 32, 0.35)')
-    outerGlow.addColorStop(1, 'rgba(255, 80, 16, 0)')
-
-    context.fillStyle = outerGlow
-    context.fillRect(x, y, cellSize, cellSize)
-
-    context.beginPath()
-    context.moveTo(baseX, baseY - flameHeight)
-    context.bezierCurveTo(
-      baseX + flameWidth,
-      baseY - (flameHeight * 0.7),
-      baseX + (flameWidth * 0.75),
-      baseY - (flameHeight * 0.2),
-      baseX,
-      baseY
-    )
-    context.bezierCurveTo(
-      baseX - (flameWidth * 0.75),
-      baseY - (flameHeight * 0.2),
-      baseX - flameWidth,
-      baseY - (flameHeight * 0.7),
-      baseX,
-      baseY - flameHeight
-    )
-    context.closePath()
-
-    const flameGradient = context.createLinearGradient(
-      baseX,
-      baseY - flameHeight,
-      baseX,
-      baseY
-    )
-    flameGradient.addColorStop(0, 'rgba(255, 247, 220, 0.95)')
-    flameGradient.addColorStop(0.35, 'rgba(255, 205, 124, 0.92)')
-    flameGradient.addColorStop(0.7, `rgba(255, ${120 + Math.round(flare * 16)}, 32, 0.88)`)
-    flameGradient.addColorStop(1, 'rgba(176, 34, 0, 0.15)')
-    context.fillStyle = flameGradient
-    context.fill()
-
-    context.beginPath()
-    context.ellipse(
-      baseX,
-      baseY - (flameHeight * 0.45),
-      flameWidth * 0.42,
-      flameHeight * 0.24,
-      0,
-      0,
-      Math.PI * 2
-    )
-    context.fillStyle = 'rgba(255, 248, 235, 0.82)'
-    context.fill()
-  }
-
-  const texture = new CanvasTexture(canvas)
-
-  texture.colorSpace = SRGBColorSpace
-  texture.repeat.set(1 / FIRE_FLIPBOOK_GRID, 1 / FIRE_FLIPBOOK_GRID)
-  texture.offset.set(0, 1 - (1 / FIRE_FLIPBOOK_GRID))
-  texture.needsUpdate = true
+  useEffect(() => {
+    texture.colorSpace = SRGBColorSpace
+    texture.wrapS = RepeatWrapping
+    texture.wrapT = RepeatWrapping
+    texture.repeat.set(1 / FIRE_FLIPBOOK_GRID, 1 / FIRE_FLIPBOOK_GRID)
+    texture.offset.set(0, 1 - (1 / FIRE_FLIPBOOK_GRID))
+    texture.anisotropy = Math.min(maxAnisotropy, 8)
+    texture.needsUpdate = true
+  }, [maxAnisotropy, texture])
 
   return texture
 }
@@ -474,8 +417,8 @@ function RendererSettings({
   useEffect(() => {
     const exposure = getRendererExposure(exposureEv100)
 
-    gl.toneMappingExposure = exposure
-    gl.domElement.dataset.rendererExposure = exposure.toFixed(3)
+    gl.toneMappingExposure = 1
+    gl.domElement.dataset.rendererExposure = exposure.toFixed(6)
     gl.domElement.dataset.rendererEv100 = exposureEv100.toFixed(2)
     gl.domElement.dataset.toneMapping = toneMapping
   }, [exposureEv100, gl, toneMapping])
@@ -536,7 +479,7 @@ function EnvironmentLighting({
 }) {
   const gl = useThree((state) => state.gl)
   const scene = useThree((state) => state.scene)
-  const hdrTexture = useLoader(RGBELoader, ENVIRONMENT_URL)
+  const hdrTexture = useLoader(HDRLoader, ENVIRONMENT_URL)
   const pmremGenerator = useMemo(() => new PMREMGenerator(gl), [gl])
   const cubeRenderTarget = useMemo(
     () => new WebGLCubeRenderTarget(CUBE_BACKGROUND_RESOLUTION),
@@ -545,6 +488,8 @@ function EnvironmentLighting({
   const environmentTexture = useRef<Texture | null>(null)
 
   useEffect(() => {
+    const calibratedIntensity = getHdrLightingIntensity(iblIntensity)
+
     hdrTexture.mapping = EquirectangularReflectionMapping
     pmremGenerator.compileEquirectangularShader()
     cubeRenderTarget.fromEquirectangularTexture(gl, hdrTexture)
@@ -553,7 +498,8 @@ function EnvironmentLighting({
     environmentTexture.current = nextEnvironment.texture
     scene.background = cubeRenderTarget.texture
     scene.environment = nextEnvironment.texture
-    scene.environmentIntensity = iblIntensity
+    scene.backgroundIntensity = calibratedIntensity
+    scene.environmentIntensity = calibratedIntensity
 
     return () => {
       if (scene.background === cubeRenderTarget.texture) {
@@ -570,17 +516,16 @@ function EnvironmentLighting({
   }, [cubeRenderTarget, gl, hdrTexture, iblIntensity, pmremGenerator, scene])
 
   useEffect(() => {
-    scene.environmentIntensity = iblIntensity
+    const calibratedIntensity = getHdrLightingIntensity(iblIntensity)
+
+    scene.backgroundIntensity = calibratedIntensity
+    scene.environmentIntensity = calibratedIntensity
   }, [iblIntensity, scene])
 
   return null
 }
 
-function Ground({
-  iblIntensity
-}: {
-  iblIntensity: number
-}) {
+function Ground() {
   const puddle = usePuddleTextures(PUDDLE_TEXTURE_REPEAT)
 
   return (
@@ -595,7 +540,6 @@ function Ground({
         bumpScale={0.08}
         clearcoat={1}
         clearcoatRoughness={0.1}
-        envMapIntensity={iblIntensity}
         metalness={0}
         roughness={0.45}
       />
@@ -611,7 +555,7 @@ function TorchBillboard({
   position: [number, number, number]
 }) {
   const camera = useThree((state) => state.camera)
-  const texture = useMemo(() => createFireFlipbookTexture(), [])
+  const texture = useFireFlipbookTexture()
   const group = useRef<Group>(null)
   const material = useRef<Mesh>(null)
 
@@ -637,18 +581,11 @@ function TorchBillboard({
         color: Color
       }
 
-      billboardMaterial.color.copy(FIRE_COLOR).multiplyScalar(
-        Math.max(0.6, intensity * FIRE_EMISSIVE_SCALE)
+      billboardMaterial.color.setScalar(
+        Math.max(0.5, intensity * FIRE_BILLBOARD_INTENSITY_SCALE)
       )
     }
   })
-
-  useEffect(
-    () => () => {
-      texture.dispose()
-    },
-    [texture]
-  )
 
   return (
     <group
@@ -661,13 +598,13 @@ function TorchBillboard({
       >
         <planeGeometry args={[TORCH_BILLBOARD_SIZE, TORCH_BILLBOARD_SIZE]} />
         <meshBasicMaterial
-          alphaTest={0.04}
-          blending={AdditiveBlending}
-          color={FIRE_COLOR.clone().multiplyScalar(Math.max(0.6, intensity * FIRE_EMISSIVE_SCALE))}
+          alphaTest={0.02}
+          color={new Color(1, 1, 1).multiplyScalar(
+            Math.max(0.5, intensity * FIRE_BILLBOARD_INTENSITY_SCALE)
+          )}
           depthWrite={false}
           map={texture}
           side={DoubleSide}
-          toneMapped={false}
           transparent
         />
       </mesh>
@@ -698,9 +635,11 @@ function TorchLight({
     }
 
     lightRef.intensity =
-      (0.5 + (0.5 * noise)) *
-      TORCH_BASE_CANDELA *
-      torchCandelaMultiplier
+      scalePhotometricIntensity(
+        (0.5 + (0.5 * noise)) *
+          TORCH_BASE_CANDELA *
+          torchCandelaMultiplier
+      )
     lightRef.distance = (0.5 + (0.5 * noise)) * 10
   })
 
@@ -710,7 +649,9 @@ function TorchLight({
       color="#ffb56a"
       decay={2}
       distance={10}
-      intensity={TORCH_BASE_CANDELA * torchCandelaMultiplier}
+      intensity={scalePhotometricIntensity(
+        TORCH_BASE_CANDELA * torchCandelaMultiplier
+      )}
       position={position}
       ref={light}
       shadow-bias={-0.0005}
@@ -721,12 +662,10 @@ function TorchLight({
 }
 
 function WallSconce({
-  iblIntensity,
   metal,
   torchCandelaMultiplier,
   wall
 }: {
-  iblIntensity: number
   metal: PbrMaps
   torchCandelaMultiplier: number
   wall: (typeof WALL_LAYOUT)[number]
@@ -754,9 +693,9 @@ function WallSconce({
         <meshStandardMaterial
           {...metal}
           bumpScale={0.02}
-          envMapIntensity={iblIntensity}
           metalness={1}
           roughness={0.45}
+          side={DoubleSide}
         />
       </mesh>
       <TorchBillboard
@@ -773,10 +712,8 @@ function WallSconce({
 }
 
 function Walls({
-  iblIntensity,
   torchCandelaMultiplier
 }: {
-  iblIntensity: number
   torchCandelaMultiplier: number
 }) {
   const wall = useStandardPbrTextures(WALL_TEXTURE_URLS, WALL_TEXTURE_REPEAT)
@@ -798,13 +735,11 @@ function Walls({
             <meshStandardMaterial
               {...wall}
               bumpScale={0.05}
-              envMapIntensity={iblIntensity}
               metalness={0.02}
               roughness={0.92}
             />
           </mesh>
           <WallSconce
-            iblIntensity={iblIntensity}
             metal={metal}
             torchCandelaMultiplier={torchCandelaMultiplier}
             wall={layout}
@@ -816,19 +751,14 @@ function Walls({
 }
 
 function SceneGeometry({
-  iblIntensity,
   torchCandelaMultiplier
 }: {
-  iblIntensity: number
   torchCandelaMultiplier: number
 }) {
   return (
     <>
-      <Ground iblIntensity={iblIntensity} />
-      <Walls
-        iblIntensity={iblIntensity}
-        torchCandelaMultiplier={torchCandelaMultiplier}
-      />
+      <Ground />
+      <Walls torchCandelaMultiplier={torchCandelaMultiplier} />
     </>
   )
 }
@@ -957,10 +887,11 @@ function TorchLensFlare({
     WALL_LAYOUT.forEach((wall) => {
       const noise = getTorchNoise(state.clock.getElapsedTime(), wall.index + 1)
       const brightness =
-        (0.5 + (0.5 * noise)) *
-        TORCH_BASE_CANDELA *
-        torchCandelaMultiplier *
-        intensity
+        scalePhotometricIntensity(
+          (0.5 + (0.5 * noise)) *
+            TORCH_BASE_CANDELA *
+            torchCandelaMultiplier
+        ) * intensity
 
       targetPosition.copy(wall.torchPosition)
       projectedPosition.copy(targetPosition).project(camera)
@@ -1002,9 +933,7 @@ function TorchLensFlare({
     lensPosition.value.x = bestScreenX
     lensPosition.value.y = bestScreenY
     opacity.value += (0 - opacity.value) * Math.min(1, delta / 0.12)
-    colorGain.value.copy(FIRE_COLOR).multiplyScalar(
-      bestBrightness * FIRE_EMISSIVE_SCALE * 2.5
-    )
+    colorGain.value.copy(FIRE_COLOR).multiplyScalar(bestBrightness * 2.5)
   })
 
   useEffect(() => () => effect.dispose(), [effect])
@@ -1274,7 +1203,6 @@ function Scene({
       />
       <EnvironmentLighting iblIntensity={visualSettings.iblIntensity} />
       <SceneGeometry
-        iblIntensity={visualSettings.iblIntensity}
         torchCandelaMultiplier={visualSettings.torchCandelaMultiplier}
       />
       <EffectComposer enableNormalPass>

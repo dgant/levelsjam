@@ -7,7 +7,7 @@ module.exports = defineConfig({
   use: {
     baseURL: 'http://127.0.0.1:42731',
     headless: true,
-    viewport: { width: 960, height: 540 }
+    viewport: { width: 800, height: 450 }
   },
   webServer: {
     command: 'node scripts/serve-root.cjs 42731',

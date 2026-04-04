@@ -26,3 +26,5 @@
 - Playwright's `webServer` teardown can lag briefly after a smoke run. In this repository, polling `127.0.0.1:42731` until it is free makes back-to-back smoke benchmarks reliable without re-enabling server reuse.
 - After a Windows crash or forced reboot, `.vite-dev-server.json` can contain garbage bytes. The dev-server helper should treat invalid JSON as stale state and recreate it instead of crashing the benchmark flow.
 - In this repository, any script that launches Playwright Chromium directly should close it in a `finally` block. Otherwise a failed benchmark run can strand headless Chrome processes on the desktop machine.
+- In this scene, pre-scaling HDRI and light intensities for half-float-friendly buffer ranges only works if the final exposure applies the exact inverse compensation. Scaling one side without the other will make the whole frame appear black.
+- When loading optional PBR channels from object-shaped URL maps, do not rely on `Object.values()` ordering. Build an explicit key-to-texture map first so metallic, normal, and roughness channels cannot silently swap slots.

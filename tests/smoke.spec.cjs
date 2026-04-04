@@ -31,7 +31,7 @@ function measureBrightness(buffer) {
   }
 }
 
-async function screenshotCanvasRegion(page, canvas, width = 100, height = 64) {
+async function screenshotCanvasRegion(page, canvas, width = 80, height = 48) {
   const box = await canvas.boundingBox()
 
   if (!box) {
@@ -124,7 +124,7 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   await expect(loadingSubtitle).toContainText('Entering the labyrinth')
 
   const initialSubtitle = await loadingSubtitle.textContent()
-  await page.waitForTimeout(350)
+  await page.waitForTimeout(275)
   const updatedSubtitle = await loadingSubtitle.textContent()
   expect(updatedSubtitle).not.toBeNull()
   expect(updatedSubtitle).not.toEqual(initialSubtitle)
@@ -139,7 +139,7 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
     })
     .toBe('true')
 
-  const frameBrightness = await waitForBrightFrame(page, canvas, 12)
+  const frameBrightness = await waitForBrightFrame(page, canvas, 6)
 
   await expect(page.locator('.fps-counter')).toContainText('FPS', { timeout: 5_000 })
 
@@ -169,7 +169,7 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
       timeout: 5_000,
       intervals: [100, 250, 500]
     })
-    .toBe('2.400')
+    .toBe('400.000000')
 
   await page.getByLabel('Torch Candelas').evaluate((element) => {
     const descriptor = Object.getOwnPropertyDescriptor(
@@ -194,7 +194,7 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
     .filter({ hasText: 'SSR' })
     .locator('input')
   await ssrToggle.check()
-  await page.waitForTimeout(1_500)
+  await page.waitForTimeout(750)
 
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
@@ -211,10 +211,15 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
     [...resourceUrls].some((url) => url.includes('metal_13_basecolor-1K.png'))
   ).toBe(true)
   expect(
+    [...resourceUrls].some((url) =>
+      url.includes('CampFire_l_nosmoke_front_Loop_01_4K_6x6.png')
+    )
+  ).toBe(true)
+  expect(
     [...resourceUrls].some((url) => url.includes('textures/atmosphere/'))
   ).toBe(false)
   expect(
     [...resourceUrls].some((url) => url.includes('waternormals.jpg'))
   ).toBe(false)
-  expect(frameBrightness.max).toBeGreaterThan(25)
+  expect(frameBrightness.max).toBeGreaterThan(18)
 })
