@@ -23,6 +23,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Run `npm run test:unit` to verify player spawn and collision math.
 - Run `npm run test:smoke` to exercise the built page through Playwright.
 - Run `npm run test:smoke:runner` when `npm run build:pages` has already prepared the root-published bundle.
+- Run `npm run test:perf` to verify the automated browser performance benchmark stays at or above 120 FPS.
 - Verify the main page renders the 3D scene without console errors.
 - Verify the loading overlay appears with `MINOTAUR` and `Entering the labyrinth...` before the scene fades in.
 - Verify `W`, `A`, `S`, and `D` move the camera.
@@ -33,7 +34,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the player collides with the walls and can land on top of them.
 - Verify horizontal speed, vertical speed, fall speed, acceleration, deceleration, and gravity match the documented targets.
 - Verify horizontal motion follows the current camera-relative input direction and that directly opposing input decelerates rather than accelerates through the turn.
-- Verify mouse lock releases on escape-style modifier keys and re-engages on ordinary input.
+- Verify mouse lock releases on escape-style modifier keys and only re-engages after an explicit click on the scene canvas.
 - Verify the visible skybox comes from local `overcast_soil_1k.hdr`.
 - Verify `IBL Intensity 1.00x` is the canonical authored HDRI baseline rather than a corrective fudge factor.
 - Verify the visible skybox brightness tracks the same calibrated HDRI path as the environment lighting.
@@ -57,6 +58,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify opening the panel releases mouse lock and clicking inside the panel does not relock the pointer.
 - Benchmark startup with `npm run bench:startup` and test duration with `npm run bench:tests` before handoff.
 - Treat duration regressions as blocking issues.
+- Treat a failed `npm run test:perf` run or a measured browser benchmark below `120 FPS` as blocking.
 - Keep `npm run test:unit` under 20 seconds.
 - Keep the prepared smoke runner `npm run test:smoke:runner` under 1 minute after a single `npm run build:pages`.
 - Latest measured benchmark on April 4, 2026: `npm run bench:startup` reached the first bright frame in about `464.6ms` on the background dev server, `npm run test:unit` took about `977ms`, and the prepared `npm run test:smoke:runner` took about `58.4s`.

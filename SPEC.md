@@ -25,6 +25,7 @@
 - Each wall has a metal wall sconce attached to it.
 - Each wall sconce is a 0.25 meter radius hemisphere using the extracted ShareTextures `metal-13` PBR pack.
 - Each wall sconce is positioned with its center one sconce radius outside the wall face.
+- Each wall sconce remains visibly readable against the wall and under the torch it supports.
 - Each wall sconce supports a camera-facing torch billboard above it.
 - Each torch billboard and torch point light are positioned one sconce radius outside the wall face with the sconce.
 - Each torch billboard is 0.125 meters square.
@@ -86,7 +87,7 @@
 - Pressing `Escape`, `Alt`, `Control`, `Meta`, or the Windows key releases mouse lock.
 - Pressing backquote opens and closes the debug controls panel during play.
 - Pressing backquote is reserved for the debug controls panel and does not restore mouse lock.
-- Any other non-reserved key press or mouse click on the scene restores mouse lock while playing.
+- Mouse lock is only requested from an explicit click on the scene canvas.
 - The game responds to movement and look input without requiring any preliminary button click.
 
 ## Visual Requirements
@@ -122,6 +123,7 @@
 - The page becomes interactive quickly on load.
 - Startup avoids remote third-party lighting assets during play by serving required scene textures from the project.
 - The frame rate remains stable during ordinary movement and camera motion.
+- The default scene configuration must benchmark at or above 120 frames per second in the project's automated browser performance test.
 - The project documents startup-time and test-duration benchmarks and treats regressions in those measurements as actionable.
 
 ## Testing Expectations
@@ -133,3 +135,4 @@
 - The loading overlay is checked in the browser and verified to animate and then fade away after asset load.
 - The backquote shortcut is checked in the browser and verified to open the debug controls panel.
 - The debug controls panel is checked in the browser and verified to expose the new IBL and torch controls while omitting removed atmosphere controls.
+- The automated browser performance test is run and passes at or above 120 frames per second before a change is considered complete.

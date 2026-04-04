@@ -9,6 +9,7 @@ const thresholdsMs = {
   'test:unit': 20_000,
   'test:smoke:runner': 60_000
 }
+const requiredScripts = ['test:perf:runner']
 
 function formatMilliseconds(value) {
   return `${value.toFixed(0)}ms`
@@ -72,6 +73,14 @@ async function waitForPortToBeFree(port, timeoutMs) {
 async function main() {
   console.log('Preparing the published build once before the smoke benchmark')
   runTimedScript('build:pages')
+
+  for (const scriptName of requiredScripts) {
+    if (scriptName.includes('smoke')) {
+      await waitForPortToBeFree(smokePort, 10_000)
+    }
+
+    runTimedScript(scriptName)
+  }
 
   for (const scriptName of Object.keys(thresholdsMs)) {
     if (scriptName === 'test:smoke:runner') {

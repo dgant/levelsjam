@@ -28,3 +28,4 @@
 - In this repository, any script that launches Playwright Chromium directly should close it in a `finally` block. Otherwise a failed benchmark run can strand headless Chrome processes on the desktop machine.
 - In this scene, pre-scaling HDRI and light intensities for half-float-friendly buffer ranges only works if the final exposure applies the exact inverse compensation. Scaling one side without the other will make the whole frame appear black.
 - When loading optional PBR channels from object-shaped URL maps, do not rely on `Object.values()` ordering. Build an explicit key-to-texture map first so metallic, normal, and roughness channels cannot silently swap slots.
+- In Playwright headless mode, the onscreen FPS counter is not a reliable performance gate because `requestAnimationFrame` can be throttled when the page is not foregrounded. Use an explicit render-cost benchmark that repeatedly renders and calls `gl.finish()` instead.

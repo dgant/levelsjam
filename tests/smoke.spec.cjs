@@ -142,6 +142,13 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   const frameBrightness = await waitForBrightFrame(page, canvas, 6)
 
   await expect(page.locator('.fps-counter')).toContainText('FPS', { timeout: 5_000 })
+  await page.keyboard.press('KeyW')
+  await expect
+    .poll(async () => page.evaluate(() => document.pointerLockElement === null), {
+      timeout: 2_000,
+      intervals: [100, 250, 500]
+    })
+    .toBe(true)
 
   await page.keyboard.press('Backquote')
   await expect(page.locator('[data-testid="visual-controls"]')).toBeVisible({
@@ -212,7 +219,7 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   ).toBe(true)
   expect(
     [...resourceUrls].some((url) =>
-      url.includes('CampFire_l_nosmoke_front_Loop_01_4K_6x6.png')
+      url.includes('CampFire_l_nosmoke_front_Loop_01_1K_6x6.webp')
     )
   ).toBe(true)
   expect(

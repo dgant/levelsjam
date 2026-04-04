@@ -27,3 +27,4 @@
 - When calibrating HDRI-based lighting in this project, keep one fixed HDRI calibration constant and one shared internal light-unit scale. Do not tie exposure semantics to the current default slider value.
 - When running Playwright smoke tests repeatedly in this repository, wait for the `serve-root` port to become free before starting the next benchmarked runner so transient web-server shutdown races do not fail the harness.
 - When manually launching Chromium in benchmark scripts for this repository, close it in a `finally` block so failed runs do not leak headless Chrome processes.
+- When a user sets a hard FPS floor for this project, enforce it with an automated browser render benchmark instead of relying on visual impressions or the throttled headless FPS counter.

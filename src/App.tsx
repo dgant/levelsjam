@@ -79,7 +79,7 @@ import {
 const assetBase = import.meta.env.BASE_URL
 const ENVIRONMENT_URL = `${assetBase}textures/environment/overcast_soil_1k.hdr`
 const FIRE_FLIPBOOK_URL =
-  `${assetBase}textures/fire/CampFire_l_nosmoke_front_Loop_01_4K_6x6.png`
+  `${assetBase}textures/fire/CampFire_l_nosmoke_front_Loop_01_1K_6x6.webp`
 const PUDDLE_TEXTURE_URLS = {
   ao: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_AO.jpg`,
   color: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_Diffuse.jpg`,
@@ -125,6 +125,8 @@ const FIRE_FLIPBOOK_DURATION_SECONDS = 4
 const FIRE_COLOR = new Color('#ffb168')
 const FIRE_BILLBOARD_INTENSITY_SCALE = 1 / TORCH_BASE_CANDELA
 const CUBE_BACKGROUND_RESOLUTION = 512
+const TORCH_SHADOW_DISTANCE_SQ = 14 * 14
+const TORCH_SHADOW_MAP_SIZE = 128
 const TONE_MAPPING_MODES = {
   linear: PostToneMappingMode.LINEAR,
   reinhard: PostToneMappingMode.REINHARD,
@@ -184,6 +186,24 @@ type PbrMaps = {
   metalnessMap?: Texture
   normalMap?: Texture
   roughnessMap?: Texture
+}
+
+type BenchmarkResult = {
+  averageFrameMs: number
+  fps: number
+  maxFrameMs: number
+  minFrameMs: number
+  samples: number
+}
+
+type TorchLightHandle = {
+  castShadow: boolean
+  distance: number
+  intensity: number
+  shadow: {
+    autoUpdate: boolean
+    needsUpdate: boolean
+  }
 }
 
 type StandardPbrTextureUrls = {
@@ -574,7 +594,6 @@ function TorchBillboard({
 
     texture.offset.x = column / FIRE_FLIPBOOK_GRID
     texture.offset.y = 1 - ((row + 1) / FIRE_FLIPBOOK_GRID)
-    texture.needsUpdate = true
 
     if (material.current) {
       const billboardMaterial = material.current.material as {
@@ -613,18 +632,17 @@ function TorchBillboard({
 }
 
 function TorchLight({
+  lightHandle,
   seed,
   torchCandelaMultiplier,
   position
 }: {
+  lightHandle: { current: TorchLightHandle | null }
   seed: number
   torchCandelaMultiplier: number
   position: [number, number, number]
 }) {
-  const light = useRef<{
-    distance: number
-    intensity: number
-  } | null>(null)
+  const light = useRef<TorchLightHandle | null>(null)
 
   useFrame((state) => {
     const noise = getTorchNoise(state.clock.getElapsedTime(), seed)
@@ -643,9 +661,18 @@ function TorchLight({
     lightRef.distance = (0.5 + (0.5 * noise)) * 10
   })
 
+  useEffect(() => {
+    lightHandle.current = light.current
+
+    return () => {
+      if (lightHandle.current === light.current) {
+        lightHandle.current = null
+      }
+    }
+  }, [lightHandle])
+
   return (
     <pointLight
-      castShadow
       color="#ffb56a"
       decay={2}
       distance={10}
@@ -655,17 +682,19 @@ function TorchLight({
       position={position}
       ref={light}
       shadow-bias={-0.0005}
-      shadow-mapSize-height={256}
-      shadow-mapSize-width={256}
+      shadow-mapSize-height={TORCH_SHADOW_MAP_SIZE}
+      shadow-mapSize-width={TORCH_SHADOW_MAP_SIZE}
     />
   )
 }
 
 function WallSconce({
+  lightHandle,
   metal,
   torchCandelaMultiplier,
   wall
 }: {
+  lightHandle: { current: TorchLightHandle | null }
   metal: PbrMaps
   torchCandelaMultiplier: number
   wall: (typeof WALL_LAYOUT)[number]
@@ -683,26 +712,64 @@ function WallSconce({
 
   return (
     <>
-      <mesh
-        castShadow
-        position={position}
-        receiveShadow
-        rotation-x={wall.sconceDirection > 0 ? Math.PI / 2 : -Math.PI / 2}
-      >
-        <sphereGeometry args={[SCONCE_RADIUS, 24, 16, 0, Math.PI, 0, Math.PI / 2]} />
-        <meshStandardMaterial
-          {...metal}
-          bumpScale={0.02}
-          metalness={1}
-          roughness={0.45}
-          side={DoubleSide}
-        />
-      </mesh>
+      <group position={position}>
+        <mesh
+          castShadow
+          position={[0, 0, -wall.sconceDirection * (SCONCE_RADIUS - 0.025)]}
+          receiveShadow
+          rotation-x={Math.PI / 2}
+        >
+          <cylinderGeometry args={[SCONCE_RADIUS * 0.82, SCONCE_RADIUS * 0.82, 0.05, 24]} />
+          <meshStandardMaterial
+            {...metal}
+            bumpScale={0.02}
+            metalness={0.85}
+            roughness={0.55}
+          />
+        </mesh>
+        <mesh
+          castShadow
+          position={[0, -SCONCE_RADIUS * 0.06, -wall.sconceDirection * (SCONCE_RADIUS * 0.3)]}
+          receiveShadow
+          rotation-x={Math.PI / 2}
+        >
+          <cylinderGeometry args={[SCONCE_RADIUS * 0.12, SCONCE_RADIUS * 0.12, SCONCE_RADIUS * 0.5, 18]} />
+          <meshStandardMaterial
+            {...metal}
+            bumpScale={0.02}
+            metalness={0.85}
+            roughness={0.55}
+          />
+        </mesh>
+        <mesh
+          castShadow
+          position={[0, -SCONCE_RADIUS * 0.07, wall.sconceDirection * (SCONCE_RADIUS * 0.08)]}
+          receiveShadow
+          rotation-x={Math.PI / 2}
+        >
+          <cylinderGeometry
+            args={[
+              SCONCE_RADIUS * 0.2,
+              SCONCE_RADIUS * 0.62,
+              SCONCE_RADIUS * 0.72,
+              24
+            ]}
+          />
+          <meshStandardMaterial
+            {...metal}
+            bumpScale={0.02}
+            metalness={0.85}
+            roughness={0.55}
+            side={DoubleSide}
+          />
+        </mesh>
+      </group>
       <TorchBillboard
         intensity={TORCH_BASE_CANDELA * torchCandelaMultiplier}
         position={torchPosition}
       />
       <TorchLight
+        lightHandle={lightHandle}
         position={torchPosition}
         seed={wall.index + 1}
         torchCandelaMultiplier={torchCandelaMultiplier}
@@ -716,8 +783,54 @@ function Walls({
 }: {
   torchCandelaMultiplier: number
 }) {
+  const camera = useThree((state) => state.camera)
   const wall = useStandardPbrTextures(WALL_TEXTURE_URLS, WALL_TEXTURE_REPEAT)
   const metal = useStandardPbrTextures(METAL_TEXTURE_URLS, METAL_TEXTURE_REPEAT)
+  const lightHandles = useRef(
+    WALL_LAYOUT.map(() => ({ current: null as TorchLightHandle | null }))
+  )
+  const activeShadowIndex = useRef(-1)
+  const tempPosition = useMemo(() => new Vector3(), [])
+
+  useFrame(() => {
+    let nextShadowIndex = -1
+    let nearestDistanceSq = TORCH_SHADOW_DISTANCE_SQ
+
+    for (const wall of WALL_LAYOUT) {
+      tempPosition.set(
+        wall.torchPosition.x,
+        wall.torchPosition.y,
+        wall.torchPosition.z
+      )
+      const distanceSq = camera.position.distanceToSquared(tempPosition)
+
+      if (distanceSq >= nearestDistanceSq) {
+        continue
+      }
+
+      nearestDistanceSq = distanceSq
+      nextShadowIndex = wall.index
+    }
+
+    if (nextShadowIndex === activeShadowIndex.current) {
+      return
+    }
+
+    const previousLight = lightHandles.current[activeShadowIndex.current]?.current
+    if (previousLight) {
+      previousLight.castShadow = false
+      previousLight.shadow.autoUpdate = false
+    }
+
+    const nextLight = lightHandles.current[nextShadowIndex]?.current
+    if (nextLight) {
+      nextLight.castShadow = true
+      nextLight.shadow.autoUpdate = true
+      nextLight.shadow.needsUpdate = true
+    }
+
+    activeShadowIndex.current = nextShadowIndex
+  })
 
   return (
     <>
@@ -740,6 +853,7 @@ function Walls({
             />
           </mesh>
           <WallSconce
+            lightHandle={lightHandles.current[layout.index]}
             metal={metal}
             torchCandelaMultiplier={torchCandelaMultiplier}
             wall={layout}
@@ -802,6 +916,60 @@ function SSREffectPrimitive({
   useEffect(() => () => effect.dispose(), [effect])
 
   return <primitive object={effect as unknown as Effect} />
+}
+
+function PerformanceBenchmarkBridge() {
+  const advance = useThree((state) => state.advance)
+  const gl = useThree((state) => state.gl)
+  const get = useThree((state) => state.get)
+  const invalidate = useThree((state) => state.invalidate)
+  const setFrameloop = useThree((state) => state.setFrameloop)
+
+  useEffect(() => {
+    const globalWindow = window as Window & {
+      __levelsjamBenchmark?: (samples?: number) => Promise<BenchmarkResult>
+    }
+    const finish = gl.getContext().finish?.bind(gl.getContext())
+
+    globalWindow.__levelsjamBenchmark = async (samples = 90) => {
+      const durations: number[] = []
+      const initialTimestamp = performance.now()
+      const originalFrameloop = get().frameloop
+
+      setFrameloop('never')
+
+      try {
+        for (let index = 0; index < samples; index += 1) {
+          const start = performance.now()
+
+          advance(initialTimestamp + (index * (1000 / 120)), true)
+          finish?.()
+
+          durations.push(performance.now() - start)
+        }
+      } finally {
+        setFrameloop(originalFrameloop)
+        invalidate()
+      }
+
+      const totalDuration = durations.reduce((sum, value) => sum + value, 0)
+      const averageFrameMs = totalDuration / durations.length
+
+      return {
+        averageFrameMs,
+        fps: 1000 / averageFrameMs,
+        maxFrameMs: Math.max(...durations),
+        minFrameMs: Math.min(...durations),
+        samples
+      }
+    }
+
+    return () => {
+      delete globalWindow.__levelsjamBenchmark
+    }
+  }, [advance, get, gl, invalidate, setFrameloop])
+
+  return null
 }
 
 function ExposureEffectPrimitive({
@@ -1010,6 +1178,10 @@ function FlightRig({
     }
 
     const onPointerDown = (event: PointerEvent) => {
+      if (controlsOpen) {
+        return
+      }
+
       if (!(event.target instanceof Node) || !canvas.contains(event.target)) {
         return
       }
@@ -1026,7 +1198,7 @@ function FlightRig({
       window.removeEventListener('mousemove', onMouseMove)
       window.removeEventListener('pointerdown', onPointerDown)
     }
-  }, [camera, canvas])
+  }, [camera, canvas, controlsOpen])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1049,10 +1221,6 @@ function FlightRig({
         }
         keys.current[event.code] = false
         return
-      }
-
-      if (document.pointerLockElement !== canvas) {
-        void canvas.requestPointerLock()
       }
 
       if (
@@ -1254,6 +1422,7 @@ function Scene({
         />
       </EffectComposer>
       <FlightRig controlsOpen={controlsOpen} />
+      <PerformanceBenchmarkBridge />
       <StartupReporter />
     </>
   )

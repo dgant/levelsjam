@@ -11,8 +11,10 @@
     "build": "vite build",
     "preview": "npm run build:pages && node scripts/serve-root.cjs 4173",
     "test:unit": "node --test tests/lighting-calibration.test.js tests/player-collision.test.js tests/player-motion.test.js tests/scene-layout.test.js",
-    "test:smoke:runner": "playwright test",
-    "test:smoke": "npm run build:pages && playwright test",
+    "test:smoke:runner": "playwright test tests/smoke.spec.cjs",
+    "test:smoke": "npm run build:pages && playwright test tests/smoke.spec.cjs",
+    "test:perf:runner": "playwright test tests/perf.spec.cjs",
+    "test:perf": "npm run build:pages && playwright test tests/perf.spec.cjs",
     "build:pages": "npm run build && node scripts/sync-pages.cjs",
     "bench:startup": "node scripts/benchmark-startup.cjs",
     "bench:tests": "node scripts/benchmark-tests.cjs"
