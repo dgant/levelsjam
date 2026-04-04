@@ -40,6 +40,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify changing direct-sun illuminance changes scene lighting while leaving `canvas[data-renderer-exposure]` unchanged until the EV100 slider moves.
 - Verify changing `Exposure EV100` by `-1` doubles `canvas[data-renderer-exposure]`.
 - Verify the direct sun color warms and cools with sun angle instead of staying flat white in the water highlights.
+- Verify the water does not retain a constant blue body tint at `0 lux`; any remaining water color should come from reflected scene light rather than a baked water color.
 - Verify specular reflections on the cube, seabed, and water respond to a sky-derived environment that matches the visible atmosphere.
 - Verify only the atmospheric sun disk is visible in the rendered scene while god rays remain functional.
 - Verify the atmosphere textures load from local `textures/atmosphere/*.exr` assets instead of `media.githubusercontent.com`.

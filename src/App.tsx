@@ -520,16 +520,16 @@ function WaterSurface({
     waterNormals.wrapS = RepeatWrapping
     waterNormals.wrapT = RepeatWrapping
 
-    const surface = new Water(new PlaneGeometry(WATER_PLANE_SIZE, WATER_PLANE_SIZE), {
-      textureWidth: 1024,
-      textureHeight: 1024,
-      waterNormals,
-      sunDirection: sunDirection.clone(),
-      sunColor: new Color(1, 1, 1),
-      waterColor: 0x2d6f96,
-      distortionScale: 3.7,
-      fog: false
-    })
+      const surface = new Water(new PlaneGeometry(WATER_PLANE_SIZE, WATER_PLANE_SIZE), {
+        textureWidth: 1024,
+        textureHeight: 1024,
+        waterNormals,
+        sunDirection: sunDirection.clone(),
+        sunColor: new Color(1, 1, 1),
+        waterColor: 0x000000,
+        distortionScale: 3.7,
+        fog: false
+      })
 
     surface.rotation.x = -Math.PI / 2
     surface.position.y = 9

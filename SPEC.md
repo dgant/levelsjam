@@ -81,6 +81,7 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - Direct sun color for scene lighting is derived from the atmosphere model's transmittance rather than a manually authored white sun color.
 - Atmosphere solar brightness is scaled from the same calibrated direct-sun illuminance input used for direct lighting.
 - Water highlights derive their sun color from the same atmosphere-derived direct sun color used by the directional light.
+- The water surface does not use a baked base tint; its visible color is derived from direct illumination and reflected scene lighting.
 - Diffuse sky lighting derives from the same atmosphere state and world position as the visible sky.
 - The scene provides a sky-derived environment map for specular reflections so PBR materials can reflect lighting that is directionally consistent with the visible sky.
 - The final image brightness is determined by the combination of calibrated scene lighting and EV100-controlled camera exposure rather than by hidden exposure multipliers on the sun control.
