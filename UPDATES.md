@@ -13,3 +13,5 @@
 - When benchmarking browser tests for the one-minute target, prepare the published build once and time the Playwright runner separately from that build step.
 - When a third-party runtime asset shows up as a startup bottleneck, vendor it into same-origin project assets before spending time on more exotic rendering changes.
 - When using Playwright or benchmark scripts, reliably shut down any headless Chrome processes you started once the task is complete.
+- When using `@takram/three-atmosphere` light-source lighting, treat the package as the authority for sun color. Reuse the atmosphere-derived `SunLight` color for water and related sun effects instead of feeding those systems a manual white sun.
+- When a UI light-strength control defaults to a non-unit value for usability, normalize it back around the rendering library's default baseline before applying it to actual light intensities.

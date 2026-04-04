@@ -15,23 +15,32 @@ import {
   SkyLight,
   SunLight
 } from '@takram/three-atmosphere/r3f'
+import {
+  SkyMaterial,
+  SunDirectionalLight as AtmosphereSunDirectionalLight
+} from '@takram/three-atmosphere'
 import { Ellipsoid, Geodetic } from '@takram/three-geospatial'
 import {
   Color,
+  CubeCamera,
   Euler,
+  HalfFloatType,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
   NoToneMapping,
+  PMREMGenerator,
   PlaneGeometry,
   RepeatWrapping,
   SRGBColorSpace,
+  Scene as ThreeScene,
   ShaderMaterial,
   SphereGeometry,
   Texture,
   TextureLoader,
   Vector2,
-  Vector3
+  Vector3,
+  WebGLCubeRenderTarget
 } from 'three'
 import {
   startTransition,
@@ -40,6 +49,7 @@ import {
   useRef,
   useState
 } from 'react'
+import type { MutableRefObject } from 'react'
 import {
   BlendFunction,
   GodRaysEffect,
@@ -84,6 +94,8 @@ const BACKQUOTE_CODE = 'Backquote'
 const SUN_DISTANCE = 6000
 const BASE_EXPOSURE = 1.2
 const DEFAULT_SUN_INTENSITY = 10
+const LIGHTING_SAMPLE_POSITION = Object.freeze({ x: 0, y: 10, z: 0 })
+const ENVIRONMENT_CAPTURE_RESOLUTION = 128
 const WATER_PLANE_SIZE = 40000
 const SEABED_PLANE_SIZE = 50000
 const cameraEuler = new Euler(0, 0, 0, 'YXZ')
@@ -214,8 +226,12 @@ function usePbrTextures(
   }
 }
 
-function getRendererExposure(sunIntensity: number) {
-  return BASE_EXPOSURE * (sunIntensity / DEFAULT_SUN_INTENSITY)
+function getLightScale(setting: number) {
+  return setting / DEFAULT_SUN_INTENSITY
+}
+
+function getRendererExposure() {
+  return BASE_EXPOSURE
 }
 
 function FlightRig({
@@ -467,13 +483,14 @@ function FlightRig({
 
 function WaterSurface({
   sunDirection,
-  sunIntensity
+  sunLight
 }: {
   sunDirection: Vector3
-  sunIntensity: number
+  sunLight: MutableRefObject<AtmosphereSunDirectionalLight | null>
 }) {
   const camera = useThree((state) => state.camera)
   const waterNormals = useLoader(TextureLoader, WATER_NORMALS_URL)
+  const effectiveSunColor = useMemo(() => new Color(1, 1, 1), [])
   const water = useMemo(() => {
     waterNormals.wrapS = RepeatWrapping
     waterNormals.wrapT = RepeatWrapping
@@ -483,7 +500,7 @@ function WaterSurface({
       textureHeight: 1024,
       waterNormals,
       sunDirection: sunDirection.clone(),
-      sunColor: new Color().setScalar(sunIntensity),
+      sunColor: new Color(1, 1, 1),
       waterColor: 0x2d6f96,
       distortionScale: 3.7,
       fog: false
@@ -493,24 +510,23 @@ function WaterSurface({
     surface.position.y = 9
     surface.receiveShadow = true
     return surface
-  }, [sunIntensity, sunDirection, waterNormals])
-
-  useEffect(() => {
-    const material = water.material as ShaderMaterial
-    const uniforms = material.uniforms as {
-      sunDirection: { value: Vector3 }
-      sunColor: { value: Color }
-    }
-
-    uniforms.sunDirection.value.copy(sunDirection)
-    uniforms.sunColor.value.setScalar(sunIntensity)
-  }, [sunDirection, sunIntensity, water])
+  }, [sunDirection, waterNormals])
 
   useFrame((_, delta) => {
     const material = water.material as ShaderMaterial
     const uniforms = material.uniforms as {
+      sunDirection: { value: Vector3 }
+      sunColor: { value: Color }
       time: { value: number }
       eye: { value: Vector3 }
+    }
+
+    uniforms.sunDirection.value.copy(sunDirection)
+    if (sunLight.current != null) {
+      effectiveSunColor
+        .copy(sunLight.current.color)
+        .multiplyScalar(sunLight.current.intensity)
+      uniforms.sunColor.value.copy(effectiveSunColor)
     }
 
     uniforms.time.value += delta * 0.35
@@ -548,9 +564,11 @@ function GodRaysPrimitive({
 
 function LensFlarePrimitive({
   intensity,
+  sunLight,
   sunPosition
 }: {
   intensity: number
+  sunLight: MutableRefObject<AtmosphereSunDirectionalLight | null>
   sunPosition: Vector3
 }) {
   const camera = useThree((state) => state.camera)
@@ -584,6 +602,7 @@ function LensFlarePrimitive({
   )
   const screenPosition = useMemo(() => new Vector2(), [])
   const projectedPosition = useMemo(() => new Vector3(), [])
+  const effectiveSunColor = useMemo(() => new Color(20, 20, 20), [])
 
   useEffect(() => {
     const resolution = effect.uniforms.get('screenRes')
@@ -596,9 +615,17 @@ function LensFlarePrimitive({
   useFrame((_, delta) => {
     const lensPosition = effect.uniforms.get('lensPosition')
     const opacity = effect.uniforms.get('opacity')
+    const colorGain = effect.uniforms.get('colorGain')
 
-    if (!lensPosition || !opacity) {
+    if (!lensPosition || !opacity || !colorGain) {
       return
+    }
+
+    if (sunLight.current != null) {
+      effectiveSunColor
+        .copy(sunLight.current.color)
+        .multiplyScalar(sunLight.current.intensity * intensity * 20)
+      colorGain.value.copy(effectiveSunColor)
     }
 
     projectedPosition.copy(sunPosition).project(camera)
@@ -672,22 +699,122 @@ function FpsReporter({
 }
 
 function RendererSettings({
-  sunIntensity,
   toneMapping
 }: {
-  sunIntensity: number
   toneMapping: ToneMappingMode
 }) {
   const gl = useThree((state) => state.gl)
 
   useEffect(() => {
-    const exposure = getRendererExposure(sunIntensity)
+    const exposure = getRendererExposure()
 
     gl.toneMapping = NoToneMapping
     gl.toneMappingExposure = 1
     gl.domElement.dataset.rendererExposure = exposure.toFixed(3)
     gl.domElement.dataset.toneMapping = toneMapping
-  }, [gl, sunIntensity, toneMapping])
+  }, [gl, toneMapping])
+
+  return null
+}
+
+function SkyEnvironment({
+  atmosphere,
+  samplePosition,
+  sunDirection,
+  worldToECEFMatrix
+}: {
+  atmosphere: MutableRefObject<AtmosphereApi | null>
+  samplePosition: Vector3
+  sunDirection: Vector3
+  worldToECEFMatrix: Matrix4
+}) {
+  const gl = useThree((state) => state.gl)
+  const scene = useThree((state) => state.scene)
+  const cubeRenderTarget = useMemo(
+    () =>
+      new WebGLCubeRenderTarget(ENVIRONMENT_CAPTURE_RESOLUTION, {
+        type: HalfFloatType
+      }),
+    []
+  )
+  const cubeCamera = useMemo(
+    () => new CubeCamera(0.1, 1000, cubeRenderTarget),
+    [cubeRenderTarget]
+  )
+  const environmentScene = useMemo(() => new ThreeScene(), [])
+  const skyMaterial = useMemo(
+    () => new SkyMaterial({ ground: false }),
+    []
+  )
+  const environmentTarget = useRef<ReturnType<PMREMGenerator['fromCubemap']> | null>(null)
+  const pmremGenerator = useMemo(() => new PMREMGenerator(gl), [gl])
+  const environmentDirty = useRef(true)
+
+  useEffect(() => {
+    const skyQuad = new Mesh(new PlaneGeometry(2, 2), skyMaterial)
+
+    skyQuad.frustumCulled = false
+    environmentScene.add(skyQuad)
+
+    pmremGenerator.compileCubemapShader()
+
+    return () => {
+      environmentScene.remove(skyQuad)
+      skyQuad.geometry.dispose()
+      skyMaterial.dispose()
+      cubeRenderTarget.dispose()
+      environmentTarget.current?.dispose()
+      if (scene.environment === environmentTarget.current?.texture) {
+        scene.environment = null
+      }
+      pmremGenerator.dispose()
+    }
+  }, [cubeRenderTarget, environmentScene, pmremGenerator, scene, skyMaterial])
+
+  useEffect(() => {
+    environmentDirty.current = true
+  }, [sunDirection, worldToECEFMatrix, samplePosition])
+
+  useFrame(() => {
+    const textures = atmosphere.current?.textures
+
+    if (textures == null) {
+      return
+    }
+
+    if (
+      skyMaterial.transmittanceTexture !== textures.transmittanceTexture ||
+      skyMaterial.irradianceTexture !== textures.irradianceTexture ||
+      skyMaterial.scatteringTexture !== textures.scatteringTexture ||
+      skyMaterial.higherOrderScatteringTexture !== textures.higherOrderScatteringTexture
+    ) {
+      skyMaterial.transmittanceTexture = textures.transmittanceTexture
+      skyMaterial.irradianceTexture = textures.irradianceTexture
+      skyMaterial.scatteringTexture = textures.scatteringTexture
+      skyMaterial.higherOrderScatteringTexture =
+        textures.higherOrderScatteringTexture ?? null
+      environmentDirty.current = true
+    }
+
+    if (!environmentDirty.current) {
+      return
+    }
+
+    environmentDirty.current = false
+    skyMaterial.sunDirection.copy(sunDirection)
+    skyMaterial.worldToECEFMatrix.copy(worldToECEFMatrix)
+    cubeCamera.position.copy(samplePosition)
+    cubeCamera.update(gl, environmentScene)
+
+    const nextEnvironmentTarget = pmremGenerator.fromCubemap(
+      cubeRenderTarget.texture
+    )
+    const previousEnvironmentTarget = environmentTarget.current
+
+    environmentTarget.current = nextEnvironmentTarget
+    scene.environment = nextEnvironmentTarget.texture
+    previousEnvironmentTarget?.dispose()
+  })
 
   return null
 }
@@ -716,10 +843,10 @@ function StartupReporter() {
 
 function Terrain({
   sunDirection,
-  sunIntensity
+  sunLight
 }: {
   sunDirection: Vector3
-  sunIntensity: number
+  sunLight: MutableRefObject<AtmosphereSunDirectionalLight | null>
 }) {
   const grass = usePbrTextures(GRASS_TEXTURE_URLS, CUBE_TEXTURE_REPEAT)
   const ground = usePbrTextures(GROUND_TEXTURE_URLS, GROUND_TEXTURE_REPEAT)
@@ -738,7 +865,7 @@ function Terrain({
 
       <WaterSurface
         sunDirection={sunDirection}
-        sunIntensity={sunIntensity}
+        sunLight={sunLight}
       />
 
       <mesh position={[0, 8, 0]} rotation-x={-Math.PI / 2} receiveShadow>
@@ -762,6 +889,7 @@ function Scene({
   visualSettings: VisualSettings
 }) {
   const atmosphere = useRef<AtmosphereApi | null>(null)
+  const sunLight = useRef<AtmosphereSunDirectionalLight | null>(null)
   const worldOrigin = useMemo(
     () => new Geodetic(0, 0, 5).toECEF(new Vector3()),
     []
@@ -788,6 +916,15 @@ function Scene({
   const sunPosition = useMemo(
     () => worldSunDirection.clone().multiplyScalar(SUN_DISTANCE),
     [worldSunDirection]
+  )
+  const lightingSamplePosition = useMemo(
+    () =>
+      new Vector3(
+        LIGHTING_SAMPLE_POSITION.x,
+        LIGHTING_SAMPLE_POSITION.y,
+        LIGHTING_SAMPLE_POSITION.z
+      ),
+    []
   )
   const godRaysSource = useMemo(() => {
     const source = new Mesh(
@@ -830,12 +967,21 @@ function Scene({
 
   useEffect(() => {
     godRaysSource.position.copy(sunPosition)
-    ;(godRaysSource.material as MeshBasicMaterial).color.setScalar(
-      visualSettings.sunIntensity
-    )
     godRaysSource.updateMatrix()
     godRaysSource.updateMatrixWorld(true)
-  }, [godRaysSource, sunPosition, visualSettings.sunIntensity])
+  }, [godRaysSource, sunPosition])
+
+  useFrame(() => {
+    const light = sunLight.current
+
+    if (light == null) {
+      return
+    }
+
+    ;(godRaysSource.material as MeshBasicMaterial).color
+      .copy(light.color)
+      .multiplyScalar(light.intensity)
+  })
 
   return (
     <Atmosphere
@@ -845,17 +991,26 @@ function Scene({
       textures={ATMOSPHERE_TEXTURES_URL}
     >
       <Sky sunDirection={atmosphereSunDirection} />
+      <SkyEnvironment
+        atmosphere={atmosphere}
+        samplePosition={lightingSamplePosition}
+        sunDirection={atmosphereSunDirection}
+        worldToECEFMatrix={worldToECEFMatrix}
+      />
       <SkyLight
-        intensity={visualSettings.skyLightIntensity}
+        intensity={getLightScale(visualSettings.skyLightIntensity)}
+        position={lightingSamplePosition}
         sunDirection={atmosphereSunDirection}
       />
       <SunLight
-        intensity={visualSettings.sunIntensity}
+        ref={sunLight}
+        intensity={getLightScale(visualSettings.sunIntensity)}
+        position={lightingSamplePosition}
         sunDirection={atmosphereSunDirection}
       />
       <Terrain
         sunDirection={worldSunDirection}
-        sunIntensity={visualSettings.sunIntensity}
+        sunLight={sunLight}
       />
       <EffectComposer enableNormalPass>
         <AerialPerspective sunDirection={atmosphereSunDirection} />
@@ -874,6 +1029,7 @@ function Scene({
         {visualSettings.lensFlare.enabled ? (
           <LensFlarePrimitive
             intensity={visualSettings.lensFlare.intensity}
+            sunLight={sunLight}
             sunPosition={sunPosition}
           />
         ) : null}
@@ -884,7 +1040,7 @@ function Scene({
           <Vignette darkness={visualSettings.vignette.intensity} />
         ) : null}
         <ToneMapping
-          exposure={getRendererExposure(visualSettings.sunIntensity)}
+          exposure={getRendererExposure()}
           mode={TONE_MAPPING_MODES[visualSettings.toneMapping]}
           resolution={256}
         />
@@ -1153,7 +1309,6 @@ export default function App() {
         }}
       >
         <RendererSettings
-          sunIntensity={visualSettings.sunIntensity}
           toneMapping={visualSettings.toneMapping}
         />
         <StartupReporter />

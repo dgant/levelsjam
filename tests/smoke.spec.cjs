@@ -160,7 +160,7 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
       timeout: 5_000,
       intervals: [100, 250, 500]
     })
-    .toBe('3.000')
+    .toBe('1.200')
   const updatedExposure = await canvas.getAttribute('data-renderer-exposure')
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
@@ -187,5 +187,5 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
     )
   ).toBe(false)
   expect(frameBrightness.max).toBeGreaterThan(40)
-  expect(updatedExposure).toBe('3.000')
+  expect(updatedExposure).toBe('1.200')
 })

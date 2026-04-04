@@ -33,10 +33,12 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - The sun is positioned 30 degrees above the horizon line.
 - The atmosphere sun direction is driven by the same canonical sun direction as the scene lights, water highlights, sun mesh, and post-processing source objects.
 - The atmosphere-facing sun direction is expressed in the coordinate space expected by `@takram/three-atmosphere`.
+- The scene uses a single canonical sun direction expressed in ECEF coordinates, and all world-space sun-dependent systems derive from that shared source.
 - The scene exposes a sun rotation slider.
 - The visual controls panel exposes a tone-mapper selector that changes the final composited image rather than only updating internal renderer state.
 - The renderer defaults to a sun intensity of `10` and the sun-intensity slider spans `0` through `100`.
-- The sun intensity control drives the direct sun light, the default-linked sky light value, the water sun highlight, the god-rays source brightness, and renderer exposure.
+- The sun intensity control scales the direct sun light, the default-linked sky light value, the water sun highlight, and the god-rays source brightness.
+- Renderer exposure remains a separate presentation setting rather than being driven directly by the sun-intensity control.
 - The scene exposes a sky light intensity slider that defaults to the sun-linked value and remains linked until manually adjusted.
 - The renderer uses `AgXToneMapping`.
 - The scene enables Bloom, GodRays, DepthOfField, Lensflare, SSAO, and Vignette with default settings.
@@ -74,6 +76,10 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - The ground plane extends beyond the visible area so it reads as infinite.
 - Atmosphere and lighting combine to produce a sky-backed outdoor scene.
 - The sky and lighting avoid a black first frame by using a known-good atmosphere configuration from the library's documented light-source example pattern.
+- Direct sun color for scene lighting is derived from the atmosphere model's transmittance rather than a manually authored white sun color.
+- Water highlights derive their sun color from the same atmosphere-derived direct sun color used by the directional light.
+- Diffuse sky lighting derives from the same atmosphere state and world position as the visible sky.
+- The scene provides a sky-derived environment map for specular reflections so PBR materials can reflect lighting that is directionally consistent with the visible sky.
 - Collision keeps the cube solid and keeps the plane below the water as an active surface boundary.
 - The water surface uses the official three.js `Water` material and animation path rather than a generic translucent plane.
 - The water and seabed remain separated by 1 meter.

@@ -15,3 +15,5 @@
 - After Playwright diagnostics or benchmarks, explicitly stop the headless browser processes they spawned instead of assuming they will all exit cleanly on their own.
 - `@react-three/postprocessing` forces the renderer to `NoToneMapping` while the composer renders, so visible tone-mapper controls must drive a `ToneMapping` post effect rather than `gl.toneMapping`.
 - The custom lens flare shader from `@react-three/postprocessing` treats its `opacity` uniform as suppression, not visibility, so app-side code must invert that value or the effect stays hidden.
+- In this project, `@takram/three-atmosphere` light-source lighting behaves coherently only when the visible sky, `SunLight`, `SkyLight`, water sun color, and any specular environment map all derive from the same atmosphere state instead of mixing in manual white sun colors.
+- The visual `sun intensity` control should be normalized around the package's default light strength. Passing the raw UI value straight into `SunLight`, `SkyLight`, or water sun color exaggerates highlights and breaks the sky-to-sun balance.
