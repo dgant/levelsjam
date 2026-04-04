@@ -24,6 +24,7 @@
 - Each wall uses the extracted ShareTextures `stone-wall-29` PBR pack rather than preview imagery.
 - Each wall has a metal wall sconce attached to it.
 - Each wall sconce is a 0.25 meter radius hemisphere using the extracted ShareTextures `metal-13` PBR pack.
+- Each wall sconce geometry is only that hemisphere and does not add extra improvised fixture parts beyond the specified hemisphere.
 - Each wall sconce is positioned with its center one sconce radius outside the wall face.
 - Each wall sconce remains visibly readable against the wall and under the torch it supports.
 - Each wall sconce supports a camera-facing torch billboard above it.

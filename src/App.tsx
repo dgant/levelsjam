@@ -712,58 +712,30 @@ function WallSconce({
 
   return (
     <>
-      <group position={position}>
-        <mesh
-          castShadow
-          position={[0, 0, -wall.sconceDirection * (SCONCE_RADIUS - 0.025)]}
-          receiveShadow
-          rotation-x={Math.PI / 2}
-        >
-          <cylinderGeometry args={[SCONCE_RADIUS * 0.82, SCONCE_RADIUS * 0.82, 0.05, 24]} />
-          <meshStandardMaterial
-            {...metal}
-            bumpScale={0.02}
-            metalness={0.85}
-            roughness={0.55}
-          />
-        </mesh>
-        <mesh
-          castShadow
-          position={[0, -SCONCE_RADIUS * 0.06, -wall.sconceDirection * (SCONCE_RADIUS * 0.3)]}
-          receiveShadow
-          rotation-x={Math.PI / 2}
-        >
-          <cylinderGeometry args={[SCONCE_RADIUS * 0.12, SCONCE_RADIUS * 0.12, SCONCE_RADIUS * 0.5, 18]} />
-          <meshStandardMaterial
-            {...metal}
-            bumpScale={0.02}
-            metalness={0.85}
-            roughness={0.55}
-          />
-        </mesh>
-        <mesh
-          castShadow
-          position={[0, -SCONCE_RADIUS * 0.07, wall.sconceDirection * (SCONCE_RADIUS * 0.08)]}
-          receiveShadow
-          rotation-x={Math.PI / 2}
-        >
-          <cylinderGeometry
-            args={[
-              SCONCE_RADIUS * 0.2,
-              SCONCE_RADIUS * 0.62,
-              SCONCE_RADIUS * 0.72,
-              24
-            ]}
-          />
-          <meshStandardMaterial
-            {...metal}
-            bumpScale={0.02}
-            metalness={0.85}
-            roughness={0.55}
-            side={DoubleSide}
-          />
-        </mesh>
-      </group>
+      <mesh
+        castShadow
+        position={position}
+        receiveShadow
+      >
+        <sphereGeometry
+          args={[
+            SCONCE_RADIUS,
+            24,
+            16,
+            0,
+            Math.PI * 2,
+            Math.PI / 2,
+            Math.PI / 2
+          ]}
+        />
+        <meshStandardMaterial
+          {...metal}
+          bumpScale={0.02}
+          metalness={0.85}
+          roughness={0.55}
+          side={DoubleSide}
+        />
+      </mesh>
       <TorchBillboard
         intensity={TORCH_BASE_CANDELA * torchCandelaMultiplier}
         position={torchPosition}
