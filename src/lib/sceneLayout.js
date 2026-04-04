@@ -79,8 +79,8 @@ function createWall(index, random) {
   const bounds = computeWallBounds({ axis, position })
   const sconceOffset =
     (axis === 'x')
-      ? { x: 0, y: 0.1, z: side * ((WALL_WIDTH / 2) + 0.03) }
-      : { x: side * ((WALL_WIDTH / 2) + 0.03), y: 0.1, z: 0 }
+      ? { x: 0, y: 0.1, z: side * ((WALL_WIDTH / 2) + SCONCE_RADIUS) }
+      : { x: side * ((WALL_WIDTH / 2) + SCONCE_RADIUS), y: 0.1, z: 0 }
   const sconcePosition = {
     x: position.x + sconceOffset.x,
     y: GROUND_Y + 1.1 + sconceOffset.y,

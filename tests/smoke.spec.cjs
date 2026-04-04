@@ -151,6 +151,7 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   await expect(page.getByLabel('Torch Candelas')).toBeVisible({ timeout: 5_000 })
   await expect(page.getByLabel('Exposure EV100')).toBeVisible({ timeout: 5_000 })
   await expect(page.getByLabel('Tone Mapper')).toBeVisible({ timeout: 5_000 })
+  await expect(page.locator('[data-testid="visual-controls"]')).toContainText('17.50 EV100')
   await expect(page.getByLabel('Sun Rotation')).toHaveCount(0)
   await expect(page.getByLabel('Direct Sun Illuminance')).toHaveCount(0)
 
@@ -159,7 +160,7 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
       HTMLInputElement.prototype,
       'value'
     )
-    descriptor.set.call(element, '14')
+    descriptor.set.call(element, '16.5')
     element.dispatchEvent(new Event('input', { bubbles: true }))
     element.dispatchEvent(new Event('change', { bubbles: true }))
   })
@@ -187,6 +188,13 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
       intervals: [100, 250, 500]
     })
     .toBe('neutral')
+
+  const ssrToggle = page
+    .locator('.visual-effect-toggle')
+    .filter({ hasText: 'SSR' })
+    .locator('input')
+  await ssrToggle.check()
+  await page.waitForTimeout(1_500)
 
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])

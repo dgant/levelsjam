@@ -41,7 +41,10 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the tone mapper is `AgX` by default.
 - Verify the visual controls panel exposes `Exposure EV100`, `IBL Intensity`, `Torch Candelas`, the tone mapper, and the enabled/intensity controls for Bloom, Depth Of Field, Lens Flares, N8AO, SSR, and Vignette.
 - Verify Bloom, Depth Of Field, Lens Flares, and SSR start disabled.
+- Verify the default `Exposure EV100` value is `17.5`.
+- Verify each sconce, billboard, and torch light sits one sconce radius outside the wall face rather than intersecting the wall.
 - Verify changing `Exposure EV100` updates `canvas[data-renderer-exposure]`.
+- Verify enabling SSR from the visual controls panel does not introduce page errors or halt rendering.
 - Verify the FPS counter appears in the top-right corner.
 - Verify pressing backquote opens the visual controls panel.
 - Verify the panel no longer exposes obsolete atmosphere or sun controls.

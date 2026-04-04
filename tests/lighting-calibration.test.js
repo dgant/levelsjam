@@ -18,6 +18,7 @@ function almostEqual(actual, expected, epsilon = 1e-6) {
 }
 
 test('anchors the default EV100 to the calibrated renderer exposure', () => {
+  assert.equal(DEFAULT_EXPOSURE_EV100, 17.5)
   almostEqual(getRendererExposure(DEFAULT_EXPOSURE_EV100), BASE_RENDERER_EXPOSURE)
 })
 

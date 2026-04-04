@@ -24,7 +24,9 @@
 - Each wall uses the extracted ShareTextures `stone-wall-29` PBR pack rather than preview imagery.
 - Each wall has a metal wall sconce attached to it.
 - Each wall sconce is a 0.25 meter radius hemisphere using the extracted ShareTextures `metal-13` PBR pack.
+- Each wall sconce is positioned with its center one sconce radius outside the wall face.
 - Each wall sconce supports a camera-facing torch billboard above it.
+- Each torch billboard and torch point light are positioned one sconce radius outside the wall face with the sconce.
 - Each torch billboard is 0.125 meters square.
 - Each torch billboard uses a 6x6 fire flipbook atlas and loops across 36 frames in 4 seconds.
 - Each torch billboard uses an unlit material.
@@ -54,6 +56,7 @@
 - The scene includes screen-space reflections.
 - The scene does not use God Rays.
 - Bloom, Depth of Field, Lens Flares, and SSR default to disabled.
+- The debug panel exposure EV100 control defaults to `17.5`.
 - The debug panel exposes an IBL intensity multiplier.
 - The debug panel exposes a torch candela multiplier.
 - The debug panel does not expose obsolete atmosphere or sun-direction controls.
@@ -94,6 +97,7 @@
 - The torch billboards animate smoothly through the flipbook loop without lighting artifacts from scene lights.
 - Torch point lights and torch billboards read as a matched fire source rather than independent unrelated elements.
 - The scene reads as an overcast exterior space lit primarily by environment light and torches.
+- Enabling SSR from the debug panel does not halt rendering or introduce runtime errors.
 - The page does not show speculative branding captions, launcher buttons, or click-to-enter copy.
 
 ## Debug Controls
