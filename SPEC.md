@@ -1,7 +1,9 @@
 # Jam 2026 Specification
 
 ## Purpose
-The project delivers a browser-based three.js game for GitHub Pages. The initial public experience is a lightweight, instantly accessible scene that establishes the visual direction and player controls for the jam entry.
+- The project delivers a browser-based three.js game for GitHub Pages.
+- The public experience opens directly into a playable first-person 3D scene.
+- The initial playable slice establishes movement, environmental art direction, and exterior lighting for the jam entry.
 
 ## Platform And Deployment
 - The project runs in a web browser without login or signup.
@@ -9,13 +11,33 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - The public site loads directly from the hosted page without a separate launcher or install step.
 
 ## Current Scope
-- The scene contains a 10m x 10m cube with a grass texture on its visible surfaces.
-- The scene contains an infinite water plane positioned 1m below the top of the cube.
-- The scene contains an infinite ground plane positioned 1m below the water plane with a separate ground texture.
-- The cube and the plane below the water participate in collision.
-- The player spawns 1 meter above the top of the cube.
-- The character collision volume is a capsule that is 1.75m tall and 0.25m in radius.
-- The character comes to rest on ground contact instead of bouncing or entering a jump loop.
+- The scene uses image-based lighting from the Poly Haven `overcast_soil` environment.
+- The scene does not use `@takram/three-atmosphere`.
+- The scene does not use the three.js `Water` helper.
+- The scene does not use a directional sunlight source.
+- The scene contains a large upward-facing ground plane centered at the origin.
+- The ground plane uses the extracted ShareTextures `puddle-ground` PBR pack rather than preview imagery.
+- The scene contains exactly 10 walls.
+- Each wall measures 2 meters tall by 4 meters long by 0.5 meters wide.
+- Each wall has its base at `Y = 0`.
+- Each wall is placed at a deterministic pseudo-random position within `-10m` to `+10m` on the world X and Z axes.
+- Each wall uses the extracted ShareTextures `stone-wall-29` PBR pack rather than preview imagery.
+- Each wall has a metal wall sconce attached to it.
+- Each wall sconce is a 0.25 meter radius hemisphere using the extracted ShareTextures `metal-13` PBR pack.
+- Each wall sconce supports a camera-facing torch billboard above it.
+- Each torch billboard is 0.125 meters square.
+- Each torch billboard uses a 6x6 fire flipbook atlas and loops across 36 frames in 4 seconds.
+- Each torch billboard uses an unlit material.
+- Each torch billboard brightness is scaled from a 1500 candela torch baseline.
+- Each torch has a shadow-casting point light located at the billboard center.
+- Each torch point light intensity equals `(0.5 + 0.5 * noise) * 1500` candelas.
+- Each torch point light distance equals `(0.5 + 0.5 * noise) * 10` meters.
+- Each torch point light uses a warm fire-appropriate color.
+- The player collides with the ground plane and the walls.
+- The character collision volume is a capsule that is 1.75 meters tall and 0.25 meters in radius.
+- The player spawns 1 meter above the ground plane.
+- The camera eye height remains derived from the character capsule.
+- The initial camera angle is horizontal.
 - The player reaches a horizontal top speed of 20 mph.
 - The player reaches a vertical top speed of 5 mph.
 - The player reaches a maximum fall speed of 40 mph.
@@ -23,90 +45,69 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - The player decelerates from horizontal top speed to zero over a travel distance of 0.5 meters.
 - Gravity applies at 1g.
 - Jetpack thrust applies at 1.25g so the net upward acceleration is 0.25g while `Space` is held.
-- The scene uses `@takram/three-atmosphere` for atmospheric rendering.
-- The scene uses the library's light-source lighting pattern with `SkyLight`, `SunLight`, and `AerialPerspective` as the reference atmosphere setup.
-- The atmosphere precomputed texture assets are served from the project's own hosted assets rather than fetched from a remote third-party origin.
-- The scene uses lighting and exposure values that keep the cube, water, and terrain readable on first load.
-- Texture links that point to ShareTextures are treated as downloadable PBR packs rather than preview images.
-- The cube and the lower ground plane use extracted PBR texture packs with tiling that assumes 1 meter by 1 meter world scale unless the source specifies a different implied scale.
-- The water plane uses the official three.js `Water` implementation from the examples/docs.
-- The sun is positioned 30 degrees above the horizon line.
-- The atmosphere sun direction is driven by the same canonical sun direction as the scene lights, water highlights, sun mesh, and post-processing source objects.
-- The atmosphere-facing sun direction is expressed in the coordinate space expected by `@takram/three-atmosphere`.
-- The scene uses a single canonical sun direction expressed in ECEF coordinates, and all world-space sun-dependent systems derive from that shared source.
-- The scene exposes a sun rotation slider.
-- The visual controls panel exposes a tone-mapper selector that changes the final composited image rather than only updating internal renderer state.
-- The renderer exposes direct sun illuminance in lux as the primary sun-brightness control.
-- The direct sun illuminance control defaults to a calibrated clear-day baseline and is converted to stable internal renderer scales through an explicit calibration layer.
-- The direct sun illuminance control drives the direct sun light, sky fill, atmosphere solar irradiance scale, water sun highlight, and the god-rays source brightness through that shared calibration layer.
-- The renderer exposes camera exposure in EV100 units as the primary exposure control.
-- Exposure calibration uses an EV100 scale where a one-stop increase halves renderer exposure and a one-stop decrease doubles renderer exposure.
-- The scene exposes a sky light multiplier control that scales the calibrated sky-fill contribution relative to the calibrated direct-sun baseline.
-- The renderer uses `AgXToneMapping`.
-- The scene enables Bloom, GodRays, DepthOfField, Lensflare, SSAO, and Vignette with default settings.
-- The UI shows an FPS counter in the top-right corner.
-- Pressing backquote opens and closes a visual controls panel during play.
-- The visual controls panel exposes the sun elevation angle and direct sun illuminance in lux.
-- The visual controls panel exposes the sun rotation angle, exposure EV100, sky light multiplier, and the active tone mapper.
-- The visual controls panel exposes enabled and intensity controls for Bloom, GodRays, DepthOfField, Lensflare, SSAO, and Vignette.
-- The player can move with first-person WASD controls.
-- The player can look around with mouse look controls.
-- Holding `Space` applies vertical thrust in a jetpack-like motion.
-- Pressing `Escape`, `Alt`, `Control`, `Meta`, or the Windows key releases mouse lock.
-- Pressing backquote is reserved for the visual controls panel and does not restore mouse lock.
-- Any other non-reserved key press or mouse click on the scene restores mouse lock while playing.
-- The initial scene contains no speculative HUD copy, branding caption, or click-to-enter gate.
+- Horizontal movement magnitude is stored as a scalar rather than a persistent world-space vector.
+- Horizontal movement is applied in the current camera-relative input direction.
+- Movement input that opposes current horizontal motion uses the deceleration rate instead of the acceleration rate.
+- The scene uses `postprocessing` Bloom.
+- The scene uses `postprocessing` Depth of Field.
+- The scene uses `n8ao` instead of the previous SSAO effect.
+- The scene includes screen-space reflections.
+- The scene does not use God Rays.
+- Bloom, Depth of Field, Lens Flares, and SSR default to disabled.
+- The debug panel exposes an IBL intensity multiplier.
+- The debug panel exposes a torch candela multiplier.
+- The debug panel does not expose obsolete atmosphere or sun-direction controls.
+- The page shows an FPS counter in the top-right corner.
+
+## Loading And Startup
+- The page shows a centered loading overlay before the scene becomes visible.
+- The loading overlay shows an `h1` with the text `MINOTAUR`.
+- The loading overlay shows an `h2` with the text `Entering the labyrinth...`.
+- The loading overlay animates the trailing dots on the subtitle through `1`, `2`, `3`, `1`, `2`, `3` at 0.25 second intervals.
+- The loading overlay remains visible until the scene assets have loaded.
+- Once the scene assets have loaded, the loading text fades out over 2 seconds.
+- Once the scene assets have loaded, the viewport fades in over the same 2 second interval.
 
 ## Player Experience
 - The camera starts in a playable 3D view with immediate control.
 - Movement feels continuous and responsive rather than tile-based or turn-based.
 - Mouse look changes camera orientation directly.
-- Pressing backquote reveals a live visual tuning panel without a rebuild or page refresh.
-- Jetpack thrust adds upward motion while `Space` remains held and stops when `Space` is released.
+- Holding `Space` applies vertical thrust in a jetpack-like motion.
+- The character comes to rest on ground contact instead of bouncing or entering a jump loop.
 - Horizontal motion feels capped and responsive rather than indefinitely accelerating.
-- Horizontal movement magnitude is stored as a scalar rather than a persistent world-space vector.
-- Horizontal movement is applied in the current camera-relative input direction.
-- Movement input that opposes current horizontal motion uses the deceleration rate instead of the acceleration rate.
 - Vertical motion feels capped and responsive rather than indefinitely accelerating.
-- Ground contact resolves the character to a resting state instead of repeatedly lifting and dropping the collision volume.
+- The player can move with first-person WASD controls.
+- The player can look around with mouse look controls.
+- Pressing `Escape`, `Alt`, `Control`, `Meta`, or the Windows key releases mouse lock.
+- Pressing backquote opens and closes the debug controls panel during play.
+- Pressing backquote is reserved for the debug controls panel and does not restore mouse lock.
+- Any other non-reserved key press or mouse click on the scene restores mouse lock while playing.
 - The game responds to movement and look input without requiring any preliminary button click.
-- Mouse lock behavior is available during play for relative look input.
 
 ## Visual Requirements
-- The cube reads as the central landmark in the scene.
-- The water plane extends beyond the visible area so it reads as infinite.
-- The ground plane extends beyond the visible area so it reads as infinite.
-- Atmosphere and lighting combine to produce a sky-backed outdoor scene.
-- The sky and lighting avoid a black first frame by using a known-good atmosphere configuration from the library's documented light-source example pattern.
-- Direct sun color for scene lighting is derived from the atmosphere model's transmittance rather than a manually authored white sun color.
-- Atmosphere solar brightness is scaled from the same calibrated direct-sun illuminance input used for direct lighting.
-- Water highlights derive their sun color from the same atmosphere-derived direct sun color used by the directional light.
-- The water surface does not use a baked base tint; its visible color is derived from direct illumination and reflected scene lighting.
-- Diffuse sky lighting derives from the same atmosphere state and world position as the visible sky.
-- The scene provides a sky-derived environment map for specular reflections so PBR materials can reflect lighting that is directionally consistent with the visible sky.
-- The final image brightness is determined by the combination of calibrated scene lighting and EV100-controlled camera exposure rather than by hidden exposure multipliers on the sun control.
-- Collision keeps the cube solid and keeps the plane below the water as an active surface boundary.
-- The water surface uses the official three.js `Water` material and animation path rather than a generic translucent plane.
-- The water and seabed remain separated by 1 meter.
-- The water and seabed use a footprint that is 10x the baseline scene size.
-- The sun direction matches a 30-degree-elevation outdoor lighting setup.
-- The atmospheric sun disk remains the only visible sun disk in the beauty image.
-- The god-rays source object supports the post-process effect without adding a second visible sun to the scene.
-- The lens flare effect produces visible flare artifacts when enabled and the sun is on-screen.
-- Highlight values remain available before tone mapping so bloom can respond proportionally to bright sources.
-- The page shows an FPS counter in the top-right corner during play.
-- The page avoids a blocking loading screen.
+- The environment map from `overcast_soil` provides the visible skybox.
+- The environment map from `overcast_soil` provides image-based lighting.
+- The environment map from `overcast_soil` provides specular reflection data for reflective materials.
+- The ground, walls, and sconces use extracted PBR texture packs with tiling based on a 1 meter world scale unless a source specifies otherwise.
+- Reflective and semi-reflective materials read from the shared environment consistently.
+- The torch billboards face the camera continuously.
+- The torch billboards animate smoothly through the flipbook loop without lighting artifacts from scene lights.
+- Torch point lights and torch billboards read as a matched fire source rather than independent unrelated elements.
+- The scene reads as an overcast exterior space lit primarily by environment light and torches.
+- The page does not show speculative branding captions, launcher buttons, or click-to-enter copy.
 
-## Animation And Motion
-- Camera rotation responds smoothly to pointer movement.
-- Movement responds continuously to key state changes.
-- Vertical thrust is sustained while the key is held, not toggled.
-- Mouse lock unlocks on escape-style modifier keys and relocks on normal interaction.
-- Opening the visual controls panel releases mouse lock so the panel can be adjusted.
+## Debug Controls
+- The debug controls panel can be opened and closed with backquote.
+- The debug controls panel exposes exposure EV100.
+- The debug controls panel exposes the active tone mapper.
+- The debug controls panel exposes the IBL intensity multiplier.
+- The debug controls panel exposes the torch candela multiplier.
+- The debug controls panel exposes enabled and intensity controls for Bloom, Depth of Field, Lens Flares, N8AO, SSR, and Vignette.
+- The debug controls panel does not expose controls for removed effects or removed atmosphere systems.
 
 ## Performance Requirements
 - The page becomes interactive quickly on load.
-- The scene uses browser-friendly asset sizes and avoids unnecessary blocking work.
+- Startup avoids remote third-party lighting assets during play by serving required scene textures from the project.
 - The frame rate remains stable during ordinary movement and camera motion.
 - The project documents startup-time and test-duration benchmarks and treats regressions in those measurements as actionable.
 
@@ -115,6 +116,7 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - The public page is verified after deployment.
 - The controls are checked in the browser for movement, looking, and thrust behavior.
 - Visual layout changes are reviewed in the rendered scene, not only in source code.
-- Collision behavior is checked in the browser for resting contact on the ground and stable interaction with the cube.
-- The backquote shortcut is checked in the browser and verified to open the visual controls panel.
-- The visual controls panel is checked in the browser and verified to expose the tone-mapper selector and corrected sun elevation and rotation controls.
+- Collision behavior is checked in the browser for stable contact with the ground plane and the walls.
+- The loading overlay is checked in the browser and verified to animate and then fade away after asset load.
+- The backquote shortcut is checked in the browser and verified to open the debug controls panel.
+- The debug controls panel is checked in the browser and verified to expose the new IBL and torch controls while omitting removed atmosphere controls.

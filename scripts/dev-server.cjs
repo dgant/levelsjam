@@ -18,7 +18,12 @@ function readState() {
     return null
   }
 
-  return JSON.parse(fs.readFileSync(statePath, 'utf8'))
+  try {
+    return JSON.parse(fs.readFileSync(statePath, 'utf8'))
+  } catch {
+    removeState()
+    return null
+  }
 }
 
 function writeState(state) {

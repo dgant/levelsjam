@@ -4,7 +4,8 @@ export type Vector3Like = {
   z: number
 }
 
-export type CubeBounds = {
+export type WallBounds = {
+  id?: string
   minX: number
   maxX: number
   minY: number
@@ -16,21 +17,11 @@ export type CubeBounds = {
 export type CollisionResult = {
   position: Vector3Like
   collisions: {
-    cube: boolean
     floor: boolean
+    walls: string[]
   }
   grounded: boolean
 }
-
-export declare const CUBE_CENTER: Readonly<Vector3Like>
-export declare const CUBE_SIZE: number
-export declare const CUBE_HALF_SIZE: number
-export declare const CUBE_BOUNDS: Readonly<CubeBounds>
-export declare const LOWER_GROUND_Y: number
-export declare const PLAYER_RADIUS: number
-export declare const PLAYER_HEIGHT: number
-export declare const PLAYER_EYE_HEIGHT: number
-export declare const PLAYER_SPAWN_POSITION: Readonly<Vector3Like>
 
 export declare function getPlayerSpawnPosition(): Vector3Like
 export declare function getCameraPosition(playerPosition: Vector3Like): Vector3Like
@@ -39,7 +30,7 @@ export declare function resolvePlayerCollision(
   desiredPosition: Vector3Like,
   options?: {
     floorY?: number
-    cubeBounds?: CubeBounds
+    wallBounds?: WallBounds[]
     radius?: number
     height?: number
   }

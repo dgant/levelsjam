@@ -41,3 +41,22 @@
 [x] Convert the proxy sun mesh to support god rays but otherwise not affect the appearance of the scene, so only three-atmosphere's sun is visible
 [x] Make the player's horizontal velocity scalar and apply it in the direction of their camera
 [x] Treat any component of the player's movement input that's going against their velocity as *deceleration*. So if you hold W while facing the direction directly opposite your velocity, the movement should be applied via the deceleration rate rather than the acceleration rate.
+
+[x] Remove three-atmosphere. Remove the water and directional light. Instead use a cubemap texture as a skybox, IBL source, and environment map for reflections. Use https://polyhaven.com/a/overcast_soil to start with.
+[x] Add a loading screen: Centered h1: "MINOTAUR". Centered h2 below that: "Entering the labyrinth..." with the number of dots rotating between 1, 2, 3, 1, 2, 3... changing every .25 second. When all assets are loaded, fade out the text and fade in the viewport over 2 seconds.
+[x] Set the initial camera angle to be horizontal
+
+[x] Replace the scene. The new scene:
+  [x] A large upward-facing plane at (0, 0, 0) using the PBR textures from https://www.sharetextures.com/textures/ground/puddle-ground. 
+  [x] Get the cubemap texture from https://polyhaven.com/a/overcast_soil and use it as a skybox, IBL source, and environment map for reflections.
+  [x] 10 randomly placed walls, 2m tall by 4m long by 0.5m wide, using the PBR textures from https://www.sharetextures.com/textures/wall/stone-wall-29. The walls should all have their bottoms at Y=0 , and be placed at a random XY location within +/- 10m of the origin in the X and Z dimensions. Player should collide with these walls
+    [x] Each wall also has a wall sconce, formed by adding a hemisphere with .25m radius (a sphere with the top half cut off), using the PBR textures from https://www.sharetextures.com/textures/metal/metal-13
+    [x] Sitting on top of the wall sconce is a camera-facing billboard, .125m square, showing this 6x6 flipbook in a 4-second loop. The flipbook is unlit, at 1500 candelas
+    [x] Positioned at the center of the billboard is a shadow-casting point light, with intensity = (0.5 + 0.5 * noise)  * 1500 candelas, with distance (0.5 + 0.5 * noise) * 10m. Use an appropriate color temperature for a sconce fire.
+  [x] In the debug view, remove any obsolete controls, and add multipliers for IBL intensity and torch candelas
+[x] Remove GodRays
+[x] Replace SSAO with n8ao
+[x] Replace Bloom with postprocessing Bloom
+[x] Replace DOF with postprocessing DOF
+[x] Include SSR
+[x] Disable Bloom, DOF, LensFlares by default

@@ -13,9 +13,15 @@
 - When benchmarking browser tests for the one-minute target, prepare the published build once and time the Playwright runner separately from that build step.
 - When a third-party runtime asset shows up as a startup bottleneck, vendor it into same-origin project assets before spending time on more exotic rendering changes.
 - When using Playwright or benchmark scripts, reliably shut down any headless Chrome processes you started once the task is complete.
+- When a crash or forced restart can interrupt local tooling, make the tool recover from corrupted state files instead of assuming JSON state is always intact.
 - When using `@takram/three-atmosphere` light-source lighting, treat the package as the authority for sun color. Reuse the atmosphere-derived `SunLight` color for water and related sun effects instead of feeding those systems a manual white sun.
 - When a UI light-strength control defaults to a non-unit value for usability, normalize it back around the rendering library's default baseline before applying it to actual light intensities.
 - When the user asks for EV calibration in this project, implement it as an explicit scene-relative EV control with `EV 0` at the calibrated default look and one-stop doubling/halving of exposure per EV step.
 - When smoke-test time regresses, trim browser harness overhead before touching app code. In this repository, dropping expensive screenshot comparisons and reducing the Playwright viewport produced a large win.
 - When the user asks for physically anchored lighting controls in this project, expose direct sun illuminance in lux and exposure in EV100, then convert those UI values through a documented calibration layer instead of pretending the renderer's internal units are already photometric.
 - When using `three-atmosphere` for this project, treat the package as the atmosphere color authority and scale its solar-irradiance uniforms, direct light, sky fill, and PMREM environment together from the same lux input so the sky, water, and surfaces stay matched.
+- When the user replaces the lighting stack, remove the old controls and spec language instead of leaving dead atmosphere or sun settings behind.
+- When a local loading overlay is required, keep it outside the canvas and let Suspense-controlled asset loading decide when the fade-out starts.
+- When external material or HDRI sources are requested for this project, download and commit the actual assets under `public/textures` so smoke tests can verify same-origin loads.
+- When running Playwright smoke tests repeatedly in this repository, wait for the `serve-root` port to become free before starting the next benchmarked runner so transient web-server shutdown races do not fail the harness.
+- When manually launching Chromium in benchmark scripts for this repository, close it in a `finally` block so failed runs do not leak headless Chrome processes.

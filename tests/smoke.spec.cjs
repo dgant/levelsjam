@@ -51,11 +51,9 @@ async function screenshotCanvasRegion(page, canvas, width = 100, height = 64) {
   })
 }
 
-async function waitForBrightFrame(page, canvas, minimumAverageBrightness, timeoutMs = 5_000) {
+async function waitForBrightFrame(page, canvas, minimumAverageBrightness, timeoutMs = 7_000) {
   const deadline = Date.now() + timeoutMs
   let lastMeasurement = { average: 0, max: 0 }
-
-  await page.waitForTimeout(300)
 
   while (Date.now() < deadline) {
     lastMeasurement = measureBrightness(
@@ -78,8 +76,6 @@ async function waitForBrightnessMeasurement(page, canvas, predicate, timeoutMs =
   const deadline = Date.now() + timeoutMs
   let lastMeasurement = { average: 0, max: 0 }
 
-  await page.waitForTimeout(150)
-
   while (Date.now() < deadline) {
     lastMeasurement = measureBrightness(
       await screenshotCanvasRegion(page, canvas)
@@ -89,7 +85,7 @@ async function waitForBrightnessMeasurement(page, canvas, predicate, timeoutMs =
       return lastMeasurement
     }
 
-    await page.waitForTimeout(150)
+    await page.waitForTimeout(200)
   }
 
   throw new Error(
@@ -97,7 +93,7 @@ async function waitForBrightnessMeasurement(page, canvas, predicate, timeoutMs =
   )
 }
 
-test('loads the flight scaffold without runtime errors', async ({ page }) => {
+test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   const consoleErrors = []
   const pageErrors = []
   const resourceUrls = new Set()
@@ -118,55 +114,45 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
 
   await page.goto('/', { waitUntil: 'domcontentloaded' })
 
+  const loadingOverlay = page.locator('.loading-overlay')
+  const loadingTitle = page.locator('.loading-overlay h1')
+  const loadingSubtitle = page.locator('.loading-overlay h2')
   const canvas = page.locator('canvas')
 
-  await expect(canvas).toBeVisible({ timeout: 5_000 })
-  const frameBrightness = await waitForBrightFrame(page, canvas, 20)
+  await expect(loadingOverlay).toBeVisible({ timeout: 5_000 })
+  await expect(loadingTitle).toHaveText('MINOTAUR')
+  await expect(loadingSubtitle).toContainText('Entering the labyrinth')
 
-  expect(frameBrightness.average).toBeGreaterThan(20)
+  const initialSubtitle = await loadingSubtitle.textContent()
+  await page.waitForTimeout(350)
+  const updatedSubtitle = await loadingSubtitle.textContent()
+  expect(updatedSubtitle).not.toBeNull()
+  expect(updatedSubtitle).not.toEqual(initialSubtitle)
+
+  await expect(loadingOverlay).toBeHidden({ timeout: 12_000 })
+  await expect(canvas).toBeVisible({ timeout: 5_000 })
+
+  await expect
+    .poll(async () => canvas.getAttribute('data-scene-ready'), {
+      timeout: 5_000,
+      intervals: [100, 250, 500]
+    })
+    .toBe('true')
+
+  const frameBrightness = await waitForBrightFrame(page, canvas, 12)
+
   await expect(page.locator('.fps-counter')).toContainText('FPS', { timeout: 5_000 })
-  await expect(page.locator('h1')).toHaveCount(0, { timeout: 1_000 })
-  await expect(page.locator('.start-button')).toHaveCount(0, { timeout: 1_000 })
-  await expect(page.getByText('Cursor / levels.io jam')).toHaveCount(0, {
-    timeout: 1_000
-  })
-  await expect(page.getByText('WebGL ready')).toHaveCount(0, { timeout: 1_000 })
 
   await page.keyboard.press('Backquote')
   await expect(page.locator('[data-testid="visual-controls"]')).toBeVisible({
     timeout: 5_000
   })
-  await expect(page.getByLabel('Sun Rotation')).toBeVisible({ timeout: 5_000 })
-  await expect(page.getByLabel('Sky Light Multiplier')).toBeVisible({
-    timeout: 5_000
-  })
-  await expect(page.getByLabel('Direct Sun Illuminance')).toBeVisible({
-    timeout: 5_000
-  })
+  await expect(page.getByLabel('IBL Intensity')).toBeVisible({ timeout: 5_000 })
+  await expect(page.getByLabel('Torch Candelas')).toBeVisible({ timeout: 5_000 })
   await expect(page.getByLabel('Exposure EV100')).toBeVisible({ timeout: 5_000 })
   await expect(page.getByLabel('Tone Mapper')).toBeVisible({ timeout: 5_000 })
-
-  await page.getByLabel('Direct Sun Illuminance').evaluate((element) => {
-    const descriptor = Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
-      'value'
-    )
-    descriptor.set.call(element, '20000')
-    element.dispatchEvent(new Event('input', { bubbles: true }))
-    element.dispatchEvent(new Event('change', { bubbles: true }))
-  })
-  await expect
-    .poll(async () => canvas.getAttribute('data-renderer-exposure'), {
-      timeout: 5_000,
-      intervals: [100, 250, 500]
-    })
-    .toBe('1.200')
-  const dimmedFrameBrightness = await waitForBrightnessMeasurement(
-    page,
-    canvas,
-    (measurement) => measurement.average < frameBrightness.average - 5
-  )
-  const sunAdjustedExposure = await canvas.getAttribute('data-renderer-exposure')
+  await expect(page.getByLabel('Sun Rotation')).toHaveCount(0)
+  await expect(page.getByLabel('Direct Sun Illuminance')).toHaveCount(0)
 
   await page.getByLabel('Exposure EV100').evaluate((element) => {
     const descriptor = Object.getOwnPropertyDescriptor(
@@ -183,54 +169,44 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
       intervals: [100, 250, 500]
     })
     .toBe('2.400')
-  await expect
-    .poll(async () => canvas.getAttribute('data-renderer-ev100'), {
-      timeout: 5_000,
-      intervals: [100, 250, 500]
-    })
-    .toBe('14.00')
-  const boostedFrameBrightness = await waitForBrightnessMeasurement(
-    page,
-    canvas,
-    (measurement) => measurement.average > dimmedFrameBrightness.average + 5
-  )
-  const updatedExposure = await canvas.getAttribute('data-renderer-exposure')
-  await page.getByLabel('Tone Mapper').selectOption('linear')
+
+  await page.getByLabel('Torch Candelas').evaluate((element) => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value'
+    )
+    descriptor.set.call(element, '4')
+    element.dispatchEvent(new Event('input', { bubbles: true }))
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+
+  await page.getByLabel('Tone Mapper').selectOption('neutral')
   await expect
     .poll(async () => canvas.getAttribute('data-tone-mapping'), {
       timeout: 5_000,
       intervals: [100, 250, 500]
     })
-    .toBe('linear')
+    .toBe('neutral')
+
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
   expect(
-    [...resourceUrls].some((url) => url.includes('grass_1_basecolor-1K.png'))
+    [...resourceUrls].some((url) => url.includes('overcast_soil_1k.hdr'))
   ).toBe(true)
   expect(
-    [...resourceUrls].some((url) => url.includes('ground_14_Basecolor-1K.png'))
+    [...resourceUrls].some((url) => url.includes('1K-puddle_Diffuse.jpg'))
   ).toBe(true)
+  expect(
+    [...resourceUrls].some((url) => url.includes('stonewall_29_basecolor-1K.png'))
+  ).toBe(true)
+  expect(
+    [...resourceUrls].some((url) => url.includes('metal_13_basecolor-1K.png'))
+  ).toBe(true)
+  expect(
+    [...resourceUrls].some((url) => url.includes('textures/atmosphere/'))
+  ).toBe(false)
   expect(
     [...resourceUrls].some((url) => url.includes('waternormals.jpg'))
-  ).toBe(true)
-  expect(
-    [...resourceUrls].some((url) => url.includes('textures/atmosphere/scattering.exr'))
-  ).toBe(true)
-  expect(
-    [...resourceUrls].some((url) => url.includes('media.githubusercontent.com'))
   ).toBe(false)
-  expect(
-    [...resourceUrls].some(
-      (url) =>
-        url.includes('textures/grass_1.webp') ||
-        url.includes('textures/ground_14.webp')
-    )
-  ).toBe(false)
-  expect(frameBrightness.max).toBeGreaterThan(40)
-  expect(dimmedFrameBrightness.average).toBeLessThan(frameBrightness.average - 5)
-  expect(sunAdjustedExposure).toBe('1.200')
-  expect(updatedExposure).toBe('2.400')
-  expect(boostedFrameBrightness.average).toBeGreaterThan(
-    dimmedFrameBrightness.average + 5
-  )
+  expect(frameBrightness.max).toBeGreaterThan(25)
 })

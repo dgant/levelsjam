@@ -69,37 +69,43 @@ async function main() {
   runNodeScript(devServerCommand[0], devServerCommand[1])
   const serverReadyMs = Number(process.hrtime.bigint() - serverStart) / 1e6
 
-  const browser = await chromium.launch({ headless: true })
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+  let browser
+  let metrics
+  let sceneReadyAt
 
-  await page.goto(url, { waitUntil: 'load' })
-  const sceneReadyAt = await waitForBrightCanvas(page)
+  try {
+    browser = await chromium.launch({ headless: true })
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 
-  const metrics = await page.evaluate(() => {
-    const navigationEntry = performance.getEntriesByType('navigation')[0]
-    const resources = performance
-      .getEntriesByType('resource')
-      .map((entry) => ({
-        name: entry.name,
-        duration: entry.duration,
-        transferSize: 'transferSize' in entry ? entry.transferSize : 0,
-        initiatorType: entry.initiatorType
-      }))
-      .sort((left, right) => right.duration - left.duration)
+    await page.goto(url, { waitUntil: 'load' })
+    sceneReadyAt = await waitForBrightCanvas(page)
 
-    return {
-      domContentLoaded: navigationEntry?.domContentLoadedEventEnd ?? Number.NaN,
-      loadEventEnd: navigationEntry?.loadEventEnd ?? Number.NaN,
-      responseEnd: navigationEntry?.responseEnd ?? Number.NaN,
-      transferSize: navigationEntry?.transferSize ?? 0,
-      encodedBodySize: navigationEntry?.encodedBodySize ?? 0,
-      resourceCount: resources.length,
-      scriptCount: resources.filter((entry) => entry.initiatorType === 'script').length,
-      topResources: resources.slice(0, 8)
-    }
-  })
+    metrics = await page.evaluate(() => {
+      const navigationEntry = performance.getEntriesByType('navigation')[0]
+      const resources = performance
+        .getEntriesByType('resource')
+        .map((entry) => ({
+          name: entry.name,
+          duration: entry.duration,
+          transferSize: 'transferSize' in entry ? entry.transferSize : 0,
+          initiatorType: entry.initiatorType
+        }))
+        .sort((left, right) => right.duration - left.duration)
 
-  await browser.close()
+      return {
+        domContentLoaded: navigationEntry?.domContentLoadedEventEnd ?? Number.NaN,
+        loadEventEnd: navigationEntry?.loadEventEnd ?? Number.NaN,
+        responseEnd: navigationEntry?.responseEnd ?? Number.NaN,
+        transferSize: navigationEntry?.transferSize ?? 0,
+        encodedBodySize: navigationEntry?.encodedBodySize ?? 0,
+        resourceCount: resources.length,
+        scriptCount: resources.filter((entry) => entry.initiatorType === 'script').length,
+        topResources: resources.slice(0, 8)
+      }
+    })
+  } finally {
+    await browser?.close()
+  }
 
   console.log(`Startup benchmark against ${url}`)
   console.log(`Server ready: ${formatMilliseconds(serverReadyMs)}`)
