@@ -140,6 +140,7 @@ type VisualSettings = {
   sunIntensity: number
   skyLightIntensity: number
   skyLightLinked: boolean
+  exposureEv: number
   toneMapping: ToneMappingMode
   bloom: EffectSettings
   godRays: EffectSettings
@@ -156,6 +157,7 @@ type EffectSettingKey = Exclude<
   | 'sunIntensity'
   | 'skyLightIntensity'
   | 'skyLightLinked'
+  | 'exposureEv'
   | 'toneMapping'
 >
 type SunSettingKey =
@@ -163,6 +165,7 @@ type SunSettingKey =
   | 'sunRotationDeg'
   | 'sunIntensity'
   | 'skyLightIntensity'
+type ExposureSettingKey = 'exposureEv'
 
 function createDefaultVisualSettings(): VisualSettings {
   return {
@@ -171,6 +174,7 @@ function createDefaultVisualSettings(): VisualSettings {
     sunIntensity: DEFAULT_SUN_INTENSITY,
     skyLightIntensity: DEFAULT_SUN_INTENSITY,
     skyLightLinked: true,
+    exposureEv: 0,
     toneMapping: 'agx',
     bloom: { enabled: true, intensity: 1 },
     godRays: { enabled: true, intensity: 0.6 },
@@ -230,8 +234,8 @@ function getLightScale(setting: number) {
   return setting / DEFAULT_SUN_INTENSITY
 }
 
-function getRendererExposure() {
-  return BASE_EXPOSURE
+function getRendererExposure(exposureEv: number) {
+  return BASE_EXPOSURE * (2 ** exposureEv)
 }
 
 function FlightRig({
@@ -699,20 +703,23 @@ function FpsReporter({
 }
 
 function RendererSettings({
+  exposureEv,
   toneMapping
 }: {
+  exposureEv: number
   toneMapping: ToneMappingMode
 }) {
   const gl = useThree((state) => state.gl)
 
   useEffect(() => {
-    const exposure = getRendererExposure()
+    const exposure = getRendererExposure(exposureEv)
 
     gl.toneMapping = NoToneMapping
     gl.toneMappingExposure = 1
     gl.domElement.dataset.rendererExposure = exposure.toFixed(3)
+    gl.domElement.dataset.rendererEv = exposureEv.toFixed(2)
     gl.domElement.dataset.toneMapping = toneMapping
-  }, [gl, toneMapping])
+  }, [exposureEv, gl, toneMapping])
 
   return null
 }
@@ -1040,7 +1047,7 @@ function Scene({
           <Vignette darkness={visualSettings.vignette.intensity} />
         ) : null}
         <ToneMapping
-          exposure={getRendererExposure()}
+          exposure={getRendererExposure(visualSettings.exposureEv)}
           mode={TONE_MAPPING_MODES[visualSettings.toneMapping]}
           resolution={256}
         />
@@ -1054,6 +1061,7 @@ function VisualControls({
   controlsOpen,
   visualSettings,
   onEffectSettingChange,
+  onExposureSettingChange,
   onSunSettingChange,
   onToneMappingChange
 }: {
@@ -1063,6 +1071,7 @@ function VisualControls({
     effect: EffectSettingKey,
     patch: Partial<EffectSettings>
   ) => void
+  onExposureSettingChange: (key: ExposureSettingKey, value: number) => void
   onSunSettingChange: (key: SunSettingKey, value: number) => void
   onToneMappingChange: (value: ToneMappingMode) => void
 }) {
@@ -1160,6 +1169,22 @@ function VisualControls({
           {visualSettings.skyLightIntensity.toFixed(1)}
           {visualSettings.skyLightLinked ? ' linked' : ''}
         </output>
+      </label>
+
+      <label className="visual-control-row">
+        <span>Exposure EV</span>
+        <input
+          aria-label="Exposure EV"
+          max={6}
+          min={-6}
+          onChange={(event) => {
+            onExposureSettingChange('exposureEv', Number(event.target.value))
+          }}
+          step={0.25}
+          type="range"
+          value={visualSettings.exposureEv}
+        />
+        <output>{visualSettings.exposureEv.toFixed(2)} EV</output>
       </label>
 
       <label className="visual-control-row">
@@ -1273,6 +1298,16 @@ export default function App() {
     }))
   }
 
+  const onExposureSettingChange = (
+    key: ExposureSettingKey,
+    value: number
+  ) => {
+    setVisualSettings((current) => ({
+      ...current,
+      [key]: value
+    }))
+  }
+
   const onToneMappingChange = (value: ToneMappingMode) => {
     setVisualSettings((current) => ({
       ...current,
@@ -1286,6 +1321,7 @@ export default function App() {
       <VisualControls
         controlsOpen={controlsOpen}
         onEffectSettingChange={onEffectSettingChange}
+        onExposureSettingChange={onExposureSettingChange}
         onSunSettingChange={onSunSettingChange}
         onToneMappingChange={onToneMappingChange}
         visualSettings={visualSettings}
@@ -1309,6 +1345,7 @@ export default function App() {
         }}
       >
         <RendererSettings
+          exposureEv={visualSettings.exposureEv}
           toneMapping={visualSettings.toneMapping}
         />
         <StartupReporter />

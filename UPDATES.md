@@ -15,3 +15,5 @@
 - When using Playwright or benchmark scripts, reliably shut down any headless Chrome processes you started once the task is complete.
 - When using `@takram/three-atmosphere` light-source lighting, treat the package as the authority for sun color. Reuse the atmosphere-derived `SunLight` color for water and related sun effects instead of feeding those systems a manual white sun.
 - When a UI light-strength control defaults to a non-unit value for usability, normalize it back around the rendering library's default baseline before applying it to actual light intensities.
+- When the user asks for EV calibration in this project, implement it as an explicit scene-relative EV control with `EV 0` at the calibrated default look and one-stop doubling/halving of exposure per EV step.
+- When smoke-test time regresses, trim browser harness overhead before touching app code. In this repository, dropping expensive screenshot comparisons and reducing the Playwright viewport produced a large win.

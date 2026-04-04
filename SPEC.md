@@ -39,13 +39,15 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - The renderer defaults to a sun intensity of `10` and the sun-intensity slider spans `0` through `100`.
 - The sun intensity control scales the direct sun light, the default-linked sky light value, the water sun highlight, and the god-rays source brightness.
 - Renderer exposure remains a separate presentation setting rather than being driven directly by the sun-intensity control.
+- The visual controls panel exposes a scene exposure control measured in EV stops relative to the default look.
+- Exposure calibration uses a scene-relative EV scale where `EV 0` matches the default presentation, `+1 EV` doubles exposure, and `-1 EV` halves exposure.
 - The scene exposes a sky light intensity slider that defaults to the sun-linked value and remains linked until manually adjusted.
 - The renderer uses `AgXToneMapping`.
 - The scene enables Bloom, GodRays, DepthOfField, Lensflare, SSAO, and Vignette with default settings.
 - The UI shows an FPS counter in the top-right corner.
 - Pressing backquote opens and closes a visual controls panel during play.
 - The visual controls panel exposes the sun elevation angle and sun intensity.
-- The visual controls panel exposes the sun rotation angle and the active tone mapper.
+- The visual controls panel exposes the sun rotation angle, scene exposure EV, and the active tone mapper.
 - The visual controls panel exposes enabled and intensity controls for Bloom, GodRays, DepthOfField, Lensflare, SSAO, and Vignette.
 - The player can move with first-person WASD controls.
 - The player can look around with mouse look controls.

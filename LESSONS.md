@@ -17,3 +17,5 @@
 - The custom lens flare shader from `@react-three/postprocessing` treats its `opacity` uniform as suppression, not visibility, so app-side code must invert that value or the effect stays hidden.
 - In this project, `@takram/three-atmosphere` light-source lighting behaves coherently only when the visible sky, `SunLight`, `SkyLight`, water sun color, and any specular environment map all derive from the same atmosphere state instead of mixing in manual white sun colors.
 - The visual `sun intensity` control should be normalized around the package's default light strength. Passing the raw UI value straight into `SunLight`, `SkyLight`, or water sun color exaggerates highlights and breaks the sky-to-sun balance.
+- For this project, the cleanest EV mapping is scene-relative rather than photographic: keep a reference exposure for `EV 0` and compute exposure as `baseExposure * 2 ** evOffset`.
+- The smoke benchmark is highly sensitive to Playwright screenshot work and viewport size. Keeping the viewport moderate and avoiding extra image-diff assertions preserves the under-one-minute runner budget.

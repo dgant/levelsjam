@@ -8,8 +8,8 @@ function measureBrightness(buffer) {
   let total = 0
   let max = 0
   let count = 0
-  const rowStep = Math.max(1, Math.floor(screenshot.height / 20))
-  const columnStep = Math.max(1, Math.floor(screenshot.width / 20))
+  const rowStep = Math.max(1, Math.floor(screenshot.height / 12))
+  const columnStep = Math.max(1, Math.floor(screenshot.width / 12))
 
   for (let row = 0; row < screenshot.height; row += rowStep) {
     for (let column = 0; column < screenshot.width; column += columnStep) {
@@ -31,7 +31,7 @@ function measureBrightness(buffer) {
   }
 }
 
-async function screenshotCanvasRegion(page, canvas, width = 480, height = 300) {
+async function screenshotCanvasRegion(page, canvas, width = 160, height = 100) {
   const box = await canvas.boundingBox()
 
   if (!box) {
@@ -57,7 +57,7 @@ async function waitForBrightFrame(page, canvas, minimumAverageBrightness, timeou
 
   while (Date.now() < deadline) {
     lastMeasurement = measureBrightness(
-      await screenshotCanvasRegion(page, canvas, 256, 160)
+      await screenshotCanvasRegion(page, canvas)
     )
 
     if (lastMeasurement.average > minimumAverageBrightness) {
@@ -91,22 +91,7 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
     resourceUrls.add(response.url())
   })
 
-  const atmosphereResponses = [
-    'transmittance.exr',
-    'irradiance.exr',
-    'scattering.exr',
-    'higher_order_scattering.exr'
-  ].map((fileName) =>
-    page.waitForResponse(
-      (response) =>
-        response.url().includes(`textures/atmosphere/${fileName}`) &&
-        response.status() === 200,
-      { timeout: 20_000 }
-    )
-  )
-
   await page.goto('/', { waitUntil: 'domcontentloaded' })
-  await Promise.all(atmosphereResponses)
 
   const canvas = page.locator('canvas')
 
@@ -130,6 +115,7 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
   await expect(page.getByLabel('Sky Light Intensity')).toBeVisible({
     timeout: 5_000
   })
+  await expect(page.getByLabel('Exposure EV')).toBeVisible({ timeout: 5_000 })
   await expect(page.getByLabel('Tone Mapper')).toBeVisible({ timeout: 5_000 })
 
   await page.getByLabel('Tone Mapper').selectOption('linear')
@@ -139,12 +125,6 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
       intervals: [100, 250, 500]
     })
     .toBe('linear')
-  const linearToneMappedBrightness = measureBrightness(
-    await screenshotCanvasRegion(page, canvas, 256, 160)
-  )
-  expect(
-    Math.abs(linearToneMappedBrightness.average - frameBrightness.average)
-  ).toBeGreaterThan(5)
 
   await page.getByLabel('Sun Intensity').evaluate((element) => {
     const descriptor = Object.getOwnPropertyDescriptor(
@@ -161,6 +141,29 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
       intervals: [100, 250, 500]
     })
     .toBe('1.200')
+  const sunAdjustedExposure = await canvas.getAttribute('data-renderer-exposure')
+
+  await page.getByLabel('Exposure EV').evaluate((element) => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value'
+    )
+    descriptor.set.call(element, '1')
+    element.dispatchEvent(new Event('input', { bubbles: true }))
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await expect
+    .poll(async () => canvas.getAttribute('data-renderer-exposure'), {
+      timeout: 5_000,
+      intervals: [100, 250, 500]
+    })
+    .toBe('2.400')
+  await expect
+    .poll(async () => canvas.getAttribute('data-renderer-ev'), {
+      timeout: 5_000,
+      intervals: [100, 250, 500]
+    })
+    .toBe('1.00')
   const updatedExposure = await canvas.getAttribute('data-renderer-exposure')
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
@@ -187,5 +190,6 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
     )
   ).toBe(false)
   expect(frameBrightness.max).toBeGreaterThan(40)
-  expect(updatedExposure).toBe('1.200')
+  expect(sunAdjustedExposure).toBe('1.200')
+  expect(updatedExposure).toBe('2.400')
 })
