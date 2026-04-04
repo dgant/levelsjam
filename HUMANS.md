@@ -1,7 +1,7 @@
 # How To Work On This Project
 
 ## Current State
-The repository contains a runnable browser game prototype for GitHub Pages. The current build serves a three.js scene with immediate mouse-look, WASD movement, and hold-space vertical thrust.
+The repository contains a runnable browser game prototype for GitHub Pages. The current build serves a three.js scene with immediate mouse-look, WASD movement, hold-space vertical thrust, a same-origin `three-atmosphere` sky setup, and a backquote visual-controls panel with sun and tone-mapper controls.
 
 ## Local Setup
 - Install Node.js 20 or newer.
@@ -32,8 +32,12 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the water surface uses the official three.js `Water` implementation and animates as expected.
 - Verify the water plane is 1 meter below the cube top and the seabed is 1 meter below the water.
 - Verify horizontal speed, vertical speed, fall speed, acceleration, deceleration, and gravity match the documented targets.
+- Verify horizontal motion follows the current camera-relative input direction and that directly opposing input decelerates rather than accelerates through the turn.
 - Verify mouse lock releases on escape-style modifier keys and re-engages on ordinary input.
 - Verify the sun sits at a 30-degree elevation and the tone mapper is `AgXToneMapping`.
+- Verify the visual controls panel exposes the tone-mapper selector and that the default sun intensity is `10` with a `0-100` slider range.
+- Verify only the atmospheric sun disk is visible in the rendered scene while god rays remain functional.
+- Verify the atmosphere textures load from local `textures/atmosphere/*.exr` assets instead of `media.githubusercontent.com`.
 - Verify the requested postprocessing effects are present with their default settings.
 - Verify the FPS counter appears in the top-right corner.
 - Verify pressing backquote opens the visual controls panel.
@@ -43,8 +47,8 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Treat duration regressions as blocking issues.
 - Keep `npm run test:unit` under 20 seconds.
 - Keep the prepared smoke runner `npm run test:smoke:runner` under 1 minute after a single `npm run build:pages`.
-- Latest measured benchmark on April 3, 2026: `npm run bench:startup` reached the first rendered frame in about 1.7 seconds on the background Vite server, with the slowest remaining requests coming from remote `@takram/three-atmosphere` EXR assets.
-- Latest measured benchmark on April 3, 2026: `npm run bench:tests` completed `npm run test:unit` in about 2.6 seconds and `npm run test:smoke:runner` in about 57.8 seconds after one prepared build.
+- Latest measured benchmark on April 4, 2026: `node scripts/benchmark-startup.cjs` reached the first bright rendered frame in about `348.2ms` against the background Vite server, with the slowest remaining startup requests all under `50ms` after moving the atmosphere EXRs to same-origin assets.
+- Latest measured benchmark on April 4, 2026: `node scripts/benchmark-tests.cjs` completed `npm run test:unit` in about `995ms` and `npm run test:smoke:runner` in about `52.7s` after one prepared build.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.

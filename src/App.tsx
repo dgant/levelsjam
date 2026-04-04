@@ -6,7 +6,6 @@ import {
   Vignette
 } from '@react-three/postprocessing'
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
-import { DEFAULT_PRECOMPUTED_TEXTURES_URL } from '@takram/three-atmosphere'
 import type { AtmosphereApi } from '@takram/three-atmosphere/r3f'
 import {
   AerialPerspective,
@@ -17,15 +16,23 @@ import {
 } from '@takram/three-atmosphere/r3f'
 import { Ellipsoid, Geodetic } from '@takram/three-geospatial'
 import {
+  ACESFilmicToneMapping,
   AgXToneMapping,
+  CineonToneMapping,
   Color,
   Euler,
+  LinearToneMapping,
   Matrix4,
   Mesh,
+  MeshBasicMaterial,
+  NeutralToneMapping,
+  NoToneMapping,
   PlaneGeometry,
+  ReinhardToneMapping,
   RepeatWrapping,
   SRGBColorSpace,
   ShaderMaterial,
+  SphereGeometry,
   Texture,
   TextureLoader,
   Vector2,
@@ -52,6 +59,7 @@ import {
 import { Water } from 'three/addons/objects/Water.js'
 
 const assetBase = import.meta.env.BASE_URL
+const ATMOSPHERE_TEXTURES_URL = `${assetBase}textures/atmosphere/`
 const GRASS_TEXTURE_URLS = {
   color: `${assetBase}textures/grass_1/grass_1-1K/grass_1_basecolor-1K.png`,
   normal: `${assetBase}textures/grass_1/grass_1-1K/grass_1_normal-1K.png`,
@@ -76,10 +84,12 @@ const INITIAL_PITCH = 0
 const BACKQUOTE_CODE = 'Backquote'
 const SUN_DISTANCE = 6000
 const BASE_EXPOSURE = 1.2
+const DEFAULT_SUN_INTENSITY = 10
 const WATER_PLANE_SIZE = 40000
 const SEABED_PLANE_SIZE = 50000
 const cameraEuler = new Euler(0, 0, 0, 'YXZ')
 const INITIAL_LOOK_TARGET = new Vector3(0, 5, 0)
+const DEFAULT_MOVE_DIRECTION = new Vector3(0, 0, -1)
 const POINTER_UNLOCK_CODES = new Set([
   'Escape',
   'AltLeft',
@@ -89,6 +99,26 @@ const POINTER_UNLOCK_CODES = new Set([
   'MetaLeft',
   'MetaRight'
 ])
+const TONE_MAPPING_MODES = {
+  none: NoToneMapping,
+  linear: LinearToneMapping,
+  reinhard: ReinhardToneMapping,
+  cineon: CineonToneMapping,
+  aces: ACESFilmicToneMapping,
+  agx: AgXToneMapping,
+  neutral: NeutralToneMapping
+} as const
+const TONE_MAPPING_OPTIONS = [
+  { key: 'none', label: 'None' },
+  { key: 'linear', label: 'Linear' },
+  { key: 'reinhard', label: 'Reinhard' },
+  { key: 'cineon', label: 'Cineon' },
+  { key: 'aces', label: 'ACES Filmic' },
+  { key: 'agx', label: 'AgX' },
+  { key: 'neutral', label: 'Neutral' }
+] as const
+
+type ToneMappingMode = keyof typeof TONE_MAPPING_MODES
 
 type EffectSettings = {
   enabled: boolean
@@ -101,6 +131,7 @@ type VisualSettings = {
   sunIntensity: number
   skyLightIntensity: number
   skyLightLinked: boolean
+  toneMapping: ToneMappingMode
   bloom: EffectSettings
   godRays: EffectSettings
   depthOfField: EffectSettings
@@ -116,6 +147,7 @@ type EffectSettingKey = Exclude<
   | 'sunIntensity'
   | 'skyLightIntensity'
   | 'skyLightLinked'
+  | 'toneMapping'
 >
 type SunSettingKey =
   | 'sunElevationDeg'
@@ -127,9 +159,10 @@ function createDefaultVisualSettings(): VisualSettings {
   return {
     sunElevationDeg: 30,
     sunRotationDeg: 0,
-    sunIntensity: 1,
-    skyLightIntensity: 1,
+    sunIntensity: DEFAULT_SUN_INTENSITY,
+    skyLightIntensity: DEFAULT_SUN_INTENSITY,
     skyLightLinked: true,
+    toneMapping: 'agx',
     bloom: { enabled: true, intensity: 1 },
     godRays: { enabled: true, intensity: 0.6 },
     depthOfField: { enabled: true, intensity: 1 },
@@ -184,6 +217,10 @@ function usePbrTextures(
   }
 }
 
+function getRendererExposure(sunIntensity: number) {
+  return BASE_EXPOSURE * (sunIntensity / DEFAULT_SUN_INTENSITY)
+}
+
 function FlightRig({
   controlsOpen
 }: {
@@ -201,6 +238,8 @@ function FlightRig({
     )
   )
   const velocity = useRef(new Vector3())
+  const horizontalSpeed = useRef(0)
+  const horizontalDirection = useRef(DEFAULT_MOVE_DIRECTION.clone())
   const forward = useRef(new Vector3())
   const right = useRef(new Vector3())
   const isPointerLocked = useRef(false)
@@ -355,13 +394,23 @@ function FlightRig({
     }
 
     const horizontalVelocity = updateHorizontalVelocity(
-      { x: velocity.current.x, z: velocity.current.z },
+      horizontalSpeed.current,
+      {
+        x: horizontalDirection.current.x,
+        z: horizontalDirection.current.z
+      },
       { x: desiredDirection.x, z: desiredDirection.z },
       delta
     )
 
-    velocity.current.x = horizontalVelocity.x
-    velocity.current.z = horizontalVelocity.z
+    horizontalSpeed.current = horizontalVelocity.speed
+    horizontalDirection.current.set(
+      horizontalVelocity.direction.x,
+      0,
+      horizontalVelocity.direction.z
+    )
+    velocity.current.x = horizontalDirection.current.x * horizontalSpeed.current
+    velocity.current.z = horizontalDirection.current.z * horizontalSpeed.current
     velocity.current.y = updateVerticalVelocity(
       velocity.current.y,
       grounded.current,
@@ -387,12 +436,14 @@ function FlightRig({
     )
 
     if (collision.position.x !== intendedPosition.current.x) {
+      horizontalSpeed.current = 0
       velocity.current.x = 0
     }
     if (collision.position.y !== intendedPosition.current.y) {
       velocity.current.y = 0
     }
     if (collision.position.z !== intendedPosition.current.z) {
+      horizontalSpeed.current = 0
       velocity.current.z = 0
     }
     if (collision.position.y !== intendedPosition.current.y && velocity.current.y < 0) {
@@ -620,16 +671,20 @@ function FpsReporter({
 }
 
 function RendererSettings({
-  sunIntensity
+  sunIntensity,
+  toneMapping
 }: {
   sunIntensity: number
+  toneMapping: ToneMappingMode
 }) {
   const gl = useThree((state) => state.gl)
 
   useEffect(() => {
-    gl.toneMappingExposure = BASE_EXPOSURE * sunIntensity
+    gl.toneMapping = TONE_MAPPING_MODES[toneMapping]
+    gl.toneMappingExposure = getRendererExposure(sunIntensity)
     gl.domElement.dataset.rendererExposure = gl.toneMappingExposure.toFixed(3)
-  }, [gl, sunIntensity])
+    gl.domElement.dataset.toneMapping = toneMapping
+  }, [gl, sunIntensity, toneMapping])
 
   return null
 }
@@ -704,12 +759,15 @@ function Scene({
   visualSettings: VisualSettings
 }) {
   const atmosphere = useRef<AtmosphereApi | null>(null)
-  const [sunMesh, setSunMesh] = useState<Mesh | null>(null)
   const worldOrigin = useMemo(
     () => new Geodetic(0, 0, 5).toECEF(new Vector3()),
     []
   )
-  const sunDirection = useMemo(() => {
+  const worldToECEFMatrix = useMemo(
+    () => Ellipsoid.WGS84.getNorthUpEastFrame(worldOrigin, new Matrix4()),
+    [worldOrigin]
+  )
+  const worldSunDirection = useMemo(() => {
     const elevationRadians = (visualSettings.sunElevationDeg * Math.PI) / 180
     const rotationRadians = (visualSettings.sunRotationDeg * Math.PI) / 180
     const horizontalMagnitude = Math.cos(elevationRadians)
@@ -720,80 +778,91 @@ function Scene({
       -Math.cos(rotationRadians) * horizontalMagnitude
     ).normalize()
   }, [visualSettings.sunElevationDeg, visualSettings.sunRotationDeg])
+  const atmosphereSunDirection = useMemo(
+    () => worldSunDirection.clone().transformDirection(worldToECEFMatrix),
+    [worldSunDirection, worldToECEFMatrix]
+  )
   const sunPosition = useMemo(
-    () => sunDirection.clone().multiplyScalar(SUN_DISTANCE),
-    [sunDirection]
+    () => worldSunDirection.clone().multiplyScalar(SUN_DISTANCE),
+    [worldSunDirection]
   )
-  const sunColor = useMemo(
-    () =>
-      new Color(
-        1.2 * visualSettings.sunIntensity,
-        1.15 * visualSettings.sunIntensity,
-        visualSettings.sunIntensity
-      ),
-    [visualSettings.sunIntensity]
-  )
-
-  useEffect(() => {
-    if (!atmosphere.current) {
-      return
-    }
-
-    atmosphere.current.worldToECEFMatrix.copy(
-      Ellipsoid.WGS84.getNorthUpEastFrame(worldOrigin, new Matrix4())
+  const godRaysSource = useMemo(() => {
+    const source = new Mesh(
+      new SphereGeometry(220, 24, 24),
+      new MeshBasicMaterial({
+        color: new Color(1, 1, 1),
+        toneMapped: false,
+        transparent: true
+      })
     )
-  }, [worldOrigin])
+
+    source.frustumCulled = false
+    source.matrixAutoUpdate = true
+    return source
+  }, [])
+
+  useEffect(
+    () => () => {
+      godRaysSource.geometry.dispose()
+      godRaysSource.material.dispose()
+    },
+    [godRaysSource]
+  )
 
   useEffect(() => {
     if (!atmosphere.current) {
       return
     }
 
-    atmosphere.current.sunDirection.copy(sunDirection)
-  }, [sunDirection])
+    atmosphere.current.worldToECEFMatrix.copy(worldToECEFMatrix)
+  }, [worldToECEFMatrix])
+
+  useEffect(() => {
+    if (!atmosphere.current) {
+      return
+    }
+
+    atmosphere.current.sunDirection.copy(atmosphereSunDirection)
+  }, [atmosphereSunDirection])
+
+  useEffect(() => {
+    godRaysSource.position.copy(sunPosition)
+    ;(godRaysSource.material as MeshBasicMaterial).color.setScalar(
+      visualSettings.sunIntensity
+    )
+    godRaysSource.updateMatrix()
+    godRaysSource.updateMatrixWorld(true)
+  }, [godRaysSource, sunPosition, visualSettings.sunIntensity])
 
   return (
     <Atmosphere
       ref={atmosphere}
       date={ATMOSPHERE_DATE}
       ground={false}
-      textures={DEFAULT_PRECOMPUTED_TEXTURES_URL}
+      textures={ATMOSPHERE_TEXTURES_URL}
     >
-      <Sky sunDirection={sunDirection} />
-      <group position={[sunPosition.x, sunPosition.y, sunPosition.z]}>
-        <SkyLight
-          intensity={visualSettings.skyLightIntensity}
-          sunDirection={sunDirection}
-        />
-        <SunLight
-          intensity={visualSettings.sunIntensity}
-          sunDirection={sunDirection}
-        />
-      </group>
-      <mesh
-        ref={(value) => {
-          if (value && value !== sunMesh) {
-            setSunMesh(value)
-          }
-        }}
-        position={[sunPosition.x, sunPosition.y, sunPosition.z]}
-      >
-        <sphereGeometry args={[220, 24, 24]} />
-        <meshBasicMaterial color={sunColor} toneMapped={false} />
-      </mesh>
+      <Sky sunDirection={atmosphereSunDirection} />
+      <SkyLight
+        intensity={visualSettings.skyLightIntensity}
+        sunDirection={atmosphereSunDirection}
+      />
+      <SunLight
+        intensity={visualSettings.sunIntensity}
+        sunDirection={atmosphereSunDirection}
+      />
       <Terrain
-        sunDirection={sunDirection}
+        sunDirection={worldSunDirection}
         sunIntensity={visualSettings.sunIntensity}
       />
       <EffectComposer enableNormalPass>
-        <AerialPerspective sunDirection={sunDirection} />
+        <AerialPerspective sunDirection={atmosphereSunDirection} />
         {visualSettings.bloom.enabled ? (
           <Bloom intensity={visualSettings.bloom.intensity} />
         ) : null}
-        {visualSettings.godRays.enabled && sunMesh ? (
+        {visualSettings.godRays.enabled ? (
           <GodRaysPrimitive
             intensity={visualSettings.godRays.intensity}
-            sun={sunMesh}
+            sun={godRaysSource}
           />
         ) : null}
         {visualSettings.depthOfField.enabled ? (
@@ -821,7 +890,8 @@ function VisualControls({
   controlsOpen,
   visualSettings,
   onEffectSettingChange,
-  onSunSettingChange
+  onSunSettingChange,
+  onToneMappingChange
 }: {
   controlsOpen: boolean
   visualSettings: VisualSettings
@@ -830,6 +900,7 @@ function VisualControls({
     patch: Partial<EffectSettings>
   ) => void
   onSunSettingChange: (key: SunSettingKey, value: number) => void
+  onToneMappingChange: (value: ToneMappingMode) => void
 }) {
   if (!controlsOpen) {
     return null
@@ -896,35 +967,55 @@ function VisualControls({
         <span>Sun Intensity</span>
         <input
           aria-label="Sun Intensity"
-          max={4}
+          max={100}
           min={0}
           onChange={(event) => {
             onSunSettingChange('sunIntensity', Number(event.target.value))
           }}
-          step={0.05}
+          step={0.1}
           type="range"
           value={visualSettings.sunIntensity}
         />
-        <output>{visualSettings.sunIntensity.toFixed(2)}</output>
+        <output>{visualSettings.sunIntensity.toFixed(1)}</output>
       </label>
 
       <label className="visual-control-row">
         <span>Sky Light Intensity</span>
         <input
           aria-label="Sky Light Intensity"
-          max={4}
+          max={100}
           min={0}
           onChange={(event) => {
             onSunSettingChange('skyLightIntensity', Number(event.target.value))
           }}
-          step={0.05}
+          step={0.1}
           type="range"
           value={visualSettings.skyLightIntensity}
         />
         <output>
-          {visualSettings.skyLightIntensity.toFixed(2)}
+          {visualSettings.skyLightIntensity.toFixed(1)}
           {visualSettings.skyLightLinked ? ' linked' : ''}
         </output>
+      </label>
+
+      <label className="visual-control-row">
+        <span>Tone Mapper</span>
+        <select
+          aria-label="Tone Mapper"
+          onChange={(event) => {
+            onToneMappingChange(event.target.value as ToneMappingMode)
+          }}
+          value={visualSettings.toneMapping}
+        >
+          {TONE_MAPPING_OPTIONS.map((option) => (
+            <option
+              key={option.key}
+              value={option.key}
+            >
+              {option.label}
+            </option>
+          ))}
+        </select>
       </label>
 
       {effectControls.map((effectControl) => (
@@ -1018,6 +1109,13 @@ export default function App() {
     }))
   }
 
+  const onToneMappingChange = (value: ToneMappingMode) => {
+    setVisualSettings((current) => ({
+      ...current,
+      toneMapping: value
+    }))
+  }
+
   return (
     <div className="app-shell">
       <div className="fps-counter">{Math.round(fps)} FPS</div>
@@ -1025,6 +1123,7 @@ export default function App() {
         controlsOpen={controlsOpen}
         onEffectSettingChange={onEffectSettingChange}
         onSunSettingChange={onSunSettingChange}
+        onToneMappingChange={onToneMappingChange}
         visualSettings={visualSettings}
       />
       <Canvas
@@ -1041,11 +1140,14 @@ export default function App() {
         dpr={[1, 2]}
         onCreated={({ camera, gl }) => {
           gl.outputColorSpace = SRGBColorSpace
-          gl.toneMapping = AgXToneMapping
-          gl.toneMappingExposure = BASE_EXPOSURE * visualSettings.sunIntensity
+          gl.toneMapping = TONE_MAPPING_MODES[visualSettings.toneMapping]
+          gl.toneMappingExposure = getRendererExposure(visualSettings.sunIntensity)
         }}
       >
-        <RendererSettings sunIntensity={visualSettings.sunIntensity} />
+        <RendererSettings
+          sunIntensity={visualSettings.sunIntensity}
+          toneMapping={visualSettings.toneMapping}
+        />
         <StartupReporter />
         <Scene
           controlsOpen={controlsOpen}

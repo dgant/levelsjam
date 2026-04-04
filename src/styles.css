@@ -86,6 +86,16 @@ body {
   width: 100%;
 }
 
+.visual-control-row select {
+  width: 100%;
+  padding: 6px 8px;
+  background: rgb(10 15 23 / 92%);
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 10px;
+  color: inherit;
+  font: inherit;
+}
+
 .visual-effect-row {
   padding-top: 10px;
   margin-top: 10px;

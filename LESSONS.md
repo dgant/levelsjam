@@ -10,3 +10,6 @@
 - The April 3, 2026 startup benchmark showed that the scene reaches its first rendered frame in about 1-2 seconds on the dev server, while the slowest remaining startup requests are remote `@takram/three-atmosphere` EXR files from `media.githubusercontent.com`.
 - Playwright should only match `*.spec.cjs` in this repository. If it scans the Node `--test` files, it wastes time running them inside the browser-test command.
 - For rendered-frame smoke checks in this scene, broad brightness sampling across the whole canvas is more reliable than checking a single center pixel.
+- In this project, moving the `three-atmosphere` EXRs into `public/textures/atmosphere` cuts startup latency dramatically compared with loading them from `media.githubusercontent.com`.
+- The `canvas[data-scene-ready]` marker proved less reliable than the rendered image for startup benchmarking, so the benchmark now waits for a bright canvas frame instead of a custom dataset flag.
+- After Playwright diagnostics or benchmarks, explicitly stop the headless browser processes they spawned instead of assuming they will all exit cleanly on their own.

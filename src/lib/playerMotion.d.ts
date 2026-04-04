@@ -15,10 +15,14 @@ export declare const GRAVITY_ACCELERATION: number
 export declare const JETPACK_ACCELERATION: number
 
 export declare function updateHorizontalVelocity(
-  currentVelocity: { x: number; z: number },
+  currentSpeed: number,
+  currentDirection: { x: number; z: number },
   desiredDirection: { x: number; z: number },
   delta: number
-): { x: number; z: number }
+): {
+  speed: number
+  direction: { x: number; z: number }
+}
 
 export declare function updateVerticalVelocity(
   currentVelocity: number,

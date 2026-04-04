@@ -34,3 +34,10 @@
 [x] Add a sun rotation slider too
 [x] Add a sky light intensity slider and default the sky light value to the same
 [x] 10x the water and seafloor size
+[x] Follow your suggestions for improving load time of the EXRs
+[x] Add tonemapper selector to the ` view
+[x] The sun elevation and rotation controls are reversed; elevation controls rotation and vice versa
+[x] Set the default sun intensity to 10 and the slider range 0-100
+[x] Convert the proxy sun mesh to support god rays but otherwise not affect the appearance of the scene, so only three-atmosphere's sun is visible
+[x] Make the player's horizontal velocity scalar and apply it in the direction of their camera
+[x] Treat any component of the player's movement input that's going against their velocity as *deceleration*. So if you hold W while facing the direction directly opposite your velocity, the movement should be applied via the deceleration rate rather than the acceleration rate.

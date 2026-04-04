@@ -1,6 +1,7 @@
 const path = require('node:path')
 const { spawnSync } = require('node:child_process')
 const { chromium } = require('@playwright/test')
+const { PNG } = require('pngjs')
 
 const rootDir = path.resolve(__dirname, '..')
 const devServerCommand = [process.execPath, ['scripts/dev-server.cjs', 'start']]
@@ -21,6 +22,48 @@ function formatMilliseconds(value) {
   return `${value.toFixed(1)}ms`
 }
 
+function measureBrightness(buffer) {
+  const screenshot = PNG.sync.read(buffer)
+  let total = 0
+  let count = 0
+  const rowStep = Math.max(1, Math.floor(screenshot.height / 20))
+  const columnStep = Math.max(1, Math.floor(screenshot.width / 20))
+
+  for (let row = 0; row < screenshot.height; row += rowStep) {
+    for (let column = 0; column < screenshot.width; column += columnStep) {
+      const pixelOffset = ((row * screenshot.width) + column) * 4
+
+      total +=
+        screenshot.data[pixelOffset] +
+        screenshot.data[pixelOffset + 1] +
+        screenshot.data[pixelOffset + 2]
+      count += 1
+    }
+  }
+
+  return total / count
+}
+
+async function waitForBrightCanvas(page) {
+  const canvas = page.locator('canvas')
+
+  await canvas.waitFor()
+
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const brightness = measureBrightness(
+      await canvas.screenshot({ scale: 'css' })
+    )
+
+    if (brightness > 20) {
+      return page.evaluate(() => performance.now())
+    }
+
+    await page.waitForTimeout(500)
+  }
+
+  throw new Error('Canvas did not reach the expected brightness threshold')
+}
+
 async function main() {
   const serverStart = process.hrtime.bigint()
   runNodeScript(devServerCommand[0], devServerCommand[1])
@@ -30,10 +73,9 @@ async function main() {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 
   await page.goto(url, { waitUntil: 'load' })
-  await page.locator('canvas[data-scene-ready=\"true\"]').waitFor()
+  const sceneReadyAt = await waitForBrightCanvas(page)
 
   const metrics = await page.evaluate(() => {
-    const canvas = document.querySelector('canvas')
     const navigationEntry = performance.getEntriesByType('navigation')[0]
     const resources = performance
       .getEntriesByType('resource')
@@ -46,7 +88,6 @@ async function main() {
       .sort((left, right) => right.duration - left.duration)
 
     return {
-      sceneReadyAt: Number(canvas?.dataset.sceneReadyAt ?? Number.NaN),
       domContentLoaded: navigationEntry?.domContentLoadedEventEnd ?? Number.NaN,
       loadEventEnd: navigationEntry?.loadEventEnd ?? Number.NaN,
       responseEnd: navigationEntry?.responseEnd ?? Number.NaN,
@@ -65,7 +106,7 @@ async function main() {
   console.log(`First response end: ${formatMilliseconds(metrics.responseEnd)}`)
   console.log(`DOMContentLoaded: ${formatMilliseconds(metrics.domContentLoaded)}`)
   console.log(`Load event end: ${formatMilliseconds(metrics.loadEventEnd)}`)
-  console.log(`Scene ready at first rendered frame: ${formatMilliseconds(metrics.sceneReadyAt)}`)
+  console.log(`Scene ready at first rendered frame: ${formatMilliseconds(sceneReadyAt)}`)
   console.log(`Navigation transfer size: ${metrics.transferSize} bytes`)
   console.log(`Navigation encoded body size: ${metrics.encodedBodySize} bytes`)
   console.log(`Resource requests: ${metrics.resourceCount}`)

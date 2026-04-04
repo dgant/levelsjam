@@ -37,23 +37,63 @@ test('matches the requested gravity and jetpack forces', () => {
 
 test('clamps horizontal velocity to the requested top speed', () => {
   const result = updateHorizontalVelocity(
-    { x: MAX_HORIZONTAL_SPEED, z: 0 },
+    MAX_HORIZONTAL_SPEED,
+    { x: 1, z: 0 },
     { x: 1, z: 0 },
     1
   )
 
-  almostEqual(Math.hypot(result.x, result.z), MAX_HORIZONTAL_SPEED)
+  almostEqual(result.speed, MAX_HORIZONTAL_SPEED)
+  almostEqual(result.direction.x, 1)
+  almostEqual(result.direction.z, 0)
 })
 
 test('decelerates horizontal velocity toward rest without reversing', () => {
   const result = updateHorizontalVelocity(
+    1,
     { x: 1, z: 0 },
     { x: 0, z: 0 },
     1
   )
 
-  almostEqual(result.x, 0)
-  almostEqual(result.z, 0)
+  almostEqual(result.speed, 0)
+  almostEqual(result.direction.x, 1)
+  almostEqual(result.direction.z, 0)
+})
+
+test('applies opposing input as deceleration instead of acceleration', () => {
+  const result = updateHorizontalVelocity(
+    MAX_HORIZONTAL_SPEED,
+    { x: 1, z: 0 },
+    { x: -1, z: 0 },
+    0.25
+  )
+
+  almostEqual(
+    result.speed,
+    Math.max(0, MAX_HORIZONTAL_SPEED - (HORIZONTAL_DECELERATION * 0.25))
+  )
+  almostEqual(result.direction.x, -1)
+  almostEqual(result.direction.z, 0)
+})
+
+test('switches to the requested camera-relative direction when accelerating', () => {
+  const result = updateHorizontalVelocity(
+    MAX_HORIZONTAL_SPEED / 2,
+    { x: 1, z: 0 },
+    { x: 0, z: -1 },
+    0.25
+  )
+
+  almostEqual(
+    result.speed,
+    Math.min(
+      MAX_HORIZONTAL_SPEED,
+      (MAX_HORIZONTAL_SPEED / 2) + (HORIZONTAL_ACCELERATION * 0.25)
+    )
+  )
+  almostEqual(result.direction.x, 0)
+  almostEqual(result.direction.z, -1)
 })
 
 test('keeps grounded vertical velocity at rest without jetpack', () => {

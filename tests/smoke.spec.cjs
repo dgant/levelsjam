@@ -50,27 +50,32 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
     resourceUrls.add(response.url())
   })
 
+  const atmosphereResponses = [
+    'transmittance.exr',
+    'irradiance.exr',
+    'scattering.exr',
+    'higher_order_scattering.exr'
+  ].map((fileName) =>
+    page.waitForResponse(
+      (response) =>
+        response.url().includes(`textures/atmosphere/${fileName}`) &&
+        response.status() === 200,
+      { timeout: 20_000 }
+    )
+  )
+
   await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await Promise.all(atmosphereResponses)
 
   const canvas = page.locator('canvas')
 
   await expect(canvas).toBeVisible({ timeout: 5_000 })
-  let frameBrightness = null
+  await page.waitForTimeout(1_000)
+  const frameBrightness = measureBrightness(
+    await canvas.screenshot({ scale: 'css' })
+  )
 
-  await expect
-    .poll(
-      async () => {
-        frameBrightness = measureBrightness(
-          await canvas.screenshot({ scale: 'css' })
-        )
-        return frameBrightness.average
-      },
-      {
-        timeout: 10_000,
-        intervals: [100, 250, 500]
-      }
-    )
-    .toBeGreaterThan(20)
+  expect(frameBrightness.average).toBeGreaterThan(20)
   await expect(page.locator('.fps-counter')).toContainText('FPS', { timeout: 5_000 })
   await expect(page.locator('h1')).toHaveCount(0, { timeout: 1_000 })
   await expect(page.locator('.start-button')).toHaveCount(0, { timeout: 1_000 })
@@ -87,13 +92,22 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
   await expect(page.getByLabel('Sky Light Intensity')).toBeVisible({
     timeout: 5_000
   })
+  await expect(page.getByLabel('Tone Mapper')).toBeVisible({ timeout: 5_000 })
+
+  await page.getByLabel('Tone Mapper').selectOption('neutral')
+  await expect
+    .poll(async () => canvas.getAttribute('data-tone-mapping'), {
+      timeout: 5_000,
+      intervals: [100, 250, 500]
+    })
+    .toBe('neutral')
 
   await page.getByLabel('Sun Intensity').evaluate((element) => {
     const descriptor = Object.getOwnPropertyDescriptor(
       HTMLInputElement.prototype,
       'value'
     )
-    descriptor.set.call(element, '0.25')
+    descriptor.set.call(element, '25')
     element.dispatchEvent(new Event('input', { bubbles: true }))
     element.dispatchEvent(new Event('change', { bubbles: true }))
   })
@@ -102,7 +116,7 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
       timeout: 5_000,
       intervals: [100, 250, 500]
     })
-    .toBe('0.300')
+    .toBe('3.000')
   const updatedExposure = await canvas.getAttribute('data-renderer-exposure')
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
@@ -116,6 +130,12 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
     [...resourceUrls].some((url) => url.includes('waternormals.jpg'))
   ).toBe(true)
   expect(
+    [...resourceUrls].some((url) => url.includes('textures/atmosphere/scattering.exr'))
+  ).toBe(true)
+  expect(
+    [...resourceUrls].some((url) => url.includes('media.githubusercontent.com'))
+  ).toBe(false)
+  expect(
     [...resourceUrls].some(
       (url) =>
         url.includes('textures/grass_1.webp') ||
@@ -123,5 +143,5 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
     )
   ).toBe(false)
   expect(frameBrightness.max).toBeGreaterThan(40)
-  expect(updatedExposure).toBe('0.300')
+  expect(updatedExposure).toBe('3.000')
 })

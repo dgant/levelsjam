@@ -25,20 +25,25 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - Jetpack thrust applies at 1.25g so the net upward acceleration is 0.25g while `Space` is held.
 - The scene uses `@takram/three-atmosphere` for atmospheric rendering.
 - The scene uses the library's light-source lighting pattern with `SkyLight`, `SunLight`, and `AerialPerspective` as the reference atmosphere setup.
+- The atmosphere precomputed texture assets are served from the project's own hosted assets rather than fetched from a remote third-party origin.
 - The scene uses lighting and exposure values that keep the cube, water, and terrain readable on first load.
 - Texture links that point to ShareTextures are treated as downloadable PBR packs rather than preview images.
 - The cube and the lower ground plane use extracted PBR texture packs with tiling that assumes 1 meter by 1 meter world scale unless the source specifies a different implied scale.
 - The water plane uses the official three.js `Water` implementation from the examples/docs.
 - The sun is positioned 30 degrees above the horizon line.
 - The atmosphere sun direction is driven by the same canonical sun direction as the scene lights, water highlights, sun mesh, and post-processing source objects.
+- The atmosphere-facing sun direction is expressed in the coordinate space expected by `@takram/three-atmosphere`.
 - The scene exposes a sun rotation slider.
-- The sun intensity control drives the direct sun light, the default-linked sky light value, the water sun highlight, the sun mesh brightness, and renderer exposure.
+- The visual controls panel exposes a tone-mapper selector.
+- The renderer defaults to a sun intensity of `10` and the sun-intensity slider spans `0` through `100`.
+- The sun intensity control drives the direct sun light, the default-linked sky light value, the water sun highlight, the god-rays source brightness, and renderer exposure.
 - The scene exposes a sky light intensity slider that defaults to the sun-linked value and remains linked until manually adjusted.
 - The renderer uses `AgXToneMapping`.
 - The scene enables Bloom, GodRays, DepthOfField, Lensflare, SSAO, and Vignette with default settings.
 - The UI shows an FPS counter in the top-right corner.
 - Pressing backquote opens and closes a visual controls panel during play.
 - The visual controls panel exposes the sun elevation angle and sun intensity.
+- The visual controls panel exposes the sun rotation angle and the active tone mapper.
 - The visual controls panel exposes enabled and intensity controls for Bloom, GodRays, DepthOfField, Lensflare, SSAO, and Vignette.
 - The player can move with first-person WASD controls.
 - The player can look around with mouse look controls.
@@ -55,6 +60,9 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - Pressing backquote reveals a live visual tuning panel without a rebuild or page refresh.
 - Jetpack thrust adds upward motion while `Space` remains held and stops when `Space` is released.
 - Horizontal motion feels capped and responsive rather than indefinitely accelerating.
+- Horizontal movement magnitude is stored as a scalar rather than a persistent world-space vector.
+- Horizontal movement is applied in the current camera-relative input direction.
+- Movement input that opposes current horizontal motion uses the deceleration rate instead of the acceleration rate.
 - Vertical motion feels capped and responsive rather than indefinitely accelerating.
 - Ground contact resolves the character to a resting state instead of repeatedly lifting and dropping the collision volume.
 - The game responds to movement and look input without requiring any preliminary button click.
@@ -71,6 +79,8 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - The water and seabed remain separated by 1 meter.
 - The water and seabed use a footprint that is 10x the baseline scene size.
 - The sun direction matches a 30-degree-elevation outdoor lighting setup.
+- The atmospheric sun disk remains the only visible sun disk in the beauty image.
+- The god-rays source object supports the post-process effect without adding a second visible sun to the scene.
 - Highlight values remain available before tone mapping so bloom can respond proportionally to bright sources.
 - The page shows an FPS counter in the top-right corner during play.
 - The page avoids a blocking loading screen.
@@ -95,3 +105,4 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - Visual layout changes are reviewed in the rendered scene, not only in source code.
 - Collision behavior is checked in the browser for resting contact on the ground and stable interaction with the cube.
 - The backquote shortcut is checked in the browser and verified to open the visual controls panel.
+- The visual controls panel is checked in the browser and verified to expose the tone-mapper selector and corrected sun elevation and rotation controls.
