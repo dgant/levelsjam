@@ -40,8 +40,10 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the visible skybox brightness tracks the same calibrated HDRI path as the environment lighting.
 - Verify the ground, walls, and sconces load the committed PBR texture packs instead of preview images.
 - Verify the torch billboard uses the linked flipbook asset rather than a generated placeholder atlas.
+- Verify the torch billboard uses the linked `CampFire_l_nosmoke_front_Loop_01_4K_6x6.png` atlas.
 - Verify the sconces are visibly readable outside the walls rather than disappearing behind the torch billboard or wall face.
 - Verify the torch billboards animate and face the camera.
+- Verify the visible flame fills the 0.125m billboard and sits on the sconce instead of appearing tiny or floating above it.
 - Verify each wall has a warm torch point light and the lights cast shadows.
 - Verify the tone mapper is `AgX` by default.
 - Verify the visual controls panel exposes `Exposure EV100`, `IBL Intensity`, `Torch Candelas`, the tone mapper, and the enabled/intensity controls for Bloom, Depth Of Field, Lens Flares, N8AO, SSR, and Vignette.

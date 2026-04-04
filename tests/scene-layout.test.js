@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   SCONCE_RADIUS,
+  TORCH_BILLBOARD_SIZE,
   WALL_LAYOUT,
   WALL_WIDTH
 } from '../src/lib/sceneLayout.js'
@@ -31,6 +32,9 @@ test('keeps each torch aligned with its wall sconce outside the wall face', () =
   for (const wall of WALL_LAYOUT) {
     assert.equal(wall.torchPosition.x, wall.sconcePosition.x)
     assert.equal(wall.torchPosition.z, wall.sconcePosition.z)
-    assert.ok(wall.torchPosition.y > wall.sconcePosition.y)
+    assert.equal(
+      wall.torchPosition.y,
+      wall.sconcePosition.y + SCONCE_RADIUS + (TORCH_BILLBOARD_SIZE / 2)
+    )
   }
 })

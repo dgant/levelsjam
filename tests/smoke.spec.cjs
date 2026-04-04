@@ -219,7 +219,7 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   ).toBe(true)
   expect(
     [...resourceUrls].some((url) =>
-      url.includes('CampFire_l_nosmoke_front_Loop_01_1K_6x6.webp')
+      url.includes('CampFire_l_nosmoke_front_Loop_01_4K_6x6.png')
     )
   ).toBe(true)
   expect(

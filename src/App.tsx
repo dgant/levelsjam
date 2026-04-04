@@ -79,7 +79,7 @@ import {
 const assetBase = import.meta.env.BASE_URL
 const ENVIRONMENT_URL = `${assetBase}textures/environment/overcast_soil_1k.hdr`
 const FIRE_FLIPBOOK_URL =
-  `${assetBase}textures/fire/CampFire_l_nosmoke_front_Loop_01_1K_6x6.webp`
+  `${assetBase}textures/fire/CampFire_l_nosmoke_front_Loop_01_4K_6x6.png`
 const PUDDLE_TEXTURE_URLS = {
   ao: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_AO.jpg`,
   color: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_Diffuse.jpg`,
@@ -122,11 +122,23 @@ const LOADING_FADE_DURATION_MS = 2000
 const FIRE_FLIPBOOK_GRID = 6
 const FIRE_FLIPBOOK_FRAME_COUNT = FIRE_FLIPBOOK_GRID * FIRE_FLIPBOOK_GRID
 const FIRE_FLIPBOOK_DURATION_SECONDS = 4
+const FIRE_FLIPBOOK_FRAME_CROP = {
+  maxX: 0.6187683284457478,
+  maxY: 0.8123167155425219,
+  minX: 0.25806451612903225,
+  minY: 0.18621700879765396
+} as const
+const FIRE_FLIPBOOK_CROP_WIDTH =
+  FIRE_FLIPBOOK_FRAME_CROP.maxX - FIRE_FLIPBOOK_FRAME_CROP.minX
+const FIRE_FLIPBOOK_CROP_HEIGHT =
+  FIRE_FLIPBOOK_FRAME_CROP.maxY - FIRE_FLIPBOOK_FRAME_CROP.minY
 const FIRE_COLOR = new Color('#ffb168')
 const FIRE_BILLBOARD_INTENSITY_SCALE = 1 / TORCH_BASE_CANDELA
 const CUBE_BACKGROUND_RESOLUTION = 512
+const TORCH_SHADOW_MAP_SIZE = 256
 const TORCH_SHADOW_DISTANCE_SQ = 14 * 14
-const TORCH_SHADOW_MAP_SIZE = 128
+const SSR_INTENSITY_SCALE = 0.05
+const LENS_FLARE_COLOR_GAIN_SCALE = 0.02
 const TONE_MAPPING_MODES = {
   linear: PostToneMappingMode.LINEAR,
   reinhard: PostToneMappingMode.REINHARD,
@@ -374,8 +386,15 @@ function useFireFlipbookTexture() {
     texture.colorSpace = SRGBColorSpace
     texture.wrapS = RepeatWrapping
     texture.wrapT = RepeatWrapping
-    texture.repeat.set(1 / FIRE_FLIPBOOK_GRID, 1 / FIRE_FLIPBOOK_GRID)
-    texture.offset.set(0, 1 - (1 / FIRE_FLIPBOOK_GRID))
+    texture.repeat.set(
+      FIRE_FLIPBOOK_CROP_WIDTH / FIRE_FLIPBOOK_GRID,
+      FIRE_FLIPBOOK_CROP_HEIGHT / FIRE_FLIPBOOK_GRID
+    )
+    texture.offset.set(
+      FIRE_FLIPBOOK_FRAME_CROP.minX / FIRE_FLIPBOOK_GRID,
+      1 -
+        ((1 + FIRE_FLIPBOOK_FRAME_CROP.maxY) / FIRE_FLIPBOOK_GRID)
+    )
     texture.anisotropy = Math.min(maxAnisotropy, 8)
     texture.needsUpdate = true
   }, [maxAnisotropy, texture])
@@ -592,8 +611,11 @@ function TorchBillboard({
       group.current.quaternion.copy(camera.quaternion)
     }
 
-    texture.offset.x = column / FIRE_FLIPBOOK_GRID
-    texture.offset.y = 1 - ((row + 1) / FIRE_FLIPBOOK_GRID)
+    texture.offset.x =
+      (column + FIRE_FLIPBOOK_FRAME_CROP.minX) / FIRE_FLIPBOOK_GRID
+    texture.offset.y =
+      1 -
+      ((row + FIRE_FLIPBOOK_FRAME_CROP.maxY) / FIRE_FLIPBOOK_GRID)
 
     if (material.current) {
       const billboardMaterial = material.current.material as {
@@ -617,7 +639,7 @@ function TorchBillboard({
       >
         <planeGeometry args={[TORCH_BILLBOARD_SIZE, TORCH_BILLBOARD_SIZE]} />
         <meshBasicMaterial
-          alphaTest={0.02}
+          alphaTest={0.005}
           color={new Color(1, 1, 1).multiplyScalar(
             Math.max(0.5, intensity * FIRE_BILLBOARD_INTENSITY_SCALE)
           )}
@@ -864,7 +886,7 @@ function SSREffectPrimitive({
         correction: 1,
         distance: 12,
         fade: 0.15,
-        intensity,
+        intensity: intensity * SSR_INTENSITY_SCALE,
         ior: 1.333,
         jitter: 0.1,
         jitterRoughness: 0.1,
@@ -882,7 +904,7 @@ function SSREffectPrimitive({
   )
 
   useEffect(() => {
-    effect.intensity = intensity
+    effect.intensity = intensity * SSR_INTENSITY_SCALE
   }, [effect, intensity])
 
   useEffect(() => () => effect.dispose(), [effect])
@@ -976,20 +998,20 @@ function TorchLensFlare({
       new LensFlareEffect({
         blendFunction: BlendFunction.NORMAL,
         enabled: true,
-        glareSize: 0.08,
+        glareSize: 0.02,
         lensPosition: new Vector3(),
         screenRes: new Vector2(size.width, size.height),
         starPoints: 6,
-        flareSize: 0.008,
+        flareSize: 0.003,
         flareSpeed: 0.01,
         flareShape: 0.1,
         animated: true,
         anamorphic: false,
-        colorGain: FIRE_COLOR.clone().multiplyScalar(intensity * 2),
+        colorGain: FIRE_COLOR.clone().multiplyScalar(LENS_FLARE_COLOR_GAIN_SCALE),
         lensDirtTexture: null,
-        haloScale: 0.4,
+        haloScale: 0.2,
         secondaryGhosts: true,
-        aditionalStreaks: true,
+        aditionalStreaks: false,
         ghostScale: 0,
         opacity: 1,
         starBurst: false
@@ -1072,8 +1094,11 @@ function TorchLensFlare({
 
     lensPosition.value.x = bestScreenX
     lensPosition.value.y = bestScreenY
-    opacity.value += (0 - opacity.value) * Math.min(1, delta / 0.12)
-    colorGain.value.copy(FIRE_COLOR).multiplyScalar(bestBrightness * 2.5)
+    const targetOpacity = 1 - Math.min(1, Math.max(0, intensity))
+    opacity.value += (targetOpacity - opacity.value) * Math.min(1, delta / 0.12)
+    colorGain.value
+      .copy(FIRE_COLOR)
+      .multiplyScalar(bestBrightness * LENS_FLARE_COLOR_GAIN_SCALE)
   })
 
   useEffect(() => () => effect.dispose(), [effect])
@@ -1429,9 +1454,9 @@ function VisualControls({
   }> = [
     { key: 'bloom', label: 'Bloom', min: 0, max: 3, step: 0.05 },
     { key: 'depthOfField', label: 'Depth Of Field', min: 0, max: 5, step: 0.05 },
-    { key: 'lensFlare', label: 'Lens Flares', min: 0, max: 2, step: 0.05 },
+    { key: 'lensFlare', label: 'Lens Flares', min: 0, max: 1, step: 0.05 },
     { key: 'n8ao', label: 'N8AO', min: 0, max: 5, step: 0.05 },
-    { key: 'ssr', label: 'SSR', min: 0, max: 3, step: 0.05 },
+    { key: 'ssr', label: 'SSR', min: 0, max: 1, step: 0.05 },
     { key: 'vignette', label: 'Vignette', min: 0, max: 1, step: 0.05 }
   ]
 

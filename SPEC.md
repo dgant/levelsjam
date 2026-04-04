@@ -35,6 +35,7 @@
 - Each torch billboard uses a 6x6 fire flipbook atlas and loops across 36 frames in 4 seconds.
 - Each torch billboard uses an unlit material.
 - Each torch billboard brightness is scaled from a 1500 candela torch baseline.
+- Each torch billboard samples the linked atlas so the visible flame fills the specified 0.125 meter quad and sits on the sconce instead of floating above it due to transparent frame padding.
 - Each torch has a shadow-casting point light located at the billboard center.
 - Each torch point light intensity equals `(0.5 + 0.5 * noise) * 1500` candelas.
 - Each torch point light distance equals `(0.5 + 0.5 * noise) * 10` meters.
@@ -63,6 +64,7 @@
 - The debug panel exposure EV100 control defaults to `17.5`.
 - The debug panel exposes an IBL intensity multiplier.
 - The debug panel exposes a torch candela multiplier.
+- The debug panel lens flare control adjusts the effect using the lens flare opacity parameter rather than an arbitrary color-gain multiplier.
 - The debug panel does not expose obsolete atmosphere or sun-direction controls.
 - The page shows an FPS counter in the top-right corner.
 

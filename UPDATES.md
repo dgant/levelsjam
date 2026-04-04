@@ -24,6 +24,7 @@
 - When a local loading overlay is required, keep it outside the canvas and let Suspense-controlled asset loading decide when the fade-out starts.
 - When external material or HDRI sources are requested for this project, download and commit the actual assets under `public/textures` so smoke tests can verify same-origin loads.
 - When the user links a specific flipbook or sprite atlas for this project, treat that linked asset as required source content rather than a style reference or invitation to generate a placeholder.
+- When optimizing performance, measure the delta and keep only obvious free wins or changes that demonstrably improve the measured result; do not optimize blindly.
 - When calibrating HDRI-based lighting in this project, keep one fixed HDRI calibration constant and one shared internal light-unit scale. Do not tie exposure semantics to the current default slider value.
 - When running Playwright smoke tests repeatedly in this repository, wait for the `serve-root` port to become free before starting the next benchmarked runner so transient web-server shutdown races do not fail the harness.
 - When manually launching Chromium in benchmark scripts for this repository, close it in a `finally` block so failed runs do not leak headless Chrome processes.
