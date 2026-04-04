@@ -16,6 +16,7 @@ import {
   SunLight
 } from '@takram/three-atmosphere/r3f'
 import {
+  AtmosphereParameters,
   SkyMaterial,
   SunDirectionalLight as AtmosphereSunDirectionalLight
 } from '@takram/three-atmosphere'
@@ -57,6 +58,17 @@ import {
 } from 'postprocessing'
 import { LensFlareEffect } from '@react-three/postprocessing'
 import {
+  DEFAULT_DIRECT_SUN_ILLUMINANCE_LUX,
+  DEFAULT_EXPOSURE_EV100,
+  DEFAULT_SKY_LIGHT_MULTIPLIER,
+  MAX_DIRECT_SUN_ILLUMINANCE_LUX,
+  MIN_DIRECT_SUN_ILLUMINANCE_LUX,
+  getAtmosphereSolarIrradianceScale,
+  getDirectSunIlluminanceScale,
+  getRendererExposure,
+  getSkyLightScale
+} from './lib/lightingCalibration.js'
+import {
   getCameraPosition,
   PLAYER_SPAWN_POSITION,
   resolvePlayerCollision
@@ -92,12 +104,12 @@ const MAX_PITCH = Math.PI / 2 - 0.05
 const INITIAL_PITCH = 0
 const BACKQUOTE_CODE = 'Backquote'
 const SUN_DISTANCE = 6000
-const BASE_EXPOSURE = 1.2
-const DEFAULT_SUN_INTENSITY = 10
 const LIGHTING_SAMPLE_POSITION = Object.freeze({ x: 0, y: 10, z: 0 })
 const ENVIRONMENT_CAPTURE_RESOLUTION = 128
 const WATER_PLANE_SIZE = 40000
 const SEABED_PLANE_SIZE = 50000
+const DEFAULT_SOLAR_IRRADIANCE =
+  AtmosphereParameters.DEFAULT.solarIrradiance.clone()
 const cameraEuler = new Euler(0, 0, 0, 'YXZ')
 const INITIAL_LOOK_TARGET = new Vector3(0, 5, 0)
 const DEFAULT_MOVE_DIRECTION = new Vector3(0, 0, -1)
@@ -137,10 +149,9 @@ type EffectSettings = {
 type VisualSettings = {
   sunElevationDeg: number
   sunRotationDeg: number
-  sunIntensity: number
-  skyLightIntensity: number
-  skyLightLinked: boolean
-  exposureEv: number
+  directSunIlluminanceLux: number
+  skyLightMultiplier: number
+  exposureEv100: number
   toneMapping: ToneMappingMode
   bloom: EffectSettings
   godRays: EffectSettings
@@ -154,27 +165,25 @@ type EffectSettingKey = Exclude<
   keyof VisualSettings,
   | 'sunElevationDeg'
   | 'sunRotationDeg'
-  | 'sunIntensity'
-  | 'skyLightIntensity'
-  | 'skyLightLinked'
-  | 'exposureEv'
+  | 'directSunIlluminanceLux'
+  | 'skyLightMultiplier'
+  | 'exposureEv100'
   | 'toneMapping'
 >
 type SunSettingKey =
   | 'sunElevationDeg'
   | 'sunRotationDeg'
-  | 'sunIntensity'
-  | 'skyLightIntensity'
-type ExposureSettingKey = 'exposureEv'
+  | 'directSunIlluminanceLux'
+  | 'skyLightMultiplier'
+type ExposureSettingKey = 'exposureEv100'
 
 function createDefaultVisualSettings(): VisualSettings {
   return {
     sunElevationDeg: 30,
     sunRotationDeg: 0,
-    sunIntensity: DEFAULT_SUN_INTENSITY,
-    skyLightIntensity: DEFAULT_SUN_INTENSITY,
-    skyLightLinked: true,
-    exposureEv: 0,
+    directSunIlluminanceLux: DEFAULT_DIRECT_SUN_ILLUMINANCE_LUX,
+    skyLightMultiplier: DEFAULT_SKY_LIGHT_MULTIPLIER,
+    exposureEv100: DEFAULT_EXPOSURE_EV100,
     toneMapping: 'agx',
     bloom: { enabled: true, intensity: 1 },
     godRays: { enabled: true, intensity: 0.6 },
@@ -230,12 +239,24 @@ function usePbrTextures(
   }
 }
 
-function getLightScale(setting: number) {
-  return setting / DEFAULT_SUN_INTENSITY
-}
-
-function getRendererExposure(exposureEv: number) {
-  return BASE_EXPOSURE * (2 ** exposureEv)
+function setSolarIrradianceScale(
+  target:
+    | {
+        uniforms?: {
+          ATMOSPHERE?: {
+            value?: {
+              solar_irradiance?: Vector3
+            }
+          }
+        }
+      }
+    | null
+    | undefined,
+  scale: number
+) {
+  target?.uniforms?.ATMOSPHERE?.value?.solar_irradiance
+    ?.copy(DEFAULT_SOLAR_IRRADIANCE)
+    .multiplyScalar(scale)
 }
 
 function FlightRig({
@@ -703,23 +724,23 @@ function FpsReporter({
 }
 
 function RendererSettings({
-  exposureEv,
+  exposureEv100,
   toneMapping
 }: {
-  exposureEv: number
+  exposureEv100: number
   toneMapping: ToneMappingMode
 }) {
   const gl = useThree((state) => state.gl)
 
   useEffect(() => {
-    const exposure = getRendererExposure(exposureEv)
+    const exposure = getRendererExposure(exposureEv100)
 
     gl.toneMapping = NoToneMapping
     gl.toneMappingExposure = exposure
     gl.domElement.dataset.rendererExposure = exposure.toFixed(3)
-    gl.domElement.dataset.rendererEv = exposureEv.toFixed(2)
+    gl.domElement.dataset.rendererEv100 = exposureEv100.toFixed(2)
     gl.domElement.dataset.toneMapping = toneMapping
-  }, [exposureEv, gl, toneMapping])
+  }, [exposureEv100, gl, toneMapping])
 
   return null
 }
@@ -727,11 +748,13 @@ function RendererSettings({
 function SkyEnvironment({
   atmosphere,
   samplePosition,
+  solarIrradianceScale,
   sunDirection,
   worldToECEFMatrix
 }: {
   atmosphere: MutableRefObject<AtmosphereApi | null>
   samplePosition: Vector3
+  solarIrradianceScale: number
   sunDirection: Vector3
   worldToECEFMatrix: Matrix4
 }) {
@@ -780,7 +803,7 @@ function SkyEnvironment({
 
   useEffect(() => {
     environmentDirty.current = true
-  }, [sunDirection, worldToECEFMatrix, samplePosition])
+  }, [samplePosition, solarIrradianceScale, sunDirection, worldToECEFMatrix])
 
   useFrame(() => {
     const textures = atmosphere.current?.textures
@@ -808,6 +831,7 @@ function SkyEnvironment({
     }
 
     environmentDirty.current = false
+    setSolarIrradianceScale(skyMaterial, solarIrradianceScale)
     skyMaterial.sunDirection.copy(sunDirection)
     skyMaterial.worldToECEFMatrix.copy(worldToECEFMatrix)
     cubeCamera.position.copy(samplePosition)
@@ -849,9 +873,11 @@ function StartupReporter() {
 }
 
 function Terrain({
+  environmentIntensity,
   sunDirection,
   sunLight
 }: {
+  environmentIntensity: number
   sunDirection: Vector3
   sunLight: MutableRefObject<AtmosphereSunDirectionalLight | null>
 }) {
@@ -865,6 +891,7 @@ function Terrain({
         <meshStandardMaterial
           {...grass}
           bumpScale={0.15}
+          envMapIntensity={environmentIntensity}
           roughness={1}
           metalness={0.04}
         />
@@ -880,6 +907,7 @@ function Terrain({
         <meshStandardMaterial
           {...ground}
           bumpScale={0.08}
+          envMapIntensity={environmentIntensity}
           roughness={0.98}
           metalness={0.02}
         />
@@ -896,6 +924,16 @@ function Scene({
   visualSettings: VisualSettings
 }) {
   const atmosphere = useRef<AtmosphereApi | null>(null)
+  const aerialPerspective = useRef<{
+    uniforms?: {
+      ATMOSPHERE?: {
+        value?: {
+          solar_irradiance?: Vector3
+        }
+      }
+    }
+  } | null>(null)
+  const sky = useRef<Mesh | null>(null)
   const sunLight = useRef<AtmosphereSunDirectionalLight | null>(null)
   const worldOrigin = useMemo(
     () => new Geodetic(0, 0, 5).toECEF(new Vector3()),
@@ -923,6 +961,29 @@ function Scene({
   const sunPosition = useMemo(
     () => worldSunDirection.clone().multiplyScalar(SUN_DISTANCE),
     [worldSunDirection]
+  )
+  const directSunIlluminanceScale = useMemo(
+    () =>
+      getDirectSunIlluminanceScale(visualSettings.directSunIlluminanceLux),
+    [visualSettings.directSunIlluminanceLux]
+  )
+  const skyLightScale = useMemo(
+    () =>
+      getSkyLightScale(
+        visualSettings.directSunIlluminanceLux,
+        visualSettings.skyLightMultiplier
+      ),
+    [
+      visualSettings.directSunIlluminanceLux,
+      visualSettings.skyLightMultiplier
+    ]
+  )
+  const atmosphereSolarIrradianceScale = useMemo(
+    () =>
+      getAtmosphereSolarIrradianceScale(
+        visualSettings.directSunIlluminanceLux
+      ),
+    [visualSettings.directSunIlluminanceLux]
   )
   const lightingSamplePosition = useMemo(
     () =>
@@ -973,6 +1034,19 @@ function Scene({
   }, [atmosphereSunDirection])
 
   useEffect(() => {
+    const skyMaterial = sky.current?.material
+
+    if (skyMaterial instanceof SkyMaterial) {
+      setSolarIrradianceScale(skyMaterial, atmosphereSolarIrradianceScale)
+    }
+
+    setSolarIrradianceScale(
+      aerialPerspective.current,
+      atmosphereSolarIrradianceScale
+    )
+  }, [atmosphereSolarIrradianceScale])
+
+  useEffect(() => {
     godRaysSource.position.copy(sunPosition)
     godRaysSource.updateMatrix()
     godRaysSource.updateMatrixWorld(true)
@@ -997,30 +1071,38 @@ function Scene({
       ground={false}
       textures={ATMOSPHERE_TEXTURES_URL}
     >
-      <Sky sunDirection={atmosphereSunDirection} />
+      <Sky
+        ref={sky}
+        sunDirection={atmosphereSunDirection}
+      />
       <SkyEnvironment
         atmosphere={atmosphere}
         samplePosition={lightingSamplePosition}
+        solarIrradianceScale={atmosphereSolarIrradianceScale}
         sunDirection={atmosphereSunDirection}
         worldToECEFMatrix={worldToECEFMatrix}
       />
       <SkyLight
-        intensity={getLightScale(visualSettings.skyLightIntensity)}
+        intensity={skyLightScale}
         position={lightingSamplePosition}
         sunDirection={atmosphereSunDirection}
       />
       <SunLight
         ref={sunLight}
-        intensity={getLightScale(visualSettings.sunIntensity)}
+        intensity={directSunIlluminanceScale}
         position={lightingSamplePosition}
         sunDirection={atmosphereSunDirection}
       />
       <Terrain
+        environmentIntensity={Math.max(0, visualSettings.skyLightMultiplier)}
         sunDirection={worldSunDirection}
         sunLight={sunLight}
       />
       <EffectComposer enableNormalPass>
-        <AerialPerspective sunDirection={atmosphereSunDirection} />
+        <AerialPerspective
+          ref={aerialPerspective}
+          sunDirection={atmosphereSunDirection}
+        />
         {visualSettings.bloom.enabled ? (
           <Bloom intensity={visualSettings.bloom.intensity} />
         ) : null}
@@ -1136,54 +1218,54 @@ function VisualControls({
       </label>
 
       <label className="visual-control-row">
-        <span>Sun Intensity</span>
+        <span>Direct Sun Illuminance</span>
         <input
-          aria-label="Sun Intensity"
-          max={100}
-          min={0}
+          aria-label="Direct Sun Illuminance"
+          max={MAX_DIRECT_SUN_ILLUMINANCE_LUX}
+          min={MIN_DIRECT_SUN_ILLUMINANCE_LUX}
           onChange={(event) => {
-            onSunSettingChange('sunIntensity', Number(event.target.value))
+            onSunSettingChange(
+              'directSunIlluminanceLux',
+              Number(event.target.value)
+            )
           }}
-          step={0.1}
+          step={100}
           type="range"
-          value={visualSettings.sunIntensity}
+          value={visualSettings.directSunIlluminanceLux}
         />
-        <output>{visualSettings.sunIntensity.toFixed(1)}</output>
+        <output>{visualSettings.directSunIlluminanceLux.toFixed(0)} lux</output>
       </label>
 
       <label className="visual-control-row">
-        <span>Sky Light Intensity</span>
+        <span>Sky Light Multiplier</span>
         <input
-          aria-label="Sky Light Intensity"
-          max={100}
+          aria-label="Sky Light Multiplier"
+          max={4}
           min={0}
           onChange={(event) => {
-            onSunSettingChange('skyLightIntensity', Number(event.target.value))
+            onSunSettingChange('skyLightMultiplier', Number(event.target.value))
           }}
-          step={0.1}
+          step={0.05}
           type="range"
-          value={visualSettings.skyLightIntensity}
+          value={visualSettings.skyLightMultiplier}
         />
-        <output>
-          {visualSettings.skyLightIntensity.toFixed(1)}
-          {visualSettings.skyLightLinked ? ' linked' : ''}
-        </output>
+        <output>{visualSettings.skyLightMultiplier.toFixed(2)}x</output>
       </label>
 
       <label className="visual-control-row">
-        <span>Exposure EV</span>
+        <span>Exposure EV100</span>
         <input
-          aria-label="Exposure EV"
-          max={6}
-          min={-6}
+          aria-label="Exposure EV100"
+          max={20}
+          min={8}
           onChange={(event) => {
-            onExposureSettingChange('exposureEv', Number(event.target.value))
+            onExposureSettingChange('exposureEv100', Number(event.target.value))
           }}
           step={0.25}
           type="range"
-          value={visualSettings.exposureEv}
+          value={visualSettings.exposureEv100}
         />
-        <output>{visualSettings.exposureEv.toFixed(2)} EV</output>
+        <output>{visualSettings.exposureEv100.toFixed(2)} EV100</output>
       </label>
 
       <label className="visual-control-row">
@@ -1274,13 +1356,7 @@ export default function App() {
   ) => {
     setVisualSettings((current) => ({
       ...current,
-      [key]: value,
-      ...(key === 'sunIntensity' && current.skyLightLinked
-        ? { skyLightIntensity: value }
-        : {}),
-      ...(key === 'skyLightIntensity'
-        ? { skyLightLinked: Math.abs(value - current.sunIntensity) < 1e-6 }
-        : {})
+      [key]: value
     }))
   }
 
@@ -1344,7 +1420,7 @@ export default function App() {
         }}
       >
         <RendererSettings
-          exposureEv={visualSettings.exposureEv}
+          exposureEv100={visualSettings.exposureEv100}
           toneMapping={visualSettings.toneMapping}
         />
         <StartupReporter />

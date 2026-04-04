@@ -36,18 +36,18 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - The scene uses a single canonical sun direction expressed in ECEF coordinates, and all world-space sun-dependent systems derive from that shared source.
 - The scene exposes a sun rotation slider.
 - The visual controls panel exposes a tone-mapper selector that changes the final composited image rather than only updating internal renderer state.
-- The renderer defaults to a sun intensity of `10` and the sun-intensity slider spans `0` through `100`.
-- The sun intensity control scales the direct sun light, the default-linked sky light value, the water sun highlight, and the god-rays source brightness.
-- Renderer exposure remains a separate presentation setting rather than being driven directly by the sun-intensity control.
-- The visual controls panel exposes a scene exposure control measured in EV stops relative to the default look.
-- Exposure calibration uses a scene-relative EV scale where `EV 0` matches the default presentation, `+1 EV` doubles exposure, and `-1 EV` halves exposure.
-- The scene exposes a sky light intensity slider that defaults to the sun-linked value and remains linked until manually adjusted.
+- The renderer exposes direct sun illuminance in lux as the primary sun-brightness control.
+- The direct sun illuminance control defaults to a calibrated clear-day baseline and is converted to stable internal renderer scales through an explicit calibration layer.
+- The direct sun illuminance control drives the direct sun light, sky fill, atmosphere solar irradiance scale, water sun highlight, and the god-rays source brightness through that shared calibration layer.
+- The renderer exposes camera exposure in EV100 units as the primary exposure control.
+- Exposure calibration uses an EV100 scale where a one-stop increase halves renderer exposure and a one-stop decrease doubles renderer exposure.
+- The scene exposes a sky light multiplier control that scales the calibrated sky-fill contribution relative to the calibrated direct-sun baseline.
 - The renderer uses `AgXToneMapping`.
 - The scene enables Bloom, GodRays, DepthOfField, Lensflare, SSAO, and Vignette with default settings.
 - The UI shows an FPS counter in the top-right corner.
 - Pressing backquote opens and closes a visual controls panel during play.
-- The visual controls panel exposes the sun elevation angle and sun intensity.
-- The visual controls panel exposes the sun rotation angle, scene exposure EV, and the active tone mapper.
+- The visual controls panel exposes the sun elevation angle and direct sun illuminance in lux.
+- The visual controls panel exposes the sun rotation angle, exposure EV100, sky light multiplier, and the active tone mapper.
 - The visual controls panel exposes enabled and intensity controls for Bloom, GodRays, DepthOfField, Lensflare, SSAO, and Vignette.
 - The player can move with first-person WASD controls.
 - The player can look around with mouse look controls.
@@ -79,9 +79,11 @@ The project delivers a browser-based three.js game for GitHub Pages. The initial
 - Atmosphere and lighting combine to produce a sky-backed outdoor scene.
 - The sky and lighting avoid a black first frame by using a known-good atmosphere configuration from the library's documented light-source example pattern.
 - Direct sun color for scene lighting is derived from the atmosphere model's transmittance rather than a manually authored white sun color.
+- Atmosphere solar brightness is scaled from the same calibrated direct-sun illuminance input used for direct lighting.
 - Water highlights derive their sun color from the same atmosphere-derived direct sun color used by the directional light.
 - Diffuse sky lighting derives from the same atmosphere state and world position as the visible sky.
 - The scene provides a sky-derived environment map for specular reflections so PBR materials can reflect lighting that is directionally consistent with the visible sky.
+- The final image brightness is determined by the combination of calibrated scene lighting and EV100-controlled camera exposure rather than by hidden exposure multipliers on the sun control.
 - Collision keeps the cube solid and keeps the plane below the water as an active surface boundary.
 - The water surface uses the official three.js `Water` material and animation path rather than a generic translucent plane.
 - The water and seabed remain separated by 1 meter.

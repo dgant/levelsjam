@@ -31,7 +31,7 @@ function measureBrightness(buffer) {
   }
 }
 
-async function screenshotCanvasRegion(page, canvas, width = 160, height = 100) {
+async function screenshotCanvasRegion(page, canvas, width = 100, height = 64) {
   const box = await canvas.boundingBox()
 
   if (!box) {
@@ -55,7 +55,7 @@ async function waitForBrightFrame(page, canvas, minimumAverageBrightness, timeou
   const deadline = Date.now() + timeoutMs
   let lastMeasurement = { average: 0, max: 0 }
 
-  await page.waitForTimeout(500)
+  await page.waitForTimeout(300)
 
   while (Date.now() < deadline) {
     lastMeasurement = measureBrightness(
@@ -66,7 +66,7 @@ async function waitForBrightFrame(page, canvas, minimumAverageBrightness, timeou
       return lastMeasurement
     }
 
-    await page.waitForTimeout(400)
+    await page.waitForTimeout(250)
   }
 
   throw new Error(
@@ -78,7 +78,7 @@ async function waitForBrightnessMeasurement(page, canvas, predicate, timeoutMs =
   const deadline = Date.now() + timeoutMs
   let lastMeasurement = { average: 0, max: 0 }
 
-  await page.waitForTimeout(300)
+  await page.waitForTimeout(150)
 
   while (Date.now() < deadline) {
     lastMeasurement = measureBrightness(
@@ -89,7 +89,7 @@ async function waitForBrightnessMeasurement(page, canvas, predicate, timeoutMs =
       return lastMeasurement
     }
 
-    await page.waitForTimeout(300)
+    await page.waitForTimeout(150)
   }
 
   throw new Error(
@@ -137,26 +137,21 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
     timeout: 5_000
   })
   await expect(page.getByLabel('Sun Rotation')).toBeVisible({ timeout: 5_000 })
-  await expect(page.getByLabel('Sky Light Intensity')).toBeVisible({
+  await expect(page.getByLabel('Sky Light Multiplier')).toBeVisible({
     timeout: 5_000
   })
-  await expect(page.getByLabel('Exposure EV')).toBeVisible({ timeout: 5_000 })
+  await expect(page.getByLabel('Direct Sun Illuminance')).toBeVisible({
+    timeout: 5_000
+  })
+  await expect(page.getByLabel('Exposure EV100')).toBeVisible({ timeout: 5_000 })
   await expect(page.getByLabel('Tone Mapper')).toBeVisible({ timeout: 5_000 })
 
-  await page.getByLabel('Tone Mapper').selectOption('linear')
-  await expect
-    .poll(async () => canvas.getAttribute('data-tone-mapping'), {
-      timeout: 5_000,
-      intervals: [100, 250, 500]
-    })
-    .toBe('linear')
-
-  await page.getByLabel('Sun Intensity').evaluate((element) => {
+  await page.getByLabel('Direct Sun Illuminance').evaluate((element) => {
     const descriptor = Object.getOwnPropertyDescriptor(
       HTMLInputElement.prototype,
       'value'
     )
-    descriptor.set.call(element, '25')
+    descriptor.set.call(element, '20000')
     element.dispatchEvent(new Event('input', { bubbles: true }))
     element.dispatchEvent(new Event('change', { bubbles: true }))
   })
@@ -166,14 +161,19 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
       intervals: [100, 250, 500]
     })
     .toBe('1.200')
+  const dimmedFrameBrightness = await waitForBrightnessMeasurement(
+    page,
+    canvas,
+    (measurement) => measurement.average < frameBrightness.average - 5
+  )
   const sunAdjustedExposure = await canvas.getAttribute('data-renderer-exposure')
 
-  await page.getByLabel('Exposure EV').evaluate((element) => {
+  await page.getByLabel('Exposure EV100').evaluate((element) => {
     const descriptor = Object.getOwnPropertyDescriptor(
       HTMLInputElement.prototype,
       'value'
     )
-    descriptor.set.call(element, '1')
+    descriptor.set.call(element, '14')
     element.dispatchEvent(new Event('input', { bubbles: true }))
     element.dispatchEvent(new Event('change', { bubbles: true }))
   })
@@ -184,17 +184,24 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
     })
     .toBe('2.400')
   await expect
-    .poll(async () => canvas.getAttribute('data-renderer-ev'), {
+    .poll(async () => canvas.getAttribute('data-renderer-ev100'), {
       timeout: 5_000,
       intervals: [100, 250, 500]
     })
-    .toBe('1.00')
+    .toBe('14.00')
   const boostedFrameBrightness = await waitForBrightnessMeasurement(
     page,
     canvas,
-    (measurement) => measurement.average > frameBrightness.average + 8
+    (measurement) => measurement.average > dimmedFrameBrightness.average + 5
   )
   const updatedExposure = await canvas.getAttribute('data-renderer-exposure')
+  await page.getByLabel('Tone Mapper').selectOption('linear')
+  await expect
+    .poll(async () => canvas.getAttribute('data-tone-mapping'), {
+      timeout: 5_000,
+      intervals: [100, 250, 500]
+    })
+    .toBe('linear')
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
   expect(
@@ -220,7 +227,10 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
     )
   ).toBe(false)
   expect(frameBrightness.max).toBeGreaterThan(40)
+  expect(dimmedFrameBrightness.average).toBeLessThan(frameBrightness.average - 5)
   expect(sunAdjustedExposure).toBe('1.200')
   expect(updatedExposure).toBe('2.400')
-  expect(boostedFrameBrightness.average).toBeGreaterThan(frameBrightness.average + 8)
+  expect(boostedFrameBrightness.average).toBeGreaterThan(
+    dimmedFrameBrightness.average + 5
+  )
 })

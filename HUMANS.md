@@ -1,7 +1,7 @@
 # How To Work On This Project
 
 ## Current State
-The repository contains a runnable browser game prototype for GitHub Pages. The current build serves a three.js scene with immediate mouse-look, WASD movement, hold-space vertical thrust, a same-origin `three-atmosphere` sky setup, atmosphere-derived sun color shared across lighting and water highlights, a sky-derived environment map for PBR reflections, and a backquote visual-controls panel with sun, exposure-EV, and tone-mapper controls.
+The repository contains a runnable browser game prototype for GitHub Pages. The current build serves a three.js scene with immediate mouse-look, WASD movement, hold-space vertical thrust, a same-origin `three-atmosphere` sky setup, atmosphere-derived sun color shared across lighting and water highlights, a sky-derived environment map for PBR reflections, and a backquote visual-controls panel with direct-sun illuminance in lux, exposure EV100, and tone-mapper controls.
 
 ## Local Setup
 - Install Node.js 20 or newer.
@@ -35,14 +35,15 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify horizontal motion follows the current camera-relative input direction and that directly opposing input decelerates rather than accelerates through the turn.
 - Verify mouse lock releases on escape-style modifier keys and re-engages on ordinary input.
 - Verify the sun sits at a 30-degree elevation and the tone mapper is `AgXToneMapping`.
-- Verify the visual controls panel exposes the tone-mapper selector and that the default sun intensity is `10` with a `0-100` slider range.
-- Verify the visual controls panel exposes the `Exposure EV` slider and that `EV 0` maps to the default presentation.
+- Verify the visual controls panel exposes the tone-mapper selector and that the default direct-sun illuminance is `100000 lux`.
+- Verify the visual controls panel exposes the `Exposure EV100` slider and that `EV100 15` maps to the default presentation.
+- Verify changing direct-sun illuminance changes scene lighting while leaving `canvas[data-renderer-exposure]` unchanged until the EV100 slider moves.
+- Verify changing `Exposure EV100` by `-1` doubles `canvas[data-renderer-exposure]`.
 - Verify the direct sun color warms and cools with sun angle instead of staying flat white in the water highlights.
 - Verify specular reflections on the cube, seabed, and water respond to a sky-derived environment that matches the visible atmosphere.
 - Verify only the atmospheric sun disk is visible in the rendered scene while god rays remain functional.
 - Verify the atmosphere textures load from local `textures/atmosphere/*.exr` assets instead of `media.githubusercontent.com`.
-- Verify changing sun intensity does not rewrite renderer exposure; the `canvas[data-renderer-exposure]` value should remain at the configured EV-derived baseline until the exposure slider changes.
-- Verify moving the `Exposure EV` slider by `+1` doubles `canvas[data-renderer-exposure]`.
+- Verify changing direct-sun illuminance updates atmosphere, water, and surface brightness coherently rather than only boosting one part of the scene.
 - Verify the requested postprocessing effects are present with their default settings.
 - Verify the FPS counter appears in the top-right corner.
 - Verify pressing backquote opens the visual controls panel.
@@ -52,8 +53,8 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Treat duration regressions as blocking issues.
 - Keep `npm run test:unit` under 20 seconds.
 - Keep the prepared smoke runner `npm run test:smoke:runner` under 1 minute after a single `npm run build:pages`.
-- Latest measured benchmark on April 4, 2026: `node scripts/benchmark-startup.cjs` reached the first bright rendered frame in about `489.3ms` against the background Vite server after adding the sky-derived PMREM environment map.
-- Latest measured benchmark on April 4, 2026: `node scripts/benchmark-tests.cjs` completed `npm run test:unit` in about `917ms` and `npm run test:smoke:runner` in about `38.7s` after one prepared build.
+- Latest measured benchmark on April 4, 2026: `node scripts/benchmark-startup.cjs` reached the first bright rendered frame in about `364.0ms` against the background Vite server with the lux-and-EV100 lighting calibration in place.
+- Latest measured benchmark on April 4, 2026: `node scripts/benchmark-tests.cjs` completed `npm run test:unit` in about `978ms` and `npm run test:smoke:runner` in about `42.1s` after one prepared build.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.

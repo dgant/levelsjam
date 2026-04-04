@@ -17,3 +17,5 @@
 - When a UI light-strength control defaults to a non-unit value for usability, normalize it back around the rendering library's default baseline before applying it to actual light intensities.
 - When the user asks for EV calibration in this project, implement it as an explicit scene-relative EV control with `EV 0` at the calibrated default look and one-stop doubling/halving of exposure per EV step.
 - When smoke-test time regresses, trim browser harness overhead before touching app code. In this repository, dropping expensive screenshot comparisons and reducing the Playwright viewport produced a large win.
+- When the user asks for physically anchored lighting controls in this project, expose direct sun illuminance in lux and exposure in EV100, then convert those UI values through a documented calibration layer instead of pretending the renderer's internal units are already photometric.
+- When using `three-atmosphere` for this project, treat the package as the atmosphere color authority and scale its solar-irradiance uniforms, direct light, sky fill, and PMREM environment together from the same lux input so the sky, water, and surfaces stay matched.
