@@ -55,6 +55,8 @@ async function waitForBrightFrame(page, canvas, minimumAverageBrightness, timeou
   const deadline = Date.now() + timeoutMs
   let lastMeasurement = { average: 0, max: 0 }
 
+  await page.waitForTimeout(500)
+
   while (Date.now() < deadline) {
     lastMeasurement = measureBrightness(
       await screenshotCanvasRegion(page, canvas)
@@ -64,11 +66,34 @@ async function waitForBrightFrame(page, canvas, minimumAverageBrightness, timeou
       return lastMeasurement
     }
 
-    await page.waitForTimeout(150)
+    await page.waitForTimeout(400)
   }
 
   throw new Error(
     `Canvas brightness did not exceed ${minimumAverageBrightness}; last measurement was ${lastMeasurement.average.toFixed(2)}`
+  )
+}
+
+async function waitForBrightnessMeasurement(page, canvas, predicate, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs
+  let lastMeasurement = { average: 0, max: 0 }
+
+  await page.waitForTimeout(300)
+
+  while (Date.now() < deadline) {
+    lastMeasurement = measureBrightness(
+      await screenshotCanvasRegion(page, canvas)
+    )
+
+    if (predicate(lastMeasurement)) {
+      return lastMeasurement
+    }
+
+    await page.waitForTimeout(300)
+  }
+
+  throw new Error(
+    `Canvas brightness did not reach the expected state; last measurement was avg=${lastMeasurement.average.toFixed(2)} max=${lastMeasurement.max.toFixed(2)}`
   )
 }
 
@@ -164,6 +189,11 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
       intervals: [100, 250, 500]
     })
     .toBe('1.00')
+  const boostedFrameBrightness = await waitForBrightnessMeasurement(
+    page,
+    canvas,
+    (measurement) => measurement.average > frameBrightness.average + 8
+  )
   const updatedExposure = await canvas.getAttribute('data-renderer-exposure')
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
@@ -192,4 +222,5 @@ test('loads the flight scaffold without runtime errors', async ({ page }) => {
   expect(frameBrightness.max).toBeGreaterThan(40)
   expect(sunAdjustedExposure).toBe('1.200')
   expect(updatedExposure).toBe('2.400')
+  expect(boostedFrameBrightness.average).toBeGreaterThan(frameBrightness.average + 8)
 })

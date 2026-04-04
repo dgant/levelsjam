@@ -715,7 +715,7 @@ function RendererSettings({
     const exposure = getRendererExposure(exposureEv)
 
     gl.toneMapping = NoToneMapping
-    gl.toneMappingExposure = 1
+    gl.toneMappingExposure = exposure
     gl.domElement.dataset.rendererExposure = exposure.toFixed(3)
     gl.domElement.dataset.rendererEv = exposureEv.toFixed(2)
     gl.domElement.dataset.toneMapping = toneMapping
@@ -1047,7 +1047,6 @@ function Scene({
           <Vignette darkness={visualSettings.vignette.intensity} />
         ) : null}
         <ToneMapping
-          exposure={getRendererExposure(visualSettings.exposureEv)}
           mode={TONE_MAPPING_MODES[visualSettings.toneMapping]}
           resolution={256}
         />
