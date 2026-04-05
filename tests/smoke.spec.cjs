@@ -31,7 +31,14 @@ function measureBrightness(buffer) {
   }
 }
 
-async function screenshotCanvasRegion(page, canvas, width = 80, height = 48) {
+async function screenshotCanvasRegion(
+  page,
+  canvas,
+  width = 80,
+  height = 48,
+  anchorX = 0.5,
+  anchorY = 0.5
+) {
   const box = await canvas.boundingBox()
 
   if (!box) {
@@ -40,11 +47,17 @@ async function screenshotCanvasRegion(page, canvas, width = 80, height = 48) {
 
   const clipWidth = Math.min(width, box.width)
   const clipHeight = Math.min(height, box.height)
+  const centerX = box.x + (box.width * anchorX)
+  const centerY = box.y + (box.height * anchorY)
+  const minX = box.x
+  const maxX = box.x + box.width - clipWidth
+  const minY = box.y
+  const maxY = box.y + box.height - clipHeight
 
   return page.screenshot({
     clip: {
-      x: box.x + ((box.width - clipWidth) / 2),
-      y: box.y + ((box.height - clipHeight) / 2),
+      x: Math.max(minX, Math.min(maxX, centerX - (clipWidth / 2))),
+      y: Math.max(minY, Math.min(maxY, centerY - (clipHeight / 2))),
       width: clipWidth,
       height: clipHeight
     }
@@ -122,12 +135,15 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   await expect(loadingOverlay).toBeVisible({ timeout: 5_000 })
   await expect(loadingTitle).toHaveText('MINOTAUR')
   await expect(loadingSubtitle).toContainText('Entering the labyrinth')
+  const initialSubtitleWidth = (await loadingSubtitle.boundingBox())?.width ?? 0
 
   const initialSubtitle = await loadingSubtitle.textContent()
   await page.waitForTimeout(275)
   const updatedSubtitle = await loadingSubtitle.textContent()
+  const updatedSubtitleWidth = (await loadingSubtitle.boundingBox())?.width ?? 0
   expect(updatedSubtitle).not.toBeNull()
   expect(updatedSubtitle).not.toEqual(initialSubtitle)
+  expect(Math.abs(updatedSubtitleWidth - initialSubtitleWidth)).toBeLessThanOrEqual(1)
 
   await expect(loadingOverlay).toBeHidden({ timeout: 12_000 })
   await expect(canvas).toBeVisible({ timeout: 5_000 })
@@ -161,6 +177,8 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   await expect(page.locator('[data-testid="visual-controls"]')).toContainText('17.50 EV100')
   await expect(page.getByLabel('Sun Rotation')).toHaveCount(0)
   await expect(page.getByLabel('Direct Sun Illuminance')).toHaveCount(0)
+  await expect(page.getByLabel('IBL Intensity')).toHaveAttribute('max', '16')
+  await expect(page.getByLabel('Torch Candelas')).toHaveAttribute('max', '16')
 
   await page.getByLabel('Exposure EV100').evaluate((element) => {
     const descriptor = Object.getOwnPropertyDescriptor(
@@ -200,8 +218,17 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
     .locator('.visual-effect-toggle')
     .filter({ hasText: 'SSR' })
     .locator('input')
+  const skyBrightnessBeforeSSR = measureBrightness(
+    await screenshotCanvasRegion(page, canvas, 120, 60, 0.5, 0.12)
+  )
   await ssrToggle.check()
   await page.waitForTimeout(750)
+  const skyBrightnessWithSSR = measureBrightness(
+    await screenshotCanvasRegion(page, canvas, 120, 60, 0.5, 0.12)
+  )
+  expect(skyBrightnessWithSSR.average).toBeLessThanOrEqual(
+    skyBrightnessBeforeSSR.average * 1.35
+  )
 
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])

@@ -8,7 +8,7 @@ export const WALL_HEIGHT = 2
 export const WALL_LENGTH = 4
 export const WALL_WIDTH = 0.5
 export const SCONCE_RADIUS = 0.25
-export const TORCH_BILLBOARD_SIZE = 0.125
+export const TORCH_BILLBOARD_SIZE = 0.5
 export const TORCH_BASE_CANDELA = 1500
 export const PLAYER_SPAWN_POSITION = Object.freeze({
   x: 0,

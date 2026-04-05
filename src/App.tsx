@@ -121,7 +121,8 @@ const LOADING_DOT_INTERVAL_MS = 250
 const LOADING_FADE_DURATION_MS = 2000
 const FIRE_FLIPBOOK_GRID = 6
 const FIRE_FLIPBOOK_FRAME_COUNT = FIRE_FLIPBOOK_GRID * FIRE_FLIPBOOK_GRID
-const FIRE_FLIPBOOK_DURATION_SECONDS = 4
+const FIRE_FLIPBOOK_DURATION_SECONDS = 0.5
+const TORCH_FLICKER_SPEED = 2
 const FIRE_FLIPBOOK_FRAME_CROP = {
   maxX: 0.6187683284457478,
   maxY: 0.8123167155425219,
@@ -136,8 +137,8 @@ const FIRE_COLOR = new Color('#ffb168')
 const FIRE_BILLBOARD_INTENSITY_SCALE = 1 / TORCH_BASE_CANDELA
 const CUBE_BACKGROUND_RESOLUTION = 512
 const TORCH_SHADOW_MAP_SIZE = 256
-const TORCH_SHADOW_DISTANCE_SQ = 14 * 14
-const SSR_INTENSITY_SCALE = 0.05
+const TORCH_SHADOW_DISTANCE_SQ = 40 * 40
+const SSR_INTENSITY_SCALE = 0.02
 const LENS_FLARE_COLOR_GAIN_SCALE = 0.02
 const TONE_MAPPING_MODES = {
   linear: PostToneMappingMode.LINEAR,
@@ -249,7 +250,7 @@ function createDefaultVisualSettings(): VisualSettings {
     depthOfField: { enabled: false, intensity: 1 },
     lensFlare: { enabled: false, intensity: 1 },
     n8ao: { enabled: true, intensity: 1 },
-    ssr: { enabled: false, intensity: 1 },
+    ssr: { enabled: false, intensity: 0.25 },
     vignette: { enabled: true, intensity: 0.4 }
   }
 }
@@ -403,10 +404,11 @@ function useFireFlipbookTexture() {
 }
 
 function getTorchNoise(time: number, seed: number) {
+  const scaledTime = time * TORCH_FLICKER_SPEED
   const oscillation =
-    Math.sin((time * 7.3) + seed) * 0.45 +
-    Math.sin((time * 12.1) + (seed * 1.7)) * 0.35 +
-    Math.sin((time * 19.3) + (seed * 0.6)) * 0.2
+    Math.sin((scaledTime * 7.3) + seed) * 0.45 +
+    Math.sin((scaledTime * 12.1) + (seed * 1.7)) * 0.35 +
+    Math.sin((scaledTime * 19.3) + (seed * 0.6)) * 0.2
 
   return Math.max(0, Math.min(1, (oscillation * 0.5) + 0.5))
 }
@@ -417,6 +419,7 @@ function LoadingOverlay({
   complete: boolean
 }) {
   const [dotCount, setDotCount] = useState(1)
+  const dots = '.'.repeat(dotCount)
 
   useEffect(() => {
     if (complete) {
@@ -439,7 +442,15 @@ function LoadingOverlay({
       data-loading-complete={complete ? 'true' : 'false'}
     >
       <h1>MINOTAUR</h1>
-      <h2>{`Entering the labyrinth${'.'.repeat(dotCount)}`}</h2>
+      <h2>
+        <span>Entering the labyrinth</span>
+        <span
+          aria-hidden="true"
+          className="loading-overlay-dots"
+        >
+          {dots}
+        </span>
+      </h2>
     </div>
   )
 }
@@ -783,47 +794,34 @@ function Walls({
   const lightHandles = useRef(
     WALL_LAYOUT.map(() => ({ current: null as TorchLightHandle | null }))
   )
-  const activeShadowIndex = useRef(-1)
   const tempPosition = useMemo(() => new Vector3(), [])
 
   useFrame(() => {
-    let nextShadowIndex = -1
-    let nearestDistanceSq = TORCH_SHADOW_DISTANCE_SQ
-
     for (const wall of WALL_LAYOUT) {
+      const light = lightHandles.current[wall.index]?.current
+
+      if (!light) {
+        continue
+      }
+
       tempPosition.set(
         wall.torchPosition.x,
         wall.torchPosition.y,
         wall.torchPosition.z
       )
       const distanceSq = camera.position.distanceToSquared(tempPosition)
+      const shouldCastShadow = distanceSq <= TORCH_SHADOW_DISTANCE_SQ
 
-      if (distanceSq >= nearestDistanceSq) {
+      if (light.castShadow === shouldCastShadow) {
         continue
       }
 
-      nearestDistanceSq = distanceSq
-      nextShadowIndex = wall.index
+      light.castShadow = shouldCastShadow
+      light.shadow.autoUpdate = false
+      if (shouldCastShadow) {
+        light.shadow.needsUpdate = true
+      }
     }
-
-    if (nextShadowIndex === activeShadowIndex.current) {
-      return
-    }
-
-    const previousLight = lightHandles.current[activeShadowIndex.current]?.current
-    if (previousLight) {
-      previousLight.castShadow = false
-      previousLight.shadow.autoUpdate = false
-    }
-
-    const nextLight = lightHandles.current[nextShadowIndex]?.current
-    if (nextLight) {
-      nextLight.castShadow = true
-      nextLight.shadow.autoUpdate = true
-      nextLight.shadow.needsUpdate = true
-    }
-
-    activeShadowIndex.current = nextShadowIndex
   })
 
   return (

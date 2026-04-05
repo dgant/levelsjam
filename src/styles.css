@@ -76,6 +76,16 @@ body {
   font-size: clamp(0.95rem, 2vw, 1.35rem);
   font-weight: 500;
   color: rgb(230 212 171 / 88%);
+  display: inline-flex;
+  justify-content: center;
+  align-items: baseline;
+}
+
+.loading-overlay-dots {
+  display: inline-block;
+  width: 3ch;
+  text-align: left;
+  white-space: pre;
 }
 
 .loading-overlay-hidden {

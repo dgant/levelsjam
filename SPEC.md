@@ -29,17 +29,22 @@
 - Each wall sconce remains visibly readable against the wall and under the torch it supports.
 - Each wall sconce supports a camera-facing torch billboard above it.
 - Each torch billboard and torch point light are positioned one sconce radius outside the wall face with the sconce.
-- Each torch billboard is 0.125 meters square.
+- Each torch billboard sits directly on top of the sconce rather than floating above it.
+- Each torch billboard is 0.5 meters square.
 - Each torch billboard uses the linked source flipbook asset rather than a procedurally generated placeholder.
 - Each torch billboard uses the local committed `CampFire_l_nosmoke_front_Loop_01_4K_6x6.png` atlas copied from the linked source asset.
-- Each torch billboard uses a 6x6 fire flipbook atlas and loops across 36 frames in 4 seconds.
+- Each torch billboard uses a 6x6 fire flipbook atlas.
+- Each torch billboard animation plays eight times faster than the previous 4-second loop.
 - Each torch billboard uses an unlit material.
 - Each torch billboard brightness is scaled from a 1500 candela torch baseline.
-- Each torch billboard samples the linked atlas so the visible flame fills the specified 0.125 meter quad and sits on the sconce instead of floating above it due to transparent frame padding.
+- Each torch billboard samples the linked atlas so the visible flame fills the specified quad and sits on the sconce instead of floating above it due to transparent frame padding.
 - Each torch has a shadow-casting point light located at the billboard center.
 - Each torch point light intensity equals `(0.5 + 0.5 * noise) * 1500` candelas.
 - Each torch point light distance equals `(0.5 + 0.5 * noise) * 10` meters.
+- Each torch point light flickers at twice the previous speed.
 - Each torch point light uses a warm fire-appropriate color.
+- Torch shadows are enabled within a fixed 40 meter radius of the camera.
+- Torch shadows within that radius reuse static shadow maps while the lights and occluders remain stationary.
 - The player collides with the ground plane and the walls.
 - The character collision volume is a capsule that is 1.75 meters tall and 0.25 meters in radius.
 - The player spawns 1 meter above the ground plane.
@@ -62,8 +67,8 @@
 - The scene does not use God Rays.
 - Bloom, Depth of Field, Lens Flares, and SSR default to disabled.
 - The debug panel exposure EV100 control defaults to `17.5`.
-- The debug panel exposes an IBL intensity multiplier.
-- The debug panel exposes a torch candela multiplier.
+- The debug panel exposes an IBL intensity multiplier across a wide enough range to rebalance the HDRI against the torches without relying on physically calibrated EV semantics.
+- The debug panel exposes a torch candela multiplier across a wide enough range to rebalance the torches against the HDRI without relying on physically calibrated EV semantics.
 - The debug panel lens flare control adjusts the effect using the lens flare opacity parameter rather than an arbitrary color-gain multiplier.
 - The debug panel does not expose obsolete atmosphere or sun-direction controls.
 - The page shows an FPS counter in the top-right corner.
@@ -73,6 +78,7 @@
 - The loading overlay shows an `h1` with the text `MINOTAUR`.
 - The loading overlay shows an `h2` with the text `Entering the labyrinth...`.
 - The loading overlay animates the trailing dots on the subtitle through `1`, `2`, `3`, `1`, `2`, `3` at 0.25 second intervals.
+- The loading subtitle keeps a consistent total width while the trailing dots animate.
 - The loading overlay remains visible until the scene assets have loaded.
 - Once the scene assets have loaded, the loading text fades out over 2 seconds.
 - Once the scene assets have loaded, the viewport fades in over the same 2 second interval.
@@ -106,11 +112,11 @@
 - The torch billboards animate smoothly through the flipbook loop without lighting artifacts from scene lights.
 - Torch point lights and torch billboards read as a matched fire source rather than independent unrelated elements.
 - The scene reads as an overcast exterior space lit primarily by environment light and torches.
-- Exposure EV100 uses a fixed absolute calibration rather than treating the chosen default EV as the calibration pivot.
-- Exposure EV100 uses a fixed `overcast_soil` HDRI calibration rather than treating the current UI default as the calibration pivot.
-- Exposure EV100 compensates for the renderer's internal light-unit scale so the scene can use precision-friendly buffer values without changing the calibrated final look.
+- Exposure EV100 acts as a stop-based presentation control rather than a claim of strict physical camera calibration.
+- IBL intensity and torch candela controls are the primary balancing controls between the HDRI and torches.
 - Raising EV100 darkens the rendered image even if the control's default value changes.
 - Enabling SSR from the debug panel does not halt rendering or introduce runtime errors.
+- Enabling SSR does not brighten the visible HDRI skybox independently of the reflected surfaces.
 - The page does not show speculative branding captions, launcher buttons, or click-to-enter copy.
 
 ## Debug Controls

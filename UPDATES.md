@@ -29,3 +29,4 @@
 - When running Playwright smoke tests repeatedly in this repository, wait for the `serve-root` port to become free before starting the next benchmarked runner so transient web-server shutdown races do not fail the harness.
 - When manually launching Chromium in benchmark scripts for this repository, close it in a `finally` block so failed runs do not leak headless Chrome processes.
 - When a user sets a hard FPS floor for this project, enforce it with an automated browser render benchmark instead of relying on visual impressions or the throttled headless FPS counter.
+- In this project, if SSR brightens the HDRI sky unexpectedly, inspect the vendored SSR shader for extra env-map fallback or double-counting before merely lowering the user-facing intensity control.

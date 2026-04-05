@@ -17,7 +17,14 @@ test('default scene benchmark stays at or above 120 FPS', async ({ page }) => {
   })
 
   await page.goto('/', { waitUntil: 'domcontentloaded' })
-  await expect(page.locator('.loading-overlay')).toBeHidden({ timeout: 12_000 })
+  await expect
+    .poll(async () => {
+      return page.locator('.loading-overlay').getAttribute('data-loading-complete')
+    }, {
+      timeout: 12_000,
+      intervals: [100, 250, 500]
+    })
+    .toBe('true')
 
   await expect
     .poll(async () => {

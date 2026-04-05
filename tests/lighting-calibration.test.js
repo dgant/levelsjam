@@ -46,9 +46,9 @@ test('exposes the ibl and torch multiplier control ranges', () => {
   assert.equal(DEFAULT_IBL_INTENSITY_MULTIPLIER, 1)
   assert.equal(DEFAULT_TORCH_CANDELA_MULTIPLIER, 1)
   assert.equal(MIN_IBL_INTENSITY_MULTIPLIER, 0)
-  assert.equal(MAX_IBL_INTENSITY_MULTIPLIER, 4)
+  assert.equal(MAX_IBL_INTENSITY_MULTIPLIER, 16)
   assert.equal(MIN_TORCH_CANDELA_MULTIPLIER, 0)
-  assert.equal(MAX_TORCH_CANDELA_MULTIPLIER, 4)
+  assert.equal(MAX_TORCH_CANDELA_MULTIPLIER, 16)
 })
 
 test('uses a shared internal light-unit scale for HDRI and photometric lights', () => {

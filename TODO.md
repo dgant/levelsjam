@@ -60,3 +60,10 @@
 [x] Replace DOF with postprocessing DOF
 [x] Include SSR
 [x] Disable Bloom, DOF, LensFlares by default
+[x] "Entering the labyrinth" should keep a consistent total width while animating so the text doesn't slide around
+[x] Enable shadows within a fixed radius of 40m
+[x] Double the speed of the light flickering
+[x] Enabling SSR makes the HDRI skybox extremely bright. I am confused why SSR would even affect the skybox
+[x] 8x the fire animation speed.
+[x] The fire billboards are positioned well above the sconce instead of right on top of it.
+[x] 4x the size of the fire billboard

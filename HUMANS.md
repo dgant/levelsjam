@@ -27,7 +27,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the main page renders the 3D scene without console errors.
 - Verify the loading overlay appears with `MINOTAUR` and `Entering the labyrinth...` before the scene fades in.
 - Verify `W`, `A`, `S`, and `D` move the camera.
-- Verify mouse movement changes view direction without a preliminary click.
+- Verify mouse movement changes view direction after an explicit click locks the pointer to the canvas.
 - Verify holding `Space` applies upward thrust and releasing it stops the ascent.
 - Verify the player starts 1 meter above the ground plane.
 - Verify ground contact is stable: the character should rest on collision instead of popping upward and falling again in a loop.
@@ -43,21 +43,26 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the torch billboard uses the linked `CampFire_l_nosmoke_front_Loop_01_4K_6x6.png` atlas.
 - Verify the sconces are visibly readable outside the walls rather than disappearing behind the torch billboard or wall face.
 - Verify the torch billboards animate and face the camera.
-- Verify the visible flame fills the 0.125m billboard and sits on the sconce instead of appearing tiny or floating above it.
+- Verify the visible flame fills the 0.5m billboard and sits on the sconce instead of appearing tiny or floating above it.
 - Verify each wall has a warm torch point light and the lights cast shadows.
+- Verify torch shadows remain active for nearby torches out to 40m from the camera.
+- Verify the torch flicker runs at the updated faster rate.
+- Verify the fire flipbook runs at the updated faster rate.
 - Verify the tone mapper is `AgX` by default.
 - Verify the visual controls panel exposes `Exposure EV100`, `IBL Intensity`, `Torch Candelas`, the tone mapper, and the enabled/intensity controls for Bloom, Depth Of Field, Lens Flares, N8AO, SSR, and Vignette.
+- Verify the `IBL Intensity` and `Torch Candelas` sliders each cover a wide enough range to rebalance the HDRI and torches without touching EV.
 - Verify Bloom, Depth Of Field, Lens Flares, and SSR start disabled.
 - Verify the default `Exposure EV100` value is `17.5`.
 - Verify each sconce, billboard, and torch light sits one sconce radius outside the wall face rather than intersecting the wall.
-- Verify changing the default EV value changes rendered brightness according to an absolute EV scale rather than keeping the same baseline look under a new label.
-- Verify changing `Exposure EV100` changes brightness by absolute stop differences while the HDRI stays on its fixed calibration path.
+- Verify changing `Exposure EV100` changes rendered brightness by stop differences.
 - Verify changing `Exposure EV100` updates `canvas[data-renderer-exposure]`.
 - Verify enabling SSR from the visual controls panel does not introduce page errors or halt rendering.
+- Verify enabling SSR does not make the visible HDRI skybox jump brighter.
 - Verify the FPS counter appears in the top-right corner.
 - Verify pressing backquote opens the visual controls panel.
 - Verify the panel no longer exposes obsolete atmosphere or sun controls.
 - Verify opening the panel releases mouse lock and clicking inside the panel does not relock the pointer.
+- Verify the loading subtitle width stays visually stable while the animated dots change.
 - Benchmark startup with `npm run bench:startup` and test duration with `npm run bench:tests` before handoff.
 - Treat duration regressions as blocking issues.
 - Treat a failed `npm run test:perf` run or a measured browser benchmark below `120 FPS` as blocking.
