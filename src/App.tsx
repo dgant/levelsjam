@@ -11,11 +11,13 @@ import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
 import { LensFlareEffect } from '@react-three/postprocessing'
 import {
   CanvasTexture,
+  CircleGeometry,
   Color,
   DoubleSide,
   EquirectangularReflectionMapping,
   Euler,
   Group,
+  LatheGeometry,
   Mesh,
   MeshBasicMaterial,
   NoToneMapping,
@@ -45,6 +47,7 @@ import {
   ToneMappingMode as PostToneMappingMode
 } from 'postprocessing'
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { SSREffect } from './vendor/screen-space-reflections.js'
 import {
   DEFAULT_EXPOSURE_STOPS,
@@ -173,6 +176,31 @@ const TONE_MAPPING_OPTIONS = [
 ] as const
 const cameraEuler = new Euler(0, 0, 0, 'YXZ')
 const defaultMoveDirection = new Vector3(0, 0, -1)
+const sconceProfilePoints = Array.from({ length: 25 }, (_, index) => {
+  const angle = (index / 24) * (Math.PI / 2)
+
+  return new Vector2(
+    SCONCE_RADIUS * Math.cos(angle),
+    -SCONCE_RADIUS * Math.sin(angle)
+  )
+})
+
+function createSconceGeometry() {
+  const bowl = new LatheGeometry(sconceProfilePoints, 48)
+  const cap = new CircleGeometry(SCONCE_RADIUS, 48)
+
+  cap.rotateX(-Math.PI / 2)
+
+  const geometry = mergeGeometries([bowl, cap], false)
+
+  geometry.computeVertexNormals()
+  bowl.dispose()
+  cap.dispose()
+
+  return geometry
+}
+
+const SCONCE_GEOMETRY = createSconceGeometry()
 const exposureEffectShader = `
 uniform float exposure;
 
@@ -845,46 +873,15 @@ function WallSconce({
       >
         <mesh
           castShadow
+          geometry={SCONCE_GEOMETRY}
           userData={{ debugIndex: wall.index, debugRole: 'sconce-body' }}
         >
-          <sphereGeometry
-            args={[
-              SCONCE_RADIUS,
-              24,
-              16,
-              0,
-              Math.PI * 2,
-              Math.PI / 2,
-              Math.PI / 2
-            ]}
-          />
           <meshStandardMaterial
             {...metal}
-            aoMapIntensity={0.35}
             bumpScale={0.02}
-            emissive="#4f3112"
-            emissiveIntensity={0.18}
-            envMapIntensity={4}
-            metalness={0.25}
-            roughness={0.7}
-            side={DoubleSide}
-          />
-        </mesh>
-        <mesh
-          castShadow
-          rotation-x={-Math.PI / 2}
-          userData={{ debugIndex: wall.index, debugRole: 'sconce-cap' }}
-        >
-          <circleGeometry args={[SCONCE_RADIUS, 24]} />
-          <meshStandardMaterial
-            {...metal}
-            aoMapIntensity={0.35}
-            bumpScale={0.02}
-            emissive="#4f3112"
-            emissiveIntensity={0.18}
-            envMapIntensity={4}
-            metalness={0.25}
-            roughness={0.7}
+            envMapIntensity={1.5}
+            metalness={1}
+            roughness={1}
             side={DoubleSide}
           />
         </mesh>
@@ -1549,7 +1546,7 @@ function Scene({
     }
     const existing = globalWindow.__levelsjamDebug ?? {}
     const debugIsolationMaterial = new MeshBasicMaterial({
-      color: new Color('#ff00ff'),
+      color: new Color('black'),
       side: DoubleSide
     })
     let restoreDebugIsolation = () => {}
@@ -1608,7 +1605,7 @@ function Scene({
         }
       })
 
-      scene.background = new Color('black')
+      scene.background = new Color('white')
       scene.visible = true
 
       restoreDebugIsolation = () => {

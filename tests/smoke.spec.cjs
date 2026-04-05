@@ -54,7 +54,7 @@ function measureDifference(bufferA, bufferB) {
   return total / (pixelCount * 3)
 }
 
-function createNonBlackMask(buffer, minimumChannel = 12) {
+function createDarkMask(buffer, maximumChannel = 24) {
   const image = PNG.sync.read(buffer)
   const mask = new Uint8Array(image.width * image.height)
   let count = 0
@@ -62,9 +62,9 @@ function createNonBlackMask(buffer, minimumChannel = 12) {
   for (let index = 0; index < image.data.length; index += 4) {
     const pixelIndex = index / 4
     if (
-      image.data[index] >= minimumChannel ||
-      image.data[index + 1] >= minimumChannel ||
-      image.data[index + 2] >= minimumChannel
+      image.data[index] <= maximumChannel &&
+      image.data[index + 1] <= maximumChannel &&
+      image.data[index + 2] <= maximumChannel
     ) {
       mask[pixelIndex] = 1
       count += 1
@@ -272,12 +272,11 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   })
   await page.waitForTimeout(300)
   const sconceBodyMaskSource = await screenshotCanvasRegion(page, canvas, 220, 180, 0.46, 0.68)
-  const sconceBodyMask = createNonBlackMask(sconceBodyMaskSource)
+  const sconceBodyMask = createDarkMask(sconceBodyMaskSource)
   expect(sconceBodyMask.count).toBeGreaterThan(4_000)
   await page.evaluate(() => {
     window.__levelsjamDebug.clearDebugIsolation()
     window.__levelsjamDebug.setDebugVisible('torch-billboard', 4, false)
-    window.__levelsjamDebug.setDebugVisible('sconce-cap', 4, false)
   })
   await page.waitForTimeout(300)
   const sconceBodyVisible = await screenshotCanvasRegion(page, canvas, 220, 180, 0.46, 0.68)
@@ -288,14 +287,13 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   const sconceBodyHidden = await screenshotCanvasRegion(page, canvas, 220, 180, 0.46, 0.68)
   await page.evaluate(() => {
     window.__levelsjamDebug.setDebugVisible('sconce-body', 4, true)
-    window.__levelsjamDebug.setDebugVisible('sconce-cap', 4, true)
     window.__levelsjamDebug.setDebugVisible('torch-billboard', 4, true)
   })
-  expect(measureMaskedBrightness(sconceBodyVisible, sconceBodyMask)).toBeGreaterThan(25)
+  expect(measureMaskedBrightness(sconceBodyVisible, sconceBodyMask)).toBeGreaterThan(10)
   expect(measureMaskedBrightness(sconceBodyHidden, sconceBodyMask)).toBeLessThan(5)
   expect(
     measureMaskedDifference(sconceBodyVisible, sconceBodyHidden, sconceBodyMask)
-  ).toBeGreaterThan(25)
+  ).toBeGreaterThan(10)
   await page.evaluate(() => {
     window.__levelsjamDebug.setView([0, 2.5, 0], [0, 2.5, -10])
   })
