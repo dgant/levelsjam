@@ -36,3 +36,4 @@
 - Copying the camera's world quaternion straight onto a billboard fails under rotated parent groups. The child billboard needs the camera orientation converted into the parent's local space first.
 - In this repository's vendored SSR pass, unsupported meshes must be hidden during the g-buffer render. Leaving them visible while merely skipping the MRT material replacement still lets unlit or transparent meshes contaminate SSR.
 - The `@react-three/postprocessing` lens flare effect's `opacity` uniform fades the flare out rather than making it stronger, so visible flare strength should primarily come from `colorGain`, `glareSize`, `flareSize`, and `haloScale`.
+- Post-effect debug controls are only trustworthy when they map to the actual wrapped effect props. In this repository, Bloom kernel size requires the non-`mipmapBlur` path, and Depth Of Field needs separate `focusDistance`, `focalLength`, and `bokehScale` controls.

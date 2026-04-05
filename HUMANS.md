@@ -41,7 +41,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the ground, walls, and sconces load the committed PBR texture packs instead of preview images.
 - Verify the torch billboard uses the linked flipbook asset rather than a generated placeholder atlas.
 - Verify the torch billboard uses the linked `CampFire_l_nosmoke_front_Loop_01_4K_6x6.png` atlas.
-- Verify each sconce is a solid capped hemisphere with its curved top facing upward rather than a sideways-open shell.
+- Verify each sconce is a solid capped lower hemisphere with the flat cap on top and the curved surface below.
 - Verify the sconces are visibly readable outside the walls rather than disappearing behind the torch billboard or wall face.
 - Verify the torch billboards animate and stay camera-facing even on walls whose parent groups are rotated.
 - Verify the visible flame fills the 0.5m billboard and sits on the sconce instead of appearing tiny or floating above it.
@@ -51,6 +51,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the fire flipbook runs at the updated faster rate.
 - Verify the tone mapper is `AgX` by default.
 - Verify the visual controls panel exposes `Exposure`, `IBL Intensity`, `Torch Candelas`, `Torch Flicker`, `Ambient Occlusion`, `AO Intensity`, the tone mapper, and the enabled/intensity controls for Bloom, Depth Of Field, Lens Flares, SSR, and Vignette.
+- Verify the visual controls panel also exposes `Bloom Kernel`, `DOF Focus Distance`, `DOF Focal Length`, and `Depth Of Field Bokeh Scale`.
 - Verify the `IBL Intensity` and `Torch Candelas` sliders each cover a wide enough range to rebalance the HDRI and torches without touching the exposure stops control.
 - Verify Bloom, Depth Of Field, Lens Flares, and SSR start disabled.
 - Verify the default `Exposure` value is `0.0`.

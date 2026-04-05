@@ -40,6 +40,7 @@ import {
 import {
   BlendFunction,
   Effect,
+  KernelSize,
   ToneMappingMode as PostToneMappingMode
 } from 'postprocessing'
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js'
@@ -186,6 +187,46 @@ type EffectSettings = {
   intensity: number
 }
 
+type BloomKernelSizeKey =
+  | 'very-small'
+  | 'small'
+  | 'medium'
+  | 'large'
+  | 'very-large'
+  | 'huge'
+
+type BloomSettings = EffectSettings & {
+  kernelSize: BloomKernelSizeKey
+}
+
+type DepthOfFieldSettings = {
+  bokehScale: number
+  enabled: boolean
+  focalLength: number
+  focusDistance: number
+}
+
+const BLOOM_KERNEL_SIZES: Record<BloomKernelSizeKey, KernelSize> = {
+  'very-small': KernelSize.VERY_SMALL,
+  small: KernelSize.SMALL,
+  medium: KernelSize.MEDIUM,
+  large: KernelSize.LARGE,
+  'very-large': KernelSize.VERY_LARGE,
+  huge: KernelSize.HUGE
+}
+
+const BLOOM_KERNEL_OPTIONS: Array<{
+  key: BloomKernelSizeKey
+  label: string
+}> = [
+  { key: 'very-small', label: 'Very Small' },
+  { key: 'small', label: 'Small' },
+  { key: 'medium', label: 'Medium' },
+  { key: 'large', label: 'Large' },
+  { key: 'very-large', label: 'Very Large' },
+  { key: 'huge', label: 'Huge' }
+]
+
 type VisualSettings = {
   ambientOcclusionIntensity: number
   ambientOcclusionMode: AmbientOcclusionMode
@@ -194,23 +235,14 @@ type VisualSettings = {
   torchCandelaMultiplier: number
   torchFlickerAmount: number
   toneMapping: ToneMappingMode
-  bloom: EffectSettings
-  depthOfField: EffectSettings
+  bloom: BloomSettings
+  depthOfField: DepthOfFieldSettings
   lensFlare: EffectSettings
   ssr: EffectSettings
   vignette: EffectSettings
 }
 
-type EffectSettingKey = Exclude<
-  keyof VisualSettings,
-  | 'ambientOcclusionIntensity'
-  | 'ambientOcclusionMode'
-  | 'exposureStops'
-  | 'iblIntensity'
-  | 'torchCandelaMultiplier'
-  | 'torchFlickerAmount'
-  | 'toneMapping'
->
+type GenericEffectSettingKey = 'lensFlare' | 'ssr' | 'vignette'
 type ScalarSettingKey =
   | 'ambientOcclusionIntensity'
   | 'exposureStops'
@@ -275,8 +307,13 @@ function createDefaultVisualSettings(): VisualSettings {
     torchCandelaMultiplier: DEFAULT_TORCH_CANDELA_MULTIPLIER,
     torchFlickerAmount: DEFAULT_TORCH_FLICKER_AMOUNT,
     toneMapping: 'agx',
-    bloom: { enabled: false, intensity: 0.7 },
-    depthOfField: { enabled: false, intensity: 1 },
+    bloom: { enabled: false, intensity: 0.7, kernelSize: 'large' },
+    depthOfField: {
+      bokehScale: 1,
+      enabled: false,
+      focalLength: 0.03,
+      focusDistance: 0.02
+    },
     lensFlare: { enabled: false, intensity: 1 },
     ssr: { enabled: false, intensity: 0.6 },
     vignette: { enabled: true, intensity: 0.4 }
@@ -810,13 +847,14 @@ function WallSconce({
             16,
             0,
             Math.PI * 2,
-            0,
+            Math.PI / 2,
             Math.PI / 2
           ]}
         />
         <meshStandardMaterial
           {...metal}
           bumpScale={0.02}
+          envMapIntensity={2}
           metalness={0.8}
           roughness={0.35}
         />
@@ -825,12 +863,13 @@ function WallSconce({
         castShadow
         position={[position[0], position[1], position[2]]}
         receiveShadow
-        rotation-x={-Math.PI / 2}
+        rotation-x={Math.PI / 2}
       >
         <circleGeometry args={[SCONCE_RADIUS, 24]} />
         <meshStandardMaterial
           {...metal}
           bumpScale={0.02}
+          envMapIntensity={2}
           metalness={0.8}
           roughness={0.35}
         />
@@ -1479,16 +1518,16 @@ function Scene({
         {visualSettings.bloom.enabled ? (
           <Bloom
             intensity={visualSettings.bloom.intensity}
+            kernelSize={BLOOM_KERNEL_SIZES[visualSettings.bloom.kernelSize]}
             luminanceSmoothing={0.08}
             luminanceThreshold={0.6}
-            mipmapBlur
           />
         ) : null}
         {visualSettings.depthOfField.enabled ? (
           <DepthOfField
-            bokehScale={visualSettings.depthOfField.intensity}
-            focalLength={0.03}
-            focusDistance={0.02}
+            bokehScale={visualSettings.depthOfField.bokehScale}
+            focalLength={visualSettings.depthOfField.focalLength}
+            focusDistance={visualSettings.depthOfField.focusDistance}
           />
         ) : null}
         {visualSettings.lensFlare.enabled ? (
@@ -1518,16 +1557,20 @@ function Scene({
 
 function VisualControls({
   onAmbientOcclusionModeChange,
+  onBloomSettingChange,
   controlsOpen,
+  onDepthOfFieldSettingChange,
   onEffectSettingChange,
   onScalarSettingChange,
   onToneMappingChange,
   visualSettings
 }: {
   onAmbientOcclusionModeChange: (value: AmbientOcclusionMode) => void
+  onBloomSettingChange: (patch: Partial<BloomSettings>) => void
   controlsOpen: boolean
+  onDepthOfFieldSettingChange: (patch: Partial<DepthOfFieldSettings>) => void
   onEffectSettingChange: (
-    effect: EffectSettingKey,
+    effect: GenericEffectSettingKey,
     patch: Partial<EffectSettings>
   ) => void
   onScalarSettingChange: (key: ScalarSettingKey, value: number) => void
@@ -1539,14 +1582,12 @@ function VisualControls({
   }
 
   const effectControls: Array<{
-    key: EffectSettingKey
+    key: GenericEffectSettingKey
     label: string
     max: number
     min: number
     step: number
   }> = [
-    { key: 'bloom', label: 'Bloom', min: 0, max: 3, step: 0.05 },
-    { key: 'depthOfField', label: 'Depth Of Field', min: 0, max: 5, step: 0.05 },
     { key: 'lensFlare', label: 'Lens Flares', min: 0, max: 1, step: 0.05 },
     { key: 'ssr', label: 'SSR', min: 0, max: 2, step: 0.05 },
     { key: 'vignette', label: 'Vignette', min: 0, max: 1, step: 0.05 }
@@ -1698,6 +1739,138 @@ function VisualControls({
         />
       </label>
 
+      <div className="visual-control-row">
+        <output>
+          {visualSettings.bloom.enabled ? visualSettings.bloom.intensity.toFixed(2) : 'off'}
+        </output>
+        <label className="visual-effect-label">
+          <input
+            checked={visualSettings.bloom.enabled}
+            onChange={(event) => {
+              onBloomSettingChange({
+                enabled: event.target.checked
+              })
+            }}
+            type="checkbox"
+          />
+          <span>Bloom</span>
+        </label>
+        <input
+          aria-label="Bloom Intensity"
+          disabled={!visualSettings.bloom.enabled}
+          max={3}
+          min={0}
+          onChange={(event) => {
+            onBloomSettingChange({
+              intensity: Number(event.target.value)
+            })
+          }}
+          step={0.05}
+          type="range"
+          value={visualSettings.bloom.intensity}
+        />
+      </div>
+
+      <label className="visual-control-row">
+        <output>
+          {BLOOM_KERNEL_OPTIONS.find(
+            (option) => option.key === visualSettings.bloom.kernelSize
+          )?.label ?? visualSettings.bloom.kernelSize}
+        </output>
+        <span>Bloom Kernel</span>
+        <select
+          aria-label="Bloom Kernel"
+          disabled={!visualSettings.bloom.enabled}
+          onChange={(event) => {
+            onBloomSettingChange({
+              kernelSize: event.target.value as BloomKernelSizeKey
+            })
+          }}
+          value={visualSettings.bloom.kernelSize}
+        >
+          {BLOOM_KERNEL_OPTIONS.map((option) => (
+            <option
+              key={option.key}
+              value={option.key}
+            >
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <div className="visual-control-row">
+        <output>
+          {visualSettings.depthOfField.enabled
+            ? visualSettings.depthOfField.bokehScale.toFixed(2)
+            : 'off'}
+        </output>
+        <label className="visual-effect-label">
+          <input
+            checked={visualSettings.depthOfField.enabled}
+            onChange={(event) => {
+              onDepthOfFieldSettingChange({
+                enabled: event.target.checked
+              })
+            }}
+            type="checkbox"
+          />
+          <span>Depth Of Field</span>
+        </label>
+        <input
+          aria-label="Depth Of Field Bokeh Scale"
+          disabled={!visualSettings.depthOfField.enabled}
+          max={5}
+          min={0}
+          onChange={(event) => {
+            onDepthOfFieldSettingChange({
+              bokehScale: Number(event.target.value)
+            })
+          }}
+          step={0.05}
+          type="range"
+          value={visualSettings.depthOfField.bokehScale}
+        />
+      </div>
+
+      <label className="visual-control-row">
+        <output>{visualSettings.depthOfField.focusDistance.toFixed(3)}</output>
+        <span>DOF Focus Distance</span>
+        <input
+          aria-label="DOF Focus Distance"
+          disabled={!visualSettings.depthOfField.enabled}
+          max={1}
+          min={0}
+          onChange={(event) => {
+            onDepthOfFieldSettingChange({
+              focusDistance: Number(event.target.value)
+            })
+          }}
+          step={0.001}
+          type="range"
+          value={visualSettings.depthOfField.focusDistance}
+        />
+      </label>
+
+      <label className="visual-control-row">
+        <output>{visualSettings.depthOfField.focalLength.toFixed(3)}</output>
+        <span>DOF Focal Length</span>
+        <input
+          aria-label="DOF Focal Length"
+          disabled={!visualSettings.depthOfField.enabled}
+          max={0.2}
+          min={0}
+          onChange={(event) => {
+            onDepthOfFieldSettingChange({
+              focalLength: Number(event.target.value)
+            })
+          }}
+          step={0.001}
+          type="range"
+          value={visualSettings.depthOfField.focalLength}
+        />
+      </label>
+
       {effectControls.map((effectControl) => {
         const effectSettings = visualSettings[effectControl.key]
 
@@ -1772,13 +1945,33 @@ export default function App() {
   }
 
   const onEffectSettingChange = (
-    effect: EffectSettingKey,
+    effect: GenericEffectSettingKey,
     patch: Partial<EffectSettings>
   ) => {
     setVisualSettings((current) => ({
       ...current,
       [effect]: {
         ...current[effect],
+        ...patch
+      }
+    }))
+  }
+
+  const onBloomSettingChange = (patch: Partial<BloomSettings>) => {
+    setVisualSettings((current) => ({
+      ...current,
+      bloom: {
+        ...current.bloom,
+        ...patch
+      }
+    }))
+  }
+
+  const onDepthOfFieldSettingChange = (patch: Partial<DepthOfFieldSettings>) => {
+    setVisualSettings((current) => ({
+      ...current,
+      depthOfField: {
+        ...current.depthOfField,
         ...patch
       }
     }))
@@ -1811,6 +2004,8 @@ export default function App() {
       <VisualControls
         controlsOpen={controlsOpen}
         onAmbientOcclusionModeChange={onAmbientOcclusionModeChange}
+        onBloomSettingChange={onBloomSettingChange}
+        onDepthOfFieldSettingChange={onDepthOfFieldSettingChange}
         onEffectSettingChange={onEffectSettingChange}
         onScalarSettingChange={onScalarSettingChange}
         onToneMappingChange={onToneMappingChange}

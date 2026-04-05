@@ -35,3 +35,4 @@
 - When billboarded effects live under rotated parent groups, compute their local billboard quaternion from the parent's world rotation instead of copying the camera's world quaternion directly.
 - When restricting SSR in this repository to PBR materials, hide unsupported meshes during the SSR g-buffer pass and restore them afterward; merely skipping the MRT material swap is not enough.
 - In this project, `@react-three/postprocessing` lens flares use `opacity` as suppression, while `colorGain` and the flare sizes control the visible strength. Drive the UI accordingly.
+- When the user asks to expose post-effect controls, wire the exact underlying effect parameters into the debugger instead of relabeling a generic intensity slider.
