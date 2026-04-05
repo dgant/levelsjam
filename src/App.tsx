@@ -17,6 +17,7 @@ import {
   Euler,
   Group,
   Mesh,
+  MeshBasicMaterial,
   NoToneMapping,
   PMREMGenerator,
   Quaternion,
@@ -1536,15 +1537,22 @@ function Scene({
   useEffect(() => {
     const globalWindow = window as Window & {
       __levelsjamDebug?: {
+        clearDebugIsolation?: () => void
         setDebugVisible?: (
           role: string,
           index: number,
           visible: boolean
         ) => void
+        isolateDebugRole?: (role: string, index: number) => void
         setSconceVisible?: (index: number, visible: boolean) => void
       }
     }
     const existing = globalWindow.__levelsjamDebug ?? {}
+    const debugIsolationMaterial = new MeshBasicMaterial({
+      color: new Color('#ff00ff'),
+      side: DoubleSide
+    })
+    let restoreDebugIsolation = () => {}
 
     const setDebugVisible = (role: string, index: number, visible: boolean) => {
       scene.traverse((object) => {
@@ -1557,8 +1565,69 @@ function Scene({
       })
     }
 
+    const clearDebugIsolation = () => {
+      restoreDebugIsolation()
+      restoreDebugIsolation = () => {}
+    }
+
+    const isolateDebugRole = (role: string, index: number) => {
+      clearDebugIsolation()
+      const savedVisibility: Array<{ object: { visible: boolean }, visible: boolean }> = []
+      const savedMeshes: Array<{
+        castShadow: boolean
+        material: Mesh['material']
+        mesh: Mesh
+        receiveShadow: boolean
+      }> = []
+      const savedBackground = scene.background
+
+      scene.traverse((object) => {
+        savedVisibility.push({ object, visible: object.visible })
+        const match =
+          object.userData?.debugRole === role &&
+          object.userData?.debugIndex === index
+
+        if (
+          !match &&
+          (object instanceof Mesh ||
+            'isLight' in object)
+        ) {
+          object.visible = false
+        }
+
+        if (match && object instanceof Mesh) {
+          savedMeshes.push({
+            castShadow: object.castShadow,
+            material: object.material,
+            mesh: object,
+            receiveShadow: object.receiveShadow
+          })
+          object.castShadow = false
+          object.receiveShadow = false
+          object.material = debugIsolationMaterial
+        }
+      })
+
+      scene.background = new Color('black')
+      scene.visible = true
+
+      restoreDebugIsolation = () => {
+        for (const entry of savedVisibility) {
+          entry.object.visible = entry.visible
+        }
+        for (const entry of savedMeshes) {
+          entry.mesh.castShadow = entry.castShadow
+          entry.mesh.receiveShadow = entry.receiveShadow
+          entry.mesh.material = entry.material
+        }
+        scene.background = savedBackground
+      }
+    }
+
     globalWindow.__levelsjamDebug = {
       ...existing,
+      clearDebugIsolation,
+      isolateDebugRole,
       setDebugVisible,
       setSconceVisible: (index, visible) => {
         setDebugVisible('sconce', index, visible)
@@ -1570,7 +1639,11 @@ function Scene({
         return
       }
 
+      clearDebugIsolation()
+      debugIsolationMaterial.dispose()
+      delete globalWindow.__levelsjamDebug.clearDebugIsolation
       delete globalWindow.__levelsjamDebug.setDebugVisible
+      delete globalWindow.__levelsjamDebug.isolateDebugRole
       delete globalWindow.__levelsjamDebug.setSconceVisible
       if (Object.keys(globalWindow.__levelsjamDebug).length === 0) {
         delete globalWindow.__levelsjamDebug

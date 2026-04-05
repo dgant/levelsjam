@@ -54,6 +54,66 @@ function measureDifference(bufferA, bufferB) {
   return total / (pixelCount * 3)
 }
 
+function createNonBlackMask(buffer, minimumChannel = 12) {
+  const image = PNG.sync.read(buffer)
+  const mask = new Uint8Array(image.width * image.height)
+  let count = 0
+
+  for (let index = 0; index < image.data.length; index += 4) {
+    const pixelIndex = index / 4
+    if (
+      image.data[index] >= minimumChannel ||
+      image.data[index + 1] >= minimumChannel ||
+      image.data[index + 2] >= minimumChannel
+    ) {
+      mask[pixelIndex] = 1
+      count += 1
+    }
+  }
+
+  return {
+    count,
+    height: image.height,
+    mask,
+    width: image.width
+  }
+}
+
+function measureMaskedDifference(bufferA, bufferB, maskInfo) {
+  const imageA = PNG.sync.read(bufferA)
+  const imageB = PNG.sync.read(bufferB)
+
+  if (
+    imageA.width !== imageB.width ||
+    imageA.height !== imageB.height ||
+    imageA.width !== maskInfo.width ||
+    imageA.height !== maskInfo.height
+  ) {
+    throw new Error('Masked diff requires matching image dimensions')
+  }
+
+  let total = 0
+  let count = 0
+
+  for (let pixelIndex = 0; pixelIndex < maskInfo.mask.length; pixelIndex += 1) {
+    if (!maskInfo.mask[pixelIndex]) {
+      continue
+    }
+
+    const index = pixelIndex * 4
+    total += Math.abs(imageA.data[index] - imageB.data[index])
+    total += Math.abs(imageA.data[index + 1] - imageB.data[index + 1])
+    total += Math.abs(imageA.data[index + 2] - imageB.data[index + 2])
+    count += 1
+  }
+
+  if (count === 0) {
+    return 0
+  }
+
+  return total / (count * 3)
+}
+
 async function screenshotCanvasRegion(
   page,
   canvas,
@@ -178,6 +238,14 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
       [-5.8, 1.45, -0.48],
       [-6.739980294369161, 1.2, -0.4781253710389137]
     )
+    window.__levelsjamDebug.isolateDebugRole('sconce-body', 4)
+  })
+  await page.waitForTimeout(300)
+  const sconceBodyMaskSource = await screenshotCanvasRegion(page, canvas, 220, 180, 0.46, 0.68)
+  const sconceBodyMask = createNonBlackMask(sconceBodyMaskSource)
+  expect(sconceBodyMask.count).toBeGreaterThan(4_000)
+  await page.evaluate(() => {
+    window.__levelsjamDebug.clearDebugIsolation()
     window.__levelsjamDebug.setDebugVisible('torch-billboard', 4, false)
     window.__levelsjamDebug.setDebugVisible('sconce-cap', 4, false)
   })
@@ -193,7 +261,9 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
     window.__levelsjamDebug.setDebugVisible('sconce-cap', 4, true)
     window.__levelsjamDebug.setDebugVisible('torch-billboard', 4, true)
   })
-  expect(measureDifference(sconceBodyVisible, sconceBodyHidden)).toBeGreaterThan(4)
+  expect(
+    measureMaskedDifference(sconceBodyVisible, sconceBodyHidden, sconceBodyMask)
+  ).toBeGreaterThan(6)
   await page.evaluate(() => {
     window.__levelsjamDebug.setView([0, 2.5, 0], [0, 2.5, -10])
   })
