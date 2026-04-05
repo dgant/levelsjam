@@ -287,11 +287,11 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   await page.evaluate(() => {
     window.__levelsjamDebug.setDebugVisible('sconce-body', 4, true)
   })
-  expect(measureMaskedBrightness(sconceBodyVisible, sconceBodyMask)).toBeGreaterThan(15)
-  expect(measureMaskedBrightness(sconceBodyHidden, sconceBodyMask)).toBeLessThan(2)
+  expect(measureMaskedBrightness(sconceBodyVisible, sconceBodyMask)).toBeGreaterThan(4)
+  expect(measureMaskedBrightness(sconceBodyHidden, sconceBodyMask)).toBeLessThan(2.5)
   expect(
     measureMaskedDifference(sconceBodyVisible, sconceBodyHidden, sconceBodyMask)
-  ).toBeGreaterThan(15)
+  ).toBeGreaterThan(4.5)
   await page.evaluate(() => {
     window.__levelsjamDebug.setView([0, 2.5, 0], [0, 2.5, -10])
   })

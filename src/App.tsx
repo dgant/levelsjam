@@ -11,13 +11,11 @@ import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
 import { LensFlareEffect } from '@react-three/postprocessing'
 import {
   CanvasTexture,
-  CircleGeometry,
   Color,
   DoubleSide,
   EquirectangularReflectionMapping,
   Euler,
   Group,
-  LatheGeometry,
   Mesh,
   NoToneMapping,
   PMREMGenerator,
@@ -46,7 +44,6 @@ import {
   ToneMappingMode as PostToneMappingMode
 } from 'postprocessing'
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js'
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { SSREffect } from './vendor/screen-space-reflections.js'
 import {
   DEFAULT_EXPOSURE_STOPS,
@@ -175,31 +172,6 @@ const TONE_MAPPING_OPTIONS = [
 ] as const
 const cameraEuler = new Euler(0, 0, 0, 'YXZ')
 const defaultMoveDirection = new Vector3(0, 0, -1)
-const sconceProfilePoints = Array.from({ length: 25 }, (_, index) => {
-  const angle = (index / 24) * (Math.PI / 2)
-
-  return new Vector2(
-    SCONCE_RADIUS * Math.cos(angle),
-    -SCONCE_RADIUS * Math.sin(angle)
-  )
-})
-
-function createSconceGeometry() {
-  const bowl = new LatheGeometry(sconceProfilePoints, 48)
-  const cap = new CircleGeometry(SCONCE_RADIUS, 48)
-
-  cap.rotateX(-Math.PI / 2)
-
-  const geometry = mergeGeometries([bowl, cap], false)
-
-  geometry.computeVertexNormals()
-  bowl.dispose()
-  cap.dispose()
-
-  return geometry
-}
-
-const SCONCE_GEOMETRY = createSconceGeometry()
 const exposureEffectShader = `
 uniform float exposure;
 
@@ -872,15 +844,54 @@ function WallSconce({
       >
         <mesh
           castShadow
-          geometry={SCONCE_GEOMETRY}
+          position={[0, 0, -wall.sconceDirection * (SCONCE_RADIUS - 0.025)]}
+          receiveShadow
+          rotation-x={Math.PI / 2}
           userData={{ debugIndex: wall.index, debugRole: 'sconce-body' }}
         >
+          <cylinderGeometry args={[SCONCE_RADIUS * 0.82, SCONCE_RADIUS * 0.82, 0.05, 24]} />
           <meshStandardMaterial
             {...metal}
             bumpScale={0.02}
-            envMapIntensity={1.5}
-            metalness={1}
-            roughness={1}
+            metalness={0.85}
+            roughness={0.55}
+          />
+        </mesh>
+        <mesh
+          castShadow
+          position={[0, -SCONCE_RADIUS * 0.06, -wall.sconceDirection * (SCONCE_RADIUS * 0.3)]}
+          receiveShadow
+          rotation-x={Math.PI / 2}
+          userData={{ debugIndex: wall.index, debugRole: 'sconce-body' }}
+        >
+          <cylinderGeometry args={[SCONCE_RADIUS * 0.12, SCONCE_RADIUS * 0.12, SCONCE_RADIUS * 0.5, 18]} />
+          <meshStandardMaterial
+            {...metal}
+            bumpScale={0.02}
+            metalness={0.85}
+            roughness={0.55}
+          />
+        </mesh>
+        <mesh
+          castShadow
+          position={[0, -SCONCE_RADIUS * 0.07, wall.sconceDirection * (SCONCE_RADIUS * 0.08)]}
+          receiveShadow
+          rotation-x={Math.PI / 2}
+          userData={{ debugIndex: wall.index, debugRole: 'sconce-body' }}
+        >
+          <cylinderGeometry
+            args={[
+              SCONCE_RADIUS * 0.2,
+              SCONCE_RADIUS * 0.62,
+              SCONCE_RADIUS * 0.72,
+              24
+            ]}
+          />
+          <meshStandardMaterial
+            {...metal}
+            bumpScale={0.02}
+            metalness={0.85}
+            roughness={0.55}
             side={DoubleSide}
           />
         </mesh>

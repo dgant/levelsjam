@@ -23,9 +23,8 @@
 - Each wall is placed at a deterministic pseudo-random position within `-10m` to `+10m` on the world X and Z axes.
 - Each wall uses the extracted ShareTextures `stone-wall-29` PBR pack rather than preview imagery.
 - Each wall has a metal wall sconce attached to it.
-- Each wall sconce is a 0.25 meter radius solid hemisphere using the extracted ShareTextures `metal-13` PBR pack.
-- Each wall sconce geometry is limited to the lower half of a sphere with its removed top replaced by a flat circular cap at the cut point.
-- Each wall sconce hemisphere is oriented with the flat cap on top and the curved half below rather than opening toward the wall or curving upward.
+- Each wall sconce uses the extracted ShareTextures `metal-13` PBR pack.
+- Each wall sconce uses the established three-part fixture geometry: a circular wall plate, a short central arm, and a forward-facing tapered cup.
 - Each wall sconce is positioned with its center one sconce radius outside the wall face.
 - Each wall sconce remains visibly readable against the wall and under the torch it supports.
 - Each wall sconce supports a camera-facing torch billboard above it.

@@ -41,7 +41,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the ground, walls, and sconces load the committed PBR texture packs instead of preview images.
 - Verify the torch billboard uses the linked flipbook asset rather than a generated placeholder atlas.
 - Verify the torch billboard uses the linked `CampFire_l_nosmoke_front_Loop_01_4K_6x6.png` atlas.
-- Verify each sconce is a solid capped lower hemisphere with the flat cap on top and the curved surface below.
+- Verify each sconce uses the established three-part metal fixture shape rather than the experimental bowl variant.
 - Verify the sconces are visibly readable outside the walls rather than disappearing behind the torch billboard or wall face.
 - Verify the torch billboards animate and stay camera-facing even on walls whose parent groups are rotated.
 - Verify the visible flame fills the 0.5m billboard and sits on the sconce instead of appearing tiny or floating above it.
