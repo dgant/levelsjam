@@ -40,3 +40,4 @@
 - A visibility proof that only changes a prop's cap or an overlapping shadow is not sufficient. For this repository, the sconce shell had to be checked from a side view where the hemisphere body itself occupies visible pixels.
 - For this sconce specifically, a whole-prop diff can still false-positive on the cap or torch overlap. The reliable proof is to hide the billboard and cap, then toggle only the hemisphere body in a side-view crop.
 - A visibility proof should have an intermediate failure mode. In this repository, the isolated sconce-body pass must first generate a non-black screen-space mask before any beauty-pass diff is trusted.
+- In this torch-wall setup, attachment height can matter more than mesh shape. Raising the torch billboard and point light to match the full 0.5m quad made the sconce effectively disappear, while restoring the older lower torch/light placement made the same fixture readable again.

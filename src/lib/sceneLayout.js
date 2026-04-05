@@ -89,7 +89,7 @@ function createWall(index, random) {
   }
   const torchPosition = {
     x: sconcePosition.x,
-    y: sconcePosition.y + SCONCE_RADIUS + (TORCH_BILLBOARD_SIZE / 2),
+    y: sconcePosition.y + SCONCE_RADIUS + 0.08,
     z: sconcePosition.z
   }
 
