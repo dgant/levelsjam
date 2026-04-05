@@ -19,6 +19,7 @@ import {
   Mesh,
   NoToneMapping,
   PMREMGenerator,
+  Quaternion,
   RepeatWrapping,
   SRGBColorSpace,
   Texture,
@@ -81,6 +82,7 @@ import {
   WALL_LENGTH,
   WALL_WIDTH
 } from './lib/sceneLayout.js'
+import { computeLocalBillboardQuaternion } from './lib/billboard.js'
 
 const assetBase = import.meta.env.BASE_URL
 const ENVIRONMENT_URL = `${assetBase}textures/environment/overcast_soil_1k.hdr`
@@ -144,7 +146,7 @@ const FIRE_BILLBOARD_INTENSITY_SCALE = 1 / TORCH_BASE_CANDELA
 const CUBE_BACKGROUND_RESOLUTION = 512
 const TORCH_SHADOW_MAP_SIZE = 256
 const TORCH_SHADOW_DISTANCE_SQ = 40 * 40
-const LENS_FLARE_COLOR_GAIN_SCALE = 0.02
+const LENS_FLARE_COLOR_GAIN_SCALE = 8
 const AMBIENT_OCCLUSION_OPTIONS = [
   { key: 'off', label: 'Off' },
   { key: 'n8ao', label: 'N8AO' },
@@ -638,6 +640,8 @@ function TorchBillboard({
   const texture = useFireFlipbookTexture()
   const group = useRef<Group>(null)
   const material = useRef<Mesh>(null)
+  const parentWorldQuaternion = useMemo(() => new Quaternion(), [])
+  const localBillboardQuaternion = useMemo(() => new Quaternion(), [])
 
   useFrame((state) => {
     const elapsed = state.clock.getElapsedTime()
@@ -649,7 +653,18 @@ function TorchBillboard({
     const row = Math.floor(frameIndex / FIRE_FLIPBOOK_GRID)
 
     if (group.current) {
-      group.current.quaternion.copy(camera.quaternion)
+      if (group.current.parent) {
+        group.current.parent.getWorldQuaternion(parentWorldQuaternion)
+        group.current.quaternion.copy(
+          computeLocalBillboardQuaternion(
+            parentWorldQuaternion,
+            camera.quaternion,
+            localBillboardQuaternion
+          )
+        )
+      } else {
+        group.current.quaternion.copy(camera.quaternion)
+      }
     }
 
     texture.offset.x =
@@ -787,7 +802,6 @@ function WallSconce({
         castShadow
         position={position}
         receiveShadow
-        rotation-y={localLayout.sconceRotationY}
       >
         <sphereGeometry
           args={[
@@ -795,9 +809,9 @@ function WallSconce({
             24,
             16,
             0,
-            Math.PI,
+            Math.PI * 2,
             0,
-            Math.PI
+            Math.PI / 2
           ]}
         />
         <meshStandardMaterial
@@ -805,7 +819,20 @@ function WallSconce({
           bumpScale={0.02}
           metalness={0.8}
           roughness={0.35}
-          side={DoubleSide}
+        />
+      </mesh>
+      <mesh
+        castShadow
+        position={[position[0], position[1], position[2]]}
+        receiveShadow
+        rotation-x={-Math.PI / 2}
+      >
+        <circleGeometry args={[SCONCE_RADIUS, 24]} />
+        <meshStandardMaterial
+          {...metal}
+          bumpScale={0.02}
+          metalness={0.8}
+          roughness={0.35}
         />
       </mesh>
       <TorchBillboard
@@ -1048,25 +1075,25 @@ function TorchLensFlare({
       new LensFlareEffect({
         blendFunction: BlendFunction.NORMAL,
         enabled: true,
-        glareSize: 0.02,
+        glareSize: 0.16,
         lensPosition: new Vector3(),
         screenRes: new Vector2(size.width, size.height),
         starPoints: 6,
-        flareSize: 0.003,
+        flareSize: 0.012,
         flareSpeed: 0.01,
-        flareShape: 0.1,
+        flareShape: 0.12,
         animated: true,
         anamorphic: false,
         colorGain: FIRE_COLOR.clone().multiplyScalar(LENS_FLARE_COLOR_GAIN_SCALE),
         lensDirtTexture: null,
-        haloScale: 0.2,
+        haloScale: 0.35,
         secondaryGhosts: true,
-        aditionalStreaks: false,
-        ghostScale: 0,
+        aditionalStreaks: true,
+        ghostScale: 0.2,
         opacity: 1,
         starBurst: false
       }),
-    [intensity, size.height, size.width]
+    [size.height, size.width]
   )
   const projectedPosition = useMemo(() => new Vector3(), [])
   const rayDirection = useMemo(() => new Vector3(), [])
@@ -1095,15 +1122,13 @@ function TorchLensFlare({
     let bestBrightness = -1
     let bestScreenX = 0
     let bestScreenY = 0
+    const visibleIntensity = Math.min(1, Math.max(0, intensity))
 
     WALL_LAYOUT.forEach((wall) => {
       const noise = getTorchNoise(state.clock.getElapsedTime(), wall.index + 1)
       const brightness =
-        scalePhotometricIntensity(
-          TORCH_BASE_CANDELA *
-            torchCandelaMultiplier *
-            getTorchFlickerFactor(noise, torchFlickerAmount)
-        ) * intensity
+        torchCandelaMultiplier *
+        getTorchFlickerFactor(noise, torchFlickerAmount)
 
       targetPosition.copy(wall.torchPosition)
       projectedPosition.copy(targetPosition).project(camera)
@@ -1144,7 +1169,7 @@ function TorchLensFlare({
 
     lensPosition.value.x = bestScreenX
     lensPosition.value.y = bestScreenY
-    const targetOpacity = 1 - Math.min(1, Math.max(0, intensity))
+    const targetOpacity = 1 - visibleIntensity
     opacity.value += (targetOpacity - opacity.value) * Math.min(1, delta / 0.12)
     colorGain.value
       .copy(FIRE_COLOR)
@@ -1436,14 +1461,16 @@ function Scene({
         ) : null}
         {visualSettings.ambientOcclusionMode === 'ssao' ? (
           <SSAO
-            distanceFalloff={0.025}
-            distanceThreshold={0.9}
-            intensity={visualSettings.ambientOcclusionIntensity}
-            luminanceInfluence={0.15}
-            radius={18}
-            rangeFalloff={0.1}
-            rangeThreshold={0.001}
-            samples={21}
+            bias={0.2}
+            distanceFalloff={0.06}
+            distanceThreshold={1}
+            intensity={visualSettings.ambientOcclusionIntensity * 2}
+            luminanceInfluence={0}
+            radius={24}
+            rangeFalloff={0.03}
+            rangeThreshold={0.002}
+            rings={4}
+            samples={31}
           />
         ) : null}
         {visualSettings.ssr.enabled ? (

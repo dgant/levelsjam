@@ -33,3 +33,6 @@
 - The vendored SSR shader in this project was double-counting HDRI contribution through its env-map fallback, so fixing sky/scene overbrightening required disabling that fallback rather than just turning down the exposed SSR intensity slider.
 - In this scene, wall attachments must use wall-local offsets rather than subtracting world positions inside a rotated wall group. Otherwise the sconces and torches land on the wrong face and can disappear behind the wall.
 - `realism-effects` `SSGI` is not currently drop-in compatible with this repository's `three` version because it imports `WebGLMultipleRenderTargets`, so AO/GI dropdown options should stay limited to the modes that actually build and run here.
+- Copying the camera's world quaternion straight onto a billboard fails under rotated parent groups. The child billboard needs the camera orientation converted into the parent's local space first.
+- In this repository's vendored SSR pass, unsupported meshes must be hidden during the g-buffer render. Leaving them visible while merely skipping the MRT material replacement still lets unlit or transparent meshes contaminate SSR.
+- The `@react-three/postprocessing` lens flare effect's `opacity` uniform fades the flare out rather than making it stronger, so visible flare strength should primarily come from `colorGain`, `glareSize`, `flareSize`, and `haloScale`.

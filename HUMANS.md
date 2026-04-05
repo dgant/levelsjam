@@ -41,8 +41,9 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the ground, walls, and sconces load the committed PBR texture packs instead of preview images.
 - Verify the torch billboard uses the linked flipbook asset rather than a generated placeholder atlas.
 - Verify the torch billboard uses the linked `CampFire_l_nosmoke_front_Loop_01_4K_6x6.png` atlas.
+- Verify each sconce is a solid capped hemisphere with its curved top facing upward rather than a sideways-open shell.
 - Verify the sconces are visibly readable outside the walls rather than disappearing behind the torch billboard or wall face.
-- Verify the torch billboards animate and face the camera.
+- Verify the torch billboards animate and stay camera-facing even on walls whose parent groups are rotated.
 - Verify the visible flame fills the 0.5m billboard and sits on the sconce instead of appearing tiny or floating above it.
 - Verify each wall has a warm torch point light and the lights cast shadows.
 - Verify torch shadows remain active for nearby torches out to 40m from the camera.
@@ -60,6 +61,8 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify enabling SSR from the visual controls panel does not introduce page errors or halt rendering.
 - Verify enabling SSR visibly changes reflective surfaces.
 - Verify enabling SSR does not make the visible HDRI skybox jump brighter.
+- Verify enabling SSR does not reflect the torch billboards or their transparent pixels.
+- Verify enabling lens flares produces a visible flare around a visible torch.
 - Verify each control row in the visual controls panel keeps the value, label, and control on one line in that order.
 - Verify the FPS counter appears in the top-right corner.
 - Verify pressing backquote opens the visual controls panel.

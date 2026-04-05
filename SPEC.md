@@ -23,9 +23,9 @@
 - Each wall is placed at a deterministic pseudo-random position within `-10m` to `+10m` on the world X and Z axes.
 - Each wall uses the extracted ShareTextures `stone-wall-29` PBR pack rather than preview imagery.
 - Each wall has a metal wall sconce attached to it.
-- Each wall sconce is a 0.25 meter radius hemisphere using the extracted ShareTextures `metal-13` PBR pack.
-- Each wall sconce geometry is only that hemisphere and does not add extra improvised fixture parts beyond the specified hemisphere.
-- Each wall sconce hemisphere is oriented as a wall-mounted bowl with its curved face outward and its flat cut face toward the wall.
+- Each wall sconce is a 0.25 meter radius solid hemisphere using the extracted ShareTextures `metal-13` PBR pack.
+- Each wall sconce geometry is limited to that solid capped hemisphere and does not add extra improvised fixture parts beyond the specified hemisphere.
+- Each wall sconce hemisphere is oriented upward with its curved surface above the wall attachment point rather than opening toward the wall.
 - Each wall sconce is positioned with its center one sconce radius outside the wall face.
 - Each wall sconce remains visibly readable against the wall and under the torch it supports.
 - Each wall sconce supports a camera-facing torch billboard above it.
@@ -116,6 +116,8 @@
 - Reflective and semi-reflective materials read from the shared environment consistently.
 - The torch billboards face the camera continuously.
 - The torch billboards animate smoothly through the flipbook loop without lighting artifacts from scene lights.
+- The torch billboards are excluded from screen-space reflections.
+- Screen-space reflections apply only to the scene's PBR materials rather than to unlit or transparent billboard materials.
 - Torch point lights and torch billboards read as a matched fire source rather than independent unrelated elements.
 - The scene reads as an overcast exterior space lit primarily by environment light and torches.
 - Exposure acts as a neutral stop-offset presentation control with `0.0` meaning no extra gain.
@@ -125,6 +127,7 @@
 - Enabling SSR produces a visible reflection change on reflective scene surfaces.
 - Enabling SSR does not brighten the visible HDRI skybox independently of the reflected surfaces.
 - Selecting `N8AO` or `SSAO` produces a visible ambient-occlusion change around contact areas.
+- Enabling lens flares produces a visible flare around visible torches.
 - The page does not show speculative branding captions, launcher buttons, or click-to-enter copy.
 
 ## Debug Controls

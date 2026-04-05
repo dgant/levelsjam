@@ -32,3 +32,6 @@
 - In this project, if SSR brightens the HDRI sky unexpectedly, inspect the vendored SSR shader for extra env-map fallback or double-counting before merely lowering the user-facing intensity control.
 - When a post effect appears to do nothing in this project, verify the actual parameter scale before assuming the effect is broken. SSR looked dead because its UI range was crushed by an extra `0.02` multiplier, and N8AO looked dead because it was configured with an almost invisible 2px screen-space radius.
 - When an optional third-party rendering package breaks the current `three` build, do not force it in just to satisfy a menu label. Keep the dropdown to the modes that are actually compatible and verified in this repository.
+- When billboarded effects live under rotated parent groups, compute their local billboard quaternion from the parent's world rotation instead of copying the camera's world quaternion directly.
+- When restricting SSR in this repository to PBR materials, hide unsupported meshes during the SSR g-buffer pass and restore them afterward; merely skipping the MRT material swap is not enough.
+- In this project, `@react-three/postprocessing` lens flares use `opacity` as suppression, while `colorGain` and the flare sizes control the visible strength. Drive the UI accordingly.

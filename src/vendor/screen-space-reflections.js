@@ -265,6 +265,7 @@ class ReflectionsPass extends Pass {
     super("ReflectionsPass");
     this.ssrEffect = void 0;
     this.cachedMaterials = new WeakMap();
+    this.hiddenMeshes = [];
     this.USE_MRT = false;
     this.webgl1DepthPass = null;
     this.visibleMeshes = [];
@@ -361,10 +362,17 @@ class ReflectionsPass extends Pass {
 
   setMRTMaterialInScene() {
     this.visibleMeshes = getVisibleChildren(this._scene);
+    this.hiddenMeshes = [];
 
     for (const c of this.visibleMeshes) {
       if (c.material) {
         const originalMaterial = c.material;
+        const supportsSSR = !Array.isArray(originalMaterial) && originalMaterial.isMeshStandardMaterial && !originalMaterial.transparent && (originalMaterial.alphaTest || 0) === 0 && (originalMaterial.opacity ?? 1) >= 1;
+        if (!supportsSSR) {
+          this.hiddenMeshes.push([c, c.visible]);
+          c.visible = false;
+          continue;
+        }
         let [cachedOriginalMaterial, mrtMaterial] = this.cachedMaterials.get(c) || [];
 
         if (originalMaterial !== cachedOriginalMaterial) {
@@ -405,6 +413,11 @@ class ReflectionsPass extends Pass {
         c.material = originalMaterial;
       }
     }
+
+    for (const [mesh, wasVisible] of this.hiddenMeshes) {
+      mesh.visible = wasVisible;
+    }
+    this.hiddenMeshes = [];
   }
 
   render(renderer, inputBuffer) {

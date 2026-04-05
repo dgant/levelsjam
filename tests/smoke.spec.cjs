@@ -256,7 +256,22 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   await page.getByRole('combobox', { name: 'Ambient Occlusion' }).selectOption('ssao')
   await page.waitForTimeout(400)
   const contactRegionSSAO = await screenshotCanvasRegion(page, canvas, 140, 100, 0.5, 0.62)
-  expect(measureDifference(contactRegionOff, contactRegionSSAO)).toBeGreaterThan(0.8)
+  expect(measureDifference(contactRegionOff, contactRegionSSAO)).toBeGreaterThan(1.1)
+
+  const flareRegionBefore = await screenshotCanvasRegion(page, canvas, 180, 120, 0.5, 0.42)
+  await page.getByRole('slider', { name: 'Lens Flares Intensity' }).evaluate((element) => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value'
+    )
+    descriptor.set.call(element, '1')
+    element.dispatchEvent(new Event('input', { bubbles: true }))
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await page.locator('.visual-effect-label').filter({ hasText: 'Lens Flares' }).locator('input').check()
+  await page.waitForTimeout(750)
+  const flareRegionAfter = await screenshotCanvasRegion(page, canvas, 180, 120, 0.5, 0.42)
+  expect(measureDifference(flareRegionBefore, flareRegionAfter)).toBeGreaterThan(0.8)
 
   const skyBrightnessBeforeSSR = measureBrightness(
     await screenshotCanvasRegion(page, canvas, 120, 60, 0.5, 0.12)
