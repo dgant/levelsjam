@@ -93,6 +93,5 @@ Read all .md files in this directory for project-specific context.
 - Give log files human-legible filenames so I can inspect them too.
 - Passwords and credentials must NEVER be stored in source-controlled files. By default these should be in .env and it is crucial for .env to be included in .gitignore
 - Avoid newline (CRLF/LF), tab-vs-space, or other pure whitespace changes unless functionally necessary. These fill up diffs and make them harder to read. Fixing indentation depth is okay when the indentation depth has changed.
-- Make changes via sub-agent. When I have requested multiple changes, attempt to divide them among sub-agents. Work that would touch the same areas or files or features should probably belong to one sub-agent so multiple agents don't trample each other's work. Sub-agents should report what they've done in a way that is visible to you.
 
 
