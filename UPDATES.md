@@ -38,3 +38,4 @@
 - When the user asks to expose post-effect controls, wire the exact underlying effect parameters into the debugger instead of relabeling a generic intensity slider.
 - When proving a rendered prop is visible, isolate the prop's own shell in the screenshot check; a cap highlight or a coincident shadow is not enough evidence.
 - When the user reports that a rendered object is absent, do not reframe the issue as a perception or occlusion problem without proof. First rule out implementation differences that can make the object fail to render at all.
+- When a visual dispute remains unresolved, have the smoke test persist the exact screenshots used for the proof with stable filenames so the human can inspect the same rendered states.

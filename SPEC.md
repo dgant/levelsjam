@@ -160,3 +160,4 @@
 - The backquote shortcut is checked in the browser and verified to open the debug controls panel.
 - The debug controls panel is checked in the browser and verified to expose the new IBL and torch controls while omitting removed atmosphere controls.
 - The automated browser performance test is run and passes at or above 120 frames per second before a change is considered complete.
+- The sconce visibility smoke check writes named screenshot artifacts for each tested state under `test-artifacts/sconce-visibility` so the rendered evidence can be inspected directly.

@@ -4,6 +4,7 @@ dist/
 playwright-report/
 test-results/
 logs/
+test-artifacts/
 preview-server*.log
 .preview-pid
 .vite-dev-server.json

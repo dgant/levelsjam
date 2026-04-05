@@ -56,6 +56,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify Bloom, Depth Of Field, Lens Flares, and SSR start disabled.
 - Verify the default `Exposure` value is `0.0`.
 - Verify each sconce, billboard, and torch light sits one sconce radius outside the wall face rather than intersecting the wall.
+- After `npm run test:smoke`, inspect the saved sconce-state screenshots in [test-artifacts/sconce-visibility](E:/p/levelsjam/test-artifacts/sconce-visibility).
 - Verify changing `Exposure` changes rendered brightness by stop differences.
 - Verify changing `Exposure` updates `canvas[data-renderer-exposure]`.
 - Verify the `Ambient Occlusion` dropdown switches between `Off`, `N8AO`, and `SSAO` and that both AO modes visibly darken contact areas compared with `Off`.

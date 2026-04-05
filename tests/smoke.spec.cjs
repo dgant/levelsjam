@@ -1,7 +1,15 @@
+const fs = require('fs')
+const path = require('path')
 const { PNG } = require('pngjs')
 const { expect, test } = require('@playwright/test')
 
 test.setTimeout(75_000)
+
+const SCONCE_ARTIFACT_DIR = path.join(
+  process.cwd(),
+  'test-artifacts',
+  'sconce-visibility'
+)
 
 function measureBrightness(buffer) {
   const screenshot = PNG.sync.read(buffer)
@@ -54,24 +62,36 @@ function measureDifference(bufferA, bufferB) {
   return total / (pixelCount * 3)
 }
 
-function createDarkMask(buffer, maximumChannel = 24) {
-  const image = PNG.sync.read(buffer)
-  const mask = new Uint8Array(image.width * image.height)
+function createDifferenceMask(bufferA, bufferB, minimumDifference = 8) {
+  const imageA = PNG.sync.read(bufferA)
+  const imageB = PNG.sync.read(bufferB)
+
+  if (
+    imageA.width !== imageB.width ||
+    imageA.height !== imageB.height
+  ) {
+    throw new Error('Difference mask requires matching image dimensions')
+  }
+
+  const mask = new Uint8Array(imageA.width * imageA.height)
   let count = 0
-  let minX = image.width
-  let minY = image.height
+  let minX = imageA.width
+  let minY = imageA.height
   let maxX = -1
   let maxY = -1
 
-  for (let index = 0; index < image.data.length; index += 4) {
+  for (let index = 0; index < imageA.data.length; index += 4) {
     const pixelIndex = index / 4
-    if (
-      image.data[index] <= maximumChannel &&
-      image.data[index + 1] <= maximumChannel &&
-      image.data[index + 2] <= maximumChannel
-    ) {
-      const x = pixelIndex % image.width
-      const y = Math.floor(pixelIndex / image.width)
+    const difference =
+      (
+        Math.abs(imageA.data[index] - imageB.data[index]) +
+        Math.abs(imageA.data[index + 1] - imageB.data[index + 1]) +
+        Math.abs(imageA.data[index + 2] - imageB.data[index + 2])
+      ) / 3
+
+    if (difference >= minimumDifference) {
+      const x = pixelIndex % imageA.width
+      const y = Math.floor(pixelIndex / imageA.width)
       mask[pixelIndex] = 1
       count += 1
       minX = Math.min(minX, x)
@@ -83,13 +103,13 @@ function createDarkMask(buffer, maximumChannel = 24) {
 
   return {
     count,
-    height: image.height,
+    height: imageA.height,
     mask,
     maxX,
     maxY,
     minX,
     minY,
-    width: image.width
+    width: imageA.width
   }
 }
 
@@ -159,6 +179,19 @@ async function screenshotCanvasRegion(
       height: clipHeight
     }
   })
+}
+
+function resetArtifactDirectory() {
+  fs.rmSync(SCONCE_ARTIFACT_DIR, {
+    force: true,
+    recursive: true
+  })
+  fs.mkdirSync(SCONCE_ARTIFACT_DIR, { recursive: true })
+}
+
+function saveArtifact(name, buffer) {
+  const target = path.join(SCONCE_ARTIFACT_DIR, name)
+  fs.writeFileSync(target, buffer)
 }
 
 async function waitForBrightFrame(page, canvas, minimumAverageBrightness, timeoutMs = 7_000) {
@@ -246,6 +279,7 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   await expect(canvas).toBeVisible({ timeout: 5_000 })
 
   const frameBrightness = await waitForBrightFrame(page, canvas, 6)
+  resetArtifactDirectory()
 
   await page.evaluate(() => {
     window.__levelsjamDebug.setView(
@@ -259,8 +293,18 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
     window.__levelsjamDebug.isolateDebugRole('sconce-body', 4)
   })
   await page.waitForTimeout(250)
-  const sconceSilhouette = await screenshotCanvasRegion(page, canvas, ...sconceFrontView)
-  const sconceMask = createDarkMask(sconceSilhouette)
+  const sconceIsolatedVisible = await screenshotCanvasRegion(page, canvas, ...sconceFrontView)
+  saveArtifact('01-isolated-sconce-visible.png', sconceIsolatedVisible)
+  await page.evaluate(() => {
+    window.__levelsjamDebug.setDebugVisible('sconce-body', 4, false)
+  })
+  await page.waitForTimeout(250)
+  const sconceIsolatedHidden = await screenshotCanvasRegion(page, canvas, ...sconceFrontView)
+  saveArtifact('02-isolated-sconce-hidden.png', sconceIsolatedHidden)
+  const sconceMask = createDifferenceMask(
+    sconceIsolatedVisible,
+    sconceIsolatedHidden
+  )
   expect(sconceMask.count).toBeGreaterThan(12_000)
   expect(sconceMask.count).toBeLessThan(22_000)
   expect(sconceMask.minX).toBeGreaterThanOrEqual(30)
@@ -273,11 +317,13 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   })
   await page.waitForTimeout(250)
   const sconceVisible = await screenshotCanvasRegion(page, canvas, ...sconceFrontView)
+  saveArtifact('03-live-billboard-hidden-sconce-visible.png', sconceVisible)
   await page.evaluate(() => {
     window.__levelsjamDebug.setDebugVisible('sconce-body', 4, false)
   })
   await page.waitForTimeout(250)
   const sconceHidden = await screenshotCanvasRegion(page, canvas, ...sconceFrontView)
+  saveArtifact('04-live-billboard-hidden-sconce-hidden.png', sconceHidden)
   await page.evaluate(() => {
     window.__levelsjamDebug.setDebugVisible('sconce-body', 4, true)
     window.__levelsjamDebug.setDebugVisible('torch-billboard', 4, true)
