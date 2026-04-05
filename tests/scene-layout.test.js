@@ -50,6 +50,5 @@ test('uses wall-local attachment offsets that stay on the wall face after rotati
     assert.equal(local.torchPosition.z, wall.sconceDirection * WALL_FACE_OFFSET)
     assert.equal(local.sconcePosition.y, wall.sconcePosition.y - wall.position.y)
     assert.equal(local.torchPosition.y, wall.torchPosition.y - wall.position.y)
-    assert.equal(local.sconceRotationY, wall.sconceDirection > 0 ? 0 : Math.PI)
   }
 })

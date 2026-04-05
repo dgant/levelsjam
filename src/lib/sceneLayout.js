@@ -152,7 +152,6 @@ export function getWallAttachmentLocalLayout(wall) {
       x: 0,
       y: torchLocalY,
       z: wall.sconceDirection * WALL_FACE_OFFSET
-    },
-    sconceRotationY: wall.sconceDirection > 0 ? 0 : Math.PI
+    }
   }
 }

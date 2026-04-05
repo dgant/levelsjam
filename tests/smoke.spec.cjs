@@ -54,6 +54,80 @@ function measureDifference(bufferA, bufferB) {
   return total / (pixelCount * 3)
 }
 
+function createDarkMask(buffer, maximumChannel = 24) {
+  const image = PNG.sync.read(buffer)
+  const mask = new Uint8Array(image.width * image.height)
+  let count = 0
+  let minX = image.width
+  let minY = image.height
+  let maxX = -1
+  let maxY = -1
+
+  for (let index = 0; index < image.data.length; index += 4) {
+    const pixelIndex = index / 4
+    if (
+      image.data[index] <= maximumChannel &&
+      image.data[index + 1] <= maximumChannel &&
+      image.data[index + 2] <= maximumChannel
+    ) {
+      const x = pixelIndex % image.width
+      const y = Math.floor(pixelIndex / image.width)
+      mask[pixelIndex] = 1
+      count += 1
+      minX = Math.min(minX, x)
+      minY = Math.min(minY, y)
+      maxX = Math.max(maxX, x)
+      maxY = Math.max(maxY, y)
+    }
+  }
+
+  return {
+    count,
+    height: image.height,
+    mask,
+    maxX,
+    maxY,
+    minX,
+    minY,
+    width: image.width
+  }
+}
+
+function measureMaskedDifference(bufferA, bufferB, maskInfo) {
+  const imageA = PNG.sync.read(bufferA)
+  const imageB = PNG.sync.read(bufferB)
+
+  if (
+    imageA.width !== imageB.width ||
+    imageA.height !== imageB.height ||
+    imageA.width !== maskInfo.width ||
+    imageA.height !== maskInfo.height
+  ) {
+    throw new Error('Masked diff requires matching image dimensions')
+  }
+
+  let total = 0
+  let count = 0
+
+  for (let pixelIndex = 0; pixelIndex < maskInfo.mask.length; pixelIndex += 1) {
+    if (!maskInfo.mask[pixelIndex]) {
+      continue
+    }
+
+    const index = pixelIndex * 4
+    total += Math.abs(imageA.data[index] - imageB.data[index])
+    total += Math.abs(imageA.data[index + 1] - imageB.data[index + 1])
+    total += Math.abs(imageA.data[index + 2] - imageB.data[index + 2])
+    count += 1
+  }
+
+  if (count === 0) {
+    return 0
+  }
+
+  return total / (count * 3)
+}
+
 async function screenshotCanvasRegion(
   page,
   canvas,
@@ -181,42 +255,37 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   })
   await page.waitForTimeout(500)
   const sconceFrontView = [220, 180, 0.46, 0.68]
-  const sconceVisible = await screenshotCanvasRegion(page, canvas, ...sconceFrontView)
   await page.evaluate(() => {
+    window.__levelsjamDebug.isolateDebugRole('sconce-body', 4)
+  })
+  await page.waitForTimeout(250)
+  const sconceSilhouette = await screenshotCanvasRegion(page, canvas, ...sconceFrontView)
+  const sconceMask = createDarkMask(sconceSilhouette)
+  expect(sconceMask.count).toBeGreaterThan(12_000)
+  expect(sconceMask.count).toBeLessThan(22_000)
+  expect(sconceMask.minX).toBeGreaterThanOrEqual(30)
+  expect(sconceMask.maxX).toBeLessThanOrEqual(219)
+  expect(sconceMask.minY).toBeLessThanOrEqual(12)
+  expect(sconceMask.maxY).toBeLessThanOrEqual(150)
+  await page.evaluate(() => {
+    window.__levelsjamDebug.clearDebugIsolation()
     window.__levelsjamDebug.setDebugVisible('torch-billboard', 4, false)
   })
   await page.waitForTimeout(250)
-  const sconceWithoutBillboard = await screenshotCanvasRegion(page, canvas, ...sconceFrontView)
+  const sconceVisible = await screenshotCanvasRegion(page, canvas, ...sconceFrontView)
   await page.evaluate(() => {
     window.__levelsjamDebug.setDebugVisible('sconce-body', 4, false)
   })
   await page.waitForTimeout(250)
-  const noBillboardNoSconce = await screenshotCanvasRegion(page, canvas, ...sconceFrontView)
+  const sconceHidden = await screenshotCanvasRegion(page, canvas, ...sconceFrontView)
   await page.evaluate(() => {
     window.__levelsjamDebug.setDebugVisible('sconce-body', 4, true)
     window.__levelsjamDebug.setDebugVisible('torch-billboard', 4, true)
-  })
-  await page.waitForTimeout(250)
-  const withBillboard = await screenshotCanvasRegion(page, canvas, ...sconceFrontView)
-  await page.evaluate(() => {
-    window.__levelsjamDebug.setDebugVisible('sconce-body', 4, false)
-  })
-  await page.waitForTimeout(250)
-  const withBillboardNoSconce = await screenshotCanvasRegion(page, canvas, ...sconceFrontView)
-  await page.evaluate(() => {
-    window.__levelsjamDebug.setDebugVisible('sconce-body', 4, true)
+    window.__levelsjamDebug.setDebugVisible('torch-light', 4, true)
   })
   expect(
-    measureDifference(sconceWithoutBillboard, noBillboardNoSconce)
-  ).toBeGreaterThan(0.12)
-  expect(
-    measureDifference(withBillboard, withBillboardNoSconce)
-  ).toBeGreaterThan(0.1)
-  expect(
-    measureDifference(withBillboard, withBillboardNoSconce)
-  ).toBeGreaterThan(
-    measureDifference(sconceVisible, sconceWithoutBillboard)
-  )
+    measureMaskedDifference(sconceVisible, sconceHidden, sconceMask)
+  ).toBeGreaterThan(20)
   await page.evaluate(() => {
     window.__levelsjamDebug.setView([0, 2.5, 0], [0, 2.5, -10])
   })

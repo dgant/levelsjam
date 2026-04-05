@@ -10,7 +10,6 @@ import {
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
 import { LensFlareEffect } from '@react-three/postprocessing'
 import {
-  AdditiveBlending,
   CanvasTexture,
   Color,
   DoubleSide,
@@ -173,6 +172,22 @@ const TONE_MAPPING_OPTIONS = [
 ] as const
 const cameraEuler = new Euler(0, 0, 0, 'YXZ')
 const defaultMoveDirection = new Vector3(0, 0, -1)
+const SCONCE_PROFILE_POINTS = (() => {
+  const points = [new Vector2(0, 0), new Vector2(SCONCE_RADIUS, 0)]
+  const segments = 12
+
+  for (let index = 1; index <= segments; index += 1) {
+    const angle = (index / segments) * (Math.PI / 2)
+    points.push(
+      new Vector2(
+        Math.cos(angle) * SCONCE_RADIUS,
+        -Math.sin(angle) * SCONCE_RADIUS
+      )
+    )
+  }
+
+  return points
+})()
 const exposureEffectShader = `
 uniform float exposure;
 
@@ -740,8 +755,7 @@ function TorchBillboard({
       >
         <planeGeometry args={[TORCH_BILLBOARD_SIZE, TORCH_BILLBOARD_SIZE]} />
         <meshBasicMaterial
-          alphaTest={0.35}
-          blending={AdditiveBlending}
+          alphaTest={0.005}
           color={new Color(1, 1, 1)}
           depthWrite={false}
           map={texture}
@@ -837,75 +851,27 @@ function WallSconce({
     localLayout.torchPosition.y,
     localLayout.torchPosition.z
   ]
-  const torchBillboardPosition: [number, number, number] = [
-    torchPosition[0],
-    torchPosition[1],
-    torchPosition[2] + (wall.sconceDirection * 0.16)
-  ]
 
   return (
     <>
-      <group
+      <mesh
+        castShadow
         position={position}
-        userData={{ debugIndex: wall.index, debugRole: 'sconce' }}
+        receiveShadow
+        userData={{ debugIndex: wall.index, debugRole: 'sconce-body' }}
       >
-        <mesh
-          castShadow
-          position={[0, 0, -wall.sconceDirection * (SCONCE_RADIUS - 0.025)]}
-          receiveShadow
-          rotation-x={Math.PI / 2}
-          userData={{ debugIndex: wall.index, debugRole: 'sconce-body' }}
-        >
-          <cylinderGeometry args={[SCONCE_RADIUS * 0.82, SCONCE_RADIUS * 0.82, 0.05, 24]} />
-          <meshStandardMaterial
-            {...metal}
-            bumpScale={0.02}
-            metalness={0.85}
-            roughness={0.55}
-          />
-        </mesh>
-        <mesh
-          castShadow
-          position={[0, -SCONCE_RADIUS * 0.06, -wall.sconceDirection * (SCONCE_RADIUS * 0.3)]}
-          receiveShadow
-          rotation-x={Math.PI / 2}
-          userData={{ debugIndex: wall.index, debugRole: 'sconce-body' }}
-        >
-          <cylinderGeometry args={[SCONCE_RADIUS * 0.12, SCONCE_RADIUS * 0.12, SCONCE_RADIUS * 0.5, 18]} />
-          <meshStandardMaterial
-            {...metal}
-            bumpScale={0.02}
-            metalness={0.85}
-            roughness={0.55}
-          />
-        </mesh>
-        <mesh
-          castShadow
-          position={[0, -SCONCE_RADIUS * 0.07, wall.sconceDirection * (SCONCE_RADIUS * 0.08)]}
-          receiveShadow
-          rotation-x={Math.PI / 2}
-          userData={{ debugIndex: wall.index, debugRole: 'sconce-body' }}
-        >
-          <cylinderGeometry
-            args={[
-              SCONCE_RADIUS * 0.2,
-              SCONCE_RADIUS * 0.62,
-              SCONCE_RADIUS * 0.72,
-              24
-            ]}
-          />
-          <meshStandardMaterial
-            {...metal}
-            bumpScale={0.02}
-            metalness={0.85}
-            roughness={0.55}
-            side={DoubleSide}
-          />
-        </mesh>
-      </group>
+        <latheGeometry args={[SCONCE_PROFILE_POINTS, 24]} />
+        <meshStandardMaterial
+          {...metal}
+          bumpScale={0.02}
+          metalness={0.85}
+          roughness={0.55}
+          side={DoubleSide}
+        />
+      </mesh>
       <TorchBillboard
         flickerAmount={flickerAmount}
-        position={torchBillboardPosition}
+        position={torchPosition}
         seed={wall.index + 1}
         torchCandelaMultiplier={torchCandelaMultiplier}
       />
@@ -1558,7 +1524,6 @@ function Scene({
           visible: boolean
         ) => void
         isolateDebugRole?: (role: string, index: number) => void
-        setSconceVisible?: (index: number, visible: boolean) => void
       }
     }
     const existing = globalWindow.__levelsjamDebug ?? {}
@@ -1637,10 +1602,7 @@ function Scene({
       ...existing,
       clearDebugIsolation,
       isolateDebugRole,
-      setDebugVisible,
-      setSconceVisible: (index, visible) => {
-        setDebugVisible('sconce', index, visible)
-      }
+      setDebugVisible
     }
 
     return () => {
@@ -1652,7 +1614,6 @@ function Scene({
       delete globalWindow.__levelsjamDebug.clearDebugIsolation
       delete globalWindow.__levelsjamDebug.setDebugVisible
       delete globalWindow.__levelsjamDebug.isolateDebugRole
-      delete globalWindow.__levelsjamDebug.setSconceVisible
       if (Object.keys(globalWindow.__levelsjamDebug).length === 0) {
         delete globalWindow.__levelsjamDebug
       }

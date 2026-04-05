@@ -43,5 +43,4 @@ export declare function getWallBounds(): Array<WallLayout['bounds'] & { id: stri
 export declare function getWallAttachmentLocalLayout(wall: WallLayout): {
   sconcePosition: Vector3Like
   torchPosition: Vector3Like
-  sconceRotationY: number
 }
