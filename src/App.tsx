@@ -158,8 +158,7 @@ const FIRE_FLIPBOOK_CROP_HEIGHT =
 const FIRE_COLOR = new Color('#ffb168')
 const FIRE_BILLBOARD_INTENSITY_SCALE = 1 / TORCH_BASE_CANDELA
 const TORCH_SHADOW_MAP_SIZE = 512
-const TORCH_LIGHT_ACTIVE_DISTANCE_SQ = 4 * 4
-const MAX_ACTIVE_TORCH_SHADOWS = 2
+const TORCH_LIGHT_DISTANCE = 16
 const LENS_FLARE_COLOR_GAIN_SCALE = 8
 const FOG_VOLUME_HEIGHT = 6
 const FOG_VOLUME_SLICE_COUNT = 6
@@ -855,13 +854,11 @@ function TorchBillboard({
 
 function TorchLight({
   flickerAmount,
-  lightHandle,
   seed,
   torchCandelaMultiplier,
   position
 }: {
   flickerAmount: number
-  lightHandle: { current: TorchLightHandle | null }
   seed: number
   torchCandelaMultiplier: number
   position: [number, number, number]
@@ -882,14 +879,12 @@ function TorchLight({
       getTorchFlickerFactor(noise, flickerAmount)
 
     lightRef.intensity = scalePhotometricIntensity(brightness)
-    lightRef.distance = 5
+    lightRef.distance = TORCH_LIGHT_DISTANCE
   })
 
   useEffect(() => {
-    lightHandle.current = light.current
-
     if (light.current) {
-      light.current.castShadow = false
+      light.current.castShadow = true
       light.current.shadow.autoUpdate = false
       light.current.shadow.mapSize.set(
         TORCH_SHADOW_MAP_SIZE,
@@ -897,19 +892,13 @@ function TorchLight({
       )
       light.current.shadow.needsUpdate = true
     }
-
-    return () => {
-      if (lightHandle.current === light.current) {
-        lightHandle.current = null
-      }
-    }
-  }, [lightHandle])
+  }, [])
 
   return (
     <pointLight
       color="#ffb56a"
       decay={2}
-      distance={5}
+      distance={TORCH_LIGHT_DISTANCE}
       intensity={scalePhotometricIntensity(
         TORCH_BASE_CANDELA * torchCandelaMultiplier
       )}
@@ -925,12 +914,10 @@ function TorchLight({
 
 function WallSconce({
   flickerAmount,
-  lightHandle,
   mazeLight,
   torchCandelaMultiplier
 }: {
   flickerAmount: number
-  lightHandle: { current: TorchLightHandle | null }
   mazeLight: MazeLayout['lights'][number]
   torchCandelaMultiplier: number
 }) {
@@ -976,7 +963,6 @@ function WallSconce({
       />
       <TorchLight
         flickerAmount={flickerAmount}
-        lightHandle={lightHandle}
         position={torchPosition}
         seed={mazeLight.index + 1}
         torchCandelaMultiplier={torchCandelaMultiplier}
@@ -1148,81 +1134,7 @@ function MazeWalls({
   layout: MazeLayout
   torchCandelaMultiplier: number
 }) {
-  const camera = useThree((state) => state.camera)
   const wall = useStandardPbrTextures(WALL_TEXTURE_URLS, WALL_TEXTURE_REPEAT)
-  const lightHandles = useRef(
-    layout.lights.map(() => ({ current: null as TorchLightHandle | null }))
-  )
-  const tempPosition = useMemo(() => new Vector3(), [])
-
-  useFrame(() => {
-    const shadowCandidates: Array<{ distanceSq: number; index: number }> = []
-
-    for (const lightPlacement of layout.lights) {
-      tempPosition.set(
-        lightPlacement.torchPosition.x,
-        lightPlacement.torchPosition.y,
-        lightPlacement.torchPosition.z
-      )
-      const distanceSq = camera.position.distanceToSquared(tempPosition)
-
-      if (distanceSq <= TORCH_LIGHT_ACTIVE_DISTANCE_SQ) {
-        shadowCandidates.push({
-          distanceSq,
-          index: lightPlacement.index
-        })
-      }
-    }
-
-    shadowCandidates.sort((a, b) => a.distanceSq - b.distanceSq)
-    const activeShadowLights = new Set(
-      shadowCandidates
-        .slice(0, MAX_ACTIVE_TORCH_SHADOWS)
-        .map((candidate) => candidate.index)
-    )
-
-    for (const lightPlacement of layout.lights) {
-      const light = lightHandles.current[lightPlacement.index]?.current
-
-      if (!light) {
-        continue
-      }
-
-      tempPosition.set(
-        lightPlacement.torchPosition.x,
-        lightPlacement.torchPosition.y,
-        lightPlacement.torchPosition.z
-      )
-      const shouldAffectScene =
-        camera.position.distanceToSquared(tempPosition) <=
-        TORCH_LIGHT_ACTIVE_DISTANCE_SQ
-      const shouldCastShadow = shouldAffectScene && activeShadowLights.has(lightPlacement.index)
-
-      if (light.visible !== shouldAffectScene) {
-        light.visible = shouldAffectScene
-        if (shouldCastShadow) {
-          light.shadow.needsUpdate = true
-        }
-      }
-
-      if (light.castShadow !== shouldCastShadow) {
-        light.castShadow = shouldCastShadow
-        if (shouldCastShadow) {
-          light.shadow.needsUpdate = true
-        }
-      }
-      light.shadow.autoUpdate = false
-      if (
-        light.shadow.mapSize.width !== TORCH_SHADOW_MAP_SIZE ||
-        light.shadow.mapSize.height !== TORCH_SHADOW_MAP_SIZE
-      ) {
-        light.shadow.mapSize.set(TORCH_SHADOW_MAP_SIZE, TORCH_SHADOW_MAP_SIZE)
-        if (shouldCastShadow) {
-          light.shadow.needsUpdate = true
-        }
-      }
-    }
-  })
 
   return (
     <>
@@ -1251,7 +1163,6 @@ function MazeWalls({
         <WallSconce
           flickerAmount={flickerAmount}
           key={mazeLight.id}
-          lightHandle={lightHandles.current[mazeLight.index]}
           mazeLight={mazeLight}
           torchCandelaMultiplier={torchCandelaMultiplier}
         />

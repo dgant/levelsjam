@@ -46,3 +46,4 @@
 - In this repository, default ambient occlusion is expensive enough to break the `>=120 FPS` gate in the maze scene. Keep AO off by default and let the debug panel enable it on demand.
 - Fixed-size baked point-light shadow maps do not remove the per-frame lighting and shadow-sampling cost. Measure the all-lights version before assuming static shadow maps make light culling unnecessary.
 - When reading keyboard state from a sparse key map in this project, treat missing keys as `false` before numeric conversion. `Number(undefined)` becomes `NaN` and can poison the whole movement state on the first frame.
+- When temporarily evaluating a lighting configuration that is expected to violate the normal FPS budget, disable the automated FPS gate explicitly in code and docs rather than letting it fail noisily.

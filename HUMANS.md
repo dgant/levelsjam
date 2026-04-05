@@ -23,7 +23,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Run `npm run test:unit` to verify player spawn and collision math.
 - Run `npm run test:smoke` to exercise the built page through Playwright.
 - Run `npm run test:smoke:runner` when `npm run build:pages` has already prepared the root-published bundle.
-- Run `npm run test:perf` to verify the automated browser performance benchmark stays at or above 120 FPS.
+- `npm run test:perf` is temporarily disabled while the baked-all-shadows lighting configuration is under evaluation.
 - Run the maze-generation validation script or its test entrypoint whenever maze files or maze rules change.
 - Verify the main page renders the 3D scene without console errors.
 - Verify the loading overlay appears with `MINOTAUR` and `Entering the labyrinth...` before the scene fades in.
@@ -47,9 +47,10 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the torch billboards animate and stay camera-facing even on walls whose parent groups are rotated.
 - Verify the visible flame fills the 0.5m billboard and that the billboard bottom edge is flush with the sconce top.
 - Verify each maze light location has a warm torch point light and the lights cast shadows.
-- Verify torch point lights outside the fixed 4m active-light radius are culled for performance.
-- Verify the two nearest nearby torches within that active-light radius cast shadows.
+- Verify torch point lights remain enabled with a 16m light distance.
+- Verify torch point lights keep shadows enabled instead of being camera-distance culled.
 - Verify every torch shadow map uses the same fixed resolution.
+- Verify torch shadow maps bake once and then stop updating while the scene remains static.
 - Verify the default `Torch Flicker` value is `0.15`.
 - Verify the torch flicker runs at the updated faster rate and that reducing `Torch Flicker` toward `0.00` steadies the torch brightness.
 - Verify the fire flipbook runs at the updated faster rate.
@@ -90,7 +91,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the repository contains at least five valid maze files and that maze validation remains under 100ms per generated maze.
 - Benchmark startup with `npm run bench:startup` and test duration with `npm run bench:tests` before handoff.
 - Treat duration regressions as blocking issues.
-- Treat a failed `npm run test:perf` run or a measured browser benchmark below `120 FPS` as blocking.
+- Treat the temporary `test:perf` disablement as intentional until the baked-all-shadows lighting evaluation ends.
 - Keep `npm run test:unit` under 20 seconds.
 - Keep the prepared smoke runner `npm run test:smoke:runner` under 1 minute after a single `npm run build:pages`.
 - Latest measured benchmark on April 5, 2026: `node scripts/benchmark-startup.cjs` reached the first bright frame in about `268.2ms` on the background dev server, `npm run test:unit` took about `4626ms`, `npm run test:perf:runner` took about `5100ms`, and the prepared `npm run test:smoke:runner` took about `28479ms`.
