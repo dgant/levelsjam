@@ -731,6 +731,7 @@ function TorchBillboard({
     <group
       position={position}
       ref={group}
+      userData={{ debugIndex: seed - 1, debugRole: 'torch-billboard' }}
     >
       <mesh
         ref={material}
@@ -802,6 +803,7 @@ function TorchLight({
       )}
       position={position}
       ref={light}
+      userData={{ debugIndex: seed - 1, debugRole: 'torch-light' }}
       shadow-bias={-0.0005}
       shadow-mapSize-height={TORCH_SHADOW_MAP_SIZE}
       shadow-mapSize-width={TORCH_SHADOW_MAP_SIZE}
@@ -842,7 +844,7 @@ function WallSconce({
       >
         <mesh
           castShadow
-          receiveShadow
+          userData={{ debugIndex: wall.index, debugRole: 'sconce-body' }}
         >
           <sphereGeometry
             args={[
@@ -858,24 +860,24 @@ function WallSconce({
           <meshStandardMaterial
             {...metal}
             bumpScale={0.02}
-            envMapIntensity={2}
-            metalness={0.8}
-            roughness={0.35}
+            envMapIntensity={3}
+            metalness={0.25}
+            roughness={0.7}
             side={DoubleSide}
           />
         </mesh>
         <mesh
           castShadow
-          receiveShadow
           rotation-x={-Math.PI / 2}
+          userData={{ debugIndex: wall.index, debugRole: 'sconce-cap' }}
         >
           <circleGeometry args={[SCONCE_RADIUS, 24]} />
           <meshStandardMaterial
             {...metal}
             bumpScale={0.02}
-            envMapIntensity={2}
-            metalness={0.8}
-            roughness={0.35}
+            envMapIntensity={3}
+            metalness={0.25}
+            roughness={0.7}
             side={DoubleSide}
           />
         </mesh>
@@ -1528,22 +1530,32 @@ function Scene({
   useEffect(() => {
     const globalWindow = window as Window & {
       __levelsjamDebug?: {
+        setDebugVisible?: (
+          role: string,
+          index: number,
+          visible: boolean
+        ) => void
         setSconceVisible?: (index: number, visible: boolean) => void
       }
     }
     const existing = globalWindow.__levelsjamDebug ?? {}
 
+    const setDebugVisible = (role: string, index: number, visible: boolean) => {
+      scene.traverse((object) => {
+        if (
+          object.userData?.debugRole === role &&
+          object.userData?.debugIndex === index
+        ) {
+          object.visible = visible
+        }
+      })
+    }
+
     globalWindow.__levelsjamDebug = {
       ...existing,
+      setDebugVisible,
       setSconceVisible: (index, visible) => {
-        scene.traverse((object) => {
-          if (
-            object.userData?.debugRole === 'sconce' &&
-            object.userData?.debugIndex === index
-          ) {
-            object.visible = visible
-          }
-        })
+        setDebugVisible('sconce', index, visible)
       }
     }
 
@@ -1552,6 +1564,7 @@ function Scene({
         return
       }
 
+      delete globalWindow.__levelsjamDebug.setDebugVisible
       delete globalWindow.__levelsjamDebug.setSconceVisible
       if (Object.keys(globalWindow.__levelsjamDebug).length === 0) {
         delete globalWindow.__levelsjamDebug

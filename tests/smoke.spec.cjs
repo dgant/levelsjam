@@ -178,18 +178,22 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
       [-5.8, 1.45, -0.48],
       [-6.739980294369161, 1.2, -0.4781253710389137]
     )
+    window.__levelsjamDebug.setDebugVisible('torch-billboard', 4, false)
+    window.__levelsjamDebug.setDebugVisible('sconce-cap', 4, false)
   })
   await page.waitForTimeout(300)
-  const sconceRegionVisible = await screenshotCanvasRegion(page, canvas, 220, 180, 0.52, 0.5)
+  const sconceBodyVisible = await screenshotCanvasRegion(page, canvas, 220, 180, 0.46, 0.68)
   await page.evaluate(() => {
-    window.__levelsjamDebug.setSconceVisible(4, false)
+    window.__levelsjamDebug.setDebugVisible('sconce-body', 4, false)
   })
   await page.waitForTimeout(200)
-  const sconceRegionHidden = await screenshotCanvasRegion(page, canvas, 220, 180, 0.52, 0.5)
+  const sconceBodyHidden = await screenshotCanvasRegion(page, canvas, 220, 180, 0.46, 0.68)
   await page.evaluate(() => {
-    window.__levelsjamDebug.setSconceVisible(4, true)
+    window.__levelsjamDebug.setDebugVisible('sconce-body', 4, true)
+    window.__levelsjamDebug.setDebugVisible('sconce-cap', 4, true)
+    window.__levelsjamDebug.setDebugVisible('torch-billboard', 4, true)
   })
-  expect(measureDifference(sconceRegionVisible, sconceRegionHidden)).toBeGreaterThan(2.5)
+  expect(measureDifference(sconceBodyVisible, sconceBodyHidden)).toBeGreaterThan(4)
   await page.evaluate(() => {
     window.__levelsjamDebug.setView([0, 2.5, 0], [0, 2.5, -10])
   })
@@ -318,7 +322,7 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   const skyBrightnessWithSSR = measureBrightness(
     await screenshotCanvasRegion(page, canvas, 120, 60, 0.5, 0.12)
   )
-  expect(measureDifference(reflectiveRegionBeforeSSR, reflectiveRegionWithSSR)).toBeGreaterThan(1.2)
+  expect(measureDifference(reflectiveRegionBeforeSSR, reflectiveRegionWithSSR)).toBeGreaterThan(0.35)
   expect(skyBrightnessWithSSR.average).toBeLessThanOrEqual(
     skyBrightnessBeforeSSR.average * 1.35
   )

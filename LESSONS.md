@@ -38,3 +38,4 @@
 - The `@react-three/postprocessing` lens flare effect's `opacity` uniform fades the flare out rather than making it stronger, so visible flare strength should primarily come from `colorGain`, `glareSize`, `flareSize`, and `haloScale`.
 - Post-effect debug controls are only trustworthy when they map to the actual wrapped effect props. In this repository, Bloom kernel size requires the non-`mipmapBlur` path, and Depth Of Field needs separate `focusDistance`, `focalLength`, and `bokehScale` controls.
 - A visibility proof that only changes a prop's cap or an overlapping shadow is not sufficient. For this repository, the sconce shell had to be checked from a side view where the hemisphere body itself occupies visible pixels.
+- For this sconce specifically, a whole-prop diff can still false-positive on the cap or torch overlap. The reliable proof is to hide the billboard and cap, then toggle only the hemisphere body in a side-view crop.
