@@ -114,6 +114,36 @@ function measureMaskedDifference(bufferA, bufferB, maskInfo) {
   return total / (count * 3)
 }
 
+function measureMaskedBrightness(buffer, maskInfo) {
+  const image = PNG.sync.read(buffer)
+
+  if (
+    image.width !== maskInfo.width ||
+    image.height !== maskInfo.height
+  ) {
+    throw new Error('Masked brightness requires matching image dimensions')
+  }
+
+  let total = 0
+  let count = 0
+
+  for (let pixelIndex = 0; pixelIndex < maskInfo.mask.length; pixelIndex += 1) {
+    if (!maskInfo.mask[pixelIndex]) {
+      continue
+    }
+
+    const index = pixelIndex * 4
+    total += image.data[index] + image.data[index + 1] + image.data[index + 2]
+    count += 1
+  }
+
+  if (count === 0) {
+    return 0
+  }
+
+  return total / (count * 3)
+}
+
 async function screenshotCanvasRegion(
   page,
   canvas,
@@ -261,9 +291,11 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
     window.__levelsjamDebug.setDebugVisible('sconce-cap', 4, true)
     window.__levelsjamDebug.setDebugVisible('torch-billboard', 4, true)
   })
+  expect(measureMaskedBrightness(sconceBodyVisible, sconceBodyMask)).toBeGreaterThan(25)
+  expect(measureMaskedBrightness(sconceBodyHidden, sconceBodyMask)).toBeLessThan(5)
   expect(
     measureMaskedDifference(sconceBodyVisible, sconceBodyHidden, sconceBodyMask)
-  ).toBeGreaterThan(6)
+  ).toBeGreaterThan(25)
   await page.evaluate(() => {
     window.__levelsjamDebug.setView([0, 2.5, 0], [0, 2.5, -10])
   })
