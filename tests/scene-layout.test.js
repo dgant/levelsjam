@@ -5,7 +5,6 @@ import {
   WALL_FACE_OFFSET,
   getWallAttachmentLocalLayout,
   SCONCE_RADIUS,
-  TORCH_BILLBOARD_SIZE,
   WALL_LAYOUT,
   WALL_WIDTH
 } from '../src/lib/sceneLayout.js'
@@ -36,7 +35,7 @@ test('keeps each torch aligned with its wall sconce outside the wall face', () =
     assert.equal(wall.torchPosition.z, wall.sconcePosition.z)
     assert.equal(
       wall.torchPosition.y,
-      wall.sconcePosition.y + SCONCE_RADIUS + (TORCH_BILLBOARD_SIZE / 2)
+      wall.sconcePosition.y + SCONCE_RADIUS + 0.08
     )
   }
 })

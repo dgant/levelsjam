@@ -30,12 +30,14 @@
 - Each wall sconce supports a camera-facing torch billboard above it.
 - Each torch billboard and torch point light are positioned one sconce radius outside the wall face with the sconce.
 - Each torch billboard sits directly on top of the sconce rather than floating above it.
+- Each torch billboard sits slightly in front of the sconce's metal geometry so the flame does not visually erase the fixture.
 - Each torch billboard is 0.5 meters square.
 - Each torch billboard uses the linked source flipbook asset rather than a procedurally generated placeholder.
 - Each torch billboard uses the local committed `CampFire_l_nosmoke_front_Loop_01_4K_6x6.png` atlas copied from the linked source asset.
 - Each torch billboard uses a 6x6 fire flipbook atlas.
 - Each torch billboard animation plays eight times faster than the previous 4-second loop.
 - Each torch billboard uses an unlit material.
+- Each torch billboard uses additive blending and alpha cutout so transparent atlas padding does not darken or occlude the sconce.
 - Each torch billboard brightness is scaled from a 1500 candela torch baseline.
 - Each torch billboard samples the linked atlas so the visible flame fills the specified quad and sits on the sconce instead of floating above it due to transparent frame padding.
 - Each torch has a shadow-casting point light located at the billboard center.

@@ -10,6 +10,7 @@ import {
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
 import { LensFlareEffect } from '@react-three/postprocessing'
 import {
+  AdditiveBlending,
   CanvasTexture,
   Color,
   DoubleSide,
@@ -739,7 +740,8 @@ function TorchBillboard({
       >
         <planeGeometry args={[TORCH_BILLBOARD_SIZE, TORCH_BILLBOARD_SIZE]} />
         <meshBasicMaterial
-          alphaTest={0.005}
+          alphaTest={0.35}
+          blending={AdditiveBlending}
           color={new Color(1, 1, 1)}
           depthWrite={false}
           map={texture}
@@ -835,6 +837,11 @@ function WallSconce({
     localLayout.torchPosition.y,
     localLayout.torchPosition.z
   ]
+  const torchBillboardPosition: [number, number, number] = [
+    torchPosition[0],
+    torchPosition[1],
+    torchPosition[2] + (wall.sconceDirection * 0.16)
+  ]
 
   return (
     <>
@@ -898,7 +905,7 @@ function WallSconce({
       </group>
       <TorchBillboard
         flickerAmount={flickerAmount}
-        position={torchPosition}
+        position={torchBillboardPosition}
         seed={wall.index + 1}
         torchCandelaMultiplier={torchCandelaMultiplier}
       />
