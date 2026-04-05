@@ -10,7 +10,7 @@ import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
 import { LensFlareEffect } from '@react-three/postprocessing'
 import {
   AdditiveBlending,
-  BackSide,
+  BasicShadowMap,
   CanvasTexture,
   Color,
   DoubleSide,
@@ -71,7 +71,6 @@ import {
 import {
   createMovementSettings,
   DEFAULT_MOVEMENT_SETTINGS,
-  updateHorizontalVelocity,
   updateVerticalVelocity
 } from './lib/playerMotion.js'
 import {
@@ -154,15 +153,14 @@ const FIRE_FLIPBOOK_CROP_HEIGHT =
 const FIRE_COLOR = new Color('#ffb168')
 const FIRE_BILLBOARD_INTENSITY_SCALE = 1 / TORCH_BASE_CANDELA
 const CUBE_BACKGROUND_RESOLUTION = 512
-const TORCH_SHADOW_MAP_SIZE = 256
-const CLOSE_TORCH_SHADOW_MAP_SIZE = 512
-const CLOSE_TORCH_SHADOW_DISTANCE_SQ = 10 * 10
-const TORCH_LIGHT_ACTIVE_DISTANCE_SQ = 10 * 10
-const TORCH_SHADOW_DISTANCE_SQ = 40 * 40
+const TORCH_SHADOW_MAP_SIZE = 512
+const TORCH_LIGHT_ACTIVE_DISTANCE_SQ = 4 * 4
 const MAX_ACTIVE_TORCH_SHADOWS = 2
 const LENS_FLARE_COLOR_GAIN_SCALE = 8
 const FOG_VOLUME_HEIGHT = 6
 const FOG_VOLUME_SLICE_COUNT = 6
+const MAX_PHYSICS_SUBSTEPS = 10
+const MIN_LOADING_OVERLAY_MS = 300
 const AMBIENT_OCCLUSION_OPTIONS = [
   { key: 'off', label: 'Off' },
   { key: 'n8ao', label: 'N8AO' },
@@ -252,6 +250,15 @@ const BLOOM_KERNEL_SIZES: Record<BloomKernelSizeKey, KernelSize> = {
   huge: KernelSize.HUGE
 }
 
+const BLOOM_RESOLUTION_SCALES: Record<BloomKernelSizeKey, number> = {
+  'very-small': 0.35,
+  small: 0.4,
+  medium: 0.5,
+  large: 0.65,
+  'very-large': 0.8,
+  huge: 1
+}
+
 const BLOOM_KERNEL_OPTIONS: Array<{
   key: BloomKernelSizeKey
   label: string
@@ -330,9 +337,6 @@ type TorchLightHandle = {
   intensity: number
   shadow: {
     autoUpdate: boolean
-    map?: {
-      dispose?: () => void
-    }
     mapSize: {
       height: number
       set: (width: number, height: number) => void
@@ -340,7 +344,6 @@ type TorchLightHandle = {
     }
     needsUpdate: boolean
   }
-  visible: boolean
 }
 
 type StandardPbrTextureUrls = {
@@ -368,7 +371,7 @@ function createDefaultVisualSettings(): VisualSettings {
   return {
     ambientOcclusionIntensity: 1,
     ambientOcclusionRadius: DEFAULT_AO_RADIUS_METERS,
-    ambientOcclusionMode: 'n8ao',
+    ambientOcclusionMode: 'off',
     exposureStops: DEFAULT_EXPOSURE_STOPS,
     iblIntensity: DEFAULT_IBL_INTENSITY_MULTIPLIER,
     torchCandelaMultiplier: DEFAULT_TORCH_CANDELA_MULTIPLIER,
@@ -392,7 +395,7 @@ function createDefaultVisualSettings(): VisualSettings {
     ssr: { enabled: false, intensity: 0.6 },
     volumetricLighting: { enabled: false, intensity: 0.35 },
     volumetricNoiseFrequency: DEFAULT_VOLUMETRIC_NOISE_FREQUENCY,
-    vignette: { enabled: true, intensity: 0.4 }
+    vignette: { enabled: false, intensity: 0.4 }
   }
 }
 
@@ -560,7 +563,18 @@ function LoadingOverlay({
   complete: boolean
 }) {
   const [dotCount, setDotCount] = useState(1)
+  const [minimumDisplayElapsed, setMinimumDisplayElapsed] = useState(false)
   const dots = '.'.repeat(dotCount)
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setMinimumDisplayElapsed(true)
+    }, MIN_LOADING_OVERLAY_MS)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [])
 
   useEffect(() => {
     if (complete) {
@@ -576,11 +590,13 @@ function LoadingOverlay({
     }
   }, [complete])
 
+  const visiblyComplete = complete && minimumDisplayElapsed
+
   return (
     <div
-      aria-hidden={complete}
-      className={`loading-overlay${complete ? ' loading-overlay-hidden' : ''}`}
-      data-loading-complete={complete ? 'true' : 'false'}
+      aria-hidden={visiblyComplete}
+      className={`loading-overlay${visiblyComplete ? ' loading-overlay-hidden' : ''}`}
+      data-loading-complete={visiblyComplete ? 'true' : 'false'}
     >
       <h1>MINOTAUR</h1>
       <h2>
@@ -597,9 +613,11 @@ function LoadingOverlay({
 }
 
 function RendererSettings({
+  composerEnabled,
   exposureStops,
   toneMapping
 }: {
+  composerEnabled: boolean
   exposureStops: number
   toneMapping: ToneMappingMode
 }) {
@@ -608,11 +626,14 @@ function RendererSettings({
   useEffect(() => {
     const exposure = getRendererExposure(exposureStops)
 
-    gl.toneMappingExposure = 1
+    gl.toneMapping = composerEnabled
+      ? NoToneMapping
+      : TONE_MAPPING_MODES[toneMapping]
+    gl.toneMappingExposure = composerEnabled ? 1 : exposure
     gl.domElement.dataset.rendererExposure = exposure.toFixed(6)
     gl.domElement.dataset.rendererExposureStops = exposureStops.toFixed(2)
     gl.domElement.dataset.toneMapping = toneMapping
-  }, [exposureStops, gl, toneMapping])
+  }, [composerEnabled, exposureStops, gl, toneMapping])
 
   return null
 }
@@ -860,6 +881,16 @@ function TorchLight({
 
   useEffect(() => {
     lightHandle.current = light.current
+
+    if (light.current) {
+      light.current.castShadow = false
+      light.current.shadow.autoUpdate = false
+      light.current.shadow.mapSize.set(
+        TORCH_SHADOW_MAP_SIZE,
+        TORCH_SHADOW_MAP_SIZE
+      )
+      light.current.shadow.needsUpdate = true
+    }
 
     return () => {
       if (lightHandle.current === light.current) {
@@ -1129,7 +1160,7 @@ function MazeWalls({
       )
       const distanceSq = camera.position.distanceToSquared(tempPosition)
 
-      if (distanceSq <= TORCH_SHADOW_DISTANCE_SQ) {
+      if (distanceSq <= TORCH_LIGHT_ACTIVE_DISTANCE_SQ) {
         shadowCandidates.push({
           distanceSq,
           index: lightPlacement.index
@@ -1156,35 +1187,33 @@ function MazeWalls({
         lightPlacement.torchPosition.y,
         lightPlacement.torchPosition.z
       )
-      const distanceSq = camera.position.distanceToSquared(tempPosition)
-      const shouldAffectScene = distanceSq <= TORCH_LIGHT_ACTIVE_DISTANCE_SQ
-      const shouldCastShadow = activeShadowLights.has(lightPlacement.index)
-      const targetShadowSize =
-        distanceSq <= CLOSE_TORCH_SHADOW_DISTANCE_SQ
-          ? CLOSE_TORCH_SHADOW_MAP_SIZE
-          : TORCH_SHADOW_MAP_SIZE
+      const shouldAffectScene =
+        camera.position.distanceToSquared(tempPosition) <=
+        TORCH_LIGHT_ACTIVE_DISTANCE_SQ
+      const shouldCastShadow = shouldAffectScene && activeShadowLights.has(lightPlacement.index)
 
       if (light.visible !== shouldAffectScene) {
         light.visible = shouldAffectScene
+        if (shouldCastShadow) {
+          light.shadow.needsUpdate = true
+        }
       }
 
-      if (
-        light.shadow.mapSize.width !== targetShadowSize ||
-        light.shadow.mapSize.height !== targetShadowSize
-      ) {
-        light.shadow.mapSize.set(targetShadowSize, targetShadowSize)
-        light.shadow.map?.dispose?.()
-        light.shadow.needsUpdate = true
+      if (light.castShadow !== shouldCastShadow) {
+        light.castShadow = shouldCastShadow
+        if (shouldCastShadow) {
+          light.shadow.needsUpdate = true
+        }
       }
-
-      if (light.castShadow === (shouldCastShadow && shouldAffectScene)) {
-        continue
-      }
-
-      light.castShadow = shouldCastShadow && shouldAffectScene
       light.shadow.autoUpdate = false
-      if (shouldCastShadow && shouldAffectScene) {
-        light.shadow.needsUpdate = true
+      if (
+        light.shadow.mapSize.width !== TORCH_SHADOW_MAP_SIZE ||
+        light.shadow.mapSize.height !== TORCH_SHADOW_MAP_SIZE
+      ) {
+        light.shadow.mapSize.set(TORCH_SHADOW_MAP_SIZE, TORCH_SHADOW_MAP_SIZE)
+        if (shouldCastShadow) {
+          light.shadow.needsUpdate = true
+        }
       }
     }
   })
@@ -1271,21 +1300,26 @@ function BloomEffectPrimitive({
         kernelSize: BLOOM_KERNEL_SIZES[kernelSize],
         luminanceSmoothing: 0,
         luminanceThreshold: 0.05,
-        mipmapBlur: false
+        mipmapBlur: false,
+        resolutionScale: BLOOM_RESOLUTION_SCALES[kernelSize]
       }),
-    []
+    [kernelSize]
   )
 
   useEffect(() => {
     effect.intensity = intensity
-    effect.kernelSize = BLOOM_KERNEL_SIZES[kernelSize]
     effect.luminanceMaterial.threshold = 0.05
     effect.luminanceMaterial.smoothing = 0
-  }, [effect, intensity, kernelSize])
+  }, [effect, intensity])
 
   useEffect(() => () => effect.dispose(), [effect])
 
-  return <primitive object={effect as unknown as Effect} />
+  return (
+    <primitive
+      key={kernelSize}
+      object={effect as unknown as Effect}
+    />
+  )
 }
 
 function SSREffectPrimitive({
@@ -1560,8 +1594,10 @@ function FlightRig({
     )
   )
   const velocity = useRef(new Vector3())
-  const horizontalSpeed = useRef(0)
-  const horizontalDirection = useRef(defaultMoveDirection.clone())
+  const keyboardLocal = useRef(new Vector3())
+  const decelLocal = useRef(new Vector3())
+  const accelWorld = useRef(new Vector3())
+  const decelWorld = useRef(new Vector3())
   const forward = useRef(new Vector3())
   const right = useRef(new Vector3())
   const intendedPosition = useRef(new Vector3())
@@ -1751,7 +1787,6 @@ function FlightRig({
           cameraPosition[2]
         )
         velocity.current.set(0, 0, 0)
-        horizontalSpeed.current = 0
         keys.current = {}
         camera.position.set(cameraPosition[0], cameraPosition[1], cameraPosition[2])
         camera.lookAt(target[0], target[1], target[2])
@@ -1785,95 +1820,134 @@ function FlightRig({
     }
 
     right.current.crossVectors(forward.current, up).normalize()
+    const maxPhysicsStep =
+      0.25 /
+      Math.max(
+        resolvedMovementSettings.maxHorizontalSpeed,
+        resolvedMovementSettings.maxVerticalSpeed,
+        resolvedMovementSettings.maxFallSpeed
+      ) /
+      3
+    let deltaRemaining = Math.min(maxPhysicsStep * MAX_PHYSICS_SUBSTEPS, delta)
 
-    const desiredDirection = new Vector3()
-    if (keys.current.KeyW) desiredDirection.add(forward.current)
-    if (keys.current.KeyS) desiredDirection.addScaledVector(forward.current, -1)
-    if (keys.current.KeyD) desiredDirection.add(right.current)
-    if (keys.current.KeyA) desiredDirection.addScaledVector(right.current, -1)
-    if (desiredDirection.lengthSq() > 0) {
-      desiredDirection.normalize()
-    }
+    while (deltaRemaining > 0) {
+      const deltaStep = Math.min(deltaRemaining, maxPhysicsStep)
+      deltaRemaining -= deltaStep
 
-    const horizontalVelocity = updateHorizontalVelocity(
-      horizontalSpeed.current,
-      {
-        x: horizontalDirection.current.x,
-        z: horizontalDirection.current.z
-      },
-      { x: desiredDirection.x, z: desiredDirection.z },
-      delta,
-      resolvedMovementSettings
-    )
-
-    horizontalSpeed.current = horizontalVelocity.speed
-    horizontalDirection.current.set(
-      horizontalVelocity.direction.x,
-      0,
-      horizontalVelocity.direction.z
-    )
-    velocity.current.x = horizontalDirection.current.x * horizontalSpeed.current
-    velocity.current.z = horizontalDirection.current.z * horizontalSpeed.current
-    velocity.current.y = updateVerticalVelocity(
-      velocity.current.y,
-      grounded.current,
-      Boolean(keys.current.Space),
-      delta,
-      resolvedMovementSettings
-    )
-
-    intendedPosition.current
-      .copy(playerPosition.current)
-      .addScaledVector(velocity.current, delta)
-
-    const collision = resolvePlayerCollision(
-      {
-        x: playerPosition.current.x,
-        y: playerPosition.current.y,
-        z: playerPosition.current.z
-      },
-      {
-        x: intendedPosition.current.x,
-        y: intendedPosition.current.y,
-        z: intendedPosition.current.z
-      },
-      { wallBounds }
-    )
-
-    if (collision.position.y !== intendedPosition.current.y) {
-      velocity.current.y = 0
-    }
-
-    for (const normal of collision.collisions.wallNormals) {
-      const dot =
-        (velocity.current.x * normal.x) +
-        (velocity.current.y * normal.y) +
-        (velocity.current.z * normal.z)
-
-      if (dot >= 0) {
-        continue
+      keyboardLocal.current.set(
+        Number(keys.current.KeyD) - Number(keys.current.KeyA),
+        0,
+        Number(keys.current.KeyW) - Number(keys.current.KeyS)
+      )
+      if (keyboardLocal.current.lengthSq() > 1) {
+        keyboardLocal.current.normalize()
       }
 
-      velocity.current.x -= normal.x * dot
-      velocity.current.y -= normal.y * dot
-      velocity.current.z -= normal.z * dot
-    }
-
-    horizontalSpeed.current = Math.hypot(velocity.current.x, velocity.current.z)
-    if (horizontalSpeed.current > 0.0001) {
-      horizontalDirection.current.set(
-        velocity.current.x / horizontalSpeed.current,
+      decelLocal.current.set(
+        velocity.current.dot(right.current),
         0,
-        velocity.current.z / horizontalSpeed.current
+        velocity.current.dot(forward.current)
+      ).clampLength(0, 1)
+
+      decelLocal.current.x = decelLocal.current.x > 0
+        ? Math.max(0, decelLocal.current.x - Math.max(0, keyboardLocal.current.x))
+        : Math.min(0, decelLocal.current.x - Math.min(0, keyboardLocal.current.x))
+      decelLocal.current.z = decelLocal.current.z > 0
+        ? Math.max(0, decelLocal.current.z - Math.max(0, keyboardLocal.current.z))
+        : Math.min(0, decelLocal.current.z - Math.min(0, keyboardLocal.current.z))
+
+      decelWorld.current
+        .copy(right.current)
+        .multiplyScalar(-decelLocal.current.x)
+        .addScaledVector(forward.current, -decelLocal.current.z)
+
+      accelWorld.current
+        .copy(right.current)
+        .multiplyScalar(keyboardLocal.current.x)
+        .addScaledVector(forward.current, keyboardLocal.current.z)
+      if (accelWorld.current.lengthSq() > 1) {
+        accelWorld.current.normalize()
+      }
+
+      velocity.current.addScaledVector(
+        decelWorld.current,
+        deltaStep *
+          (
+            resolvedMovementSettings.maxHorizontalSpeed *
+            resolvedMovementSettings.maxHorizontalSpeed /
+            (2 * resolvedMovementSettings.horizontalDecelerationDistance)
+          )
+      )
+      velocity.current.addScaledVector(
+        accelWorld.current,
+        deltaStep *
+          (
+            resolvedMovementSettings.maxHorizontalSpeed *
+            resolvedMovementSettings.maxHorizontalSpeed /
+            (2 * resolvedMovementSettings.horizontalAccelerationDistance)
+          )
+      )
+
+      const horizontalSpeed = Math.hypot(velocity.current.x, velocity.current.z)
+      if (horizontalSpeed > resolvedMovementSettings.maxHorizontalSpeed) {
+        const scale = resolvedMovementSettings.maxHorizontalSpeed / horizontalSpeed
+        velocity.current.x *= scale
+        velocity.current.z *= scale
+      }
+
+      velocity.current.y = updateVerticalVelocity(
+        velocity.current.y,
+        grounded.current,
+        Boolean(keys.current.Space),
+        deltaStep,
+        resolvedMovementSettings
+      )
+
+      intendedPosition.current
+        .copy(playerPosition.current)
+        .addScaledVector(velocity.current, deltaStep)
+
+      const collision = resolvePlayerCollision(
+        {
+          x: playerPosition.current.x,
+          y: playerPosition.current.y,
+          z: playerPosition.current.z
+        },
+        {
+          x: intendedPosition.current.x,
+          y: intendedPosition.current.y,
+          z: intendedPosition.current.z
+        },
+        { wallBounds }
+      )
+
+      if (collision.position.y !== intendedPosition.current.y) {
+        velocity.current.y = 0
+      }
+
+      for (const normal of collision.collisions.wallNormals) {
+        const dot =
+          (velocity.current.x * normal.x) +
+          (velocity.current.y * normal.y) +
+          (velocity.current.z * normal.z)
+
+        if (dot >= 0) {
+          continue
+        }
+
+        velocity.current.addScaledVector(
+          new Vector3(normal.x, normal.y, normal.z),
+          -dot
+        )
+      }
+
+      grounded.current = collision.grounded && !keys.current.Space
+      playerPosition.current.set(
+        collision.position.x,
+        collision.position.y,
+        collision.position.z
       )
     }
-
-    grounded.current = collision.grounded && !keys.current.Space
-    playerPosition.current.set(
-      collision.position.x,
-      collision.position.y,
-      collision.position.z
-    )
 
     const cameraPosition = getCameraPosition(playerPosition.current)
 
@@ -1884,11 +1958,13 @@ function FlightRig({
 }
 
 function Scene({
+  composerEnabled,
   controlsOpen,
   layout,
   onAssetsReady,
   visualSettings
 }: {
+  composerEnabled: boolean
   controlsOpen: boolean
   layout: MazeLayout
   onAssetsReady: () => void
@@ -2020,66 +2096,68 @@ function Scene({
         volumetricLighting={visualSettings.volumetricLighting}
         volumetricNoiseFrequency={visualSettings.volumetricNoiseFrequency}
       />
-      <EffectComposer enableNormalPass>
-        {visualSettings.ambientOcclusionMode === 'n8ao' ? (
-          <N8AO
-            aoRadius={visualSettings.ambientOcclusionRadius}
-            color="#000000"
-            denoiseRadius={6}
-            distanceFalloff={1}
-            intensity={visualSettings.ambientOcclusionIntensity * 3}
-            quality="medium"
+      {composerEnabled ? (
+        <EffectComposer enableNormalPass>
+          {visualSettings.ambientOcclusionMode === 'n8ao' ? (
+            <N8AO
+              aoRadius={visualSettings.ambientOcclusionRadius}
+              color="#000000"
+              denoiseRadius={6}
+              distanceFalloff={1}
+              intensity={visualSettings.ambientOcclusionIntensity * 3}
+              quality="medium"
+            />
+          ) : null}
+          {visualSettings.ambientOcclusionMode === 'ssao' ? (
+            <SSAO
+              bias={0.03}
+              distanceFalloff={0.1}
+              distanceThreshold={1}
+              intensity={visualSettings.ambientOcclusionIntensity * 6}
+              luminanceInfluence={0}
+              radius={visualSettings.ambientOcclusionRadius}
+              rangeFalloff={0.1}
+              rangeThreshold={0.001}
+              rings={6}
+              samples={32}
+            />
+          ) : null}
+          {visualSettings.ssr.enabled ? (
+            <SSREffectPrimitive intensity={visualSettings.ssr.intensity} />
+          ) : null}
+          {visualSettings.bloom.enabled ? (
+            <BloomEffectPrimitive
+              intensity={visualSettings.bloom.intensity}
+              kernelSize={visualSettings.bloom.kernelSize}
+            />
+          ) : null}
+          {visualSettings.depthOfField.enabled ? (
+            <DepthOfField
+              bokehScale={visualSettings.depthOfField.bokehScale}
+              focalLength={visualSettings.depthOfField.focalLength}
+              focusDistance={visualSettings.depthOfField.focusDistance}
+            />
+          ) : null}
+          {visualSettings.lensFlare.enabled ? (
+            <TorchLensFlare
+              intensity={visualSettings.lensFlare.intensity}
+              layout={layout}
+              torchCandelaMultiplier={visualSettings.torchCandelaMultiplier}
+              torchFlickerAmount={visualSettings.torchFlickerAmount}
+            />
+          ) : null}
+          {visualSettings.vignette.enabled ? (
+            <Vignette darkness={visualSettings.vignette.intensity} />
+          ) : null}
+          <ExposureEffectPrimitive
+            exposure={getRendererExposure(visualSettings.exposureStops)}
           />
-        ) : null}
-        {visualSettings.ambientOcclusionMode === 'ssao' ? (
-          <SSAO
-            bias={0.03}
-            distanceFalloff={0.1}
-            distanceThreshold={1}
-            intensity={visualSettings.ambientOcclusionIntensity * 6}
-            luminanceInfluence={0}
-            radius={visualSettings.ambientOcclusionRadius}
-            rangeFalloff={0.1}
-            rangeThreshold={0.001}
-            rings={6}
-            samples={32}
+          <ToneMapping
+            mode={TONE_MAPPING_MODES[visualSettings.toneMapping]}
+            resolution={256}
           />
-        ) : null}
-        {visualSettings.ssr.enabled ? (
-          <SSREffectPrimitive intensity={visualSettings.ssr.intensity} />
-        ) : null}
-        {visualSettings.bloom.enabled ? (
-          <BloomEffectPrimitive
-            intensity={visualSettings.bloom.intensity}
-            kernelSize={visualSettings.bloom.kernelSize}
-          />
-        ) : null}
-        {visualSettings.depthOfField.enabled ? (
-          <DepthOfField
-            bokehScale={visualSettings.depthOfField.bokehScale}
-            focalLength={visualSettings.depthOfField.focalLength}
-            focusDistance={visualSettings.depthOfField.focusDistance}
-          />
-        ) : null}
-        {visualSettings.lensFlare.enabled ? (
-          <TorchLensFlare
-            intensity={visualSettings.lensFlare.intensity}
-            layout={layout}
-            torchCandelaMultiplier={visualSettings.torchCandelaMultiplier}
-            torchFlickerAmount={visualSettings.torchFlickerAmount}
-          />
-        ) : null}
-        {visualSettings.vignette.enabled ? (
-          <Vignette darkness={visualSettings.vignette.intensity} />
-        ) : null}
-        <ExposureEffectPrimitive
-          exposure={getRendererExposure(visualSettings.exposureStops)}
-        />
-        <ToneMapping
-          mode={TONE_MAPPING_MODES[visualSettings.toneMapping]}
-          resolution={256}
-        />
-      </EffectComposer>
+        </EffectComposer>
+      ) : null}
       <FlightRig
         controlsOpen={controlsOpen}
         movementSettings={visualSettings.movement}
@@ -2564,6 +2642,13 @@ export default function App() {
   })
   const [sceneLoaded, setSceneLoaded] = useState(false)
   const [visualSettings, setVisualSettings] = useState(createDefaultVisualSettings)
+  const composerEnabled =
+    visualSettings.ambientOcclusionMode !== 'off' ||
+    visualSettings.ssr.enabled ||
+    visualSettings.bloom.enabled ||
+    visualSettings.depthOfField.enabled ||
+    visualSettings.lensFlare.enabled ||
+    visualSettings.vignette.enabled
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -2713,16 +2798,19 @@ export default function App() {
             gl.toneMapping = NoToneMapping
             gl.toneMappingExposure = 1
             gl.shadowMap.enabled = true
+            gl.shadowMap.type = BasicShadowMap
             gl.domElement.dataset.sceneReady = 'false'
           }}
           shadows
         >
           <RendererSettings
+            composerEnabled={composerEnabled}
             exposureStops={visualSettings.exposureStops}
             toneMapping={visualSettings.toneMapping}
           />
           <Suspense fallback={null}>
             <Scene
+              composerEnabled={composerEnabled}
               controlsOpen={controlsOpen}
               layout={mazeLayout}
               onAssetsReady={onAssetsReady}

@@ -20,18 +20,45 @@ function isWithinExpandedTopBounds(position, bounds, radius) {
   )
 }
 
-function chooseNearestFace(position, bounds) {
+function chooseHorizontalFace(previousPosition, position, bounds, radius) {
+  const expandedBounds = {
+    minX: bounds.minX - radius,
+    maxX: bounds.maxX + radius,
+    minZ: bounds.minZ - radius,
+    maxZ: bounds.maxZ + radius
+  }
   const faces = [
-    { axis: 'x', value: bounds.minX, distance: position.x - bounds.minX },
-    { axis: 'x', value: bounds.maxX, distance: bounds.maxX - position.x },
-    { axis: 'y', value: bounds.minY, distance: position.y - bounds.minY },
-    { axis: 'y', value: bounds.maxY, distance: bounds.maxY - position.y },
-    { axis: 'z', value: bounds.minZ, distance: position.z - bounds.minZ },
-    { axis: 'z', value: bounds.maxZ, distance: bounds.maxZ - position.z }
+    {
+      axis: 'x',
+      depth: position.x - expandedBounds.minX,
+      normal: { x: -1, y: 0, z: 0 },
+      crossedFromOutside: previousPosition.x <= expandedBounds.minX
+    },
+    {
+      axis: 'x',
+      depth: expandedBounds.maxX - position.x,
+      normal: { x: 1, y: 0, z: 0 },
+      crossedFromOutside: previousPosition.x >= expandedBounds.maxX
+    },
+    {
+      axis: 'z',
+      depth: position.z - expandedBounds.minZ,
+      normal: { x: 0, y: 0, z: -1 },
+      crossedFromOutside: previousPosition.z <= expandedBounds.minZ
+    },
+    {
+      axis: 'z',
+      depth: expandedBounds.maxZ - position.z,
+      normal: { x: 0, y: 0, z: 1 },
+      crossedFromOutside: previousPosition.z >= expandedBounds.maxZ
+    }
   ]
+  const validFaces = faces.filter((face) => face.depth >= 0)
+  const crossedFaces = validFaces.filter((face) => face.crossedFromOutside)
+  const candidates = crossedFaces.length > 0 ? crossedFaces : validFaces
 
-  return faces.reduce((best, face) => {
-    if (!best || face.distance < best.distance) {
+  return candidates.reduce((best, face) => {
+    if (!best || face.depth < best.depth) {
       return face
     }
 
@@ -77,96 +104,13 @@ function resolveAgainstBox(previousPosition, desiredPosition, bounds, radius, he
     return { collided, grounded, normals, position }
   }
 
-  const candidates = []
-
-  if (
-    previousPosition.x <= bounds.minX - radius &&
-    position.x > bounds.minX - radius
-  ) {
-    candidates.push({
-      axis: 'x',
-      value: bounds.minX - radius,
-      distance: position.x - (bounds.minX - radius)
-    })
-  }
-
-  if (
-    previousPosition.x >= bounds.maxX + radius &&
-    position.x < bounds.maxX + radius
-  ) {
-    candidates.push({
-      axis: 'x',
-      value: bounds.maxX + radius,
-      distance: bounds.maxX + radius - position.x
-    })
-  }
-
-  if (
-    previousPosition.z <= bounds.minZ - radius &&
-    position.z > bounds.minZ - radius
-  ) {
-    candidates.push({
-      axis: 'z',
-      value: bounds.minZ - radius,
-      distance: position.z - (bounds.minZ - radius)
-    })
-  }
-
-  if (
-    previousPosition.z >= bounds.maxZ + radius &&
-    position.z < bounds.maxZ + radius
-  ) {
-    candidates.push({
-      axis: 'z',
-      value: bounds.maxZ + radius,
-      distance: bounds.maxZ + radius - position.z
-    })
-  }
-
-  const face = (
-    candidates.length > 0
-      ? candidates
-      : [
-          chooseNearestFace(position, {
-            minX: bounds.minX - radius,
-            maxX: bounds.maxX + radius,
-            minY: bounds.minY,
-            maxY: bounds.maxY,
-            minZ: bounds.minZ - radius,
-            maxZ: bounds.maxZ + radius
-          })
-        ]
-  ).reduce((best, candidate) => {
-    if (!best || candidate.distance < best.distance) {
-      return candidate
-    }
-
-    return best
-  }, null)
+  const face = chooseHorizontalFace(previousPosition, position, bounds, radius)
 
   if (face) {
-    position[face.axis] = face.value
-    grounded = grounded || face.axis === 'y' && face.value === bounds.maxY
+    position.x += face.normal.x * face.depth
+    position.z += face.normal.z * face.depth
     collided = true
-    if (face.axis === 'x') {
-      normals.push({
-        x: face.value < bounds.minX ? -1 : 1,
-        y: 0,
-        z: 0
-      })
-    } else if (face.axis === 'y') {
-      normals.push({
-        x: 0,
-        y: face.value === bounds.maxY ? 1 : -1,
-        z: 0
-      })
-    } else if (face.axis === 'z') {
-      normals.push({
-        x: 0,
-        y: 0,
-        z: face.value < bounds.minZ ? -1 : 1
-      })
-    }
+    normals.push(face.normal)
   }
 
   return { collided, grounded, normals, position }

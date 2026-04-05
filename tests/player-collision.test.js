@@ -82,6 +82,45 @@ test('preserves tangential motion when sliding along a wall face', () => {
   assert.deepEqual(result.collisions.wallNormals, [{ x: -1, y: 0, z: 0 }])
 })
 
+test('repeated wall-slide resolution preserves tangent travel without tunneling through the wall', () => {
+  const velocity = { x: 3, y: 0, z: 4 }
+  let position = { x: customWall.minX - PLAYER_RADIUS - 0.05, y: 0, z: -1.1 }
+  let maxXDuringOverlap = -Infinity
+
+  for (let index = 0; index < 60; index += 1) {
+    const desired = {
+      x: position.x + (velocity.x / 60),
+      y: position.y,
+      z: position.z + (velocity.z / 60)
+    }
+    const result = resolvePlayerCollision(position, desired, { wallBounds: [customWall] })
+
+    for (const normal of result.collisions.wallNormals) {
+      const dot =
+        (velocity.x * normal.x) +
+        (velocity.y * normal.y) +
+        (velocity.z * normal.z)
+
+      if (dot < 0) {
+        velocity.x -= normal.x * dot
+        velocity.y -= normal.y * dot
+        velocity.z -= normal.z * dot
+      }
+    }
+
+    position = result.position
+    if (
+      position.z > customWall.minZ - PLAYER_RADIUS &&
+      position.z < customWall.maxZ + PLAYER_RADIUS
+    ) {
+      maxXDuringOverlap = Math.max(maxXDuringOverlap, position.x)
+    }
+  }
+
+  assert.equal(maxXDuringOverlap, customWall.minX - PLAYER_RADIUS)
+  assert.ok(position.z > 1.5)
+})
+
 test('lands on top of a wall when descending onto it', () => {
   const result = resolvePlayerCollision(
     { x: 0, y: customWall.maxY + 1, z: 0 },

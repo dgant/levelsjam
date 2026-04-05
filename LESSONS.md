@@ -40,3 +40,5 @@
 - Once `three-atmosphere` is removed from the scene, remove the package itself as well. Leaving it installed makes the repo harder to reason about and can mask whether the runtime still depends on it.
 - The benchmark harness must wait for the Playwright web-server port before both smoke and perf runners. They share the same local `serve-root` port, so only guarding the smoke runner leaves a real race.
 - In this repository, a `7x7` torch maze can still clear the `>=120 FPS` perf gate if only the nearest torches cast shadows and distant point lights are culled entirely. Paying for every local point-light shadow cube at once is what tanks the benchmark.
+- In this repository, default ambient occlusion can cost more than the nearby torch-shadow budget. If the perf gate suddenly halves, check whether a default post effect forced the composer back on before over-optimizing the lights.
+- The fast default render path should bypass `EffectComposer` entirely when every optional post effect is off. Use renderer tonemapping and exposure directly for the baseline scene and mount the composer only when a post effect is actually enabled.

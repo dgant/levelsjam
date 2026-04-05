@@ -48,9 +48,10 @@
 - Each torch point light distance remains fixed at 5 meters.
 - Each torch point light flickers at twice the previous speed.
 - Each torch point light uses a warm fire-appropriate color.
-- The two nearest torch lights within a fixed 40 meter radius of the camera cast shadows.
+- Torch point lights outside a fixed 4 meter active-light radius are culled for performance.
+- The two nearest torch lights within the active-light radius cast shadows.
+- Torch shadow maps use one fixed resolution for every torch light.
 - Torch shadow maps reuse static updates while the lights and occluders remain stationary.
-- Close torch lights use a 2x higher shadow-map resolution than distant torch lights.
 - The player collides with the ground plane and the walls.
 - The character collision volume is a capsule that is 1.75 meters tall and 0.25 meters in radius.
 - The player spawns 1 meter above the ground plane.
@@ -63,9 +64,11 @@
 - The player decelerates from horizontal top speed to zero over a travel distance of 0.5 meters by default.
 - Gravity applies at 1g.
 - Jetpack thrust applies at 1.25g so the net upward acceleration is 0.25g while `Space` is held.
+- Player movement uses fixed physics substeps derived from the character radius and configured speed limits.
 - Horizontal movement magnitude is stored as a scalar rather than a persistent world-space vector.
 - Horizontal movement is applied in the current camera-relative input direction.
 - Movement input that opposes current horizontal motion uses the deceleration rate instead of the acceleration rate.
+- Wall collision resolves against wall side faces and top faces rather than arbitrary wall AABB faces.
 - On wall collision, only the component of player velocity along the collision normal is removed so the player can slide along walls.
 - The scene uses `postprocessing` Bloom.
 - The scene uses `postprocessing` Depth of Field.
@@ -74,7 +77,7 @@
 - The scene includes a full-maze volumetric fog volume that spans the ground footprint from 0 to 6 meters in altitude.
 - The scene does not render per-torch cone meshes as the volumetric-fog implementation.
 - The scene does not use God Rays.
-- Bloom, Depth of Field, Lens Flares, and SSR default to disabled.
+- Bloom, Depth of Field, Lens Flares, SSR, Ambient Occlusion, and Vignette default to disabled.
 - The debug panel exposure control defaults to `-4.5`.
 - The debug panel exposes an IBL intensity multiplier across a wide enough range to rebalance the HDRI against the torches without relying on physically calibrated EV semantics.
 - The debug panel exposes a torch candela multiplier across a wide enough range to rebalance the torches against the HDRI without relying on physically calibrated EV semantics.
@@ -85,11 +88,12 @@
 - The debug panel exposes an ambient-occlusion mode dropdown with working `Off`, `N8AO`, and `SSAO` modes.
 - The debug panel exposes one shared ambient-occlusion intensity slider for the selected AO mode.
 - The debug panel exposes an ambient-occlusion radius control and labels the radius in scene units or screen-space units as appropriate for the selected AO mode.
+- The debug panel ambient-occlusion mode defaults to `Off`.
 - The debug panel exposes Depth of Field `focusDistance`, `focalLength`, and `bokehScale`.
 - The debug panel labels Depth of Field `focusDistance` and `focalLength` with their units.
 - The debug panel allows Depth of Field focus distance values up to 8 meters.
 - The debug panel exposes Bloom `kernelSize`.
-- The Bloom kernel-size control produces a visible change in the rendered bloom.
+- The Bloom kernel-size control updates the configured bloom kernel preset.
 - The debug panel does not expose obsolete atmosphere or sun-direction controls.
 - The page shows an FPS counter in the top-right corner together with the current Git revision and revision timestamp.
 

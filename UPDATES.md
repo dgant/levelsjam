@@ -43,3 +43,5 @@
 - When a requested content replacement removes a rendering system entirely, uninstall the now-unused package instead of leaving it as dead dependency drift.
 - When timing Playwright-based benchmarks in this repository, treat both `test:smoke:runner` and `test:perf:runner` as users of the same local web-server port and wait for that port to be free before launching either runner.
 - When a larger maze raises the torch count, profile live point lights and shadow casters before changing materials or geometry. In this repository the fastest fix was limiting shadow casting to the nearest torches and culling distant point lights, not blindly downgrading the whole scene.
+- In this repository, default ambient occlusion is expensive enough to break the `>=120 FPS` gate in the maze scene. Keep AO off by default and let the debug panel enable it on demand.
+- Fixed-size baked point-light shadow maps do not remove the per-frame lighting and shadow-sampling cost. Measure the all-lights version before assuming static shadow maps make light culling unnecessary.

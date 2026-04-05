@@ -47,8 +47,9 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the torch billboards animate and stay camera-facing even on walls whose parent groups are rotated.
 - Verify the visible flame fills the 0.5m billboard and that the billboard bottom edge is flush with the sconce top.
 - Verify each maze light location has a warm torch point light and the lights cast shadows.
-- Verify the two nearest nearby torches cast shadows when they are within 40m of the camera.
-- Verify close torch lights use visibly sharper shadow maps than the second shadowed light.
+- Verify torch point lights outside the fixed 4m active-light radius are culled for performance.
+- Verify the two nearest nearby torches within that active-light radius cast shadows.
+- Verify every torch shadow map uses the same fixed resolution.
 - Verify the default `Torch Flicker` value is `0.15`.
 - Verify the torch flicker runs at the updated faster rate and that reducing `Torch Flicker` toward `0.00` steadies the torch brightness.
 - Verify the fire flipbook runs at the updated faster rate.
@@ -65,6 +66,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify changing `Exposure` changes rendered brightness by stop differences.
 - Verify changing `Exposure` updates `canvas[data-renderer-exposure]`.
 - Verify the `Ambient Occlusion` dropdown switches between `Off`, `N8AO`, and `SSAO` and that both AO modes visibly darken contact areas compared with `Off`.
+- Verify `Ambient Occlusion` starts at `Off` in the default scene.
 - Verify the `AO Radius` control produces a visible radius change in the selected AO mode.
 - Verify enabling SSR from the visual controls panel does not introduce page errors or halt rendering.
 - Verify enabling SSR visibly changes reflective surfaces.
@@ -91,7 +93,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Treat a failed `npm run test:perf` run or a measured browser benchmark below `120 FPS` as blocking.
 - Keep `npm run test:unit` under 20 seconds.
 - Keep the prepared smoke runner `npm run test:smoke:runner` under 1 minute after a single `npm run build:pages`.
-- Latest measured benchmark on April 5, 2026: `npm run bench:startup` reached the first bright frame in about `337.6ms` on the background dev server, `npm run test:unit` took about `4852ms`, and the prepared `npm run test:smoke:runner` took about `57.3s`.
+- Latest measured benchmark on April 5, 2026: `node scripts/benchmark-startup.cjs` reached the first bright frame in about `268.2ms` on the background dev server, `npm run test:unit` took about `4626ms`, `npm run test:perf:runner` took about `5100ms`, and the prepared `npm run test:smoke:runner` took about `28479ms`.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.
