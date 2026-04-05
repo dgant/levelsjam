@@ -73,6 +73,7 @@ import {
 import {
   GROUND_SIZE,
   GROUND_Y,
+  PLAYER_EYE_HEIGHT,
   PLAYER_SPAWN_POSITION,
   SCONCE_RADIUS,
   TORCH_BASE_CANDELA,
@@ -835,45 +836,50 @@ function WallSconce({
 
   return (
     <>
-      <mesh
-        castShadow
+      <group
         position={position}
-        receiveShadow
+        userData={{ debugIndex: wall.index, debugRole: 'sconce' }}
       >
-        <sphereGeometry
-          args={[
-            SCONCE_RADIUS,
-            24,
-            16,
-            0,
-            Math.PI * 2,
-            Math.PI / 2,
-            Math.PI / 2
-          ]}
-        />
-        <meshStandardMaterial
-          {...metal}
-          bumpScale={0.02}
-          envMapIntensity={2}
-          metalness={0.8}
-          roughness={0.35}
-        />
-      </mesh>
-      <mesh
-        castShadow
-        position={[position[0], position[1], position[2]]}
-        receiveShadow
-        rotation-x={Math.PI / 2}
-      >
-        <circleGeometry args={[SCONCE_RADIUS, 24]} />
-        <meshStandardMaterial
-          {...metal}
-          bumpScale={0.02}
-          envMapIntensity={2}
-          metalness={0.8}
-          roughness={0.35}
-        />
-      </mesh>
+        <mesh
+          castShadow
+          receiveShadow
+        >
+          <sphereGeometry
+            args={[
+              SCONCE_RADIUS,
+              24,
+              16,
+              0,
+              Math.PI * 2,
+              Math.PI / 2,
+              Math.PI / 2
+            ]}
+          />
+          <meshStandardMaterial
+            {...metal}
+            bumpScale={0.02}
+            envMapIntensity={2}
+            metalness={0.8}
+            roughness={0.35}
+            side={DoubleSide}
+          />
+        </mesh>
+        <mesh
+          castShadow
+          receiveShadow
+          rotation-x={-Math.PI / 2}
+        >
+          <circleGeometry args={[SCONCE_RADIUS, 24]} />
+          <meshStandardMaterial
+            {...metal}
+            bumpScale={0.02}
+            envMapIntensity={2}
+            metalness={0.8}
+            roughness={0.35}
+            side={DoubleSide}
+          />
+        </mesh>
+      </group>
       <TorchBillboard
         flickerAmount={flickerAmount}
         position={torchPosition}
@@ -1372,6 +1378,49 @@ function FlightRig({
     }
   }, [controlsOpen])
 
+  useEffect(() => {
+    const globalWindow = window as Window & {
+      __levelsjamDebug?: {
+        setView?: (
+          cameraPosition: [number, number, number],
+          target: [number, number, number]
+        ) => void
+      }
+    }
+    const existing = globalWindow.__levelsjamDebug ?? {}
+
+    globalWindow.__levelsjamDebug = {
+      ...existing,
+      setView: (cameraPosition, target) => {
+        playerPosition.current.set(
+          cameraPosition[0],
+          cameraPosition[1] - PLAYER_EYE_HEIGHT,
+          cameraPosition[2]
+        )
+        velocity.current.set(0, 0, 0)
+        horizontalSpeed.current = 0
+        keys.current = {}
+        camera.position.set(cameraPosition[0], cameraPosition[1], cameraPosition[2])
+        camera.lookAt(target[0], target[1], target[2])
+        cameraEuler.setFromQuaternion(camera.quaternion, 'YXZ')
+        yaw.current = cameraEuler.y
+        pitch.current = cameraEuler.x
+        camera.updateMatrixWorld()
+      }
+    }
+
+    return () => {
+      if (!globalWindow.__levelsjamDebug) {
+        return
+      }
+
+      delete globalWindow.__levelsjamDebug.setView
+      if (Object.keys(globalWindow.__levelsjamDebug).length === 0) {
+        delete globalWindow.__levelsjamDebug
+      }
+    }
+  }, [camera])
+
   useFrame((_, delta) => {
     camera.getWorldDirection(forward.current)
     forward.current.y = 0
@@ -1470,9 +1519,45 @@ function Scene({
   onAssetsReady: () => void
   visualSettings: VisualSettings
 }) {
+  const scene = useThree((state) => state.scene)
+
   useEffect(() => {
     onAssetsReady()
   }, [onAssetsReady])
+
+  useEffect(() => {
+    const globalWindow = window as Window & {
+      __levelsjamDebug?: {
+        setSconceVisible?: (index: number, visible: boolean) => void
+      }
+    }
+    const existing = globalWindow.__levelsjamDebug ?? {}
+
+    globalWindow.__levelsjamDebug = {
+      ...existing,
+      setSconceVisible: (index, visible) => {
+        scene.traverse((object) => {
+          if (
+            object.userData?.debugRole === 'sconce' &&
+            object.userData?.debugIndex === index
+          ) {
+            object.visible = visible
+          }
+        })
+      }
+    }
+
+    return () => {
+      if (!globalWindow.__levelsjamDebug) {
+        return
+      }
+
+      delete globalWindow.__levelsjamDebug.setSconceVisible
+      if (Object.keys(globalWindow.__levelsjamDebug).length === 0) {
+        delete globalWindow.__levelsjamDebug
+      }
+    }
+  }, [scene])
 
   return (
     <>

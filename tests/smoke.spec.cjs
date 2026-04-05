@@ -173,6 +173,28 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
 
   const frameBrightness = await waitForBrightFrame(page, canvas, 6)
 
+  await page.evaluate(() => {
+    window.__levelsjamDebug.setView(
+      [-6.739980294369161, 1.5, 1.6],
+      [-6.739980294369161, 1.15, -0.4781253710389137]
+    )
+  })
+  await page.waitForTimeout(300)
+  const sconceRegionVisible = await screenshotCanvasRegion(page, canvas, 140, 140, 0.5, 0.5)
+  await page.evaluate(() => {
+    window.__levelsjamDebug.setSconceVisible(4, false)
+  })
+  await page.waitForTimeout(200)
+  const sconceRegionHidden = await screenshotCanvasRegion(page, canvas, 140, 140, 0.5, 0.5)
+  await page.evaluate(() => {
+    window.__levelsjamDebug.setSconceVisible(4, true)
+  })
+  expect(measureDifference(sconceRegionVisible, sconceRegionHidden)).toBeGreaterThan(1.2)
+  await page.evaluate(() => {
+    window.__levelsjamDebug.setView([0, 2.5, 0], [0, 2.5, -10])
+  })
+  await page.waitForTimeout(200)
+
   await expect(page.locator('.fps-counter')).toContainText('FPS', { timeout: 5_000 })
   await page.keyboard.press('KeyW')
   await expect
