@@ -3,6 +3,7 @@ import {
   DepthOfField,
   EffectComposer,
   N8AO,
+  SSAO,
   ToneMapping,
   Vignette
 } from '@react-three/postprocessing'
@@ -43,15 +44,19 @@ import {
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js'
 import { SSREffect } from './vendor/screen-space-reflections.js'
 import {
-  DEFAULT_EXPOSURE_EV100,
+  DEFAULT_EXPOSURE_STOPS,
   DEFAULT_IBL_INTENSITY_MULTIPLIER,
   DEFAULT_TORCH_CANDELA_MULTIPLIER,
+  DEFAULT_TORCH_FLICKER_AMOUNT,
   MAX_IBL_INTENSITY_MULTIPLIER,
   MAX_TORCH_CANDELA_MULTIPLIER,
+  MAX_TORCH_FLICKER_AMOUNT,
   MIN_IBL_INTENSITY_MULTIPLIER,
   MIN_TORCH_CANDELA_MULTIPLIER,
+  MIN_TORCH_FLICKER_AMOUNT,
   getHdrLightingIntensity,
   getRendererExposure,
+  getTorchFlickerFactor,
   scalePhotometricIntensity
 } from './lib/lightingCalibration.js'
 import {
@@ -71,6 +76,7 @@ import {
   TORCH_BASE_CANDELA,
   TORCH_BILLBOARD_SIZE,
   WALL_HEIGHT,
+  getWallAttachmentLocalLayout,
   WALL_LAYOUT,
   WALL_LENGTH,
   WALL_WIDTH
@@ -138,8 +144,12 @@ const FIRE_BILLBOARD_INTENSITY_SCALE = 1 / TORCH_BASE_CANDELA
 const CUBE_BACKGROUND_RESOLUTION = 512
 const TORCH_SHADOW_MAP_SIZE = 256
 const TORCH_SHADOW_DISTANCE_SQ = 40 * 40
-const SSR_INTENSITY_SCALE = 0.02
 const LENS_FLARE_COLOR_GAIN_SCALE = 0.02
+const AMBIENT_OCCLUSION_OPTIONS = [
+  { key: 'off', label: 'Off' },
+  { key: 'n8ao', label: 'N8AO' },
+  { key: 'ssao', label: 'SSAO' }
+] as const
 const TONE_MAPPING_MODES = {
   linear: PostToneMappingMode.LINEAR,
   reinhard: PostToneMappingMode.REINHARD,
@@ -167,6 +177,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
 `
 
 type ToneMappingMode = keyof typeof TONE_MAPPING_MODES
+type AmbientOcclusionMode = (typeof AMBIENT_OCCLUSION_OPTIONS)[number]['key']
 
 type EffectSettings = {
   enabled: boolean
@@ -174,23 +185,36 @@ type EffectSettings = {
 }
 
 type VisualSettings = {
-  exposureEv100: number
+  ambientOcclusionIntensity: number
+  ambientOcclusionMode: AmbientOcclusionMode
+  exposureStops: number
   iblIntensity: number
   torchCandelaMultiplier: number
+  torchFlickerAmount: number
   toneMapping: ToneMappingMode
   bloom: EffectSettings
   depthOfField: EffectSettings
   lensFlare: EffectSettings
-  n8ao: EffectSettings
   ssr: EffectSettings
   vignette: EffectSettings
 }
 
 type EffectSettingKey = Exclude<
   keyof VisualSettings,
-  'exposureEv100' | 'iblIntensity' | 'torchCandelaMultiplier' | 'toneMapping'
+  | 'ambientOcclusionIntensity'
+  | 'ambientOcclusionMode'
+  | 'exposureStops'
+  | 'iblIntensity'
+  | 'torchCandelaMultiplier'
+  | 'torchFlickerAmount'
+  | 'toneMapping'
 >
-type ScalarSettingKey = 'exposureEv100' | 'iblIntensity' | 'torchCandelaMultiplier'
+type ScalarSettingKey =
+  | 'ambientOcclusionIntensity'
+  | 'exposureStops'
+  | 'iblIntensity'
+  | 'torchCandelaMultiplier'
+  | 'torchFlickerAmount'
 
 type PbrMaps = {
   aoMap?: Texture
@@ -242,15 +266,17 @@ class ExposureEffectImpl extends Effect {
 
 function createDefaultVisualSettings(): VisualSettings {
   return {
-    exposureEv100: DEFAULT_EXPOSURE_EV100,
+    ambientOcclusionIntensity: 1,
+    ambientOcclusionMode: 'n8ao',
+    exposureStops: DEFAULT_EXPOSURE_STOPS,
     iblIntensity: DEFAULT_IBL_INTENSITY_MULTIPLIER,
     torchCandelaMultiplier: DEFAULT_TORCH_CANDELA_MULTIPLIER,
+    torchFlickerAmount: DEFAULT_TORCH_FLICKER_AMOUNT,
     toneMapping: 'agx',
     bloom: { enabled: false, intensity: 0.7 },
     depthOfField: { enabled: false, intensity: 1 },
     lensFlare: { enabled: false, intensity: 1 },
-    n8ao: { enabled: true, intensity: 1 },
-    ssr: { enabled: false, intensity: 0.25 },
+    ssr: { enabled: false, intensity: 0.6 },
     vignette: { enabled: true, intensity: 0.4 }
   }
 }
@@ -456,22 +482,22 @@ function LoadingOverlay({
 }
 
 function RendererSettings({
-  exposureEv100,
+  exposureStops,
   toneMapping
 }: {
-  exposureEv100: number
+  exposureStops: number
   toneMapping: ToneMappingMode
 }) {
   const gl = useThree((state) => state.gl)
 
   useEffect(() => {
-    const exposure = getRendererExposure(exposureEv100)
+    const exposure = getRendererExposure(exposureStops)
 
     gl.toneMappingExposure = 1
     gl.domElement.dataset.rendererExposure = exposure.toFixed(6)
-    gl.domElement.dataset.rendererEv100 = exposureEv100.toFixed(2)
+    gl.domElement.dataset.rendererExposureStops = exposureStops.toFixed(2)
     gl.domElement.dataset.toneMapping = toneMapping
-  }, [exposureEv100, gl, toneMapping])
+  }, [exposureStops, gl, toneMapping])
 
   return null
 }
@@ -598,11 +624,15 @@ function Ground() {
 }
 
 function TorchBillboard({
-  intensity,
-  position
+  flickerAmount,
+  position,
+  seed,
+  torchCandelaMultiplier
 }: {
-  intensity: number
+  flickerAmount: number
   position: [number, number, number]
+  seed: number
+  torchCandelaMultiplier: number
 }) {
   const camera = useThree((state) => state.camera)
   const texture = useFireFlipbookTexture()
@@ -629,12 +659,17 @@ function TorchBillboard({
       ((row + FIRE_FLIPBOOK_FRAME_CROP.maxY) / FIRE_FLIPBOOK_GRID)
 
     if (material.current) {
+      const noise = getTorchNoise(elapsed, seed)
+      const brightness =
+        TORCH_BASE_CANDELA *
+        torchCandelaMultiplier *
+        getTorchFlickerFactor(noise, flickerAmount)
       const billboardMaterial = material.current.material as {
         color: Color
       }
 
       billboardMaterial.color.setScalar(
-        Math.max(0.5, intensity * FIRE_BILLBOARD_INTENSITY_SCALE)
+        brightness * FIRE_BILLBOARD_INTENSITY_SCALE
       )
     }
   })
@@ -651,9 +686,7 @@ function TorchBillboard({
         <planeGeometry args={[TORCH_BILLBOARD_SIZE, TORCH_BILLBOARD_SIZE]} />
         <meshBasicMaterial
           alphaTest={0.005}
-          color={new Color(1, 1, 1).multiplyScalar(
-            Math.max(0.5, intensity * FIRE_BILLBOARD_INTENSITY_SCALE)
-          )}
+          color={new Color(1, 1, 1)}
           depthWrite={false}
           map={texture}
           side={DoubleSide}
@@ -665,11 +698,13 @@ function TorchBillboard({
 }
 
 function TorchLight({
+  flickerAmount,
   lightHandle,
   seed,
   torchCandelaMultiplier,
   position
 }: {
+  flickerAmount: number
   lightHandle: { current: TorchLightHandle | null }
   seed: number
   torchCandelaMultiplier: number
@@ -685,13 +720,13 @@ function TorchLight({
       return
     }
 
-    lightRef.intensity =
-      scalePhotometricIntensity(
-        (0.5 + (0.5 * noise)) *
-          TORCH_BASE_CANDELA *
-          torchCandelaMultiplier
-      )
-    lightRef.distance = (0.5 + (0.5 * noise)) * 10
+    const brightness =
+      TORCH_BASE_CANDELA *
+      torchCandelaMultiplier *
+      getTorchFlickerFactor(noise, flickerAmount)
+
+    lightRef.intensity = scalePhotometricIntensity(brightness)
+    lightRef.distance = 10
   })
 
   useEffect(() => {
@@ -722,25 +757,28 @@ function TorchLight({
 }
 
 function WallSconce({
+  flickerAmount,
   lightHandle,
   metal,
   torchCandelaMultiplier,
   wall
 }: {
+  flickerAmount: number
   lightHandle: { current: TorchLightHandle | null }
   metal: PbrMaps
   torchCandelaMultiplier: number
   wall: (typeof WALL_LAYOUT)[number]
 }) {
+  const localLayout = getWallAttachmentLocalLayout(wall)
   const position: [number, number, number] = [
-    wall.sconcePosition.x - wall.position.x,
-    wall.sconcePosition.y - wall.position.y,
-    wall.sconcePosition.z - wall.position.z
+    localLayout.sconcePosition.x,
+    localLayout.sconcePosition.y,
+    localLayout.sconcePosition.z
   ]
   const torchPosition: [number, number, number] = [
-    wall.torchPosition.x - wall.position.x,
-    wall.torchPosition.y - wall.position.y,
-    wall.torchPosition.z - wall.position.z
+    localLayout.torchPosition.x,
+    localLayout.torchPosition.y,
+    localLayout.torchPosition.z
   ]
 
   return (
@@ -749,6 +787,7 @@ function WallSconce({
         castShadow
         position={position}
         receiveShadow
+        rotation-y={localLayout.sconceRotationY}
       >
         <sphereGeometry
           args={[
@@ -756,24 +795,27 @@ function WallSconce({
             24,
             16,
             0,
-            Math.PI * 2,
-            Math.PI / 2,
-            Math.PI / 2
+            Math.PI,
+            0,
+            Math.PI
           ]}
         />
         <meshStandardMaterial
           {...metal}
           bumpScale={0.02}
-          metalness={0.85}
-          roughness={0.55}
+          metalness={0.8}
+          roughness={0.35}
           side={DoubleSide}
         />
       </mesh>
       <TorchBillboard
-        intensity={TORCH_BASE_CANDELA * torchCandelaMultiplier}
+        flickerAmount={flickerAmount}
         position={torchPosition}
+        seed={wall.index + 1}
+        torchCandelaMultiplier={torchCandelaMultiplier}
       />
       <TorchLight
+        flickerAmount={flickerAmount}
         lightHandle={lightHandle}
         position={torchPosition}
         seed={wall.index + 1}
@@ -784,8 +826,10 @@ function WallSconce({
 }
 
 function Walls({
+  flickerAmount,
   torchCandelaMultiplier
 }: {
+  flickerAmount: number
   torchCandelaMultiplier: number
 }) {
   const camera = useThree((state) => state.camera)
@@ -845,6 +889,7 @@ function Walls({
             />
           </mesh>
           <WallSconce
+            flickerAmount={flickerAmount}
             lightHandle={lightHandles.current[layout.index]}
             metal={metal}
             torchCandelaMultiplier={torchCandelaMultiplier}
@@ -857,14 +902,19 @@ function Walls({
 }
 
 function SceneGeometry({
+  flickerAmount,
   torchCandelaMultiplier
 }: {
+  flickerAmount: number
   torchCandelaMultiplier: number
 }) {
   return (
     <>
       <Ground />
-      <Walls torchCandelaMultiplier={torchCandelaMultiplier} />
+      <Walls
+        flickerAmount={flickerAmount}
+        torchCandelaMultiplier={torchCandelaMultiplier}
+      />
     </>
   )
 }
@@ -879,22 +929,22 @@ function SSREffectPrimitive({
   const effect = useMemo(
     () =>
       new SSREffect(scene, camera, {
-        blend: 0.9,
-        blur: 0.45,
+        blend: 0.92,
+        blur: 0.3,
         correction: 1,
-        distance: 12,
-        fade: 0.15,
-        intensity: intensity * SSR_INTENSITY_SCALE,
+        distance: 18,
+        fade: 0.12,
+        intensity,
         ior: 1.333,
-        jitter: 0.1,
+        jitter: 0.05,
         jitterRoughness: 0.1,
-        maxDepthDifference: 10,
-        maxRoughness: 1,
+        maxDepthDifference: 6,
+        maxRoughness: 0.95,
         missedRays: true,
         refineSteps: 5,
         resolutionScale: 0.75,
-        steps: 20,
-        thickness: 10,
+        steps: 24,
+        thickness: 4,
         useNormalMap: true,
         useRoughnessMap: true
       }),
@@ -902,7 +952,7 @@ function SSREffectPrimitive({
   )
 
   useEffect(() => {
-    effect.intensity = intensity * SSR_INTENSITY_SCALE
+    effect.intensity = intensity
   }, [effect, intensity])
 
   useEffect(() => () => effect.dispose(), [effect])
@@ -982,10 +1032,12 @@ function ExposureEffectPrimitive({
 
 function TorchLensFlare({
   intensity,
-  torchCandelaMultiplier
+  torchCandelaMultiplier,
+  torchFlickerAmount
 }: {
   intensity: number
   torchCandelaMultiplier: number
+  torchFlickerAmount: number
 }) {
   const camera = useThree((state) => state.camera)
   const raycaster = useThree((state) => state.raycaster)
@@ -1048,9 +1100,9 @@ function TorchLensFlare({
       const noise = getTorchNoise(state.clock.getElapsedTime(), wall.index + 1)
       const brightness =
         scalePhotometricIntensity(
-          (0.5 + (0.5 * noise)) *
-            TORCH_BASE_CANDELA *
-            torchCandelaMultiplier
+          TORCH_BASE_CANDELA *
+            torchCandelaMultiplier *
+            getTorchFlickerFactor(noise, torchFlickerAmount)
         ) * intensity
 
       targetPosition.copy(wall.torchPosition)
@@ -1366,19 +1418,32 @@ function Scene({
       />
       <EnvironmentLighting iblIntensity={visualSettings.iblIntensity} />
       <SceneGeometry
+        flickerAmount={visualSettings.torchFlickerAmount}
         torchCandelaMultiplier={visualSettings.torchCandelaMultiplier}
       />
       <EffectComposer enableNormalPass>
-        {visualSettings.n8ao.enabled ? (
+        {visualSettings.ambientOcclusionMode === 'n8ao' ? (
           <N8AO
-            aoRadius={2}
+            aoRadius={28}
             color="#000000"
-            denoiseRadius={12}
-            distanceFalloff={1}
+            denoiseRadius={8}
+            distanceFalloff={0.2}
             halfRes
-            intensity={visualSettings.n8ao.intensity}
+            intensity={visualSettings.ambientOcclusionIntensity}
             quality="medium"
             screenSpaceRadius
+          />
+        ) : null}
+        {visualSettings.ambientOcclusionMode === 'ssao' ? (
+          <SSAO
+            distanceFalloff={0.025}
+            distanceThreshold={0.9}
+            intensity={visualSettings.ambientOcclusionIntensity}
+            luminanceInfluence={0.15}
+            radius={18}
+            rangeFalloff={0.1}
+            rangeThreshold={0.001}
+            samples={21}
           />
         ) : null}
         {visualSettings.ssr.enabled ? (
@@ -1403,13 +1468,14 @@ function Scene({
           <TorchLensFlare
             intensity={visualSettings.lensFlare.intensity}
             torchCandelaMultiplier={visualSettings.torchCandelaMultiplier}
+            torchFlickerAmount={visualSettings.torchFlickerAmount}
           />
         ) : null}
         {visualSettings.vignette.enabled ? (
           <Vignette darkness={visualSettings.vignette.intensity} />
         ) : null}
         <ExposureEffectPrimitive
-          exposure={getRendererExposure(visualSettings.exposureEv100)}
+          exposure={getRendererExposure(visualSettings.exposureStops)}
         />
         <ToneMapping
           mode={TONE_MAPPING_MODES[visualSettings.toneMapping]}
@@ -1424,12 +1490,14 @@ function Scene({
 }
 
 function VisualControls({
+  onAmbientOcclusionModeChange,
   controlsOpen,
   onEffectSettingChange,
   onScalarSettingChange,
   onToneMappingChange,
   visualSettings
 }: {
+  onAmbientOcclusionModeChange: (value: AmbientOcclusionMode) => void
   controlsOpen: boolean
   onEffectSettingChange: (
     effect: EffectSettingKey,
@@ -1453,8 +1521,7 @@ function VisualControls({
     { key: 'bloom', label: 'Bloom', min: 0, max: 3, step: 0.05 },
     { key: 'depthOfField', label: 'Depth Of Field', min: 0, max: 5, step: 0.05 },
     { key: 'lensFlare', label: 'Lens Flares', min: 0, max: 1, step: 0.05 },
-    { key: 'n8ao', label: 'N8AO', min: 0, max: 5, step: 0.05 },
-    { key: 'ssr', label: 'SSR', min: 0, max: 1, step: 0.05 },
+    { key: 'ssr', label: 'SSR', min: 0, max: 2, step: 0.05 },
     { key: 'vignette', label: 'Vignette', min: 0, max: 1, step: 0.05 }
   ]
 
@@ -1469,22 +1536,23 @@ function VisualControls({
       </div>
 
       <label className="visual-control-row">
-        <span>Exposure EV100</span>
+        <output>{visualSettings.exposureStops.toFixed(2)}</output>
+        <span>Exposure</span>
         <input
-          aria-label="Exposure EV100"
+          aria-label="Exposure"
           max={20}
-          min={8}
+          min={-20}
           onChange={(event) => {
-            onScalarSettingChange('exposureEv100', Number(event.target.value))
+            onScalarSettingChange('exposureStops', Number(event.target.value))
           }}
           step={0.25}
           type="range"
-          value={visualSettings.exposureEv100}
+          value={visualSettings.exposureStops}
         />
-        <output>{visualSettings.exposureEv100.toFixed(2)} EV100</output>
       </label>
 
       <label className="visual-control-row">
+        <output>{visualSettings.iblIntensity.toFixed(2)}x</output>
         <span>IBL Intensity</span>
         <input
           aria-label="IBL Intensity"
@@ -1497,10 +1565,10 @@ function VisualControls({
           type="range"
           value={visualSettings.iblIntensity}
         />
-        <output>{visualSettings.iblIntensity.toFixed(2)}x</output>
       </label>
 
       <label className="visual-control-row">
+        <output>{visualSettings.torchCandelaMultiplier.toFixed(2)}x</output>
         <span>Torch Candelas</span>
         <input
           aria-label="Torch Candelas"
@@ -1516,10 +1584,14 @@ function VisualControls({
           type="range"
           value={visualSettings.torchCandelaMultiplier}
         />
-        <output>{visualSettings.torchCandelaMultiplier.toFixed(2)}x</output>
       </label>
 
       <label className="visual-control-row">
+        <output>
+          {TONE_MAPPING_OPTIONS.find(
+            (option) => option.key === visualSettings.toneMapping
+          )?.label ?? visualSettings.toneMapping}
+        </output>
         <span>Tone Mapper</span>
         <select
           aria-label="Tone Mapper"
@@ -1539,28 +1611,92 @@ function VisualControls({
         </select>
       </label>
 
-      {effectControls.map((effectControl) => (
-        <div
-          className="visual-effect-row"
-          key={effectControl.key}
-        >
-          <label className="visual-effect-toggle">
-            <input
-              checked={visualSettings[effectControl.key].enabled}
-              onChange={(event) => {
-                onEffectSettingChange(effectControl.key, {
-                  enabled: event.target.checked
-                })
-              }}
-              type="checkbox"
-            />
-            <span>{effectControl.label}</span>
-          </label>
+      <label className="visual-control-row">
+        <output>{visualSettings.torchFlickerAmount.toFixed(2)}</output>
+        <span>Torch Flicker</span>
+        <input
+          aria-label="Torch Flicker"
+          max={MAX_TORCH_FLICKER_AMOUNT}
+          min={MIN_TORCH_FLICKER_AMOUNT}
+          onChange={(event) => {
+            onScalarSettingChange('torchFlickerAmount', Number(event.target.value))
+          }}
+          step={0.05}
+          type="range"
+          value={visualSettings.torchFlickerAmount}
+        />
+      </label>
 
-          <label className="visual-control-row">
-            <span>{effectControl.label} Intensity</span>
+      <label className="visual-control-row">
+        <output>
+          {AMBIENT_OCCLUSION_OPTIONS.find(
+            (option) => option.key === visualSettings.ambientOcclusionMode
+          )?.label ?? visualSettings.ambientOcclusionMode}
+        </output>
+        <span>Ambient Occlusion</span>
+        <select
+          aria-label="Ambient Occlusion"
+          onChange={(event) => {
+            onAmbientOcclusionModeChange(event.target.value as AmbientOcclusionMode)
+          }}
+          value={visualSettings.ambientOcclusionMode}
+        >
+          {AMBIENT_OCCLUSION_OPTIONS.map((option) => (
+            <option
+              key={option.key}
+              value={option.key}
+            >
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="visual-control-row">
+        <output>{visualSettings.ambientOcclusionIntensity.toFixed(2)}</output>
+        <span>AO Intensity</span>
+        <input
+          aria-label="AO Intensity"
+          max={5}
+          min={0}
+          onChange={(event) => {
+            onScalarSettingChange(
+              'ambientOcclusionIntensity',
+              Number(event.target.value)
+            )
+          }}
+          step={0.05}
+          type="range"
+          value={visualSettings.ambientOcclusionIntensity}
+        />
+      </label>
+
+      {effectControls.map((effectControl) => {
+        const effectSettings = visualSettings[effectControl.key]
+
+        return (
+          <div
+            className="visual-control-row"
+            key={effectControl.key}
+          >
+            <output>
+              {effectSettings.enabled ? effectSettings.intensity.toFixed(2) : 'off'}
+            </output>
+            <label className="visual-effect-label">
+              <input
+                checked={effectSettings.enabled}
+                onChange={(event) => {
+                  onEffectSettingChange(effectControl.key, {
+                    enabled: event.target.checked
+                  })
+                }}
+                type="checkbox"
+              />
+              <span>{effectControl.label}</span>
+            </label>
             <input
               aria-label={`${effectControl.label} Intensity`}
+              disabled={!effectSettings.enabled}
               max={effectControl.max}
               min={effectControl.min}
               onChange={(event) => {
@@ -1570,12 +1706,11 @@ function VisualControls({
               }}
               step={effectControl.step}
               type="range"
-              value={visualSettings[effectControl.key].intensity}
+              value={effectSettings.intensity}
             />
-            <output>{visualSettings[effectControl.key].intensity.toFixed(2)}</output>
-          </label>
-        </div>
-      ))}
+          </div>
+        )
+      })}
     </aside>
   )
 }
@@ -1629,6 +1764,13 @@ export default function App() {
     }))
   }
 
+  const onAmbientOcclusionModeChange = (value: AmbientOcclusionMode) => {
+    setVisualSettings((current) => ({
+      ...current,
+      ambientOcclusionMode: value
+    }))
+  }
+
   const onAssetsReady = () => {
     startTransition(() => {
       setSceneLoaded(true)
@@ -1641,6 +1783,7 @@ export default function App() {
       <LoadingOverlay complete={sceneLoaded} />
       <VisualControls
         controlsOpen={controlsOpen}
+        onAmbientOcclusionModeChange={onAmbientOcclusionModeChange}
         onEffectSettingChange={onEffectSettingChange}
         onScalarSettingChange={onScalarSettingChange}
         onToneMappingChange={onToneMappingChange}
@@ -1673,7 +1816,7 @@ export default function App() {
           shadows
         >
           <RendererSettings
-            exposureEv100={visualSettings.exposureEv100}
+            exposureStops={visualSettings.exposureStops}
             toneMapping={visualSettings.toneMapping}
           />
           <Suspense fallback={null}>

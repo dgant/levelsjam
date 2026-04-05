@@ -10,6 +10,7 @@ export const WALL_WIDTH = 0.5
 export const SCONCE_RADIUS = 0.25
 export const TORCH_BILLBOARD_SIZE = 0.5
 export const TORCH_BASE_CANDELA = 1500
+export const WALL_FACE_OFFSET = (WALL_WIDTH / 2) + SCONCE_RADIUS
 export const PLAYER_SPAWN_POSITION = Object.freeze({
   x: 0,
   y: GROUND_Y + 1,
@@ -79,8 +80,8 @@ function createWall(index, random) {
   const bounds = computeWallBounds({ axis, position })
   const sconceOffset =
     (axis === 'x')
-      ? { x: 0, y: 0.1, z: side * ((WALL_WIDTH / 2) + SCONCE_RADIUS) }
-      : { x: side * ((WALL_WIDTH / 2) + SCONCE_RADIUS), y: 0.1, z: 0 }
+      ? { x: 0, y: 0.1, z: side * WALL_FACE_OFFSET }
+      : { x: side * WALL_FACE_OFFSET, y: 0.1, z: 0 }
   const sconcePosition = {
     x: position.x + sconceOffset.x,
     y: GROUND_Y + 1.1 + sconceOffset.y,
@@ -135,4 +136,23 @@ export function getWallBounds() {
     ...wall.bounds,
     id: wall.id
   }))
+}
+
+export function getWallAttachmentLocalLayout(wall) {
+  const sconceLocalY = wall.sconcePosition.y - wall.position.y
+  const torchLocalY = wall.torchPosition.y - wall.position.y
+
+  return {
+    sconcePosition: {
+      x: 0,
+      y: sconceLocalY,
+      z: wall.sconceDirection * WALL_FACE_OFFSET
+    },
+    torchPosition: {
+      x: 0,
+      y: torchLocalY,
+      z: wall.sconceDirection * WALL_FACE_OFFSET
+    },
+    sconceRotationY: wall.sconceDirection > 0 ? 0 : Math.PI
+  }
 }

@@ -25,6 +25,7 @@
 - Each wall has a metal wall sconce attached to it.
 - Each wall sconce is a 0.25 meter radius hemisphere using the extracted ShareTextures `metal-13` PBR pack.
 - Each wall sconce geometry is only that hemisphere and does not add extra improvised fixture parts beyond the specified hemisphere.
+- Each wall sconce hemisphere is oriented as a wall-mounted bowl with its curved face outward and its flat cut face toward the wall.
 - Each wall sconce is positioned with its center one sconce radius outside the wall face.
 - Each wall sconce remains visibly readable against the wall and under the torch it supports.
 - Each wall sconce supports a camera-facing torch billboard above it.
@@ -39,8 +40,11 @@
 - Each torch billboard brightness is scaled from a 1500 candela torch baseline.
 - Each torch billboard samples the linked atlas so the visible flame fills the specified quad and sits on the sconce instead of floating above it due to transparent frame padding.
 - Each torch has a shadow-casting point light located at the billboard center.
-- Each torch point light intensity equals `(0.5 + 0.5 * noise) * 1500` candelas.
-- Each torch point light distance equals `(0.5 + 0.5 * noise) * 10` meters.
+- Each torch brightness uses `mix(1, noise, flickering) * intensity`.
+- Each torch brightness uses one user-adjustable intensity multiplier and one user-adjustable flicker amount slider.
+- Each torch point light intensity derives from the shared torch brightness value and a 1500 candela torch baseline.
+- Each torch billboard brightness derives from the same shared torch brightness value as the point light.
+- Each torch point light distance remains fixed at 10 meters.
 - Each torch point light flickers at twice the previous speed.
 - Each torch point light uses a warm fire-appropriate color.
 - Torch shadows are enabled within a fixed 40 meter radius of the camera.
@@ -66,10 +70,12 @@
 - The scene includes screen-space reflections.
 - The scene does not use God Rays.
 - Bloom, Depth of Field, Lens Flares, and SSR default to disabled.
-- The debug panel exposure EV100 control defaults to `17.5`.
+- The debug panel exposure control defaults to `0.0`.
 - The debug panel exposes an IBL intensity multiplier across a wide enough range to rebalance the HDRI against the torches without relying on physically calibrated EV semantics.
 - The debug panel exposes a torch candela multiplier across a wide enough range to rebalance the torches against the HDRI without relying on physically calibrated EV semantics.
 - The debug panel lens flare control adjusts the effect using the lens flare opacity parameter rather than an arbitrary color-gain multiplier.
+- The debug panel exposes an ambient-occlusion mode dropdown with working `Off`, `N8AO`, and `SSAO` modes.
+- The debug panel exposes one shared ambient-occlusion intensity slider for the selected AO mode.
 - The debug panel does not expose obsolete atmosphere or sun-direction controls.
 - The page shows an FPS counter in the top-right corner.
 
@@ -112,20 +118,25 @@
 - The torch billboards animate smoothly through the flipbook loop without lighting artifacts from scene lights.
 - Torch point lights and torch billboards read as a matched fire source rather than independent unrelated elements.
 - The scene reads as an overcast exterior space lit primarily by environment light and torches.
-- Exposure EV100 acts as a stop-based presentation control rather than a claim of strict physical camera calibration.
+- Exposure acts as a neutral stop-offset presentation control with `0.0` meaning no extra gain.
 - IBL intensity and torch candela controls are the primary balancing controls between the HDRI and torches.
-- Raising EV100 darkens the rendered image even if the control's default value changes.
+- Positive exposure values darken the rendered image by stops and negative values brighten it by stops.
 - Enabling SSR from the debug panel does not halt rendering or introduce runtime errors.
+- Enabling SSR produces a visible reflection change on reflective scene surfaces.
 - Enabling SSR does not brighten the visible HDRI skybox independently of the reflected surfaces.
+- Selecting `N8AO` or `SSAO` produces a visible ambient-occlusion change around contact areas.
 - The page does not show speculative branding captions, launcher buttons, or click-to-enter copy.
 
 ## Debug Controls
 - The debug controls panel can be opened and closed with backquote.
-- The debug controls panel exposes exposure EV100.
+- The debug controls panel exposes exposure.
 - The debug controls panel exposes the active tone mapper.
 - The debug controls panel exposes the IBL intensity multiplier.
 - The debug controls panel exposes the torch candela multiplier.
-- The debug controls panel exposes enabled and intensity controls for Bloom, Depth of Field, Lens Flares, N8AO, SSR, and Vignette.
+- The debug controls panel exposes the torch flicker amount.
+- The debug controls panel exposes ambient-occlusion mode and intensity.
+- The debug controls panel exposes enabled and intensity controls for Bloom, Depth of Field, Lens Flares, SSR, and Vignette.
+- The debug controls panel lays out each control row on one line in value-label-control order.
 - The debug controls panel does not expose controls for removed effects or removed atmosphere systems.
 
 ## Performance Requirements

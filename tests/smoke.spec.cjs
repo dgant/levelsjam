@@ -31,6 +31,29 @@ function measureBrightness(buffer) {
   }
 }
 
+function measureDifference(bufferA, bufferB) {
+  const imageA = PNG.sync.read(bufferA)
+  const imageB = PNG.sync.read(bufferB)
+
+  if (
+    imageA.width !== imageB.width ||
+    imageA.height !== imageB.height
+  ) {
+    throw new Error('Cannot diff screenshots with mismatched dimensions')
+  }
+
+  let total = 0
+  const pixelCount = imageA.width * imageA.height
+
+  for (let index = 0; index < imageA.data.length; index += 4) {
+    total += Math.abs(imageA.data[index] - imageB.data[index])
+    total += Math.abs(imageA.data[index + 1] - imageB.data[index + 1])
+    total += Math.abs(imageA.data[index + 2] - imageB.data[index + 2])
+  }
+
+  return total / (pixelCount * 3)
+}
+
 async function screenshotCanvasRegion(
   page,
   canvas,
@@ -148,13 +171,6 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   await expect(loadingOverlay).toBeHidden({ timeout: 12_000 })
   await expect(canvas).toBeVisible({ timeout: 5_000 })
 
-  await expect
-    .poll(async () => canvas.getAttribute('data-scene-ready'), {
-      timeout: 5_000,
-      intervals: [100, 250, 500]
-    })
-    .toBe('true')
-
   const frameBrightness = await waitForBrightFrame(page, canvas, 6)
 
   await expect(page.locator('.fps-counter')).toContainText('FPS', { timeout: 5_000 })
@@ -170,22 +186,28 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   await expect(page.locator('[data-testid="visual-controls"]')).toBeVisible({
     timeout: 5_000
   })
-  await expect(page.getByLabel('IBL Intensity')).toBeVisible({ timeout: 5_000 })
-  await expect(page.getByLabel('Torch Candelas')).toBeVisible({ timeout: 5_000 })
-  await expect(page.getByLabel('Exposure EV100')).toBeVisible({ timeout: 5_000 })
-  await expect(page.getByLabel('Tone Mapper')).toBeVisible({ timeout: 5_000 })
-  await expect(page.locator('[data-testid="visual-controls"]')).toContainText('17.50 EV100')
+  await expect(page.getByRole('slider', { name: 'IBL Intensity' })).toBeVisible({ timeout: 5_000 })
+  await expect(page.getByRole('slider', { name: 'Torch Candelas' })).toBeVisible({ timeout: 5_000 })
+  await expect(page.getByRole('slider', { name: 'Torch Flicker' })).toBeVisible({ timeout: 5_000 })
+  await expect(page.getByRole('combobox', { name: 'Ambient Occlusion' })).toBeVisible({ timeout: 5_000 })
+  await expect(page.getByRole('slider', { name: 'AO Intensity' })).toBeVisible({ timeout: 5_000 })
+  await expect(page.getByRole('slider', { name: 'Exposure' })).toBeVisible({ timeout: 5_000 })
+  await expect(page.getByRole('combobox', { name: 'Tone Mapper' })).toBeVisible({ timeout: 5_000 })
+  await expect(page.locator('[data-testid="visual-controls"]')).toContainText('0.00')
   await expect(page.getByLabel('Sun Rotation')).toHaveCount(0)
   await expect(page.getByLabel('Direct Sun Illuminance')).toHaveCount(0)
-  await expect(page.getByLabel('IBL Intensity')).toHaveAttribute('max', '16')
-  await expect(page.getByLabel('Torch Candelas')).toHaveAttribute('max', '16')
+  await expect(page.getByRole('slider', { name: 'IBL Intensity' })).toHaveAttribute('max', '16')
+  await expect(page.getByRole('slider', { name: 'Torch Candelas' })).toHaveAttribute('max', '16')
+  await expect(page.getByRole('slider', { name: 'Torch Flicker' })).toHaveAttribute('max', '1')
+  await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveAttribute('min', '-20')
+  await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveAttribute('max', '20')
 
-  await page.getByLabel('Exposure EV100').evaluate((element) => {
+  await page.getByRole('slider', { name: 'Exposure' }).evaluate((element) => {
     const descriptor = Object.getOwnPropertyDescriptor(
       HTMLInputElement.prototype,
       'value'
     )
-    descriptor.set.call(element, '16.5')
+    descriptor.set.call(element, '-1')
     element.dispatchEvent(new Event('input', { bubbles: true }))
     element.dispatchEvent(new Event('change', { bubbles: true }))
   })
@@ -194,9 +216,9 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
       timeout: 5_000,
       intervals: [100, 250, 500]
     })
-    .toBe('400.000000')
+    .toBe('2.000000')
 
-  await page.getByLabel('Torch Candelas').evaluate((element) => {
+  await page.getByRole('slider', { name: 'Torch Candelas' }).evaluate((element) => {
     const descriptor = Object.getOwnPropertyDescriptor(
       HTMLInputElement.prototype,
       'value'
@@ -206,7 +228,7 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
     element.dispatchEvent(new Event('change', { bubbles: true }))
   })
 
-  await page.getByLabel('Tone Mapper').selectOption('neutral')
+  await page.getByRole('combobox', { name: 'Tone Mapper' }).selectOption('neutral')
   await expect
     .poll(async () => canvas.getAttribute('data-tone-mapping'), {
       timeout: 5_000,
@@ -214,18 +236,48 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
     })
     .toBe('neutral')
 
-  const ssrToggle = page
-    .locator('.visual-effect-toggle')
-    .filter({ hasText: 'SSR' })
-    .locator('input')
+  await page.getByRole('combobox', { name: 'Ambient Occlusion' }).selectOption('off')
+  await page.waitForTimeout(400)
+  const contactRegionOff = await screenshotCanvasRegion(page, canvas, 140, 100, 0.5, 0.62)
+  await page.getByRole('combobox', { name: 'Ambient Occlusion' }).selectOption('n8ao')
+  await page.getByRole('slider', { name: 'AO Intensity' }).evaluate((element) => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value'
+    )
+    descriptor.set.call(element, '5')
+    element.dispatchEvent(new Event('input', { bubbles: true }))
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await page.waitForTimeout(400)
+  const contactRegionN8AO = await screenshotCanvasRegion(page, canvas, 140, 100, 0.5, 0.62)
+  expect(measureDifference(contactRegionOff, contactRegionN8AO)).toBeGreaterThan(1.2)
+
+  await page.getByRole('combobox', { name: 'Ambient Occlusion' }).selectOption('ssao')
+  await page.waitForTimeout(400)
+  const contactRegionSSAO = await screenshotCanvasRegion(page, canvas, 140, 100, 0.5, 0.62)
+  expect(measureDifference(contactRegionOff, contactRegionSSAO)).toBeGreaterThan(0.8)
+
   const skyBrightnessBeforeSSR = measureBrightness(
     await screenshotCanvasRegion(page, canvas, 120, 60, 0.5, 0.12)
   )
-  await ssrToggle.check()
+  const reflectiveRegionBeforeSSR = await screenshotCanvasRegion(page, canvas, 140, 100, 0.5, 0.75)
+  await page.getByRole('slider', { name: 'SSR Intensity' }).evaluate((element) => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value'
+    )
+    descriptor.set.call(element, '1')
+    element.dispatchEvent(new Event('input', { bubbles: true }))
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await page.locator('.visual-effect-label').filter({ hasText: 'SSR' }).locator('input').check()
   await page.waitForTimeout(750)
+  const reflectiveRegionWithSSR = await screenshotCanvasRegion(page, canvas, 140, 100, 0.5, 0.75)
   const skyBrightnessWithSSR = measureBrightness(
     await screenshotCanvasRegion(page, canvas, 120, 60, 0.5, 0.12)
   )
+  expect(measureDifference(reflectiveRegionBeforeSSR, reflectiveRegionWithSSR)).toBeGreaterThan(1.2)
   expect(skyBrightnessWithSSR.average).toBeLessThanOrEqual(
     skyBrightnessBeforeSSR.average * 1.35
   )

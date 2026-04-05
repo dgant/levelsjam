@@ -151,9 +151,10 @@ body {
 
 .visual-control-row {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 6px;
-  margin-bottom: 12px;
+  grid-template-columns: 5.5rem minmax(6.5rem, max-content) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
 }
 
 .visual-control-row input[type='range'] {
@@ -170,15 +171,14 @@ body {
   font: inherit;
 }
 
-.visual-effect-row {
-  padding-top: 10px;
-  margin-top: 10px;
-  border-top: 1px solid rgb(255 255 255 / 10%);
+.visual-control-row output {
+  text-align: right;
+  white-space: nowrap;
 }
 
-.visual-effect-toggle {
+.visual-effect-label {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 10px;
+  white-space: nowrap;
 }

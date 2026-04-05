@@ -67,3 +67,10 @@
 [x] 8x the fire animation speed.
 [x] The fire billboards are positioned well above the sconce instead of right on top of it.
 [x] 4x the size of the fire billboard
+[x] Set a neutral do-nothing exposure to be 0.0 and make the slider go +/- 20 stops from there
+[x] Give the torches a brightness of mix(1, noise, flickering) * intensity where intensity and flickering are sliders
+[x] None of the sconces are visible, though they are casting shadows
+[x] SSR dosn't appear to be doing anything. Fix it.
+[x] N8AO doesn't appear to be doing anything. Fix it.
+[x] Add a dropdown to choose between the working AO modes that are easily available in the current stack, including N8AO and SSAO, and an intensity slider. Make sure to actually connect these and verify that they are working
+[x] To save space in the settings menu, put each value, label, and slider on the same line, in that order

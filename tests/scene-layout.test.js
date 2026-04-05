@@ -2,6 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  WALL_FACE_OFFSET,
+  getWallAttachmentLocalLayout,
   SCONCE_RADIUS,
   TORCH_BILLBOARD_SIZE,
   WALL_LAYOUT,
@@ -36,5 +38,19 @@ test('keeps each torch aligned with its wall sconce outside the wall face', () =
       wall.torchPosition.y,
       wall.sconcePosition.y + SCONCE_RADIUS + (TORCH_BILLBOARD_SIZE / 2)
     )
+  }
+})
+
+test('uses wall-local attachment offsets that stay on the wall face after rotation', () => {
+  for (const wall of WALL_LAYOUT) {
+    const local = getWallAttachmentLocalLayout(wall)
+
+    assert.equal(local.sconcePosition.x, 0)
+    assert.equal(local.torchPosition.x, 0)
+    assert.equal(local.sconcePosition.z, wall.sconceDirection * WALL_FACE_OFFSET)
+    assert.equal(local.torchPosition.z, wall.sconceDirection * WALL_FACE_OFFSET)
+    assert.equal(local.sconcePosition.y, wall.sconcePosition.y - wall.position.y)
+    assert.equal(local.torchPosition.y, wall.torchPosition.y - wall.position.y)
+    assert.equal(local.sconceRotationY, wall.sconceDirection > 0 ? 0 : Math.PI)
   }
 })

@@ -1,7 +1,7 @@
 # How To Work On This Project
 
 ## Current State
-The repository contains a runnable browser game prototype for GitHub Pages. The current build serves a three.js scene with immediate mouse-look, WASD movement, hold-space vertical thrust, a local Poly Haven `overcast_soil` HDRI used for the visible skybox and IBL, a large `puddle-ground` floor plane, ten deterministic stone walls with metal sconces and animated torch billboards, and a backquote visual-controls panel with exposure EV100, IBL intensity, torch candela, tone-mapper, and post-effect controls.
+The repository contains a runnable browser game prototype for GitHub Pages. The current build serves a three.js scene with immediate mouse-look, WASD movement, hold-space vertical thrust, a local Poly Haven `overcast_soil` HDRI used for the visible skybox and IBL, a large `puddle-ground` floor plane, ten deterministic stone walls with visible metal sconces and animated torch billboards, and a backquote visual-controls panel with neutral-stop exposure, IBL intensity, torch candela, torch flicker, ambient-occlusion mode, tone-mapper, and post-effect controls.
 
 ## Local Setup
 - Install Node.js 20 or newer.
@@ -46,18 +46,21 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the visible flame fills the 0.5m billboard and sits on the sconce instead of appearing tiny or floating above it.
 - Verify each wall has a warm torch point light and the lights cast shadows.
 - Verify torch shadows remain active for nearby torches out to 40m from the camera.
-- Verify the torch flicker runs at the updated faster rate.
+- Verify the torch flicker runs at the updated faster rate and that reducing `Torch Flicker` toward `0.00` steadies the torch brightness.
 - Verify the fire flipbook runs at the updated faster rate.
 - Verify the tone mapper is `AgX` by default.
-- Verify the visual controls panel exposes `Exposure EV100`, `IBL Intensity`, `Torch Candelas`, the tone mapper, and the enabled/intensity controls for Bloom, Depth Of Field, Lens Flares, N8AO, SSR, and Vignette.
-- Verify the `IBL Intensity` and `Torch Candelas` sliders each cover a wide enough range to rebalance the HDRI and torches without touching EV.
+- Verify the visual controls panel exposes `Exposure`, `IBL Intensity`, `Torch Candelas`, `Torch Flicker`, `Ambient Occlusion`, `AO Intensity`, the tone mapper, and the enabled/intensity controls for Bloom, Depth Of Field, Lens Flares, SSR, and Vignette.
+- Verify the `IBL Intensity` and `Torch Candelas` sliders each cover a wide enough range to rebalance the HDRI and torches without touching the exposure stops control.
 - Verify Bloom, Depth Of Field, Lens Flares, and SSR start disabled.
-- Verify the default `Exposure EV100` value is `17.5`.
+- Verify the default `Exposure` value is `0.0`.
 - Verify each sconce, billboard, and torch light sits one sconce radius outside the wall face rather than intersecting the wall.
-- Verify changing `Exposure EV100` changes rendered brightness by stop differences.
-- Verify changing `Exposure EV100` updates `canvas[data-renderer-exposure]`.
+- Verify changing `Exposure` changes rendered brightness by stop differences.
+- Verify changing `Exposure` updates `canvas[data-renderer-exposure]`.
+- Verify the `Ambient Occlusion` dropdown switches between `Off`, `N8AO`, and `SSAO` and that both AO modes visibly darken contact areas compared with `Off`.
 - Verify enabling SSR from the visual controls panel does not introduce page errors or halt rendering.
+- Verify enabling SSR visibly changes reflective surfaces.
 - Verify enabling SSR does not make the visible HDRI skybox jump brighter.
+- Verify each control row in the visual controls panel keeps the value, label, and control on one line in that order.
 - Verify the FPS counter appears in the top-right corner.
 - Verify pressing backquote opens the visual controls panel.
 - Verify the panel no longer exposes obsolete atmosphere or sun controls.

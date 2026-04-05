@@ -35,7 +35,13 @@ export declare const WALL_WIDTH: number
 export declare const SCONCE_RADIUS: number
 export declare const TORCH_BILLBOARD_SIZE: number
 export declare const TORCH_BASE_CANDELA: number
+export declare const WALL_FACE_OFFSET: number
 export declare const PLAYER_SPAWN_POSITION: Readonly<Vector3Like>
 export declare const WALL_LAYOUT: readonly WallLayout[]
 
 export declare function getWallBounds(): Array<WallLayout['bounds'] & { id: string }>
+export declare function getWallAttachmentLocalLayout(wall: WallLayout): {
+  sconcePosition: Vector3Like
+  torchPosition: Vector3Like
+  sconceRotationY: number
+}

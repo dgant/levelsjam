@@ -30,3 +30,5 @@
 - When manually launching Chromium in benchmark scripts for this repository, close it in a `finally` block so failed runs do not leak headless Chrome processes.
 - When a user sets a hard FPS floor for this project, enforce it with an automated browser render benchmark instead of relying on visual impressions or the throttled headless FPS counter.
 - In this project, if SSR brightens the HDRI sky unexpectedly, inspect the vendored SSR shader for extra env-map fallback or double-counting before merely lowering the user-facing intensity control.
+- When a post effect appears to do nothing in this project, verify the actual parameter scale before assuming the effect is broken. SSR looked dead because its UI range was crushed by an extra `0.02` multiplier, and N8AO looked dead because it was configured with an almost invisible 2px screen-space radius.
+- When an optional third-party rendering package breaks the current `three` build, do not force it in just to satisfy a menu label. Keep the dropdown to the modes that are actually compatible and verified in this repository.
