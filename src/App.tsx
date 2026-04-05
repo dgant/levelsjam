@@ -16,18 +16,23 @@ import {
   DoubleSide,
   EquirectangularReflectionMapping,
   Euler,
+  ACESFilmicToneMapping,
+  AgXToneMapping,
+  CineonToneMapping,
+  LinearToneMapping,
   Mesh,
   NoToneMapping,
+  NeutralToneMapping,
   PMREMGenerator,
   Quaternion,
+  ReinhardToneMapping,
   RepeatWrapping,
   SRGBColorSpace,
   Texture,
   TextureLoader,
   Uniform,
   Vector2,
-  Vector3,
-  WebGLCubeRenderTarget
+  Vector3
 } from 'three'
 import {
   startTransition,
@@ -152,7 +157,6 @@ const FIRE_FLIPBOOK_CROP_HEIGHT =
   FIRE_FLIPBOOK_FRAME_CROP.maxY - FIRE_FLIPBOOK_FRAME_CROP.minY
 const FIRE_COLOR = new Color('#ffb168')
 const FIRE_BILLBOARD_INTENSITY_SCALE = 1 / TORCH_BASE_CANDELA
-const CUBE_BACKGROUND_RESOLUTION = 512
 const TORCH_SHADOW_MAP_SIZE = 512
 const TORCH_LIGHT_ACTIVE_DISTANCE_SQ = 4 * 4
 const MAX_ACTIVE_TORCH_SHADOWS = 2
@@ -173,6 +177,14 @@ const TONE_MAPPING_MODES = {
   aces: PostToneMappingMode.ACES_FILMIC,
   agx: PostToneMappingMode.AGX,
   neutral: PostToneMappingMode.NEUTRAL
+} as const
+const RENDERER_TONE_MAPPING_MODES = {
+  linear: LinearToneMapping,
+  reinhard: ReinhardToneMapping,
+  cineon: CineonToneMapping,
+  aces: ACESFilmicToneMapping,
+  agx: AgXToneMapping,
+  neutral: NeutralToneMapping
 } as const
 const TONE_MAPPING_OPTIONS = [
   { key: 'linear', label: 'Linear' },
@@ -628,7 +640,7 @@ function RendererSettings({
 
     gl.toneMapping = composerEnabled
       ? NoToneMapping
-      : TONE_MAPPING_MODES[toneMapping]
+      : RENDERER_TONE_MAPPING_MODES[toneMapping]
     gl.toneMappingExposure = composerEnabled ? 1 : exposure
     gl.domElement.dataset.rendererExposure = exposure.toFixed(6)
     gl.domElement.dataset.rendererExposureStops = exposureStops.toFixed(2)
@@ -693,10 +705,6 @@ function EnvironmentLighting({
   const scene = useThree((state) => state.scene)
   const hdrTexture = useLoader(HDRLoader, ENVIRONMENT_URL)
   const pmremGenerator = useMemo(() => new PMREMGenerator(gl), [gl])
-  const cubeRenderTarget = useMemo(
-    () => new WebGLCubeRenderTarget(CUBE_BACKGROUND_RESOLUTION),
-    []
-  )
   const environmentTexture = useRef<Texture | null>(null)
 
   useEffect(() => {
@@ -704,28 +712,26 @@ function EnvironmentLighting({
 
     hdrTexture.mapping = EquirectangularReflectionMapping
     pmremGenerator.compileEquirectangularShader()
-    cubeRenderTarget.fromEquirectangularTexture(gl, hdrTexture)
-    const nextEnvironment = pmremGenerator.fromCubemap(cubeRenderTarget.texture)
+    const nextEnvironment = pmremGenerator.fromEquirectangular(hdrTexture)
 
     environmentTexture.current = nextEnvironment.texture
-    scene.background = cubeRenderTarget.texture
+    scene.background = hdrTexture
     scene.environment = nextEnvironment.texture
     scene.backgroundIntensity = calibratedIntensity
     scene.environmentIntensity = calibratedIntensity
 
     return () => {
-      if (scene.background === cubeRenderTarget.texture) {
+      if (scene.background === hdrTexture) {
         scene.background = null
       }
       if (scene.environment === environmentTexture.current) {
         scene.environment = null
       }
       nextEnvironment.dispose()
-      cubeRenderTarget.dispose()
       pmremGenerator.dispose()
       hdrTexture.dispose()
     }
-  }, [cubeRenderTarget, gl, hdrTexture, iblIntensity, pmremGenerator, scene])
+  }, [gl, hdrTexture, iblIntensity, pmremGenerator, scene])
 
   useEffect(() => {
     const calibratedIntensity = getHdrLightingIntensity(iblIntensity)
@@ -1835,9 +1841,9 @@ function FlightRig({
       deltaRemaining -= deltaStep
 
       keyboardLocal.current.set(
-        Number(keys.current.KeyD) - Number(keys.current.KeyA),
+        Number(Boolean(keys.current.KeyD)) - Number(Boolean(keys.current.KeyA)),
         0,
-        Number(keys.current.KeyW) - Number(keys.current.KeyS)
+        Number(Boolean(keys.current.KeyW)) - Number(Boolean(keys.current.KeyS))
       )
       if (keyboardLocal.current.lengthSq() > 1) {
         keyboardLocal.current.normalize()
@@ -2084,10 +2090,6 @@ function Scene({
 
   return (
     <>
-      <color
-        args={['#0a0d12']}
-        attach="background"
-      />
       <EnvironmentLighting iblIntensity={visualSettings.iblIntensity} />
       <SceneGeometry
         flickerAmount={visualSettings.torchFlickerAmount}

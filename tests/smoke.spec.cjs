@@ -84,16 +84,25 @@ async function screenshotCanvasRegion(
   })
 }
 
-async function waitForBrightFrame(page, canvas, minimumAverageBrightness, timeoutMs = 7_000) {
+async function waitForBrightFrame(
+  page,
+  canvas,
+  minimumAverageBrightness,
+  minimumPeakBrightness,
+  timeoutMs = 7_000
+) {
   const deadline = Date.now() + timeoutMs
   let lastMeasurement = { average: 0, max: 0 }
 
   while (Date.now() < deadline) {
     lastMeasurement = measureBrightness(
-      await screenshotCanvasRegion(page, canvas, 120, 80, 0.5, 0.5)
+      await screenshotCanvasRegion(page, canvas, 180, 120, 0.5, 0.72)
     )
 
-    if (lastMeasurement.average > minimumAverageBrightness) {
+    if (
+      lastMeasurement.average > minimumAverageBrightness &&
+      lastMeasurement.max > minimumPeakBrightness
+    ) {
       return lastMeasurement
     }
 
@@ -101,7 +110,7 @@ async function waitForBrightFrame(page, canvas, minimumAverageBrightness, timeou
   }
 
   throw new Error(
-    `Canvas brightness did not exceed ${minimumAverageBrightness}; last measurement was ${lastMeasurement.average.toFixed(2)}`
+    `Canvas brightness did not exceed avg ${minimumAverageBrightness} and peak ${minimumPeakBrightness}; last measurement was avg ${lastMeasurement.average.toFixed(2)} peak ${lastMeasurement.max.toFixed(2)}`
   )
 }
 
@@ -156,7 +165,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   await expect(loadingOverlay).toBeHidden({ timeout: 12_000 })
   await expect(canvas).toBeVisible({ timeout: 5_000 })
 
-  const frameBrightness = await waitForBrightFrame(page, canvas, 6)
+  const frameBrightness = await waitForBrightFrame(page, canvas, 45, 90)
 
   await expect(page.locator('.fps-counter')).toContainText('FPS', { timeout: 5_000 })
   await expect(page.locator('.fps-counter')).not.toContainText('unknown')
@@ -269,7 +278,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
 
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
-  expect(frameBrightness.max).toBeGreaterThan(18)
+  expect(frameBrightness.average).toBeGreaterThan(45)
+  expect(frameBrightness.max).toBeGreaterThan(90)
   expect(
     [...resourceUrls].some((url) => url.includes('overcast_soil_1k.hdr'))
   ).toBe(true)
