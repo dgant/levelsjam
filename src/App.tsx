@@ -859,8 +859,11 @@ function WallSconce({
           />
           <meshStandardMaterial
             {...metal}
+            aoMapIntensity={0.35}
             bumpScale={0.02}
-            envMapIntensity={3}
+            emissive="#4f3112"
+            emissiveIntensity={0.18}
+            envMapIntensity={4}
             metalness={0.25}
             roughness={0.7}
             side={DoubleSide}
@@ -874,8 +877,11 @@ function WallSconce({
           <circleGeometry args={[SCONCE_RADIUS, 24]} />
           <meshStandardMaterial
             {...metal}
+            aoMapIntensity={0.35}
             bumpScale={0.02}
-            envMapIntensity={3}
+            emissive="#4f3112"
+            emissiveIntensity={0.18}
+            envMapIntensity={4}
             metalness={0.25}
             roughness={0.7}
             side={DoubleSide}
