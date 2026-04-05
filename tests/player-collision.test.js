@@ -70,6 +70,18 @@ test('clamps the player to a wall side when moving through it horizontally', () 
   assert.equal(result.grounded, true)
 })
 
+test('preserves tangential motion when sliding along a wall face', () => {
+  const result = resolvePlayerCollision(
+    { x: customWall.minX - PLAYER_RADIUS, y: 0, z: -1.1 },
+    { x: 0, y: 0, z: -1.05 },
+    { wallBounds: [customWall] }
+  )
+
+  assert.equal(result.position.x, customWall.minX - PLAYER_RADIUS)
+  assert.equal(result.position.z, -1.05)
+  assert.deepEqual(result.collisions.wallNormals, [{ x: -1, y: 0, z: 0 }])
+})
+
 test('lands on top of a wall when descending onto it', () => {
   const result = resolvePlayerCollision(
     { x: 0, y: customWall.maxY + 1, z: 0 },

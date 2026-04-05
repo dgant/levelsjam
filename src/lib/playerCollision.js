@@ -194,6 +194,7 @@ export function resolvePlayerCollision(
   const height = options.height ?? PLAYER_HEIGHT
   const wallBounds = options.wallBounds ?? getWallBounds()
   const position = cloneVector(desiredPosition)
+  const currentPreviousPosition = cloneVector(previousPosition)
   const collisions = { floor: false, wallNormals: [], walls: [] }
   let grounded = false
 
@@ -205,7 +206,7 @@ export function resolvePlayerCollision(
 
   for (const bounds of wallBounds) {
     const resolution = resolveAgainstBox(
-      previousPosition,
+      currentPreviousPosition,
       position,
       bounds,
       radius,
@@ -219,6 +220,9 @@ export function resolvePlayerCollision(
     position.x = resolution.position.x
     position.y = resolution.position.y
     position.z = resolution.position.z
+    currentPreviousPosition.x = position.x
+    currentPreviousPosition.y = position.y
+    currentPreviousPosition.z = position.z
     grounded = grounded || resolution.grounded
     collisions.walls.push(bounds.id ?? 'wall')
     collisions.wallNormals.push(...resolution.normals)

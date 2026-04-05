@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  createMovementSettings,
+  DEFAULT_MOVEMENT_SETTINGS,
   GRAVITY_ACCELERATION,
   HORIZONTAL_ACCELERATION,
   HORIZONTAL_DECELERATION,
@@ -28,6 +30,19 @@ test('converts the requested mph limits to meters per second', () => {
 test('matches the requested acceleration and deceleration distances', () => {
   almostEqual(HORIZONTAL_ACCELERATION, (MAX_HORIZONTAL_SPEED ** 2) / 4)
   almostEqual(HORIZONTAL_DECELERATION, MAX_HORIZONTAL_SPEED ** 2)
+})
+
+test('creates runtime movement settings from debug values', () => {
+  const custom = createMovementSettings({
+    horizontalAccelerationDistance: 3,
+    horizontalDecelerationDistance: 1,
+    maxHorizontalSpeedMph: 12
+  })
+
+  almostEqual(custom.maxHorizontalSpeed, 12 * MPH_TO_METERS_PER_SECOND)
+  almostEqual(custom.horizontalAccelerationDistance, 3)
+  almostEqual(custom.horizontalDecelerationDistance, 1)
+  assert.equal(DEFAULT_MOVEMENT_SETTINGS.maxHorizontalSpeedMph, 20)
 })
 
 test('matches the requested gravity and jetpack forces', () => {

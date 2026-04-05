@@ -8,18 +8,55 @@ export const MAX_FALL_SPEED = 40 * MPH_TO_METERS_PER_SECOND
 
 export const HORIZONTAL_ACCELERATION_DISTANCE = 2
 export const HORIZONTAL_DECELERATION_DISTANCE = 0.5
-export const HORIZONTAL_ACCELERATION =
-  (MAX_HORIZONTAL_SPEED * MAX_HORIZONTAL_SPEED) /
-  (2 * HORIZONTAL_ACCELERATION_DISTANCE)
-export const HORIZONTAL_DECELERATION =
-  (MAX_HORIZONTAL_SPEED * MAX_HORIZONTAL_SPEED) /
-  (2 * HORIZONTAL_DECELERATION_DISTANCE)
+export const HORIZONTAL_ACCELERATION = getHorizontalAcceleration(
+  MAX_HORIZONTAL_SPEED,
+  HORIZONTAL_ACCELERATION_DISTANCE
+)
+export const HORIZONTAL_DECELERATION = getHorizontalDeceleration(
+  MAX_HORIZONTAL_SPEED,
+  HORIZONTAL_DECELERATION_DISTANCE
+)
 
 export const GRAVITY_ACCELERATION = 9.80665
 export const JETPACK_ACCELERATION = GRAVITY_ACCELERATION * 1.25
+export const DEFAULT_MOVEMENT_SETTINGS = Object.freeze({
+  horizontalAccelerationDistance: HORIZONTAL_ACCELERATION_DISTANCE,
+  horizontalDecelerationDistance: HORIZONTAL_DECELERATION_DISTANCE,
+  maxFallSpeed: MAX_FALL_SPEED,
+  maxHorizontalSpeed: MAX_HORIZONTAL_SPEED,
+  maxHorizontalSpeedMph: 20,
+  maxVerticalSpeed: MAX_VERTICAL_SPEED
+})
 
 const DIRECTION_EPSILON = 1e-6
 const DEFAULT_DIRECTION = { x: 0, z: -1 }
+
+export function getHorizontalAcceleration(maxHorizontalSpeed, distance) {
+  return (maxHorizontalSpeed * maxHorizontalSpeed) / (2 * distance)
+}
+
+export function getHorizontalDeceleration(maxHorizontalSpeed, distance) {
+  return (maxHorizontalSpeed * maxHorizontalSpeed) / (2 * distance)
+}
+
+export function createMovementSettings({
+  horizontalAccelerationDistance = HORIZONTAL_ACCELERATION_DISTANCE,
+  horizontalDecelerationDistance = HORIZONTAL_DECELERATION_DISTANCE,
+  maxHorizontalSpeedMph = 20,
+  maxVerticalSpeed = MAX_VERTICAL_SPEED,
+  maxFallSpeed = MAX_FALL_SPEED
+} = {}) {
+  const maxHorizontalSpeed = maxHorizontalSpeedMph * MPH_TO_METERS_PER_SECOND
+
+  return {
+    horizontalAccelerationDistance,
+    horizontalDecelerationDistance,
+    maxFallSpeed,
+    maxHorizontalSpeed,
+    maxHorizontalSpeedMph,
+    maxVerticalSpeed
+  }
+}
 
 function normalizeDirection(direction, fallback = DEFAULT_DIRECTION) {
   const length = Math.hypot(direction.x, direction.z)
@@ -38,14 +75,23 @@ export function updateHorizontalVelocity(
   currentSpeed,
   currentDirection,
   desiredDirection,
-  delta
+  delta,
+  movementSettings = DEFAULT_MOVEMENT_SETTINGS
 ) {
+  const horizontalAcceleration = getHorizontalAcceleration(
+    movementSettings.maxHorizontalSpeed,
+    movementSettings.horizontalAccelerationDistance
+  )
+  const horizontalDeceleration = getHorizontalDeceleration(
+    movementSettings.maxHorizontalSpeed,
+    movementSettings.horizontalDecelerationDistance
+  )
   const normalizedCurrentDirection = normalizeDirection(currentDirection)
   const desiredLength = Math.hypot(desiredDirection.x, desiredDirection.z)
 
   if (desiredLength <= DIRECTION_EPSILON) {
     return {
-      speed: Math.max(0, currentSpeed - (HORIZONTAL_DECELERATION * delta)),
+      speed: Math.max(0, currentSpeed - (horizontalDeceleration * delta)),
       direction: normalizedCurrentDirection
     }
   }
@@ -54,7 +100,10 @@ export function updateHorizontalVelocity(
 
   if (currentSpeed <= DIRECTION_EPSILON) {
     return {
-      speed: Math.min(MAX_HORIZONTAL_SPEED, HORIZONTAL_ACCELERATION * delta),
+      speed: Math.min(
+        movementSettings.maxHorizontalSpeed,
+        horizontalAcceleration * delta
+      ),
       direction: normalizedDesiredDirection
     }
   }
@@ -66,7 +115,7 @@ export function updateHorizontalVelocity(
   if (alignment < 0) {
     const nextSpeed = Math.max(
       0,
-      currentSpeed - (HORIZONTAL_DECELERATION * delta)
+      currentSpeed - (horizontalDeceleration * delta)
     )
 
     return {
@@ -80,8 +129,8 @@ export function updateHorizontalVelocity(
 
   return {
     speed: Math.min(
-      MAX_HORIZONTAL_SPEED,
-      currentSpeed + (HORIZONTAL_ACCELERATION * delta)
+      movementSettings.maxHorizontalSpeed,
+      currentSpeed + (horizontalAcceleration * delta)
     ),
     direction: normalizedDesiredDirection
   }
@@ -91,7 +140,8 @@ export function updateVerticalVelocity(
   currentVelocity,
   grounded,
   jetpackActive,
-  delta
+  delta,
+  movementSettings = DEFAULT_MOVEMENT_SETTINGS
 ) {
   if (grounded && !jetpackActive) {
     return 0
@@ -101,9 +151,9 @@ export function updateVerticalVelocity(
 
   if (jetpackActive) {
     nextVelocity += (JETPACK_ACCELERATION - GRAVITY_ACCELERATION) * delta
-    return Math.min(nextVelocity, MAX_VERTICAL_SPEED)
+    return Math.min(nextVelocity, movementSettings.maxVerticalSpeed)
   }
 
   nextVelocity -= GRAVITY_ACCELERATION * delta
-  return Math.max(nextVelocity, -MAX_FALL_SPEED)
+  return Math.max(nextVelocity, -movementSettings.maxFallSpeed)
 }

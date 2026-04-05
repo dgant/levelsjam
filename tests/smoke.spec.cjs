@@ -180,14 +180,21 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
 
   await expect(page.getByRole('slider', { name: 'Exposure' })).toBeVisible()
   await expect(page.getByRole('slider', { name: 'Torch Flicker' })).toBeVisible()
+  await expect(page.getByRole('slider', { name: 'Move Speed' })).toBeVisible()
+  await expect(page.getByRole('slider', { name: 'Accel Distance' })).toBeVisible()
+  await expect(page.getByRole('slider', { name: 'Decel Distance' })).toBeVisible()
   await expect(page.getByRole('slider', { name: 'AO Radius' })).toBeVisible()
   await expect(page.getByRole('slider', { name: 'Fog Noise Frequency' })).toBeVisible()
   await expect(page.getByRole('combobox', { name: 'Bloom Kernel' })).toBeVisible()
 
   await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveValue('-4.5')
   await expect(page.getByRole('slider', { name: 'Torch Flicker' })).toHaveValue('0.15')
+  await expect(page.getByRole('slider', { name: 'Move Speed' })).toHaveValue('20')
+  await expect(page.getByRole('slider', { name: 'Accel Distance' })).toHaveValue('2')
+  await expect(page.getByRole('slider', { name: 'Decel Distance' })).toHaveValue('0.5')
   await expect(page.locator('[data-testid="visual-controls"]')).toContainText('DOF Focus Distance (m)')
   await expect(page.locator('[data-testid="visual-controls"]')).toContainText('DOF Focal Length / Range (m)')
+  await expect(page.getByRole('slider', { name: 'DOF Focus Distance' })).toHaveAttribute('max', '8')
 
   await expect
     .poll(async () => {
@@ -257,8 +264,15 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   const bloomHuge = await screenshotCanvasRegion(page, canvas, 150, 110, 0.5, 0.42)
   expect(measureDifference(bloomSmall, bloomHuge)).toBeGreaterThan(0.003)
 
+  await setCheckboxByLabelText(page, 'Volumetric Fog', false)
+  await page.waitForTimeout(150)
+  const fogOff = await screenshotCanvasRegion(page, canvas, 150, 110, 0.5, 0.52)
+  await setCheckboxByLabelText(page, 'Volumetric Fog', true)
   await setSlider(page, 'Volumetric Fog Intensity', 1)
   await setSlider(page, 'Fog Noise Frequency', 6)
+  await page.waitForTimeout(200)
+  const fogOn = await screenshotCanvasRegion(page, canvas, 150, 110, 0.5, 0.52)
+  expect(measureDifference(fogOff, fogOn)).toBeGreaterThan(0.008)
 
   await setSlider(page, 'Exposure', -3.5)
   await expect

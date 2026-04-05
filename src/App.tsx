@@ -69,6 +69,8 @@ import {
   resolvePlayerCollision
 } from './lib/playerCollision.js'
 import {
+  createMovementSettings,
+  DEFAULT_MOVEMENT_SETTINGS,
   updateHorizontalVelocity,
   updateVerticalVelocity
 } from './lib/playerMotion.js'
@@ -153,8 +155,14 @@ const FIRE_COLOR = new Color('#ffb168')
 const FIRE_BILLBOARD_INTENSITY_SCALE = 1 / TORCH_BASE_CANDELA
 const CUBE_BACKGROUND_RESOLUTION = 512
 const TORCH_SHADOW_MAP_SIZE = 256
+const CLOSE_TORCH_SHADOW_MAP_SIZE = 512
+const CLOSE_TORCH_SHADOW_DISTANCE_SQ = 10 * 10
+const TORCH_LIGHT_ACTIVE_DISTANCE_SQ = 10 * 10
 const TORCH_SHADOW_DISTANCE_SQ = 40 * 40
+const MAX_ACTIVE_TORCH_SHADOWS = 2
 const LENS_FLARE_COLOR_GAIN_SCALE = 8
+const FOG_VOLUME_HEIGHT = 6
+const FOG_VOLUME_SLICE_COUNT = 6
 const AMBIENT_OCCLUSION_OPTIONS = [
   { key: 'off', label: 'Off' },
   { key: 'n8ao', label: 'N8AO' },
@@ -229,6 +237,12 @@ type DepthOfFieldSettings = {
   focusDistance: number
 }
 
+type MovementSettings = {
+  accelerationDistance: number
+  decelerationDistance: number
+  maxHorizontalSpeedMph: number
+}
+
 const BLOOM_KERNEL_SIZES: Record<BloomKernelSizeKey, KernelSize> = {
   'very-small': KernelSize.VERY_SMALL,
   small: KernelSize.SMALL,
@@ -267,6 +281,7 @@ type VisualSettings = {
   bloom: BloomSettings
   depthOfField: DepthOfFieldSettings
   lensFlare: EffectSettings
+  movement: MovementSettings
   ssr: EffectSettings
   volumetricLighting: EffectSettings
   volumetricNoiseFrequency: number
@@ -283,6 +298,9 @@ type ScalarSettingKey =
   | 'ambientOcclusionRadius'
   | 'exposureStops'
   | 'iblIntensity'
+  | 'movementAccelerationDistance'
+  | 'movementDecelerationDistance'
+  | 'movementMaxHorizontalSpeedMph'
   | 'torchCandelaMultiplier'
   | 'torchFlickerAmount'
   | 'volumetricNoiseFrequency'
@@ -312,8 +330,17 @@ type TorchLightHandle = {
   intensity: number
   shadow: {
     autoUpdate: boolean
+    map?: {
+      dispose?: () => void
+    }
+    mapSize: {
+      height: number
+      set: (width: number, height: number) => void
+      width: number
+    }
     needsUpdate: boolean
   }
+  visible: boolean
 }
 
 type StandardPbrTextureUrls = {
@@ -355,8 +382,15 @@ function createDefaultVisualSettings(): VisualSettings {
       focusDistance: 0.02
     },
     lensFlare: { enabled: false, intensity: 1 },
+    movement: {
+      accelerationDistance:
+        DEFAULT_MOVEMENT_SETTINGS.horizontalAccelerationDistance,
+      decelerationDistance:
+        DEFAULT_MOVEMENT_SETTINGS.horizontalDecelerationDistance,
+      maxHorizontalSpeedMph: DEFAULT_MOVEMENT_SETTINGS.maxHorizontalSpeedMph
+    },
     ssr: { enabled: false, intensity: 0.6 },
-    volumetricLighting: { enabled: true, intensity: 0.35 },
+    volumetricLighting: { enabled: false, intensity: 0.35 },
     volumetricNoiseFrequency: DEFAULT_VOLUMETRIC_NOISE_FREQUENCY,
     vignette: { enabled: true, intensity: 0.4 }
   }
@@ -821,7 +855,7 @@ function TorchLight({
       getTorchFlickerFactor(noise, flickerAmount)
 
     lightRef.intensity = scalePhotometricIntensity(brightness)
-    lightRef.distance = 10
+    lightRef.distance = 5
   })
 
   useEffect(() => {
@@ -838,7 +872,7 @@ function TorchLight({
     <pointLight
       color="#ffb56a"
       decay={2}
-      distance={10}
+      distance={5}
       intensity={scalePhotometricIntensity(
         TORCH_BASE_CANDELA * torchCandelaMultiplier
       )}
@@ -910,13 +944,6 @@ function WallSconce({
         seed={mazeLight.index + 1}
         torchCandelaMultiplier={torchCandelaMultiplier}
       />
-      <TorchVolume
-        debugIndex={mazeLight.index}
-        flickerAmount={flickerAmount}
-        position={torchPosition}
-        seed={mazeLight.index + 1}
-        torchCandelaMultiplier={torchCandelaMultiplier}
-      />
     </>
   )
 }
@@ -945,129 +972,133 @@ function SconceMesh({
   )
 }
 
-function TorchVolume({
-  debugIndex,
-  flickerAmount,
-  position,
-  seed,
-  torchCandelaMultiplier
+function FogVolume({
+  noiseFrequency,
+  visible,
+  volumeIntensity
 }: {
-  debugIndex: number
-  flickerAmount: number
-  position: [number, number, number]
-  seed: number
-  torchCandelaMultiplier: number
+  noiseFrequency: number
+  visible: boolean
+  volumeIntensity: number
 }) {
-  const material = useRef<{
+  const materials = useRef<Array<{
     uniforms?: {
-      intensity?: { value: number }
+      density?: { value: number }
+      layerHeight?: { value: number }
       noiseFrequency?: { value: number }
       time?: { value: number }
     }
-  } | null>(null)
+  } | null>>([])
+  const layerHeights = useMemo(
+    () =>
+      Array.from({ length: FOG_VOLUME_SLICE_COUNT }, (_, index) => {
+        return ((index + 0.5) / FOG_VOLUME_SLICE_COUNT) * FOG_VOLUME_HEIGHT
+      }),
+    []
+  )
 
   useFrame((state) => {
-    const uniforms = material.current?.uniforms
-    if (!uniforms) {
-      return
-    }
+    for (const material of materials.current) {
+      const uniforms = material?.uniforms
+      if (!uniforms) {
+        continue
+      }
 
-    const noise = getTorchNoise(state.clock.getElapsedTime(), seed)
-    uniforms.intensity.value =
-      (state.scene.userData.volumetricIntensity ?? 0) *
-      torchCandelaMultiplier *
-      getTorchFlickerFactor(noise, flickerAmount)
-    uniforms.noiseFrequency.value =
-      state.scene.userData.volumetricNoiseFrequency ??
-      DEFAULT_VOLUMETRIC_NOISE_FREQUENCY
-    uniforms.time.value = state.clock.getElapsedTime()
+      uniforms.density.value = visible ? volumeIntensity : 0
+      uniforms.noiseFrequency.value = noiseFrequency
+      uniforms.time.value = state.clock.getElapsedTime()
+    }
   })
 
   return (
-    <mesh
-      position={[position[0], position[1] + 0.7, position[2]]}
-      rotation-x={Math.PI}
-      userData={{
-        debugIndex,
-        debugRole: 'torch-volume',
-        lensflare: 'no-occlusion'
-      }}
-    >
-      <coneGeometry args={[0.75, 1.8, 24, 1, true]} />
-      <shaderMaterial
-        blending={AdditiveBlending}
-        depthWrite={false}
-        fragmentShader={`
-          uniform float intensity;
-          uniform float noiseFrequency;
-          uniform float time;
-          varying vec3 vLocalPosition;
+    <group userData={{ debugRole: 'global-fog-volume' }}>
+      {layerHeights.map((layerHeight, index) => (
+        <mesh
+          key={layerHeight}
+          position={[0, GROUND_Y + layerHeight, 0]}
+          rotation-x={-Math.PI / 2}
+        >
+          <planeGeometry args={[GROUND_SIZE, GROUND_SIZE]} />
+          <shaderMaterial
+            blending={AdditiveBlending}
+            depthWrite={false}
+            fragmentShader={`
+              uniform float density;
+              uniform float layerHeight;
+              uniform float noiseFrequency;
+              uniform float time;
+              varying vec3 vWorldPosition;
 
-          float hash(vec3 p) {
-            return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
-          }
+              float hash(vec3 p) {
+                return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
+              }
 
-          float noise(vec3 p) {
-            vec3 i = floor(p);
-            vec3 f = fract(p);
-            f = f * f * (3.0 - 2.0 * f);
+              float noise(vec3 p) {
+                vec3 i = floor(p);
+                vec3 f = fract(p);
+                f = f * f * (3.0 - 2.0 * f);
 
-            float n000 = hash(i + vec3(0.0, 0.0, 0.0));
-            float n100 = hash(i + vec3(1.0, 0.0, 0.0));
-            float n010 = hash(i + vec3(0.0, 1.0, 0.0));
-            float n110 = hash(i + vec3(1.0, 1.0, 0.0));
-            float n001 = hash(i + vec3(0.0, 0.0, 1.0));
-            float n101 = hash(i + vec3(1.0, 0.0, 1.0));
-            float n011 = hash(i + vec3(0.0, 1.0, 1.0));
-            float n111 = hash(i + vec3(1.0, 1.0, 1.0));
+                float n000 = hash(i + vec3(0.0, 0.0, 0.0));
+                float n100 = hash(i + vec3(1.0, 0.0, 0.0));
+                float n010 = hash(i + vec3(0.0, 1.0, 0.0));
+                float n110 = hash(i + vec3(1.0, 1.0, 0.0));
+                float n001 = hash(i + vec3(0.0, 0.0, 1.0));
+                float n101 = hash(i + vec3(1.0, 0.0, 1.0));
+                float n011 = hash(i + vec3(0.0, 1.0, 1.0));
+                float n111 = hash(i + vec3(1.0, 1.0, 1.0));
 
-            float n00 = mix(n000, n100, f.x);
-            float n10 = mix(n010, n110, f.x);
-            float n01 = mix(n001, n101, f.x);
-            float n11 = mix(n011, n111, f.x);
-            float n0 = mix(n00, n10, f.y);
-            float n1 = mix(n01, n11, f.y);
+                float n00 = mix(n000, n100, f.x);
+                float n10 = mix(n010, n110, f.x);
+                float n01 = mix(n001, n101, f.x);
+                float n11 = mix(n011, n111, f.x);
+                float n0 = mix(n00, n10, f.y);
+                float n1 = mix(n01, n11, f.y);
 
-            return mix(n0, n1, f.z);
-          }
+                return mix(n0, n1, f.z);
+              }
 
-          void main() {
-            vec3 samplePoint = vec3(
-              vLocalPosition.x * noiseFrequency,
-              (vLocalPosition.y * noiseFrequency) - (time * 0.7),
-              vLocalPosition.z * noiseFrequency
-            );
-            float radial = 1.0 - smoothstep(0.08, 0.72, length(vLocalPosition.xz));
-            float heightMask = smoothstep(-0.9, -0.2, vLocalPosition.y) * (1.0 - smoothstep(0.35, 0.9, vLocalPosition.y));
-            float smoke = mix(0.45, 1.0, noise(samplePoint));
-            float alpha = radial * heightMask * smoke * intensity * 1.2;
+              void main() {
+                vec3 samplePoint = vec3(
+                  vWorldPosition.x * 0.08 * noiseFrequency,
+                  (layerHeight * 0.5 * noiseFrequency) - (time * 0.12),
+                  vWorldPosition.z * 0.08 * noiseFrequency
+                );
+                float verticalFalloff = 1.0 - smoothstep(0.0, ${FOG_VOLUME_HEIGHT.toFixed(1)}, layerHeight);
+                float baseNoise = mix(0.45, 1.0, noise(samplePoint));
+                float horizontalFade = 1.0 - smoothstep(${(GROUND_SIZE * 0.33).toFixed(1)}, ${(GROUND_SIZE * 0.6).toFixed(1)}, length(vWorldPosition.xz));
+                float alpha = clamp(density * verticalFalloff * horizontalFade * baseNoise * 0.1, 0.0, 0.12);
+                if (alpha < 0.002) {
+                  discard;
+                }
 
-            if (alpha < 0.015) {
-              discard;
-            }
+                gl_FragColor = vec4(vec3(0.56, 0.58, 0.62), alpha);
+              }
+            `}
+            ref={(material) => {
+              materials.current[index] = material
+            }}
+            side={DoubleSide}
+            toneMapped={false}
+            transparent
+            uniforms={{
+              density: { value: visible ? volumeIntensity : 0 },
+              layerHeight: { value: layerHeight },
+              noiseFrequency: { value: noiseFrequency },
+              time: { value: 0 }
+            }}
+            vertexShader={`
+              varying vec3 vWorldPosition;
 
-            gl_FragColor = vec4(1.0, 0.7, 0.28, alpha);
-          }
-        `}
-        ref={material}
-        side={BackSide}
-        toneMapped={false}
-        transparent
-        uniforms={{
-          intensity: { value: 0 },
-          noiseFrequency: { value: DEFAULT_VOLUMETRIC_NOISE_FREQUENCY },
-          time: { value: 0 }
-        }}
-        vertexShader={`
-          varying vec3 vLocalPosition;
-
-          void main() {
-            vLocalPosition = position;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-          }
-        `}
-      />
-    </mesh>
+              void main() {
+                vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                vWorldPosition = worldPosition.xyz;
+                gl_Position = projectionMatrix * viewMatrix * worldPosition;
+              }
+            `}
+          />
+        </mesh>
+      ))}
+    </group>
   )
 }
 
@@ -1088,6 +1119,31 @@ function MazeWalls({
   const tempPosition = useMemo(() => new Vector3(), [])
 
   useFrame(() => {
+    const shadowCandidates: Array<{ distanceSq: number; index: number }> = []
+
+    for (const lightPlacement of layout.lights) {
+      tempPosition.set(
+        lightPlacement.torchPosition.x,
+        lightPlacement.torchPosition.y,
+        lightPlacement.torchPosition.z
+      )
+      const distanceSq = camera.position.distanceToSquared(tempPosition)
+
+      if (distanceSq <= TORCH_SHADOW_DISTANCE_SQ) {
+        shadowCandidates.push({
+          distanceSq,
+          index: lightPlacement.index
+        })
+      }
+    }
+
+    shadowCandidates.sort((a, b) => a.distanceSq - b.distanceSq)
+    const activeShadowLights = new Set(
+      shadowCandidates
+        .slice(0, MAX_ACTIVE_TORCH_SHADOWS)
+        .map((candidate) => candidate.index)
+    )
+
     for (const lightPlacement of layout.lights) {
       const light = lightHandles.current[lightPlacement.index]?.current
 
@@ -1101,15 +1157,33 @@ function MazeWalls({
         lightPlacement.torchPosition.z
       )
       const distanceSq = camera.position.distanceToSquared(tempPosition)
-      const shouldCastShadow = distanceSq <= TORCH_SHADOW_DISTANCE_SQ
+      const shouldAffectScene = distanceSq <= TORCH_LIGHT_ACTIVE_DISTANCE_SQ
+      const shouldCastShadow = activeShadowLights.has(lightPlacement.index)
+      const targetShadowSize =
+        distanceSq <= CLOSE_TORCH_SHADOW_DISTANCE_SQ
+          ? CLOSE_TORCH_SHADOW_MAP_SIZE
+          : TORCH_SHADOW_MAP_SIZE
 
-      if (light.castShadow === shouldCastShadow) {
+      if (light.visible !== shouldAffectScene) {
+        light.visible = shouldAffectScene
+      }
+
+      if (
+        light.shadow.mapSize.width !== targetShadowSize ||
+        light.shadow.mapSize.height !== targetShadowSize
+      ) {
+        light.shadow.mapSize.set(targetShadowSize, targetShadowSize)
+        light.shadow.map?.dispose?.()
+        light.shadow.needsUpdate = true
+      }
+
+      if (light.castShadow === (shouldCastShadow && shouldAffectScene)) {
         continue
       }
 
-      light.castShadow = shouldCastShadow
+      light.castShadow = shouldCastShadow && shouldAffectScene
       light.shadow.autoUpdate = false
-      if (shouldCastShadow) {
+      if (shouldCastShadow && shouldAffectScene) {
         light.shadow.needsUpdate = true
       }
     }
@@ -1154,11 +1228,15 @@ function MazeWalls({
 function SceneGeometry({
   flickerAmount,
   layout,
-  torchCandelaMultiplier
+  torchCandelaMultiplier,
+  volumetricLighting,
+  volumetricNoiseFrequency
 }: {
   flickerAmount: number
   layout: MazeLayout
   torchCandelaMultiplier: number
+  volumetricLighting: EffectSettings
+  volumetricNoiseFrequency: number
 }) {
   return (
     <>
@@ -1168,6 +1246,13 @@ function SceneGeometry({
         layout={layout}
         torchCandelaMultiplier={torchCandelaMultiplier}
       />
+      {volumetricLighting.enabled ? (
+        <FogVolume
+          noiseFrequency={volumetricNoiseFrequency}
+          visible={volumetricLighting.enabled}
+          volumeIntensity={volumetricLighting.intensity}
+        />
+      ) : null}
     </>
   )
 }
@@ -1314,14 +1399,14 @@ function ExposureEffectPrimitive({
   return <primitive object={effect as unknown as Effect} />
 }
 
-function TorchLensFlare({
+function TorchLensFlareEffect({
   intensity,
-  layout,
+  mazeLight,
   torchCandelaMultiplier,
   torchFlickerAmount
 }: {
   intensity: number
-  layout: MazeLayout
+  mazeLight: MazeLayout['lights'][number]
   torchCandelaMultiplier: number
   torchFlickerAmount: number
 }) {
@@ -1334,21 +1419,21 @@ function TorchLensFlare({
       new LensFlareEffect({
         blendFunction: BlendFunction.NORMAL,
         enabled: true,
-        glareSize: 0.16,
+        glareSize: 0.08,
         lensPosition: new Vector3(),
         screenRes: new Vector2(size.width, size.height),
         starPoints: 6,
-        flareSize: 0.012,
+        flareSize: 0.006,
         flareSpeed: 0.01,
         flareShape: 0.12,
         animated: true,
         anamorphic: false,
-        colorGain: FIRE_COLOR.clone().multiplyScalar(LENS_FLARE_COLOR_GAIN_SCALE),
+        colorGain: FIRE_COLOR.clone().multiplyScalar(LENS_FLARE_COLOR_GAIN_SCALE * 0.05),
         lensDirtTexture: null,
-        haloScale: 0.35,
+        haloScale: 0.18,
         secondaryGhosts: true,
         aditionalStreaks: true,
-        ghostScale: 0.2,
+        ghostScale: 0.12,
         opacity: 1,
         starBurst: false
       }),
@@ -1378,61 +1463,48 @@ function TorchLensFlare({
       return
     }
 
-    let bestBrightness = -1
-    let bestScreenX = 0
-    let bestScreenY = 0
-    const visibleIntensity = Math.min(1, Math.max(0, intensity))
+    const noise = getTorchNoise(state.clock.getElapsedTime(), mazeLight.index + 1)
+    const brightness =
+      torchCandelaMultiplier *
+      getTorchFlickerFactor(noise, torchFlickerAmount)
+    const visibleIntensity = Math.max(0, intensity)
 
-    layout.lights.forEach((mazeLight) => {
-      const noise = getTorchNoise(state.clock.getElapsedTime(), mazeLight.index + 1)
-      const brightness =
-        torchCandelaMultiplier *
-        getTorchFlickerFactor(noise, torchFlickerAmount)
+    targetPosition.copy(mazeLight.torchPosition)
+    projectedPosition.copy(targetPosition).project(camera)
 
-      targetPosition.copy(mazeLight.torchPosition)
-      projectedPosition.copy(targetPosition).project(camera)
-
-      if (
-        projectedPosition.z < -1 ||
-        projectedPosition.z > 1 ||
-        Math.abs(projectedPosition.x) > 1.2 ||
-        Math.abs(projectedPosition.y) > 1.2
-      ) {
-        return
-      }
-
-      rayDirection.copy(targetPosition).sub(camera.position)
-      const distanceToTorch = rayDirection.length()
-      rayDirection.normalize()
-      raycaster.set(camera.position, rayDirection)
-
-      const hit = raycaster.intersectObjects(scene.children, true)[0]
-      const visible =
-        !hit ||
-        hit.distance >= distanceToTorch - 0.05 ||
-        hit.object.userData.lensflare === 'no-occlusion'
-
-      if (!visible || brightness <= bestBrightness) {
-        return
-      }
-
-      bestBrightness = brightness
-      bestScreenX = projectedPosition.x
-      bestScreenY = projectedPosition.y
-    })
-
-    if (bestBrightness <= 0) {
+    if (
+      projectedPosition.z < -1 ||
+      projectedPosition.z > 1 ||
+      Math.abs(projectedPosition.x) > 1.2 ||
+      Math.abs(projectedPosition.y) > 1.2
+    ) {
       opacity.value += (1 - opacity.value) * Math.min(1, delta / 0.12)
       return
     }
 
-    lensPosition.value.x = bestScreenX
-    lensPosition.value.y = bestScreenY
-    const targetOpacity = 1 - visibleIntensity
+    rayDirection.copy(targetPosition).sub(camera.position)
+    const distanceToTorch = rayDirection.length()
+    rayDirection.normalize()
+    raycaster.set(camera.position, rayDirection)
+
+    const hit = raycaster.intersectObjects(scene.children, true)[0]
+    const visible =
+      !hit ||
+      hit.distance >= distanceToTorch - 0.05 ||
+      hit.object.userData.lensflare === 'no-occlusion'
+
+    if (!visible) {
+      opacity.value += (1 - opacity.value) * Math.min(1, delta / 0.12)
+      return
+    }
+
+    lensPosition.value.x = projectedPosition.x
+    lensPosition.value.y = projectedPosition.y
+    const targetOpacity = 1 - Math.min(0.98, visibleIntensity * brightness * 0.05)
     opacity.value += (targetOpacity - opacity.value) * Math.min(1, delta / 0.12)
     colorGain.value
       .copy(FIRE_COLOR)
-      .multiplyScalar(bestBrightness * LENS_FLARE_COLOR_GAIN_SCALE)
+      .multiplyScalar(brightness * visibleIntensity * LENS_FLARE_COLOR_GAIN_SCALE * 0.05)
   })
 
   useEffect(() => () => effect.dispose(), [effect])
@@ -1440,11 +1512,39 @@ function TorchLensFlare({
   return <primitive object={effect as unknown as Effect} />
 }
 
+function TorchLensFlare({
+  intensity,
+  layout,
+  torchCandelaMultiplier,
+  torchFlickerAmount
+}: {
+  intensity: number
+  layout: MazeLayout
+  torchCandelaMultiplier: number
+  torchFlickerAmount: number
+}) {
+  return (
+    <>
+      {layout.lights.map((mazeLight) => (
+        <TorchLensFlareEffect
+          intensity={intensity}
+          key={mazeLight.id}
+          mazeLight={mazeLight}
+          torchCandelaMultiplier={torchCandelaMultiplier}
+          torchFlickerAmount={torchFlickerAmount}
+        />
+      ))}
+    </>
+  )
+}
+
 function FlightRig({
   controlsOpen,
+  movementSettings,
   wallBounds
 }: {
   controlsOpen: boolean
+  movementSettings: MovementSettings
   wallBounds: ReturnType<typeof getWallBounds>
 }) {
   const camera = useThree((state) => state.camera)
@@ -1469,6 +1569,19 @@ function FlightRig({
   const pitch = useRef(0)
   const isPointerLocked = useRef(false)
   const up = useMemo(() => new Vector3(0, 1, 0), [])
+  const resolvedMovementSettings = useMemo(
+    () =>
+      createMovementSettings({
+        horizontalAccelerationDistance: movementSettings.accelerationDistance,
+        horizontalDecelerationDistance: movementSettings.decelerationDistance,
+        maxHorizontalSpeedMph: movementSettings.maxHorizontalSpeedMph
+      }),
+    [
+      movementSettings.accelerationDistance,
+      movementSettings.decelerationDistance,
+      movementSettings.maxHorizontalSpeedMph
+    ]
+  )
 
   useEffect(() => {
     const spawnPosition = getPlayerSpawnPosition()
@@ -1689,7 +1802,8 @@ function FlightRig({
         z: horizontalDirection.current.z
       },
       { x: desiredDirection.x, z: desiredDirection.z },
-      delta
+      delta,
+      resolvedMovementSettings
     )
 
     horizontalSpeed.current = horizontalVelocity.speed
@@ -1704,7 +1818,8 @@ function FlightRig({
       velocity.current.y,
       grounded.current,
       Boolean(keys.current.Space),
-      delta
+      delta,
+      resolvedMovementSettings
     )
 
     intendedPosition.current
@@ -1763,7 +1878,7 @@ function FlightRig({
     const cameraPosition = getCameraPosition(playerPosition.current)
 
     camera.position.set(cameraPosition.x, cameraPosition.y, cameraPosition.z)
-  })
+  }, -1)
 
   return null
 }
@@ -1779,24 +1894,11 @@ function Scene({
   onAssetsReady: () => void
   visualSettings: VisualSettings
 }) {
-  const scene = useThree((state) => state.scene)
-
   useEffect(() => {
     onAssetsReady()
   }, [onAssetsReady])
 
-  useEffect(() => {
-    scene.userData.volumetricIntensity =
-      visualSettings.volumetricLighting.enabled
-        ? visualSettings.volumetricLighting.intensity
-        : 0
-    scene.userData.volumetricNoiseFrequency = visualSettings.volumetricNoiseFrequency
-  }, [
-    scene,
-    visualSettings.volumetricLighting.enabled,
-    visualSettings.volumetricLighting.intensity,
-    visualSettings.volumetricNoiseFrequency
-  ])
+  const scene = useThree((state) => state.scene)
 
   useEffect(() => {
     const globalWindow = window as Window & {
@@ -1915,6 +2017,8 @@ function Scene({
         flickerAmount={visualSettings.torchFlickerAmount}
         layout={layout}
         torchCandelaMultiplier={visualSettings.torchCandelaMultiplier}
+        volumetricLighting={visualSettings.volumetricLighting}
+        volumetricNoiseFrequency={visualSettings.volumetricNoiseFrequency}
       />
       <EffectComposer enableNormalPass>
         {visualSettings.ambientOcclusionMode === 'n8ao' ? (
@@ -1978,6 +2082,7 @@ function Scene({
       </EffectComposer>
       <FlightRig
         controlsOpen={controlsOpen}
+        movementSettings={visualSettings.movement}
         wallBounds={getWallBounds(layout)}
       />
       <PerformanceBenchmarkBridge />
@@ -2019,7 +2124,7 @@ function VisualControls({
     min: number
     step: number
   }> = [
-    { key: 'lensFlare', label: 'Lens Flares', min: 0, max: 1, step: 0.05 },
+    { key: 'lensFlare', label: 'Lens Flares', min: 0, max: 0.2, step: 0.005 },
     { key: 'ssr', label: 'SSR', min: 0, max: 2, step: 0.05 },
     { key: 'volumetricLighting', label: 'Volumetric Fog', min: 0, max: 1, step: 0.05 },
     { key: 'vignette', label: 'Vignette', min: 0, max: 1, step: 0.05 }
@@ -2124,6 +2229,63 @@ function VisualControls({
           step={0.05}
           type="range"
           value={visualSettings.torchFlickerAmount}
+        />
+      </label>
+
+      <label className="visual-control-row">
+        <output>{visualSettings.movement.maxHorizontalSpeedMph.toFixed(1)}mph</output>
+        <span>Move Speed</span>
+        <input
+          aria-label="Move Speed"
+          max={40}
+          min={1}
+          onChange={(event) => {
+            onScalarSettingChange(
+              'movementMaxHorizontalSpeedMph',
+              Number(event.target.value)
+            )
+          }}
+          step={0.5}
+          type="range"
+          value={visualSettings.movement.maxHorizontalSpeedMph}
+        />
+      </label>
+
+      <label className="visual-control-row">
+        <output>{visualSettings.movement.accelerationDistance.toFixed(2)}m</output>
+        <span>Accel Distance</span>
+        <input
+          aria-label="Accel Distance"
+          max={12}
+          min={0.25}
+          onChange={(event) => {
+            onScalarSettingChange(
+              'movementAccelerationDistance',
+              Number(event.target.value)
+            )
+          }}
+          step={0.05}
+          type="range"
+          value={visualSettings.movement.accelerationDistance}
+        />
+      </label>
+
+      <label className="visual-control-row">
+        <output>{visualSettings.movement.decelerationDistance.toFixed(2)}m</output>
+        <span>Decel Distance</span>
+        <input
+          aria-label="Decel Distance"
+          max={4}
+          min={0.1}
+          onChange={(event) => {
+            onScalarSettingChange(
+              'movementDecelerationDistance',
+              Number(event.target.value)
+            )
+          }}
+          step={0.05}
+          type="range"
+          value={visualSettings.movement.decelerationDistance}
         />
       </label>
 
@@ -2290,7 +2452,7 @@ function VisualControls({
         <input
           aria-label="DOF Focus Distance"
           disabled={!visualSettings.depthOfField.enabled}
-          max={1}
+          max={8}
           min={0}
           onChange={(event) => {
             onDepthOfFieldSettingChange({
@@ -2350,7 +2512,11 @@ function VisualControls({
             key={effectControl.key}
           >
             <output>
-              {effectSettings.enabled ? effectSettings.intensity.toFixed(2) : 'off'}
+              {effectSettings.enabled
+                ? effectControl.key === 'lensFlare'
+                  ? effectSettings.intensity.toFixed(3)
+                  : effectSettings.intensity.toFixed(2)
+                : 'off'}
             </output>
             <label className="visual-effect-label">
               <input
@@ -2416,10 +2582,42 @@ export default function App() {
   }, [])
 
   const onScalarSettingChange = (key: ScalarSettingKey, value: number) => {
-    setVisualSettings((current) => ({
-      ...current,
-      [key]: value
-    }))
+    setVisualSettings((current) => {
+      if (key === 'movementAccelerationDistance') {
+        return {
+          ...current,
+          movement: {
+            ...current.movement,
+            accelerationDistance: value
+          }
+        }
+      }
+
+      if (key === 'movementDecelerationDistance') {
+        return {
+          ...current,
+          movement: {
+            ...current.movement,
+            decelerationDistance: value
+          }
+        }
+      }
+
+      if (key === 'movementMaxHorizontalSpeedMph') {
+        return {
+          ...current,
+          movement: {
+            ...current.movement,
+            maxHorizontalSpeedMph: value
+          }
+        }
+      }
+
+      return {
+        ...current,
+        [key]: value
+      }
+    })
   }
 
   const onEffectSettingChange = (

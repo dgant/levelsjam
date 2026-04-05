@@ -18,6 +18,7 @@
 - The scene contains a large upward-facing ground plane centered at the origin.
 - The ground plane uses the extracted ShareTextures `puddle-ground` PBR pack rather than preview imagery.
 - The scene instantiates one source-controlled legal maze at random on each load.
+- The default maze dimensions are 7 cells by 7 cells.
 - Each maze uses a grid of cells with walls on cell edges rather than filling the cells themselves.
 - Each maze wall is represented in the scene by a `0.25m x 2m x 2m` wall mesh.
 - Each maze wall has its base at `Y = 0`.
@@ -25,12 +26,12 @@
 - The scene does not include the previous deterministic pseudo-random wall field.
 - The scene does not include the previous standalone reference sconce line.
 - The scene uses wall sconces only where a generated maze light is assigned.
-- Each wall sconce uses a 0.25 meter radius lower hemisphere with the cut top replaced by a flat circular cap.
+- Each wall sconce uses a 0.125 meter radius lower hemisphere with the cut top replaced by a flat circular cap.
 - Each wall sconce uses the requested `metal-13` PBR texture pack rather than a debug material.
 - Each wall sconce is positioned with its center one sconce radius outside the wall face.
 - Each wall sconce supports a camera-facing torch billboard above it.
 - Each torch billboard and torch point light are positioned against the same wall face as the sconce, on the side of the cell the light is intended to illuminate.
-- Each torch billboard sits directly on top of the sconce rather than floating above it.
+- Each torch billboard's bottom edge is flush with the top of the sconce rather than floating above it.
 - Each torch billboard is 0.5 meters square.
 - Each torch billboard uses the linked source flipbook asset rather than a procedurally generated placeholder.
 - Each torch billboard uses the local committed `CampFire_l_nosmoke_front_Loop_01_4K_6x6.png` atlas copied from the linked source asset.
@@ -44,21 +45,22 @@
 - Each torch brightness uses one user-adjustable intensity multiplier and one user-adjustable flicker amount slider.
 - Each torch point light intensity derives from the shared torch brightness value and a 1500 candela torch baseline.
 - Each torch billboard brightness derives from the same shared torch brightness value as the point light.
-- Each torch point light distance remains fixed at 10 meters.
+- Each torch point light distance remains fixed at 5 meters.
 - Each torch point light flickers at twice the previous speed.
 - Each torch point light uses a warm fire-appropriate color.
-- Torch shadows are enabled within a fixed 40 meter radius of the camera.
-- Torch shadows within that radius reuse static shadow maps while the lights and occluders remain stationary.
+- The two nearest torch lights within a fixed 40 meter radius of the camera cast shadows.
+- Torch shadow maps reuse static updates while the lights and occluders remain stationary.
+- Close torch lights use a 2x higher shadow-map resolution than distant torch lights.
 - The player collides with the ground plane and the walls.
 - The character collision volume is a capsule that is 1.75 meters tall and 0.25 meters in radius.
 - The player spawns 1 meter above the ground plane.
 - The camera eye height remains derived from the character capsule.
 - The initial camera angle is horizontal.
-- The player reaches a horizontal top speed of 20 mph.
+- The player reaches a horizontal top speed of 20 mph by default.
 - The player reaches a vertical top speed of 5 mph.
 - The player reaches a maximum fall speed of 40 mph.
-- The player accelerates to horizontal top speed over a travel distance of 2 meters.
-- The player decelerates from horizontal top speed to zero over a travel distance of 0.5 meters.
+- The player accelerates to horizontal top speed over a travel distance of 2 meters by default.
+- The player decelerates from horizontal top speed to zero over a travel distance of 0.5 meters by default.
 - Gravity applies at 1g.
 - Jetpack thrust applies at 1.25g so the net upward acceleration is 0.25g while `Space` is held.
 - Horizontal movement magnitude is stored as a scalar rather than a persistent world-space vector.
@@ -69,19 +71,23 @@
 - The scene uses `postprocessing` Depth of Field.
 - The scene uses `n8ao` instead of the previous SSAO effect.
 - The scene includes screen-space reflections.
-- The scene includes volumetric lighting or fog shafts in the spirit of the three.js volume-lighting example.
+- The scene includes a full-maze volumetric fog volume that spans the ground footprint from 0 to 6 meters in altitude.
+- The scene does not render per-torch cone meshes as the volumetric-fog implementation.
 - The scene does not use God Rays.
 - Bloom, Depth of Field, Lens Flares, and SSR default to disabled.
 - The debug panel exposure control defaults to `-4.5`.
 - The debug panel exposes an IBL intensity multiplier across a wide enough range to rebalance the HDRI against the torches without relying on physically calibrated EV semantics.
 - The debug panel exposes a torch candela multiplier across a wide enough range to rebalance the torches against the HDRI without relying on physically calibrated EV semantics.
 - The debug panel exposes a torch flicker amount slider with a default value of `0.15`.
+- The debug panel exposes player top speed, acceleration distance, and deceleration distance controls.
 - The debug panel lens flare control adjusts the effect using the lens flare opacity parameter rather than an arbitrary color-gain multiplier.
+- The debug panel lens flare control provides useful adjustment very close to zero rather than jumping immediately to an over-bright flare.
 - The debug panel exposes an ambient-occlusion mode dropdown with working `Off`, `N8AO`, and `SSAO` modes.
 - The debug panel exposes one shared ambient-occlusion intensity slider for the selected AO mode.
 - The debug panel exposes an ambient-occlusion radius control and labels the radius in scene units or screen-space units as appropriate for the selected AO mode.
 - The debug panel exposes Depth of Field `focusDistance`, `focalLength`, and `bokehScale`.
 - The debug panel labels Depth of Field `focusDistance` and `focalLength` with their units.
+- The debug panel allows Depth of Field focus distance values up to 8 meters.
 - The debug panel exposes Bloom `kernelSize`.
 - The Bloom kernel-size control produces a visible change in the rendered bloom.
 - The debug panel does not expose obsolete atmosphere or sun-direction controls.
@@ -140,7 +146,8 @@
 - Selecting `SSAO` produces a visible ambient-occlusion change around contact areas rather than appearing inert.
 - Enabling lens flares produces a visible flare around visible torches.
 - Increasing or decreasing lens-flare opacity produces a visible corresponding change in the flare.
-- Increasing or decreasing volumetric fog or smoke parameters produces a visible corresponding change in volumetric lighting.
+- Lens flares apply to the set of visible torch lights rather than jumping between arbitrary lights frame to frame.
+- Increasing or decreasing volumetric fog or smoke parameters produces a visible corresponding change in the full-scene fog volume.
 - The page does not show speculative branding captions, launcher buttons, or click-to-enter copy.
 
 ## Debug Controls
@@ -150,6 +157,9 @@
 - The debug controls panel exposes the IBL intensity multiplier.
 - The debug controls panel exposes the torch candela multiplier.
 - The debug controls panel exposes the torch flicker amount.
+- The debug controls panel exposes player top speed.
+- The debug controls panel exposes player acceleration distance.
+- The debug controls panel exposes player deceleration distance.
 - The debug controls panel exposes ambient-occlusion mode and intensity.
 - The debug controls panel exposes ambient-occlusion radius.
 - The debug controls panel exposes enabled and intensity controls for Bloom, Depth of Field, Lens Flares, SSR, and Vignette.

@@ -7,7 +7,9 @@ import { pathToFileURL } from 'node:url'
 
 import { MAZES } from '../src/data/mazes/index.js'
 import {
+  MAZE_HEIGHT,
   MAZE_TARGET_COUNT,
+  MAZE_WIDTH,
   generateMaze,
   getMazeSceneLayout,
   validateMaze
@@ -20,6 +22,8 @@ test('generates valid mazes under 100ms', () => {
   const validation = validateMaze(maze)
 
   assert.equal(validation.valid, true, validation.errors.join('\n'))
+  assert.equal(maze.width, MAZE_WIDTH)
+  assert.equal(maze.height, MAZE_HEIGHT)
   assert.ok(maze.generationMs < 100, `generation took ${maze.generationMs}ms`)
 })
 

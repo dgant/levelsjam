@@ -18,6 +18,7 @@ export type CollisionResult = {
   position: Vector3Like
   collisions: {
     floor: boolean
+    wallNormals: Vector3Like[]
     walls: string[]
   }
   grounded: boolean

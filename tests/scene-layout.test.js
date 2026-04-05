@@ -14,9 +14,12 @@ import {
   getRandomMazeLayout,
   getWallBounds
 } from '../src/lib/sceneLayout.js'
+import { MAZE_HEIGHT, MAZE_WIDTH } from '../src/lib/maze.js'
 
 test('keeps at least five persisted mazes available to the runtime', () => {
   assert.ok(AVAILABLE_MAZES.length >= MAZE_COUNT)
+  assert.ok(AVAILABLE_MAZES.every((maze) => maze.width === MAZE_WIDTH))
+  assert.ok(AVAILABLE_MAZES.every((maze) => maze.height === MAZE_HEIGHT))
 })
 
 test('returns one of the available mazes when selecting a random layout', () => {
@@ -53,7 +56,7 @@ test('places each sconce one radius outside the wall face on the lit-cell side',
 
     assert.equal(deltaX, 0)
     assert.equal(deltaZ, 0)
-    assert.equal(light.torchPosition.y, light.sconcePosition.y + SCONCE_RADIUS + 0.08)
+    assert.equal(light.torchPosition.y, light.sconcePosition.y + 0.25)
   }
 })
 

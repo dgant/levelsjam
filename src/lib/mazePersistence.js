@@ -2,7 +2,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
+  MAZE_HEIGHT,
   MAZE_TARGET_COUNT,
+  MAZE_WIDTH,
   generateMaze,
   getMazeSignature,
   serializeMazeModule,
@@ -64,7 +66,11 @@ export async function ensureMazeFiles({
     const maze = await importMazeModule(filePath)
     const validation = validateMaze(maze)
 
-    if (!validation.valid) {
+    if (
+      !validation.valid ||
+      maze.width !== MAZE_WIDTH ||
+      maze.height !== MAZE_HEIGHT
+    ) {
       fs.rmSync(filePath, { force: true })
       continue
     }

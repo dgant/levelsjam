@@ -45,15 +45,18 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify each sconce renders with the requested `metal-13` PBR textures rather than a debug material.
 - Verify the sconces are visibly readable outside the maze walls rather than disappearing into the surface behind them.
 - Verify the torch billboards animate and stay camera-facing even on walls whose parent groups are rotated.
-- Verify the visible flame fills the 0.5m billboard and sits on the sconce instead of appearing tiny or floating above it.
+- Verify the visible flame fills the 0.5m billboard and that the billboard bottom edge is flush with the sconce top.
 - Verify each maze light location has a warm torch point light and the lights cast shadows.
-- Verify torch shadows remain active for nearby torches out to 40m from the camera.
+- Verify the two nearest nearby torches cast shadows when they are within 40m of the camera.
+- Verify close torch lights use visibly sharper shadow maps than the second shadowed light.
 - Verify the default `Torch Flicker` value is `0.15`.
 - Verify the torch flicker runs at the updated faster rate and that reducing `Torch Flicker` toward `0.00` steadies the torch brightness.
 - Verify the fire flipbook runs at the updated faster rate.
 - Verify the tone mapper is `AgX` by default.
 - Verify the visual controls panel exposes `Exposure`, `IBL Intensity`, `Torch Candelas`, `Torch Flicker`, `Ambient Occlusion`, `AO Intensity`, the tone mapper, and the enabled/intensity controls for Bloom, Depth Of Field, Lens Flares, SSR, and Vignette.
 - Verify the visual controls panel also exposes `Bloom Kernel`, `AO Radius`, `DOF Focus Distance`, `DOF Focal Length`, `Depth Of Field Bokeh Scale`, and the volumetric fog controls.
+- Verify the visual controls panel exposes `Move Speed`, `Accel Distance`, and `Decel Distance`.
+- Verify the `DOF Focus Distance` slider reaches 8 meters.
 - Verify the `IBL Intensity` and `Torch Candelas` sliders each cover a wide enough range to rebalance the HDRI and torches without touching the exposure stops control.
 - Verify Bloom, Depth Of Field, Lens Flares, and SSR start disabled.
 - Verify the default `Exposure` value is `-4.5`.
@@ -69,9 +72,12 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify enabling SSR does not reflect the torch billboards or their transparent pixels.
 - Verify enabling lens flares produces a visible flare around a visible torch.
 - Verify changing lens-flare opacity visibly changes the flare strength.
+- Verify the smallest nonzero lens-flare setting is still subtle enough to be useful.
+- Verify lens flares do not flicker between arbitrary torches from frame to frame.
 - Verify the Bloom kernel-size control produces a visible bloom change.
 - Verify SSAO now produces a visible change where contact darkening should occur.
-- Verify the volumetric-lighting controls produce visible fog or smoke changes.
+- Verify the volumetric-lighting controls produce visible changes in the full-scene fog volume rather than in per-torch cone meshes.
+- Verify the fog volume occupies the maze footprint from ground level up to roughly 6 meters.
 - Verify each control row in the visual controls panel keeps the value, label, and control on one line in that order.
 - Verify the FPS counter appears in the top-right corner and includes the Git revision and revision timestamp.
 - Verify pressing backquote opens the visual controls panel.
@@ -85,7 +91,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Treat a failed `npm run test:perf` run or a measured browser benchmark below `120 FPS` as blocking.
 - Keep `npm run test:unit` under 20 seconds.
 - Keep the prepared smoke runner `npm run test:smoke:runner` under 1 minute after a single `npm run build:pages`.
-- Latest measured benchmark on April 5, 2026: `npm run bench:startup` reached the first bright frame in about `294.8ms` on the background dev server, `npm run test:unit` took about `1371ms`, and the prepared `npm run test:smoke:runner` took about `50.5s`.
+- Latest measured benchmark on April 5, 2026: `npm run bench:startup` reached the first bright frame in about `337.6ms` on the background dev server, `npm run test:unit` took about `4852ms`, and the prepared `npm run test:smoke:runner` took about `57.3s`.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.

@@ -4,28 +4,37 @@ export type Vector3Like = {
   z: number
 }
 
-export type WallLayout = {
-  axis: 'x' | 'z'
-  bounds: {
-    minX: number
-    maxX: number
-    minY: number
-    maxY: number
-    minZ: number
-    maxZ: number
-  }
+export type WallBounds = {
   id: string
-  index: number
-  position: Vector3Like
-  sconceDirection: number
-  sconcePosition: Vector3Like
-  torchPosition: Vector3Like
-  yaw: number
+  minX: number
+  maxX: number
+  minY: number
+  maxY: number
+  minZ: number
+  maxZ: number
 }
 
-export type StandaloneSconceLayout = {
-  index: number
-  position: Vector3Like
+export type MazeLayout = {
+  lights: Array<{
+    cell: { x: number; y: number }
+    id: string
+    index: number
+    sconcePosition: Vector3Like
+    side: 'north' | 'east' | 'south' | 'west'
+    torchPosition: Vector3Like
+  }>
+  maze: {
+    height: number
+    id: string
+    width: number
+  }
+  walls: Array<{
+    axis: 'x' | 'z'
+    bounds: WallBounds
+    center: { x: number; z: number }
+    id: string
+    yaw: number
+  }>
 }
 
 export declare const PLAYER_RADIUS: number
@@ -33,7 +42,6 @@ export declare const PLAYER_HEIGHT: number
 export declare const PLAYER_EYE_HEIGHT: number
 export declare const GROUND_Y: number
 export declare const GROUND_SIZE: number
-export declare const WALL_COUNT: number
 export declare const WALL_HEIGHT: number
 export declare const WALL_LENGTH: number
 export declare const WALL_WIDTH: number
@@ -41,16 +49,15 @@ export declare const SCONCE_RADIUS: number
 export declare const TORCH_BILLBOARD_SIZE: number
 export declare const TORCH_BASE_CANDELA: number
 export declare const WALL_FACE_OFFSET: number
-export declare const WALL_PLACEMENT_LIMIT: number
-export declare const STANDALONE_SCONCE_COUNT: number
-export declare const STANDALONE_SCONCE_STEP: number
 export declare const PLAYER_SPAWN_POSITION: Readonly<Vector3Like>
-export declare const WALL_LAYOUT: readonly WallLayout[]
-export declare const STANDALONE_SCONCE_LAYOUT: readonly StandaloneSconceLayout[]
-export declare const STANDALONE_REFERENCE_TORCH_POSITION: Readonly<Vector3Like>
+export declare const AVAILABLE_MAZES: readonly Array<{
+  height: number
+  id: string
+  width: number
+}>
+export declare const DEFAULT_MAZE_LAYOUT: MazeLayout
+export declare const MAZE_COUNT: number
 
-export declare function getWallBounds(): Array<WallLayout['bounds'] & { id: string }>
-export declare function getWallAttachmentLocalLayout(wall: WallLayout): {
-  sconcePosition: Vector3Like
-  torchPosition: Vector3Like
-}
+export declare function getRandomMazeLayout(random?: () => number): MazeLayout
+export declare function getMazeLayoutById(id: string): MazeLayout | null
+export declare function getWallBounds(layout?: MazeLayout): WallBounds[]
