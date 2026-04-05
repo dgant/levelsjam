@@ -3,7 +3,7 @@ const path = require('path')
 const { PNG } = require('pngjs')
 const { expect, test } = require('@playwright/test')
 
-test.setTimeout(75_000)
+test.setTimeout(140_000)
 
 const SCONCE_ARTIFACT_DIR = path.join(
   process.cwd(),
@@ -346,12 +346,69 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
     ...standaloneLineView
   )
   saveArtifact('05-standalone-sconce-line-visible.png', standaloneLineVisible)
+  for (let index = 0; index < 10; index += 1) {
+    const sconcePosition = await page.evaluate((currentIndex) => {
+      return window.__levelsjamDebug.getDebugPosition(
+        'standalone-sconce-body',
+        currentIndex
+      )
+    }, index)
+    if (!sconcePosition) {
+      throw new Error(`Missing standalone sconce debug position for index ${index}`)
+    }
+    await page.evaluate(([x, y, z]) => {
+      window.__levelsjamDebug.setView(
+        [x - 1.75, y + 0.2, z - 1.8],
+        [x, y, z]
+      )
+    }, sconcePosition)
+    await page.waitForTimeout(220)
+    const liveStandaloneSconce = await screenshotCanvasRegion(
+      page,
+      canvas,
+      180,
+      180,
+      0.5,
+      0.54
+    )
+    saveArtifact(
+      `standalone-sconce-step-${String(index).padStart(2, '0')}-live.png`,
+      liveStandaloneSconce
+    )
+    await page.evaluate((currentIndex) => {
+      window.__levelsjamDebug.isolateDebugRole('standalone-sconce-body', currentIndex)
+    }, index)
+    await page.waitForTimeout(160)
+    const isolatedStandaloneSconce = await screenshotCanvasRegion(
+      page,
+      canvas,
+      180,
+      180,
+      0.5,
+      0.54
+    )
+    saveArtifact(
+      `standalone-sconce-step-${String(index).padStart(2, '0')}-isolated.png`,
+      isolatedStandaloneSconce
+    )
+    await page.evaluate(() => {
+      window.__levelsjamDebug.clearDebugIsolation()
+    })
+    await page.waitForTimeout(100)
+  }
+  await page.evaluate(() => {
+    window.__levelsjamDebug.setView(
+      [11.75, 1.6, -2.2],
+      [13.5, 1.375, 0]
+    )
+  })
+  await page.waitForTimeout(300)
   await page.evaluate(() => {
     for (let index = 0; index < 10; index += 1) {
       window.__levelsjamDebug.setDebugVisible('standalone-sconce-body', index, false)
     }
   })
-  await page.waitForTimeout(300)
+  await page.waitForTimeout(200)
   const standaloneLineHidden = await screenshotCanvasRegion(
     page,
     canvas,
@@ -512,7 +569,7 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   ).toBe(true)
   expect(
     [...resourceUrls].some((url) => url.includes('metal_13_basecolor-1K.png'))
-  ).toBe(false)
+  ).toBe(true)
   expect(
     [...resourceUrls].some((url) =>
       url.includes('CampFire_l_nosmoke_front_Loop_01_4K_6x6.png')

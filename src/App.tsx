@@ -34,6 +34,7 @@ import {
   Suspense,
   useEffect,
   useMemo,
+  type ReactNode,
   useRef,
   useState
 } from 'react'
@@ -106,6 +107,14 @@ const WALL_TEXTURE_URLS = {
   normal: `${assetBase}textures/stone-wall-29/stonewall_29-1K/stonewall_29_normal-1K.png`,
   roughness: `${assetBase}textures/stone-wall-29/stonewall_29-1K/stonewall_29_roughness-1K.png`
 }
+const METAL_TEXTURE_URLS = {
+  ao: `${assetBase}textures/metal-13/metal_13-1K/metal_13_ambientocclusion-1K.png`,
+  color: `${assetBase}textures/metal-13/metal_13-1K/metal_13_basecolor-1K.png`,
+  height: `${assetBase}textures/metal-13/metal_13-1K/metal_13_height-1K.png`,
+  metallic: `${assetBase}textures/metal-13/metal_13-1K/metal_13_metallic-1K.png`,
+  normal: `${assetBase}textures/metal-13/metal_13-1K/metal_13_normal-1K.png`,
+  roughness: `${assetBase}textures/metal-13/metal_13-1K/metal_13_roughness-1K.png`
+}
 const LOOK_SENSITIVITY = 0.003
 const MAX_PITCH = Math.PI / 2 - 0.05
 const BACKQUOTE_CODE = 'Backquote'
@@ -120,6 +129,7 @@ const POINTER_UNLOCK_CODES = new Set([
 ])
 const PUDDLE_TEXTURE_REPEAT = 60
 const WALL_TEXTURE_REPEAT = 2
+const METAL_TEXTURE_REPEAT = 1
 const LOADING_DOT_INTERVAL_MS = 250
 const LOADING_FADE_DURATION_MS = 2000
 const FIRE_FLIPBOOK_GRID = 6
@@ -181,6 +191,18 @@ const SCONCE_PROFILE_POINTS = (() => {
 
   return points
 })()
+const STANDALONE_SCONCE_MATERIAL_STEPS = [
+  'basic-black',
+  'standard-diffuse-gray',
+  'standard-metal-gray-env-off',
+  'standard-metal-gray-env-on',
+  'standard-basecolor-only',
+  'standard-basecolor-metal',
+  'standard-basecolor-metal-roughness-map',
+  'standard-basecolor-metal-roughness-metalness-map',
+  'standard-basecolor-metal-surface-detail',
+  'standard-full-pbr'
+] as const
 const exposureEffectShader = `
 uniform float exposure;
 
@@ -268,6 +290,9 @@ type PbrMaps = {
   normalMap?: Texture
   roughnessMap?: Texture
 }
+
+type StandaloneSconceMaterialStep =
+  (typeof STANDALONE_SCONCE_MATERIAL_STEPS)[number]
 
 type BenchmarkResult = {
   averageFrameMs: number
@@ -848,6 +873,12 @@ function WallSconce({
       <SconceMesh
         debugIndex={wall.index}
         debugRole="sconce-body"
+        material={
+          <meshBasicMaterial
+            color="black"
+            side={DoubleSide}
+          />
+        }
         position={position}
       />
       <TorchBillboard
@@ -870,10 +901,12 @@ function WallSconce({
 function SconceMesh({
   debugIndex,
   debugRole,
+  material,
   position
 }: {
   debugIndex: number
   debugRole: string
+  material: ReactNode
   position: [number, number, number]
 }) {
   return (
@@ -884,12 +917,135 @@ function SconceMesh({
       userData={{ debugIndex, debugRole }}
     >
       <latheGeometry args={[SCONCE_PROFILE_POINTS, 24]} />
-      <meshBasicMaterial
-        color="black"
-        side={DoubleSide}
-      />
+      {material}
     </mesh>
   )
+}
+
+function StandaloneSconceMaterial({
+  metal,
+  step
+}: {
+  metal: PbrMaps
+  step: StandaloneSconceMaterialStep
+}) {
+  switch (step) {
+    case 'basic-black':
+      return (
+        <meshBasicMaterial
+          color="black"
+          side={DoubleSide}
+        />
+      )
+    case 'standard-diffuse-gray':
+      return (
+        <meshStandardMaterial
+          color="#808080"
+          metalness={0}
+          roughness={1}
+          side={DoubleSide}
+        />
+      )
+    case 'standard-metal-gray-env-off':
+      return (
+        <meshStandardMaterial
+          color="#808080"
+          envMapIntensity={0}
+          metalness={0.85}
+          roughness={0.55}
+          side={DoubleSide}
+        />
+      )
+    case 'standard-metal-gray-env-on':
+      return (
+        <meshStandardMaterial
+          color="#808080"
+          envMapIntensity={1}
+          metalness={0.85}
+          roughness={0.55}
+          side={DoubleSide}
+        />
+      )
+    case 'standard-basecolor-only':
+      return (
+        <meshStandardMaterial
+          color="white"
+          map={metal.map}
+          metalness={0}
+          roughness={1}
+          side={DoubleSide}
+        />
+      )
+    case 'standard-basecolor-metal':
+      return (
+        <meshStandardMaterial
+          color="white"
+          envMapIntensity={1}
+          map={metal.map}
+          metalness={0.85}
+          roughness={0.55}
+          side={DoubleSide}
+        />
+      )
+    case 'standard-basecolor-metal-roughness-map':
+      return (
+        <meshStandardMaterial
+          color="white"
+          envMapIntensity={1}
+          map={metal.map}
+          metalness={0.85}
+          roughness={0.55}
+          roughnessMap={metal.roughnessMap}
+          side={DoubleSide}
+        />
+      )
+    case 'standard-basecolor-metal-roughness-metalness-map':
+      return (
+        <meshStandardMaterial
+          color="white"
+          envMapIntensity={1}
+          map={metal.map}
+          metalness={0.85}
+          metalnessMap={metal.metalnessMap}
+          roughness={0.55}
+          roughnessMap={metal.roughnessMap}
+          side={DoubleSide}
+        />
+      )
+    case 'standard-basecolor-metal-surface-detail':
+      return (
+        <meshStandardMaterial
+          bumpMap={metal.bumpMap}
+          bumpScale={0.02}
+          color="white"
+          envMapIntensity={1}
+          map={metal.map}
+          metalness={0.85}
+          metalnessMap={metal.metalnessMap}
+          normalMap={metal.normalMap}
+          roughness={0.55}
+          roughnessMap={metal.roughnessMap}
+          side={DoubleSide}
+        />
+      )
+    case 'standard-full-pbr':
+      return (
+        <meshStandardMaterial
+          aoMap={metal.aoMap}
+          bumpMap={metal.bumpMap}
+          bumpScale={0.02}
+          color="white"
+          envMapIntensity={1}
+          map={metal.map}
+          metalness={0.85}
+          metalnessMap={metal.metalnessMap}
+          normalMap={metal.normalMap}
+          roughness={0.55}
+          roughnessMap={metal.roughnessMap}
+          side={DoubleSide}
+        />
+      )
+  }
 }
 
 function StandaloneSconceLine({
@@ -899,6 +1055,7 @@ function StandaloneSconceLine({
   flickerAmount: number
   torchCandelaMultiplier: number
 }) {
+  const metal = useStandardPbrTextures(METAL_TEXTURE_URLS, METAL_TEXTURE_REPEAT)
   const lightHandle = useRef<TorchLightHandle | null>(null)
   const torchPosition: [number, number, number] = [
     STANDALONE_REFERENCE_TORCH_POSITION.x,
@@ -914,6 +1071,12 @@ function StandaloneSconceLine({
           debugIndex={sconce.index}
           debugRole="standalone-sconce-body"
           key={`standalone-sconce-${sconce.index}`}
+          material={
+            <StandaloneSconceMaterial
+              metal={metal}
+              step={STANDALONE_SCONCE_MATERIAL_STEPS[sconce.index]}
+            />
+          }
           position={[
             sconce.position.x,
             sconce.position.y,
@@ -1276,6 +1439,7 @@ function FlightRig({
 }) {
   const camera = useThree((state) => state.camera)
   const canvas = useThree((state) => state.gl.domElement)
+  const scene = useThree((state) => state.scene)
   const keys = useRef<Record<string, boolean>>({})
   const grounded = useRef(false)
   const playerPosition = useRef(
@@ -1424,6 +1588,10 @@ function FlightRig({
   useEffect(() => {
     const globalWindow = window as Window & {
       __levelsjamDebug?: {
+        getDebugPosition?: (
+          role: string,
+          index: number
+        ) => [number, number, number] | null
         setView?: (
           cameraPosition: [number, number, number],
           target: [number, number, number]
@@ -1431,9 +1599,28 @@ function FlightRig({
       }
     }
     const existing = globalWindow.__levelsjamDebug ?? {}
+    const worldPosition = new Vector3()
 
     globalWindow.__levelsjamDebug = {
       ...existing,
+      getDebugPosition: (role, index) => {
+        let match: [number, number, number] | null = null
+
+        scene.traverse((object) => {
+          if (
+            match ||
+            object.userData?.debugRole !== role ||
+            object.userData?.debugIndex !== index
+          ) {
+            return
+          }
+
+          object.getWorldPosition(worldPosition)
+          match = [worldPosition.x, worldPosition.y, worldPosition.z]
+        })
+
+        return match
+      },
       setView: (cameraPosition, target) => {
         playerPosition.current.set(
           cameraPosition[0],
@@ -1457,12 +1644,13 @@ function FlightRig({
         return
       }
 
+      delete globalWindow.__levelsjamDebug.getDebugPosition
       delete globalWindow.__levelsjamDebug.setView
       if (Object.keys(globalWindow.__levelsjamDebug).length === 0) {
         delete globalWindow.__levelsjamDebug
       }
     }
-  }, [camera])
+  }, [camera, scene])
 
   useFrame((_, delta) => {
     camera.getWorldDirection(forward.current)

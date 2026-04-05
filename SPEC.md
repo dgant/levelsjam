@@ -48,6 +48,9 @@
 - Each torch point light uses a warm fire-appropriate color.
 - The scene contains a standalone reference line of 10 sconces placed just outside the wall-assembly area.
 - The standalone reference sconces use the same capped lower-hemisphere bowl geometry and the same solid black unlit debug material as the wall sconces.
+- The standalone reference sconce line currently acts as a material-diagnosis ladder.
+- The standalone reference sconce at the bottom of the line uses the simplest solid black unlit material.
+- Each subsequent standalone reference sconce adds one more step of the original PBR material path so visibility failures can be isolated by position in the line.
 - The first standalone reference sconce rests on the ground with its bottom tangent to `Y = 0`.
 - Each subsequent standalone reference sconce is offset by `+0.25m` in height and `+0.25m` along the line direction, forming a rising diagonal.
 - The standalone reference sconce line contains no attached billboard or point light.
