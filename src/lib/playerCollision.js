@@ -43,6 +43,7 @@ function resolveAgainstBox(previousPosition, desiredPosition, bounds, radius, he
   const position = cloneVector(desiredPosition)
   let grounded = false
   let collided = false
+  const normals = []
 
   if (
     previousPosition.y >= bounds.maxY &&
@@ -52,6 +53,7 @@ function resolveAgainstBox(previousPosition, desiredPosition, bounds, radius, he
     position.y = bounds.maxY
     grounded = true
     collided = true
+    normals.push({ x: 0, y: 1, z: 0 })
   }
 
   const capsuleTop = position.y + height
@@ -72,7 +74,7 @@ function resolveAgainstBox(previousPosition, desiredPosition, bounds, radius, he
       grounded = true
     }
 
-    return { collided, grounded, position }
+    return { collided, grounded, normals, position }
   }
 
   const candidates = []
@@ -146,9 +148,28 @@ function resolveAgainstBox(previousPosition, desiredPosition, bounds, radius, he
     position[face.axis] = face.value
     grounded = grounded || face.axis === 'y' && face.value === bounds.maxY
     collided = true
+    if (face.axis === 'x') {
+      normals.push({
+        x: face.value < bounds.minX ? -1 : 1,
+        y: 0,
+        z: 0
+      })
+    } else if (face.axis === 'y') {
+      normals.push({
+        x: 0,
+        y: face.value === bounds.maxY ? 1 : -1,
+        z: 0
+      })
+    } else if (face.axis === 'z') {
+      normals.push({
+        x: 0,
+        y: 0,
+        z: face.value < bounds.minZ ? -1 : 1
+      })
+    }
   }
 
-  return { collided, grounded, position }
+  return { collided, grounded, normals, position }
 }
 
 export function getPlayerSpawnPosition() {
@@ -173,7 +194,7 @@ export function resolvePlayerCollision(
   const height = options.height ?? PLAYER_HEIGHT
   const wallBounds = options.wallBounds ?? getWallBounds()
   const position = cloneVector(desiredPosition)
-  const collisions = { floor: false, walls: [] }
+  const collisions = { floor: false, wallNormals: [], walls: [] }
   let grounded = false
 
   if (position.y < floorY) {
@@ -200,6 +221,7 @@ export function resolvePlayerCollision(
     position.z = resolution.position.z
     grounded = grounded || resolution.grounded
     collisions.walls.push(bounds.id ?? 'wall')
+    collisions.wallNormals.push(...resolution.normals)
   }
 
   if (!grounded && Math.abs(position.y - floorY) < 1e-6) {

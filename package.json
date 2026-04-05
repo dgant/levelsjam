@@ -9,8 +9,9 @@
     "dev:bg:status": "node scripts/dev-server.cjs status",
     "dev:bg:stop": "node scripts/dev-server.cjs stop",
     "build": "vite build",
+    "ensure:mazes": "node scripts/ensure-mazes.cjs",
     "preview": "npm run build:pages && node scripts/serve-root.cjs 4173",
-    "test:unit": "node --test tests/billboard.test.js tests/lighting-calibration.test.js tests/player-collision.test.js tests/player-motion.test.js tests/scene-layout.test.js",
+    "test:unit": "node --test tests/billboard.test.js tests/lighting-calibration.test.js tests/maze.test.js tests/player-collision.test.js tests/player-motion.test.js tests/scene-layout.test.js",
     "test:smoke:runner": "playwright test tests/smoke.spec.cjs",
     "test:smoke": "npm run build:pages && playwright test tests/smoke.spec.cjs",
     "test:perf:runner": "playwright test tests/perf.spec.cjs",
@@ -22,7 +23,6 @@
   "dependencies": {
     "@react-three/fiber": "^9.3.0",
     "@react-three/postprocessing": "^3.0.4",
-    "@takram/three-atmosphere": "^0.17.1",
     "postprocessing": "^6.37.7",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

@@ -39,3 +39,6 @@
 - When proving a rendered prop is visible, isolate the prop's own shell in the screenshot check; a cap highlight or a coincident shadow is not enough evidence.
 - When the user reports that a rendered object is absent, do not reframe the issue as a perception or occlusion problem without proof. First rule out implementation differences that can make the object fail to render at all.
 - When a visual dispute remains unresolved, have the smoke test persist the exact screenshots used for the proof with stable filenames so the human can inspect the same rendered states.
+- When a scene layout becomes randomized, add a deterministic query-param hook for browser tests so smoke and perf runs can target one persisted scene and stay stable.
+- When a requested content replacement removes a rendering system entirely, uninstall the now-unused package instead of leaving it as dead dependency drift.
+- When timing Playwright-based benchmarks in this repository, treat both `test:smoke:runner` and `test:perf:runner` as users of the same local web-server port and wait for that port to be free before launching either runner.

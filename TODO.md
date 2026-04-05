@@ -74,25 +74,25 @@
 [x] N8AO doesn't appear to be doing anything. Fix it.
 [x] Add a dropdown to choose between the working AO modes that are easily available in the current stack, including N8AO and SSAO, and an intensity slider. Make sure to actually connect these and verify that they are working
 [x] To save space in the settings menu, put each value, label, and slider on the same line, in that order
-[] Set the default Torch Flicker to 0.15
-[] Set the default Exposure to -4.5
-[] Changing the bloom kernel size has no effect
-[] SSAO still has no visible effect even where it should.
-[] Do N8AO/SSAO have a radius setting? Expose it if so (with units ideally)
-[] Debug panel should mention the units of DOF focus distance/focal length if possible
-[] Implement volumetric lighting like https://threejs.org/examples/webgpu_volume_lighting.html -- expose the fog/smoke amount as debug parameters (plus i assume there's internally a smoke noise frequency we can expose).
-[] Print the Git revision and revision timestamp up by the FPS counter
-[] Player collision is currently setting the player's velocity to zero, but only the velocity's component along the collision normal of the wall to the player should be set to zero (so you can slide along the edge of an obstacle without repeatedly stopping)
-[] Create a maze generator
-  [] The generator creates a random maze. A maze is a grid of cells, with walls in the edges between cells (and not in the cells themselves). A maze must meet all of the following constraints
-    [] Each exterior edge must be a wall except one, which is the maze opening
-    [] Each cell must have at least two open edges
-    [] Each cell must have two paths to the cell inside the opening that share no cells in common (besides the start and end cells)
-    [] Every unwalled edge must, if walled, violate one of these constraints (ie. it should not be possible to add a wall anywhere and still adhere to these constraints)
-  [] After finishing the maze, create a list of unlit cells. Then until the list is empty, remove a random cell with at least one wall, put a light in the cell (adjacent to one of its walls, chosen at random), then remove any cells within unbroken cardinal-direciton line of sight from the "unlit cells" list (ie. we expect the light will light these cells)
-  [] Persist each generated maze in a file. The generated mazes should be source controlled
-  [] Valid maze generation must always take under 100ms
-  [] The test suite must delete any non-passing mazes 
-  [] There must always be five valid mazes. Whenever there are fewer, generate more until there are enough
-[] Delete the existing sconces and random wall-sconce-light-flames
-[] On game load, instantiate one of the available legal mazes at random. Each of the maze's wall gets a .25m x 2m x 2m mesh with the wall material, with shadows and collision enabled. Then for each light, place the sconce-billboard-light assembly against that wall, on the side of the cell it's supposed to be lighting
+[x] Set the default Torch Flicker to 0.15
+[x] Set the default Exposure to -4.5
+[x] Changing the bloom kernel size has no effect
+[x] SSAO still has no visible effect even where it should.
+[x] Do N8AO/SSAO have a radius setting? Expose it if so (with units ideally)
+[x] Debug panel should mention the units of DOF focus distance/focal length if possible
+[x] Implement volumetric lighting like https://threejs.org/examples/webgpu_volume_lighting.html -- expose the fog/smoke amount as debug parameters (plus i assume there's internally a smoke noise frequency we can expose).
+[x] Print the Git revision and revision timestamp up by the FPS counter
+[x] Player collision is currently setting the player's velocity to zero, but only the velocity's component along the collision normal of the wall to the player should be set to zero (so you can slide along the edge of an obstacle without repeatedly stopping)
+[x] Create a maze generator
+  [x] The generator creates a random maze. A maze is a grid of cells, with walls in the edges between cells (and not in the cells themselves). A maze must meet all of the following constraints
+    [x] Each exterior edge must be a wall except one, which is the maze opening
+    [x] Each cell must have at least two open edges
+    [x] Each cell must have two paths to the cell inside the opening that share no cells in common (besides the start and end cells)
+    [x] Every unwalled edge must, if walled, violate one of these constraints (ie. it should not be possible to add a wall anywhere and still adhere to these constraints)
+  [x] After finishing the maze, create a list of unlit cells. Then until the list is empty, remove a random cell with at least one wall, put a light in the cell (adjacent to one of its walls, chosen at random), then remove any cells within unbroken cardinal-direciton line of sight from the "unlit cells" list (ie. we expect the light will light these cells)
+  [x] Persist each generated maze in a file. The generated mazes should be source controlled
+  [x] Valid maze generation must always take under 100ms
+  [x] The test suite must delete any non-passing mazes 
+  [x] There must always be five valid mazes. Whenever there are fewer, generate more until there are enough
+[x] Delete the existing sconces and random wall-sconce-light-flames
+[x] On game load, instantiate one of the available legal mazes at random. Each of the maze's wall gets a .25m x 2m x 2m mesh with the wall material, with shadows and collision enabled. Then for each light, place the sconce-billboard-light assembly against that wall, on the side of the cell it's supposed to be lighting

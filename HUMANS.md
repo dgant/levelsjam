@@ -1,7 +1,7 @@
 # How To Work On This Project
 
 ## Current State
-The repository contains a runnable browser game prototype for GitHub Pages. The current build serves a three.js scene with immediate mouse-look, WASD movement, hold-space vertical thrust, a local Poly Haven `overcast_soil` HDRI used for the visible skybox and IBL, a large `puddle-ground` floor plane, ten deterministic stone walls with visible metal sconces and animated torch billboards, and a backquote visual-controls panel with neutral-stop exposure, IBL intensity, torch candela, torch flicker, ambient-occlusion mode, tone-mapper, and post-effect controls.
+The repository contains a runnable browser game prototype for GitHub Pages. The intended build serves a three.js scene with immediate mouse-look, WASD movement, hold-space vertical thrust, a local Poly Haven `overcast_soil` HDRI used for the visible skybox and IBL, a large `puddle-ground` floor plane, one randomly selected persisted maze built from `stone-wall-29` wall meshes, maze-mounted metal sconces with animated torch billboards, and a backquote visual-controls panel with exposure, IBL intensity, torch candela, torch flicker, ambient-occlusion mode, tone-mapper, post-effect controls, and build metadata in the FPS overlay.
 
 ## Local Setup
 - Install Node.js 20 or newer.
@@ -24,6 +24,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Run `npm run test:smoke` to exercise the built page through Playwright.
 - Run `npm run test:smoke:runner` when `npm run build:pages` has already prepared the root-published bundle.
 - Run `npm run test:perf` to verify the automated browser performance benchmark stays at or above 120 FPS.
+- Run the maze-generation validation script or its test entrypoint whenever maze files or maze rules change.
 - Verify the main page renders the 3D scene without console errors.
 - Verify the loading overlay appears with `MINOTAUR` and `Entering the labyrinth...` before the scene fades in.
 - Verify `W`, `A`, `S`, and `D` move the camera.
@@ -31,58 +32,60 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify holding `Space` applies upward thrust and releasing it stops the ascent.
 - Verify the player starts 1 meter above the ground plane.
 - Verify ground contact is stable: the character should rest on collision instead of popping upward and falling again in a loop.
-- Verify the player collides with the walls and can land on top of them.
+- Verify the player collides with maze walls and can slide along them instead of repeatedly stopping on corners.
 - Verify horizontal speed, vertical speed, fall speed, acceleration, deceleration, and gravity match the documented targets.
 - Verify horizontal motion follows the current camera-relative input direction and that directly opposing input decelerates rather than accelerates through the turn.
 - Verify mouse lock releases on escape-style modifier keys and only re-engages after an explicit click on the scene canvas.
 - Verify the visible skybox comes from local `overcast_soil_1k.hdr`.
 - Verify `IBL Intensity 1.00x` is the canonical authored HDRI baseline rather than a corrective fudge factor.
 - Verify the visible skybox brightness tracks the same calibrated HDRI path as the environment lighting.
-- Verify the ground and walls load the committed PBR texture packs instead of preview images.
+- Verify the ground, maze walls, and sconces load the committed PBR texture packs instead of preview images.
 - Verify the torch billboard uses the linked flipbook asset rather than a generated placeholder atlas.
 - Verify the torch billboard uses the linked `CampFire_l_nosmoke_front_Loop_01_4K_6x6.png` atlas.
-- Verify each sconce uses the requested capped lower-hemisphere bowl shape.
-- Verify each sconce currently renders as a solid black unlit debug object.
-- Verify the sconces are visibly readable outside the walls rather than disappearing behind the torch billboard or wall face.
-- Verify the standalone diagonal sconce line appears just outside the wall field, with 10 sconces stepping up by `0.25m`.
-- Verify the standalone diagonal sconce line currently acts as a material-diagnosis ladder from bottom to top.
-- Verify the bottom standalone sconce uses the simplest solid black unlit material.
-- Verify each higher standalone sconce adds one more step of the original metal PBR path.
-- Verify the standalone reference torch sits near that line but outside the line's AABB.
+- Verify each sconce renders with the requested `metal-13` PBR textures rather than a debug material.
+- Verify the sconces are visibly readable outside the maze walls rather than disappearing into the surface behind them.
 - Verify the torch billboards animate and stay camera-facing even on walls whose parent groups are rotated.
 - Verify the visible flame fills the 0.5m billboard and sits on the sconce instead of appearing tiny or floating above it.
-- Verify each wall has a warm torch point light and the lights cast shadows.
+- Verify each maze light location has a warm torch point light and the lights cast shadows.
 - Verify torch shadows remain active for nearby torches out to 40m from the camera.
+- Verify the default `Torch Flicker` value is `0.15`.
 - Verify the torch flicker runs at the updated faster rate and that reducing `Torch Flicker` toward `0.00` steadies the torch brightness.
 - Verify the fire flipbook runs at the updated faster rate.
 - Verify the tone mapper is `AgX` by default.
 - Verify the visual controls panel exposes `Exposure`, `IBL Intensity`, `Torch Candelas`, `Torch Flicker`, `Ambient Occlusion`, `AO Intensity`, the tone mapper, and the enabled/intensity controls for Bloom, Depth Of Field, Lens Flares, SSR, and Vignette.
-- Verify the visual controls panel also exposes `Bloom Kernel`, `DOF Focus Distance`, `DOF Focal Length`, and `Depth Of Field Bokeh Scale`.
+- Verify the visual controls panel also exposes `Bloom Kernel`, `AO Radius`, `DOF Focus Distance`, `DOF Focal Length`, `Depth Of Field Bokeh Scale`, and the volumetric fog controls.
 - Verify the `IBL Intensity` and `Torch Candelas` sliders each cover a wide enough range to rebalance the HDRI and torches without touching the exposure stops control.
 - Verify Bloom, Depth Of Field, Lens Flares, and SSR start disabled.
-- Verify the default `Exposure` value is `0.0`.
+- Verify the default `Exposure` value is `-4.5`.
 - Verify each sconce, billboard, and torch light sits one sconce radius outside the wall face rather than intersecting the wall.
-- After `npm run test:smoke`, inspect the saved sconce-state screenshots in [test-artifacts/sconce-visibility](E:/p/levelsjam/test-artifacts/sconce-visibility), including the per-step standalone diagnostic captures.
+- After `npm run test:smoke`, inspect any saved rendering artifacts if the smoke checks fail.
 - Verify changing `Exposure` changes rendered brightness by stop differences.
 - Verify changing `Exposure` updates `canvas[data-renderer-exposure]`.
 - Verify the `Ambient Occlusion` dropdown switches between `Off`, `N8AO`, and `SSAO` and that both AO modes visibly darken contact areas compared with `Off`.
+- Verify the `AO Radius` control produces a visible radius change in the selected AO mode.
 - Verify enabling SSR from the visual controls panel does not introduce page errors or halt rendering.
 - Verify enabling SSR visibly changes reflective surfaces.
 - Verify enabling SSR does not make the visible HDRI skybox jump brighter.
 - Verify enabling SSR does not reflect the torch billboards or their transparent pixels.
 - Verify enabling lens flares produces a visible flare around a visible torch.
+- Verify changing lens-flare opacity visibly changes the flare strength.
+- Verify the Bloom kernel-size control produces a visible bloom change.
+- Verify SSAO now produces a visible change where contact darkening should occur.
+- Verify the volumetric-lighting controls produce visible fog or smoke changes.
 - Verify each control row in the visual controls panel keeps the value, label, and control on one line in that order.
-- Verify the FPS counter appears in the top-right corner.
+- Verify the FPS counter appears in the top-right corner and includes the Git revision and revision timestamp.
 - Verify pressing backquote opens the visual controls panel.
 - Verify the panel no longer exposes obsolete atmosphere or sun controls.
 - Verify opening the panel releases mouse lock and clicking inside the panel does not relock the pointer.
 - Verify the loading subtitle width stays visually stable while the animated dots change.
+- Verify the loaded scene uses one of the persisted maze files instead of the previous random wall field.
+- Verify the repository contains at least five valid maze files and that maze validation remains under 100ms per generated maze.
 - Benchmark startup with `npm run bench:startup` and test duration with `npm run bench:tests` before handoff.
 - Treat duration regressions as blocking issues.
 - Treat a failed `npm run test:perf` run or a measured browser benchmark below `120 FPS` as blocking.
 - Keep `npm run test:unit` under 20 seconds.
 - Keep the prepared smoke runner `npm run test:smoke:runner` under 1 minute after a single `npm run build:pages`.
-- Latest measured benchmark on April 4, 2026: `npm run bench:startup` reached the first bright frame in about `464.6ms` on the background dev server, `npm run test:unit` took about `977ms`, and the prepared `npm run test:smoke:runner` took about `58.4s`.
+- Latest measured benchmark on April 5, 2026: `npm run bench:startup` reached the first bright frame in about `294.8ms` on the background dev server, `npm run test:unit` took about `1371ms`, and the prepared `npm run test:smoke:runner` took about `50.5s`.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.

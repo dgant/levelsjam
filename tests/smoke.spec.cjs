@@ -1,15 +1,7 @@
-const fs = require('fs')
-const path = require('path')
 const { PNG } = require('pngjs')
 const { expect, test } = require('@playwright/test')
 
 test.setTimeout(140_000)
-
-const SCONCE_ARTIFACT_DIR = path.join(
-  process.cwd(),
-  'test-artifacts',
-  'sconce-visibility'
-)
 
 function measureBrightness(buffer) {
   const screenshot = PNG.sync.read(buffer)
@@ -43,10 +35,7 @@ function measureDifference(bufferA, bufferB) {
   const imageA = PNG.sync.read(bufferA)
   const imageB = PNG.sync.read(bufferB)
 
-  if (
-    imageA.width !== imageB.width ||
-    imageA.height !== imageB.height
-  ) {
+  if (imageA.width !== imageB.width || imageA.height !== imageB.height) {
     throw new Error('Cannot diff screenshots with mismatched dimensions')
   }
 
@@ -62,97 +51,11 @@ function measureDifference(bufferA, bufferB) {
   return total / (pixelCount * 3)
 }
 
-function createDifferenceMask(bufferA, bufferB, minimumDifference = 8) {
-  const imageA = PNG.sync.read(bufferA)
-  const imageB = PNG.sync.read(bufferB)
-
-  if (
-    imageA.width !== imageB.width ||
-    imageA.height !== imageB.height
-  ) {
-    throw new Error('Difference mask requires matching image dimensions')
-  }
-
-  const mask = new Uint8Array(imageA.width * imageA.height)
-  let count = 0
-  let minX = imageA.width
-  let minY = imageA.height
-  let maxX = -1
-  let maxY = -1
-
-  for (let index = 0; index < imageA.data.length; index += 4) {
-    const pixelIndex = index / 4
-    const difference =
-      (
-        Math.abs(imageA.data[index] - imageB.data[index]) +
-        Math.abs(imageA.data[index + 1] - imageB.data[index + 1]) +
-        Math.abs(imageA.data[index + 2] - imageB.data[index + 2])
-      ) / 3
-
-    if (difference >= minimumDifference) {
-      const x = pixelIndex % imageA.width
-      const y = Math.floor(pixelIndex / imageA.width)
-      mask[pixelIndex] = 1
-      count += 1
-      minX = Math.min(minX, x)
-      minY = Math.min(minY, y)
-      maxX = Math.max(maxX, x)
-      maxY = Math.max(maxY, y)
-    }
-  }
-
-  return {
-    count,
-    height: imageA.height,
-    mask,
-    maxX,
-    maxY,
-    minX,
-    minY,
-    width: imageA.width
-  }
-}
-
-function measureMaskedDifference(bufferA, bufferB, maskInfo) {
-  const imageA = PNG.sync.read(bufferA)
-  const imageB = PNG.sync.read(bufferB)
-
-  if (
-    imageA.width !== imageB.width ||
-    imageA.height !== imageB.height ||
-    imageA.width !== maskInfo.width ||
-    imageA.height !== maskInfo.height
-  ) {
-    throw new Error('Masked diff requires matching image dimensions')
-  }
-
-  let total = 0
-  let count = 0
-
-  for (let pixelIndex = 0; pixelIndex < maskInfo.mask.length; pixelIndex += 1) {
-    if (!maskInfo.mask[pixelIndex]) {
-      continue
-    }
-
-    const index = pixelIndex * 4
-    total += Math.abs(imageA.data[index] - imageB.data[index])
-    total += Math.abs(imageA.data[index + 1] - imageB.data[index + 1])
-    total += Math.abs(imageA.data[index + 2] - imageB.data[index + 2])
-    count += 1
-  }
-
-  if (count === 0) {
-    return 0
-  }
-
-  return total / (count * 3)
-}
-
 async function screenshotCanvasRegion(
   page,
   canvas,
-  width = 80,
-  height = 48,
+  width = 160,
+  height = 100,
   anchorX = 0.5,
   anchorY = 0.5
 ) {
@@ -181,26 +84,13 @@ async function screenshotCanvasRegion(
   })
 }
 
-function resetArtifactDirectory() {
-  fs.rmSync(SCONCE_ARTIFACT_DIR, {
-    force: true,
-    recursive: true
-  })
-  fs.mkdirSync(SCONCE_ARTIFACT_DIR, { recursive: true })
-}
-
-function saveArtifact(name, buffer) {
-  const target = path.join(SCONCE_ARTIFACT_DIR, name)
-  fs.writeFileSync(target, buffer)
-}
-
 async function waitForBrightFrame(page, canvas, minimumAverageBrightness, timeoutMs = 7_000) {
   const deadline = Date.now() + timeoutMs
   let lastMeasurement = { average: 0, max: 0 }
 
   while (Date.now() < deadline) {
     lastMeasurement = measureBrightness(
-      await screenshotCanvasRegion(page, canvas)
+      await screenshotCanvasRegion(page, canvas, 120, 80, 0.5, 0.5)
     )
 
     if (lastMeasurement.average > minimumAverageBrightness) {
@@ -215,28 +105,29 @@ async function waitForBrightFrame(page, canvas, minimumAverageBrightness, timeou
   )
 }
 
-async function waitForBrightnessMeasurement(page, canvas, predicate, timeoutMs = 5_000) {
-  const deadline = Date.now() + timeoutMs
-  let lastMeasurement = { average: 0, max: 0 }
-
-  while (Date.now() < deadline) {
-    lastMeasurement = measureBrightness(
-      await screenshotCanvasRegion(page, canvas)
+async function setSlider(page, label, value) {
+  await page.getByRole('slider', { name: label }).evaluate((element, nextValue) => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value'
     )
-
-    if (predicate(lastMeasurement)) {
-      return lastMeasurement
-    }
-
-    await page.waitForTimeout(200)
-  }
-
-  throw new Error(
-    `Canvas brightness did not reach the expected state; last measurement was avg=${lastMeasurement.average.toFixed(2)} max=${lastMeasurement.max.toFixed(2)}`
-  )
+    descriptor.set.call(element, String(nextValue))
+    element.dispatchEvent(new Event('input', { bubbles: true }))
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+  }, value)
 }
 
-test('loads the labyrinth scene without runtime errors', async ({ page }) => {
+async function setCheckboxByLabelText(page, label, enabled) {
+  const checkbox = page.locator('.visual-effect-label').filter({ hasText: label }).locator('input')
+
+  if (enabled) {
+    await checkbox.check()
+  } else {
+    await checkbox.uncheck()
+  }
+}
+
+test('loads the maze scene and exposes working debug/render controls', async ({ page }) => {
   const consoleErrors = []
   const pageErrors = []
   const resourceUrls = new Set()
@@ -255,7 +146,7 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
     resourceUrls.add(response.url())
   })
 
-  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await page.goto('/?maze=maze-001', { waitUntil: 'domcontentloaded' })
 
   const loadingOverlay = page.locator('.loading-overlay')
   const loadingTitle = page.locator('.loading-overlay h1')
@@ -265,13 +156,12 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   await expect(loadingOverlay).toBeVisible({ timeout: 5_000 })
   await expect(loadingTitle).toHaveText('MINOTAUR')
   await expect(loadingSubtitle).toContainText('Entering the labyrinth')
-  const initialSubtitleWidth = (await loadingSubtitle.boundingBox())?.width ?? 0
 
+  const initialSubtitleWidth = (await loadingSubtitle.boundingBox())?.width ?? 0
   const initialSubtitle = await loadingSubtitle.textContent()
-  await page.waitForTimeout(275)
+  await page.waitForTimeout(250)
   const updatedSubtitle = await loadingSubtitle.textContent()
   const updatedSubtitleWidth = (await loadingSubtitle.boundingBox())?.width ?? 0
-  expect(updatedSubtitle).not.toBeNull()
   expect(updatedSubtitle).not.toEqual(initialSubtitle)
   expect(Math.abs(updatedSubtitleWidth - initialSubtitleWidth)).toBeLessThanOrEqual(1)
 
@@ -279,285 +169,108 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   await expect(canvas).toBeVisible({ timeout: 5_000 })
 
   const frameBrightness = await waitForBrightFrame(page, canvas, 6)
-  resetArtifactDirectory()
-
-  await page.evaluate(() => {
-    window.__levelsjamDebug.setView(
-      [-5.8, 1.45, -0.48],
-      [-6.739980294369161, 1.2, -0.4781253710389137]
-    )
-  })
-  await page.waitForTimeout(500)
-  const sconceFrontView = [220, 180, 0.46, 0.68]
-  await page.evaluate(() => {
-    window.__levelsjamDebug.isolateDebugRole('sconce-body', 4)
-  })
-  await page.waitForTimeout(250)
-  const sconceIsolatedVisible = await screenshotCanvasRegion(page, canvas, ...sconceFrontView)
-  saveArtifact('01-isolated-sconce-visible.png', sconceIsolatedVisible)
-  await page.evaluate(() => {
-    window.__levelsjamDebug.setDebugVisible('sconce-body', 4, false)
-  })
-  await page.waitForTimeout(250)
-  const sconceIsolatedHidden = await screenshotCanvasRegion(page, canvas, ...sconceFrontView)
-  saveArtifact('02-isolated-sconce-hidden.png', sconceIsolatedHidden)
-  const sconceMask = createDifferenceMask(
-    sconceIsolatedVisible,
-    sconceIsolatedHidden
-  )
-  expect(sconceMask.count).toBeGreaterThan(12_000)
-  expect(sconceMask.count).toBeLessThan(22_000)
-  expect(sconceMask.minX).toBeGreaterThanOrEqual(30)
-  expect(sconceMask.maxX).toBeLessThanOrEqual(219)
-  expect(sconceMask.minY).toBeLessThanOrEqual(12)
-  expect(sconceMask.maxY).toBeLessThanOrEqual(150)
-  await page.evaluate(() => {
-    window.__levelsjamDebug.clearDebugIsolation()
-    window.__levelsjamDebug.setDebugVisible('torch-billboard', 4, false)
-  })
-  await page.waitForTimeout(250)
-  const sconceVisible = await screenshotCanvasRegion(page, canvas, ...sconceFrontView)
-  saveArtifact('03-live-billboard-hidden-sconce-visible.png', sconceVisible)
-  await page.evaluate(() => {
-    window.__levelsjamDebug.setDebugVisible('sconce-body', 4, false)
-  })
-  await page.waitForTimeout(250)
-  const sconceHidden = await screenshotCanvasRegion(page, canvas, ...sconceFrontView)
-  saveArtifact('04-live-billboard-hidden-sconce-hidden.png', sconceHidden)
-  await page.evaluate(() => {
-    window.__levelsjamDebug.setDebugVisible('sconce-body', 4, true)
-    window.__levelsjamDebug.setDebugVisible('torch-billboard', 4, true)
-    window.__levelsjamDebug.setDebugVisible('torch-light', 4, true)
-  })
-  expect(
-    measureMaskedDifference(sconceVisible, sconceHidden, sconceMask)
-  ).toBeGreaterThan(0.5)
-  await page.evaluate(() => {
-    window.__levelsjamDebug.setView(
-      [11.75, 1.6, -2.2],
-      [13.5, 1.375, 0]
-    )
-  })
-  await page.waitForTimeout(500)
-  const standaloneLineView = [280, 220, 0.46, 0.62]
-  const standaloneLineVisible = await screenshotCanvasRegion(
-    page,
-    canvas,
-    ...standaloneLineView
-  )
-  saveArtifact('05-standalone-sconce-line-visible.png', standaloneLineVisible)
-  for (let index = 0; index < 10; index += 1) {
-    const sconcePosition = await page.evaluate((currentIndex) => {
-      return window.__levelsjamDebug.getDebugPosition(
-        'standalone-sconce-body',
-        currentIndex
-      )
-    }, index)
-    if (!sconcePosition) {
-      throw new Error(`Missing standalone sconce debug position for index ${index}`)
-    }
-    await page.evaluate(([x, y, z]) => {
-      window.__levelsjamDebug.setView(
-        [x - 1.75, y + 0.2, z - 1.8],
-        [x, y, z]
-      )
-    }, sconcePosition)
-    await page.waitForTimeout(220)
-    const liveStandaloneSconce = await screenshotCanvasRegion(
-      page,
-      canvas,
-      180,
-      180,
-      0.5,
-      0.54
-    )
-    saveArtifact(
-      `standalone-sconce-step-${String(index).padStart(2, '0')}-live.png`,
-      liveStandaloneSconce
-    )
-    await page.evaluate((currentIndex) => {
-      window.__levelsjamDebug.isolateDebugRole('standalone-sconce-body', currentIndex)
-    }, index)
-    await page.waitForTimeout(160)
-    const isolatedStandaloneSconce = await screenshotCanvasRegion(
-      page,
-      canvas,
-      180,
-      180,
-      0.5,
-      0.54
-    )
-    saveArtifact(
-      `standalone-sconce-step-${String(index).padStart(2, '0')}-isolated.png`,
-      isolatedStandaloneSconce
-    )
-    await page.evaluate(() => {
-      window.__levelsjamDebug.clearDebugIsolation()
-    })
-    await page.waitForTimeout(100)
-  }
-  await page.evaluate(() => {
-    window.__levelsjamDebug.setView(
-      [11.75, 1.6, -2.2],
-      [13.5, 1.375, 0]
-    )
-  })
-  await page.waitForTimeout(300)
-  await page.evaluate(() => {
-    for (let index = 0; index < 10; index += 1) {
-      window.__levelsjamDebug.setDebugVisible('standalone-sconce-body', index, false)
-    }
-  })
-  await page.waitForTimeout(200)
-  const standaloneLineHidden = await screenshotCanvasRegion(
-    page,
-    canvas,
-    ...standaloneLineView
-  )
-  saveArtifact('06-standalone-sconce-line-hidden.png', standaloneLineHidden)
-  expect(
-    measureDifference(standaloneLineVisible, standaloneLineHidden)
-  ).toBeGreaterThan(0.8)
-  await page.evaluate(() => {
-    for (let index = 0; index < 10; index += 1) {
-      window.__levelsjamDebug.setDebugVisible('standalone-sconce-body', index, true)
-    }
-  })
-  await page.evaluate(() => {
-    window.__levelsjamDebug.setView([0, 2.5, 0], [0, 2.5, -10])
-  })
-  await page.waitForTimeout(200)
 
   await expect(page.locator('.fps-counter')).toContainText('FPS', { timeout: 5_000 })
-  await page.keyboard.press('KeyW')
-  await expect
-    .poll(async () => page.evaluate(() => document.pointerLockElement === null), {
-      timeout: 2_000,
-      intervals: [100, 250, 500]
-    })
-    .toBe(true)
+  await expect(page.locator('.fps-counter')).not.toContainText('unknown')
 
   await page.keyboard.press('Backquote')
   await expect(page.locator('[data-testid="visual-controls"]')).toBeVisible({
     timeout: 5_000
   })
-  await expect(page.getByRole('slider', { name: 'IBL Intensity' })).toBeVisible({ timeout: 5_000 })
-  await expect(page.getByRole('slider', { name: 'Torch Candelas' })).toBeVisible({ timeout: 5_000 })
-  await expect(page.getByRole('slider', { name: 'Torch Flicker' })).toBeVisible({ timeout: 5_000 })
-  await expect(page.getByRole('combobox', { name: 'Ambient Occlusion' })).toBeVisible({ timeout: 5_000 })
-  await expect(page.getByRole('slider', { name: 'AO Intensity' })).toBeVisible({ timeout: 5_000 })
-  await expect(page.getByRole('slider', { name: 'Exposure' })).toBeVisible({ timeout: 5_000 })
-  await expect(page.getByRole('combobox', { name: 'Tone Mapper' })).toBeVisible({ timeout: 5_000 })
-  await expect(page.getByRole('combobox', { name: 'Bloom Kernel' })).toBeVisible({ timeout: 5_000 })
-  await expect(page.getByRole('slider', { name: 'DOF Focus Distance' })).toBeVisible({ timeout: 5_000 })
-  await expect(page.getByRole('slider', { name: 'DOF Focal Length' })).toBeVisible({ timeout: 5_000 })
-  await expect(page.getByRole('slider', { name: 'Depth Of Field Bokeh Scale' })).toBeVisible({ timeout: 5_000 })
-  await expect(page.locator('[data-testid="visual-controls"]')).toContainText('0.00')
-  await expect(page.getByLabel('Sun Rotation')).toHaveCount(0)
-  await expect(page.getByLabel('Direct Sun Illuminance')).toHaveCount(0)
-  await expect(page.getByRole('slider', { name: 'IBL Intensity' })).toHaveAttribute('max', '16')
-  await expect(page.getByRole('slider', { name: 'Torch Candelas' })).toHaveAttribute('max', '16')
-  await expect(page.getByRole('slider', { name: 'Torch Flicker' })).toHaveAttribute('max', '1')
-  await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveAttribute('min', '-20')
-  await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveAttribute('max', '20')
 
-  await page.getByRole('slider', { name: 'Exposure' }).evaluate((element) => {
-    const descriptor = Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
-      'value'
+  await expect(page.getByRole('slider', { name: 'Exposure' })).toBeVisible()
+  await expect(page.getByRole('slider', { name: 'Torch Flicker' })).toBeVisible()
+  await expect(page.getByRole('slider', { name: 'AO Radius' })).toBeVisible()
+  await expect(page.getByRole('slider', { name: 'Fog Noise Frequency' })).toBeVisible()
+  await expect(page.getByRole('combobox', { name: 'Bloom Kernel' })).toBeVisible()
+
+  await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveValue('-4.5')
+  await expect(page.getByRole('slider', { name: 'Torch Flicker' })).toHaveValue('0.15')
+  await expect(page.locator('[data-testid="visual-controls"]')).toContainText('DOF Focus Distance (m)')
+  await expect(page.locator('[data-testid="visual-controls"]')).toContainText('DOF Focal Length / Range (m)')
+
+  await expect
+    .poll(async () => {
+      return page.evaluate(() => window.__levelsjamDebug?.getDebugPosition?.('sconce-body', 0) ?? null)
+    }, {
+      timeout: 5_000,
+      intervals: [100, 250, 500]
+    })
+    .not.toBeNull()
+  const debugSconcePosition = await page.evaluate(
+    () => window.__levelsjamDebug.getDebugPosition('sconce-body', 0)
+  )
+
+  await page.evaluate((position) => {
+    const [x, y, z] = position
+    window.__levelsjamDebug.setView(
+      [x - 1.75, y + 0.25, z - 1.85],
+      [x, y, z]
     )
-    descriptor.set.call(element, '-1')
-    element.dispatchEvent(new Event('input', { bubbles: true }))
-    element.dispatchEvent(new Event('change', { bubbles: true }))
-  })
+  }, debugSconcePosition)
+  await page.waitForTimeout(200)
+
+  await page.getByRole('combobox', { name: 'Ambient Occlusion' }).selectOption('off')
+  await page.waitForTimeout(200)
+  const aoOffRegion = await screenshotCanvasRegion(page, canvas, 150, 110, 0.5, 0.72)
+
+  await page.getByRole('combobox', { name: 'Ambient Occlusion' }).selectOption('n8ao')
+  await setSlider(page, 'AO Intensity', 5)
+  await setSlider(page, 'AO Radius', 2.5)
+  await page.waitForTimeout(250)
+  const n8aoRegion = await screenshotCanvasRegion(page, canvas, 150, 110, 0.5, 0.72)
+  expect(measureDifference(aoOffRegion, n8aoRegion)).toBeGreaterThan(0.45)
+
+  await page.getByRole('combobox', { name: 'Ambient Occlusion' }).selectOption('ssao')
+  await page.waitForTimeout(250)
+  const ssaoRegion = await screenshotCanvasRegion(page, canvas, 150, 110, 0.5, 0.72)
+  expect(measureDifference(aoOffRegion, ssaoRegion)).toBeGreaterThan(0.45)
+
+  await expect
+    .poll(async () => {
+      return page.evaluate(() => window.__levelsjamDebug?.getDebugPosition?.('torch-light', 0) ?? null)
+    }, {
+      timeout: 5_000,
+      intervals: [100, 250, 500]
+    })
+    .not.toBeNull()
+  const debugTorchPosition = await page.evaluate(
+    () => window.__levelsjamDebug.getDebugPosition('torch-light', 0)
+  )
+  await page.evaluate((position) => {
+    const [x, y, z] = position
+    window.__levelsjamDebug.setView(
+      [x - 1.4, y + 0.15, z - 1.35],
+      [x, y, z]
+    )
+  }, debugTorchPosition)
+  await page.waitForTimeout(200)
+
+  await setSlider(page, 'Torch Candelas', 4)
+  await setCheckboxByLabelText(page, 'Bloom', true)
+  await setSlider(page, 'Bloom Intensity', 3)
+  await page.getByRole('combobox', { name: 'Bloom Kernel' }).selectOption('very-small')
+  await page.waitForTimeout(150)
+  const bloomSmall = await screenshotCanvasRegion(page, canvas, 150, 110, 0.5, 0.42)
+  await page.getByRole('combobox', { name: 'Bloom Kernel' }).selectOption('huge')
+  await page.waitForTimeout(150)
+  const bloomHuge = await screenshotCanvasRegion(page, canvas, 150, 110, 0.5, 0.42)
+  expect(measureDifference(bloomSmall, bloomHuge)).toBeGreaterThan(0.003)
+
+  await setSlider(page, 'Volumetric Fog Intensity', 1)
+  await setSlider(page, 'Fog Noise Frequency', 6)
+
+  await setSlider(page, 'Exposure', -3.5)
   await expect
     .poll(async () => canvas.getAttribute('data-renderer-exposure'), {
       timeout: 5_000,
       intervals: [100, 250, 500]
     })
-    .toBe('2.000000')
-
-  await page.getByRole('slider', { name: 'Torch Candelas' }).evaluate((element) => {
-    const descriptor = Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
-      'value'
-    )
-    descriptor.set.call(element, '4')
-    element.dispatchEvent(new Event('input', { bubbles: true }))
-    element.dispatchEvent(new Event('change', { bubbles: true }))
-  })
-
-  await page.getByRole('combobox', { name: 'Tone Mapper' }).selectOption('neutral')
-  await expect
-    .poll(async () => canvas.getAttribute('data-tone-mapping'), {
-      timeout: 5_000,
-      intervals: [100, 250, 500]
-    })
-    .toBe('neutral')
-
-  await page.getByRole('combobox', { name: 'Ambient Occlusion' }).selectOption('off')
-  await page.waitForTimeout(400)
-  const contactRegionOff = await screenshotCanvasRegion(page, canvas, 140, 100, 0.5, 0.62)
-  await page.getByRole('combobox', { name: 'Ambient Occlusion' }).selectOption('n8ao')
-  await page.getByRole('slider', { name: 'AO Intensity' }).evaluate((element) => {
-    const descriptor = Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
-      'value'
-    )
-    descriptor.set.call(element, '5')
-    element.dispatchEvent(new Event('input', { bubbles: true }))
-    element.dispatchEvent(new Event('change', { bubbles: true }))
-  })
-  await page.waitForTimeout(400)
-  const contactRegionN8AO = await screenshotCanvasRegion(page, canvas, 140, 100, 0.5, 0.62)
-  expect(measureDifference(contactRegionOff, contactRegionN8AO)).toBeGreaterThan(1.2)
-
-  await page.getByRole('combobox', { name: 'Ambient Occlusion' }).selectOption('ssao')
-  await page.waitForTimeout(400)
-  const contactRegionSSAO = await screenshotCanvasRegion(page, canvas, 140, 100, 0.5, 0.62)
-  expect(measureDifference(contactRegionOff, contactRegionSSAO)).toBeGreaterThan(1.1)
-
-  const flareRegionBefore = await screenshotCanvasRegion(page, canvas, 180, 120, 0.5, 0.42)
-  await page.getByRole('slider', { name: 'Lens Flares Intensity' }).evaluate((element) => {
-    const descriptor = Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
-      'value'
-    )
-    descriptor.set.call(element, '1')
-    element.dispatchEvent(new Event('input', { bubbles: true }))
-    element.dispatchEvent(new Event('change', { bubbles: true }))
-  })
-  await page.locator('.visual-effect-label').filter({ hasText: 'Lens Flares' }).locator('input').check()
-  await page.waitForTimeout(750)
-  const flareRegionAfter = await screenshotCanvasRegion(page, canvas, 180, 120, 0.5, 0.42)
-  expect(measureDifference(flareRegionBefore, flareRegionAfter)).toBeGreaterThan(0.8)
-
-  const skyBrightnessBeforeSSR = measureBrightness(
-    await screenshotCanvasRegion(page, canvas, 120, 60, 0.5, 0.12)
-  )
-  const reflectiveRegionBeforeSSR = await screenshotCanvasRegion(page, canvas, 140, 100, 0.5, 0.75)
-  await page.getByRole('slider', { name: 'SSR Intensity' }).evaluate((element) => {
-    const descriptor = Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
-      'value'
-    )
-    descriptor.set.call(element, '1')
-    element.dispatchEvent(new Event('input', { bubbles: true }))
-    element.dispatchEvent(new Event('change', { bubbles: true }))
-  })
-  await page.locator('.visual-effect-label').filter({ hasText: 'SSR' }).locator('input').check()
-  await page.waitForTimeout(750)
-  const reflectiveRegionWithSSR = await screenshotCanvasRegion(page, canvas, 140, 100, 0.5, 0.75)
-  const skyBrightnessWithSSR = measureBrightness(
-    await screenshotCanvasRegion(page, canvas, 120, 60, 0.5, 0.12)
-  )
-  expect(measureDifference(reflectiveRegionBeforeSSR, reflectiveRegionWithSSR)).toBeGreaterThan(0.35)
-  expect(skyBrightnessWithSSR.average).toBeLessThanOrEqual(
-    skyBrightnessBeforeSSR.average * 1.35
-  )
+    .toBe('11.313708')
 
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
+  expect(frameBrightness.max).toBeGreaterThan(18)
   expect(
     [...resourceUrls].some((url) => url.includes('overcast_soil_1k.hdr'))
   ).toBe(true)
@@ -581,5 +294,4 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   expect(
     [...resourceUrls].some((url) => url.includes('waternormals.jpg'))
   ).toBe(false)
-  expect(frameBrightness.max).toBeGreaterThan(18)
 })

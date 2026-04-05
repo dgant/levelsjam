@@ -11,6 +11,10 @@ const thresholdsMs = {
 }
 const requiredScripts = ['test:perf:runner']
 
+function usesPlaywrightWebServer(scriptName) {
+  return scriptName.includes('smoke') || scriptName.includes('perf')
+}
+
 function formatMilliseconds(value) {
   return `${value.toFixed(0)}ms`
 }
@@ -75,7 +79,7 @@ async function main() {
   runTimedScript('build:pages')
 
   for (const scriptName of requiredScripts) {
-    if (scriptName.includes('smoke')) {
+    if (usesPlaywrightWebServer(scriptName)) {
       await waitForPortToBeFree(smokePort, 10_000)
     }
 
@@ -83,7 +87,7 @@ async function main() {
   }
 
   for (const scriptName of Object.keys(thresholdsMs)) {
-    if (scriptName === 'test:smoke:runner') {
+    if (usesPlaywrightWebServer(scriptName)) {
       await waitForPortToBeFree(smokePort, 10_000)
     }
 

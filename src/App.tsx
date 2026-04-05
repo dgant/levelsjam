@@ -1,5 +1,4 @@
 import {
-  Bloom,
   DepthOfField,
   EffectComposer,
   N8AO,
@@ -10,12 +9,13 @@ import {
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
 import { LensFlareEffect } from '@react-three/postprocessing'
 import {
+  AdditiveBlending,
+  BackSide,
   CanvasTexture,
   Color,
   DoubleSide,
   EquirectangularReflectionMapping,
   Euler,
-  Group,
   Mesh,
   NoToneMapping,
   PMREMGenerator,
@@ -40,6 +40,7 @@ import {
 } from 'react'
 import {
   BlendFunction,
+  BloomEffect,
   Effect,
   KernelSize,
   ToneMappingMode as PostToneMappingMode
@@ -74,20 +75,22 @@ import {
 import {
   GROUND_SIZE,
   GROUND_Y,
+  getMazeLayoutById,
+  getRandomMazeLayout,
+  getWallBounds,
   PLAYER_EYE_HEIGHT,
   PLAYER_SPAWN_POSITION,
   SCONCE_RADIUS,
-  STANDALONE_REFERENCE_TORCH_POSITION,
-  STANDALONE_SCONCE_LAYOUT,
   TORCH_BASE_CANDELA,
   TORCH_BILLBOARD_SIZE,
   WALL_HEIGHT,
-  getWallAttachmentLocalLayout,
-  WALL_LAYOUT,
   WALL_LENGTH,
   WALL_WIDTH
 } from './lib/sceneLayout.js'
 import { computeLocalBillboardQuaternion } from './lib/billboard.js'
+
+declare const __GIT_REVISION__: string
+declare const __GIT_REVISION_TIMESTAMP__: string
 
 const assetBase = import.meta.env.BASE_URL
 const ENVIRONMENT_URL = `${assetBase}textures/environment/overcast_soil_1k.hdr`
@@ -191,18 +194,6 @@ const SCONCE_PROFILE_POINTS = (() => {
 
   return points
 })()
-const STANDALONE_SCONCE_MATERIAL_STEPS = [
-  'basic-black',
-  'standard-diffuse-gray',
-  'standard-metal-gray-env-off',
-  'standard-metal-gray-env-on',
-  'standard-basecolor-only',
-  'standard-basecolor-metal',
-  'standard-basecolor-metal-roughness-map',
-  'standard-basecolor-metal-roughness-metalness-map',
-  'standard-basecolor-metal-surface-detail',
-  'standard-full-pbr'
-] as const
 const exposureEffectShader = `
 uniform float exposure;
 
@@ -259,9 +250,15 @@ const BLOOM_KERNEL_OPTIONS: Array<{
   { key: 'huge', label: 'Huge' }
 ]
 
+const DEFAULT_AO_RADIUS_METERS = 1.25
+const DEFAULT_VOLUMETRIC_NOISE_FREQUENCY = 2
+const GIT_REVISION = __GIT_REVISION__
+const GIT_REVISION_TIMESTAMP = __GIT_REVISION_TIMESTAMP__
+
 type VisualSettings = {
   ambientOcclusionIntensity: number
   ambientOcclusionMode: AmbientOcclusionMode
+  ambientOcclusionRadius: number
   exposureStops: number
   iblIntensity: number
   torchCandelaMultiplier: number
@@ -271,16 +268,24 @@ type VisualSettings = {
   depthOfField: DepthOfFieldSettings
   lensFlare: EffectSettings
   ssr: EffectSettings
+  volumetricLighting: EffectSettings
+  volumetricNoiseFrequency: number
   vignette: EffectSettings
 }
 
-type GenericEffectSettingKey = 'lensFlare' | 'ssr' | 'vignette'
+type GenericEffectSettingKey =
+  'lensFlare' |
+  'ssr' |
+  'vignette' |
+  'volumetricLighting'
 type ScalarSettingKey =
   | 'ambientOcclusionIntensity'
+  | 'ambientOcclusionRadius'
   | 'exposureStops'
   | 'iblIntensity'
   | 'torchCandelaMultiplier'
   | 'torchFlickerAmount'
+  | 'volumetricNoiseFrequency'
 
 type PbrMaps = {
   aoMap?: Texture
@@ -291,9 +296,6 @@ type PbrMaps = {
   roughnessMap?: Texture
 }
 
-type StandaloneSconceMaterialStep =
-  (typeof STANDALONE_SCONCE_MATERIAL_STEPS)[number]
-
 type BenchmarkResult = {
   averageFrameMs: number
   fps: number
@@ -301,6 +303,8 @@ type BenchmarkResult = {
   minFrameMs: number
   samples: number
 }
+
+type MazeLayout = ReturnType<typeof getRandomMazeLayout>
 
 type TorchLightHandle = {
   castShadow: boolean
@@ -336,6 +340,7 @@ class ExposureEffectImpl extends Effect {
 function createDefaultVisualSettings(): VisualSettings {
   return {
     ambientOcclusionIntensity: 1,
+    ambientOcclusionRadius: DEFAULT_AO_RADIUS_METERS,
     ambientOcclusionMode: 'n8ao',
     exposureStops: DEFAULT_EXPOSURE_STOPS,
     iblIntensity: DEFAULT_IBL_INTENSITY_MULTIPLIER,
@@ -351,6 +356,8 @@ function createDefaultVisualSettings(): VisualSettings {
     },
     lensFlare: { enabled: false, intensity: 1 },
     ssr: { enabled: false, intensity: 0.6 },
+    volumetricLighting: { enabled: true, intensity: 0.35 },
+    volumetricNoiseFrequency: DEFAULT_VOLUMETRIC_NOISE_FREQUENCY,
     vignette: { enabled: true, intensity: 0.4 }
   }
 }
@@ -848,34 +855,43 @@ function TorchLight({
 function WallSconce({
   flickerAmount,
   lightHandle,
-  torchCandelaMultiplier,
-  wall
+  mazeLight,
+  torchCandelaMultiplier
 }: {
   flickerAmount: number
   lightHandle: { current: TorchLightHandle | null }
+  mazeLight: MazeLayout['lights'][number]
   torchCandelaMultiplier: number
-  wall: (typeof WALL_LAYOUT)[number]
 }) {
-  const localLayout = getWallAttachmentLocalLayout(wall)
+  const metal = useStandardPbrTextures(METAL_TEXTURE_URLS, METAL_TEXTURE_REPEAT)
   const position: [number, number, number] = [
-    localLayout.sconcePosition.x,
-    localLayout.sconcePosition.y,
-    localLayout.sconcePosition.z
+    mazeLight.sconcePosition.x,
+    mazeLight.sconcePosition.y,
+    mazeLight.sconcePosition.z
   ]
   const torchPosition: [number, number, number] = [
-    localLayout.torchPosition.x,
-    localLayout.torchPosition.y,
-    localLayout.torchPosition.z
+    mazeLight.torchPosition.x,
+    mazeLight.torchPosition.y,
+    mazeLight.torchPosition.z
   ]
 
   return (
     <>
       <SconceMesh
-        debugIndex={wall.index}
+        debugIndex={mazeLight.index}
         debugRole="sconce-body"
         material={
-          <meshBasicMaterial
-            color="black"
+          <meshStandardMaterial
+            bumpMap={metal.bumpMap}
+            bumpScale={0.02}
+            color="white"
+            envMapIntensity={1}
+            map={metal.map}
+            metalness={0.85}
+            metalnessMap={metal.metalnessMap}
+            normalMap={metal.normalMap}
+            roughness={0.55}
+            roughnessMap={metal.roughnessMap}
             side={DoubleSide}
           />
         }
@@ -884,14 +900,21 @@ function WallSconce({
       <TorchBillboard
         flickerAmount={flickerAmount}
         position={torchPosition}
-        seed={wall.index + 1}
+        seed={mazeLight.index + 1}
         torchCandelaMultiplier={torchCandelaMultiplier}
       />
       <TorchLight
         flickerAmount={flickerAmount}
         lightHandle={lightHandle}
         position={torchPosition}
-        seed={wall.index + 1}
+        seed={mazeLight.index + 1}
+        torchCandelaMultiplier={torchCandelaMultiplier}
+      />
+      <TorchVolume
+        debugIndex={mazeLight.index}
+        flickerAmount={flickerAmount}
+        position={torchPosition}
+        seed={mazeLight.index + 1}
         torchCandelaMultiplier={torchCandelaMultiplier}
       />
     </>
@@ -922,211 +945,160 @@ function SconceMesh({
   )
 }
 
-function StandaloneSconceMaterial({
-  metal,
-  step
-}: {
-  metal: PbrMaps
-  step: StandaloneSconceMaterialStep
-}) {
-  switch (step) {
-    case 'basic-black':
-      return (
-        <meshBasicMaterial
-          color="black"
-          side={DoubleSide}
-        />
-      )
-    case 'standard-diffuse-gray':
-      return (
-        <meshStandardMaterial
-          color="#808080"
-          metalness={0}
-          roughness={1}
-          side={DoubleSide}
-        />
-      )
-    case 'standard-metal-gray-env-off':
-      return (
-        <meshStandardMaterial
-          color="#808080"
-          envMapIntensity={0}
-          metalness={0.85}
-          roughness={0.55}
-          side={DoubleSide}
-        />
-      )
-    case 'standard-metal-gray-env-on':
-      return (
-        <meshStandardMaterial
-          color="#808080"
-          envMapIntensity={1}
-          metalness={0.85}
-          roughness={0.55}
-          side={DoubleSide}
-        />
-      )
-    case 'standard-basecolor-only':
-      return (
-        <meshStandardMaterial
-          color="white"
-          map={metal.map}
-          metalness={0}
-          roughness={1}
-          side={DoubleSide}
-        />
-      )
-    case 'standard-basecolor-metal':
-      return (
-        <meshStandardMaterial
-          color="white"
-          envMapIntensity={1}
-          map={metal.map}
-          metalness={0.85}
-          roughness={0.55}
-          side={DoubleSide}
-        />
-      )
-    case 'standard-basecolor-metal-roughness-map':
-      return (
-        <meshStandardMaterial
-          color="white"
-          envMapIntensity={1}
-          map={metal.map}
-          metalness={0.85}
-          roughness={0.55}
-          roughnessMap={metal.roughnessMap}
-          side={DoubleSide}
-        />
-      )
-    case 'standard-basecolor-metal-roughness-metalness-map':
-      return (
-        <meshStandardMaterial
-          color="white"
-          envMapIntensity={1}
-          map={metal.map}
-          metalness={0.85}
-          metalnessMap={metal.metalnessMap}
-          roughness={0.55}
-          roughnessMap={metal.roughnessMap}
-          side={DoubleSide}
-        />
-      )
-    case 'standard-basecolor-metal-surface-detail':
-      return (
-        <meshStandardMaterial
-          bumpMap={metal.bumpMap}
-          bumpScale={0.02}
-          color="white"
-          envMapIntensity={1}
-          map={metal.map}
-          metalness={0.85}
-          metalnessMap={metal.metalnessMap}
-          normalMap={metal.normalMap}
-          roughness={0.55}
-          roughnessMap={metal.roughnessMap}
-          side={DoubleSide}
-        />
-      )
-    case 'standard-full-pbr':
-      return (
-        <meshStandardMaterial
-          aoMap={metal.aoMap}
-          bumpMap={metal.bumpMap}
-          bumpScale={0.02}
-          color="white"
-          envMapIntensity={1}
-          map={metal.map}
-          metalness={0.85}
-          metalnessMap={metal.metalnessMap}
-          normalMap={metal.normalMap}
-          roughness={0.55}
-          roughnessMap={metal.roughnessMap}
-          side={DoubleSide}
-        />
-      )
-  }
-}
-
-function StandaloneSconceLine({
+function TorchVolume({
+  debugIndex,
   flickerAmount,
+  position,
+  seed,
   torchCandelaMultiplier
 }: {
+  debugIndex: number
   flickerAmount: number
+  position: [number, number, number]
+  seed: number
   torchCandelaMultiplier: number
 }) {
-  const metal = useStandardPbrTextures(METAL_TEXTURE_URLS, METAL_TEXTURE_REPEAT)
-  const lightHandle = useRef<TorchLightHandle | null>(null)
-  const torchPosition: [number, number, number] = [
-    STANDALONE_REFERENCE_TORCH_POSITION.x,
-    STANDALONE_REFERENCE_TORCH_POSITION.y,
-    STANDALONE_REFERENCE_TORCH_POSITION.z
-  ]
-  const torchSeed = WALL_LAYOUT.length + 1
+  const material = useRef<{
+    uniforms?: {
+      intensity?: { value: number }
+      noiseFrequency?: { value: number }
+      time?: { value: number }
+    }
+  } | null>(null)
+
+  useFrame((state) => {
+    const uniforms = material.current?.uniforms
+    if (!uniforms) {
+      return
+    }
+
+    const noise = getTorchNoise(state.clock.getElapsedTime(), seed)
+    uniforms.intensity.value =
+      (state.scene.userData.volumetricIntensity ?? 0) *
+      torchCandelaMultiplier *
+      getTorchFlickerFactor(noise, flickerAmount)
+    uniforms.noiseFrequency.value =
+      state.scene.userData.volumetricNoiseFrequency ??
+      DEFAULT_VOLUMETRIC_NOISE_FREQUENCY
+    uniforms.time.value = state.clock.getElapsedTime()
+  })
 
   return (
-    <>
-      {STANDALONE_SCONCE_LAYOUT.map((sconce) => (
-        <SconceMesh
-          debugIndex={sconce.index}
-          debugRole="standalone-sconce-body"
-          key={`standalone-sconce-${sconce.index}`}
-          material={
-            <StandaloneSconceMaterial
-              metal={metal}
-              step={STANDALONE_SCONCE_MATERIAL_STEPS[sconce.index]}
-            />
+    <mesh
+      position={[position[0], position[1] + 0.7, position[2]]}
+      rotation-x={Math.PI}
+      userData={{
+        debugIndex,
+        debugRole: 'torch-volume',
+        lensflare: 'no-occlusion'
+      }}
+    >
+      <coneGeometry args={[0.75, 1.8, 24, 1, true]} />
+      <shaderMaterial
+        blending={AdditiveBlending}
+        depthWrite={false}
+        fragmentShader={`
+          uniform float intensity;
+          uniform float noiseFrequency;
+          uniform float time;
+          varying vec3 vLocalPosition;
+
+          float hash(vec3 p) {
+            return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
           }
-          position={[
-            sconce.position.x,
-            sconce.position.y,
-            sconce.position.z
-          ]}
-        />
-      ))}
-      <TorchBillboard
-        flickerAmount={flickerAmount}
-        position={torchPosition}
-        seed={torchSeed}
-        torchCandelaMultiplier={torchCandelaMultiplier}
+
+          float noise(vec3 p) {
+            vec3 i = floor(p);
+            vec3 f = fract(p);
+            f = f * f * (3.0 - 2.0 * f);
+
+            float n000 = hash(i + vec3(0.0, 0.0, 0.0));
+            float n100 = hash(i + vec3(1.0, 0.0, 0.0));
+            float n010 = hash(i + vec3(0.0, 1.0, 0.0));
+            float n110 = hash(i + vec3(1.0, 1.0, 0.0));
+            float n001 = hash(i + vec3(0.0, 0.0, 1.0));
+            float n101 = hash(i + vec3(1.0, 0.0, 1.0));
+            float n011 = hash(i + vec3(0.0, 1.0, 1.0));
+            float n111 = hash(i + vec3(1.0, 1.0, 1.0));
+
+            float n00 = mix(n000, n100, f.x);
+            float n10 = mix(n010, n110, f.x);
+            float n01 = mix(n001, n101, f.x);
+            float n11 = mix(n011, n111, f.x);
+            float n0 = mix(n00, n10, f.y);
+            float n1 = mix(n01, n11, f.y);
+
+            return mix(n0, n1, f.z);
+          }
+
+          void main() {
+            vec3 samplePoint = vec3(
+              vLocalPosition.x * noiseFrequency,
+              (vLocalPosition.y * noiseFrequency) - (time * 0.7),
+              vLocalPosition.z * noiseFrequency
+            );
+            float radial = 1.0 - smoothstep(0.08, 0.72, length(vLocalPosition.xz));
+            float heightMask = smoothstep(-0.9, -0.2, vLocalPosition.y) * (1.0 - smoothstep(0.35, 0.9, vLocalPosition.y));
+            float smoke = mix(0.45, 1.0, noise(samplePoint));
+            float alpha = radial * heightMask * smoke * intensity * 1.2;
+
+            if (alpha < 0.015) {
+              discard;
+            }
+
+            gl_FragColor = vec4(1.0, 0.7, 0.28, alpha);
+          }
+        `}
+        ref={material}
+        side={BackSide}
+        toneMapped={false}
+        transparent
+        uniforms={{
+          intensity: { value: 0 },
+          noiseFrequency: { value: DEFAULT_VOLUMETRIC_NOISE_FREQUENCY },
+          time: { value: 0 }
+        }}
+        vertexShader={`
+          varying vec3 vLocalPosition;
+
+          void main() {
+            vLocalPosition = position;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `}
       />
-      <TorchLight
-        flickerAmount={flickerAmount}
-        lightHandle={lightHandle}
-        position={torchPosition}
-        seed={torchSeed}
-        torchCandelaMultiplier={torchCandelaMultiplier}
-      />
-    </>
+    </mesh>
   )
 }
 
-function Walls({
+function MazeWalls({
   flickerAmount,
+  layout,
   torchCandelaMultiplier
 }: {
   flickerAmount: number
+  layout: MazeLayout
   torchCandelaMultiplier: number
 }) {
   const camera = useThree((state) => state.camera)
   const wall = useStandardPbrTextures(WALL_TEXTURE_URLS, WALL_TEXTURE_REPEAT)
   const lightHandles = useRef(
-    WALL_LAYOUT.map(() => ({ current: null as TorchLightHandle | null }))
+    layout.lights.map(() => ({ current: null as TorchLightHandle | null }))
   )
   const tempPosition = useMemo(() => new Vector3(), [])
 
   useFrame(() => {
-    for (const wall of WALL_LAYOUT) {
-      const light = lightHandles.current[wall.index]?.current
+    for (const lightPlacement of layout.lights) {
+      const light = lightHandles.current[lightPlacement.index]?.current
 
       if (!light) {
         continue
       }
 
       tempPosition.set(
-        wall.torchPosition.x,
-        wall.torchPosition.y,
-        wall.torchPosition.z
+        lightPlacement.torchPosition.x,
+        lightPlacement.torchPosition.y,
+        lightPlacement.torchPosition.z
       )
       const distanceSq = camera.position.distanceToSquared(tempPosition)
       const shouldCastShadow = distanceSq <= TORCH_SHADOW_DISTANCE_SQ
@@ -1145,31 +1117,35 @@ function Walls({
 
   return (
     <>
-      {WALL_LAYOUT.map((layout) => (
-        <group
-          key={layout.id}
-          position={[layout.position.x, layout.position.y, layout.position.z]}
-          rotation-y={layout.yaw}
+      {layout.walls.map((mazeWall) => (
+        <mesh
+          castShadow
+          key={mazeWall.id}
+          position={[
+            mazeWall.center.x,
+            GROUND_Y + (WALL_HEIGHT / 2),
+            mazeWall.center.z
+          ]}
+          receiveShadow
+          rotation-y={mazeWall.yaw}
         >
-          <mesh
-            castShadow
-            receiveShadow
-          >
-            <boxGeometry args={[WALL_LENGTH, WALL_HEIGHT, WALL_WIDTH]} />
-            <meshStandardMaterial
-              {...wall}
-              bumpScale={0.05}
-              metalness={0.02}
-              roughness={0.92}
-            />
-          </mesh>
-          <WallSconce
-            flickerAmount={flickerAmount}
-            lightHandle={lightHandles.current[layout.index]}
-            torchCandelaMultiplier={torchCandelaMultiplier}
-            wall={layout}
+          <boxGeometry args={[WALL_LENGTH, WALL_HEIGHT, WALL_WIDTH]} />
+          <meshStandardMaterial
+            {...wall}
+            bumpScale={0.05}
+            metalness={0.02}
+            roughness={0.92}
           />
-        </group>
+        </mesh>
+      ))}
+      {layout.lights.map((mazeLight) => (
+        <WallSconce
+          flickerAmount={flickerAmount}
+          key={mazeLight.id}
+          lightHandle={lightHandles.current[mazeLight.index]}
+          mazeLight={mazeLight}
+          torchCandelaMultiplier={torchCandelaMultiplier}
+        />
       ))}
     </>
   )
@@ -1177,24 +1153,54 @@ function Walls({
 
 function SceneGeometry({
   flickerAmount,
+  layout,
   torchCandelaMultiplier
 }: {
   flickerAmount: number
+  layout: MazeLayout
   torchCandelaMultiplier: number
 }) {
   return (
     <>
       <Ground />
-      <Walls
+      <MazeWalls
         flickerAmount={flickerAmount}
-        torchCandelaMultiplier={torchCandelaMultiplier}
-      />
-      <StandaloneSconceLine
-        flickerAmount={flickerAmount}
+        layout={layout}
         torchCandelaMultiplier={torchCandelaMultiplier}
       />
     </>
   )
+}
+
+function BloomEffectPrimitive({
+  intensity,
+  kernelSize
+}: {
+  intensity: number
+  kernelSize: BloomKernelSizeKey
+}) {
+  const effect = useMemo(
+    () =>
+      new BloomEffect({
+        intensity,
+        kernelSize: BLOOM_KERNEL_SIZES[kernelSize],
+        luminanceSmoothing: 0,
+        luminanceThreshold: 0.05,
+        mipmapBlur: false
+      }),
+    []
+  )
+
+  useEffect(() => {
+    effect.intensity = intensity
+    effect.kernelSize = BLOOM_KERNEL_SIZES[kernelSize]
+    effect.luminanceMaterial.threshold = 0.05
+    effect.luminanceMaterial.smoothing = 0
+  }, [effect, intensity, kernelSize])
+
+  useEffect(() => () => effect.dispose(), [effect])
+
+  return <primitive object={effect as unknown as Effect} />
 }
 
 function SSREffectPrimitive({
@@ -1310,10 +1316,12 @@ function ExposureEffectPrimitive({
 
 function TorchLensFlare({
   intensity,
+  layout,
   torchCandelaMultiplier,
   torchFlickerAmount
 }: {
   intensity: number
+  layout: MazeLayout
   torchCandelaMultiplier: number
   torchFlickerAmount: number
 }) {
@@ -1375,13 +1383,13 @@ function TorchLensFlare({
     let bestScreenY = 0
     const visibleIntensity = Math.min(1, Math.max(0, intensity))
 
-    WALL_LAYOUT.forEach((wall) => {
-      const noise = getTorchNoise(state.clock.getElapsedTime(), wall.index + 1)
+    layout.lights.forEach((mazeLight) => {
+      const noise = getTorchNoise(state.clock.getElapsedTime(), mazeLight.index + 1)
       const brightness =
         torchCandelaMultiplier *
         getTorchFlickerFactor(noise, torchFlickerAmount)
 
-      targetPosition.copy(wall.torchPosition)
+      targetPosition.copy(mazeLight.torchPosition)
       projectedPosition.copy(targetPosition).project(camera)
 
       if (
@@ -1433,9 +1441,11 @@ function TorchLensFlare({
 }
 
 function FlightRig({
-  controlsOpen
+  controlsOpen,
+  wallBounds
 }: {
   controlsOpen: boolean
+  wallBounds: ReturnType<typeof getWallBounds>
 }) {
   const camera = useThree((state) => state.camera)
   const canvas = useThree((state) => state.gl.domElement)
@@ -1711,19 +1721,36 @@ function FlightRig({
         x: intendedPosition.current.x,
         y: intendedPosition.current.y,
         z: intendedPosition.current.z
-      }
+      },
+      { wallBounds }
     )
 
-    if (collision.position.x !== intendedPosition.current.x) {
-      horizontalSpeed.current = 0
-      velocity.current.x = 0
-    }
     if (collision.position.y !== intendedPosition.current.y) {
       velocity.current.y = 0
     }
-    if (collision.position.z !== intendedPosition.current.z) {
-      horizontalSpeed.current = 0
-      velocity.current.z = 0
+
+    for (const normal of collision.collisions.wallNormals) {
+      const dot =
+        (velocity.current.x * normal.x) +
+        (velocity.current.y * normal.y) +
+        (velocity.current.z * normal.z)
+
+      if (dot >= 0) {
+        continue
+      }
+
+      velocity.current.x -= normal.x * dot
+      velocity.current.y -= normal.y * dot
+      velocity.current.z -= normal.z * dot
+    }
+
+    horizontalSpeed.current = Math.hypot(velocity.current.x, velocity.current.z)
+    if (horizontalSpeed.current > 0.0001) {
+      horizontalDirection.current.set(
+        velocity.current.x / horizontalSpeed.current,
+        0,
+        velocity.current.z / horizontalSpeed.current
+      )
     }
 
     grounded.current = collision.grounded && !keys.current.Space
@@ -1743,10 +1770,12 @@ function FlightRig({
 
 function Scene({
   controlsOpen,
+  layout,
   onAssetsReady,
   visualSettings
 }: {
   controlsOpen: boolean
+  layout: MazeLayout
   onAssetsReady: () => void
   visualSettings: VisualSettings
 }) {
@@ -1755,6 +1784,19 @@ function Scene({
   useEffect(() => {
     onAssetsReady()
   }, [onAssetsReady])
+
+  useEffect(() => {
+    scene.userData.volumetricIntensity =
+      visualSettings.volumetricLighting.enabled
+        ? visualSettings.volumetricLighting.intensity
+        : 0
+    scene.userData.volumetricNoiseFrequency = visualSettings.volumetricNoiseFrequency
+  }, [
+    scene,
+    visualSettings.volumetricLighting.enabled,
+    visualSettings.volumetricLighting.intensity,
+    visualSettings.volumetricNoiseFrequency
+  ])
 
   useEffect(() => {
     const globalWindow = window as Window & {
@@ -1871,44 +1913,41 @@ function Scene({
       <EnvironmentLighting iblIntensity={visualSettings.iblIntensity} />
       <SceneGeometry
         flickerAmount={visualSettings.torchFlickerAmount}
+        layout={layout}
         torchCandelaMultiplier={visualSettings.torchCandelaMultiplier}
       />
       <EffectComposer enableNormalPass>
         {visualSettings.ambientOcclusionMode === 'n8ao' ? (
           <N8AO
-            aoRadius={28}
+            aoRadius={visualSettings.ambientOcclusionRadius}
             color="#000000"
-            denoiseRadius={8}
-            distanceFalloff={0.2}
-            halfRes
-            intensity={visualSettings.ambientOcclusionIntensity}
+            denoiseRadius={6}
+            distanceFalloff={1}
+            intensity={visualSettings.ambientOcclusionIntensity * 3}
             quality="medium"
-            screenSpaceRadius
           />
         ) : null}
         {visualSettings.ambientOcclusionMode === 'ssao' ? (
           <SSAO
-            bias={0.2}
-            distanceFalloff={0.06}
+            bias={0.03}
+            distanceFalloff={0.1}
             distanceThreshold={1}
-            intensity={visualSettings.ambientOcclusionIntensity * 2}
+            intensity={visualSettings.ambientOcclusionIntensity * 6}
             luminanceInfluence={0}
-            radius={24}
-            rangeFalloff={0.03}
-            rangeThreshold={0.002}
-            rings={4}
-            samples={31}
+            radius={visualSettings.ambientOcclusionRadius}
+            rangeFalloff={0.1}
+            rangeThreshold={0.001}
+            rings={6}
+            samples={32}
           />
         ) : null}
         {visualSettings.ssr.enabled ? (
           <SSREffectPrimitive intensity={visualSettings.ssr.intensity} />
         ) : null}
         {visualSettings.bloom.enabled ? (
-          <Bloom
+          <BloomEffectPrimitive
             intensity={visualSettings.bloom.intensity}
-            kernelSize={BLOOM_KERNEL_SIZES[visualSettings.bloom.kernelSize]}
-            luminanceSmoothing={0.08}
-            luminanceThreshold={0.6}
+            kernelSize={visualSettings.bloom.kernelSize}
           />
         ) : null}
         {visualSettings.depthOfField.enabled ? (
@@ -1921,6 +1960,7 @@ function Scene({
         {visualSettings.lensFlare.enabled ? (
           <TorchLensFlare
             intensity={visualSettings.lensFlare.intensity}
+            layout={layout}
             torchCandelaMultiplier={visualSettings.torchCandelaMultiplier}
             torchFlickerAmount={visualSettings.torchFlickerAmount}
           />
@@ -1936,7 +1976,10 @@ function Scene({
           resolution={256}
         />
       </EffectComposer>
-      <FlightRig controlsOpen={controlsOpen} />
+      <FlightRig
+        controlsOpen={controlsOpen}
+        wallBounds={getWallBounds(layout)}
+      />
       <PerformanceBenchmarkBridge />
       <StartupReporter />
     </>
@@ -1978,6 +2021,7 @@ function VisualControls({
   }> = [
     { key: 'lensFlare', label: 'Lens Flares', min: 0, max: 1, step: 0.05 },
     { key: 'ssr', label: 'SSR', min: 0, max: 2, step: 0.05 },
+    { key: 'volumetricLighting', label: 'Volumetric Fog', min: 0, max: 1, step: 0.05 },
     { key: 'vignette', label: 'Vignette', min: 0, max: 1, step: 0.05 }
   ]
 
@@ -2127,6 +2171,25 @@ function VisualControls({
         />
       </label>
 
+      <label className="visual-control-row">
+        <output>{visualSettings.ambientOcclusionRadius.toFixed(2)}m</output>
+        <span>AO Radius</span>
+        <input
+          aria-label="AO Radius"
+          max={4}
+          min={0.1}
+          onChange={(event) => {
+            onScalarSettingChange(
+              'ambientOcclusionRadius',
+              Number(event.target.value)
+            )
+          }}
+          step={0.05}
+          type="range"
+          value={visualSettings.ambientOcclusionRadius}
+        />
+      </label>
+
       <div className="visual-control-row">
         <output>
           {visualSettings.bloom.enabled ? visualSettings.bloom.intensity.toFixed(2) : 'off'}
@@ -2223,7 +2286,7 @@ function VisualControls({
 
       <label className="visual-control-row">
         <output>{visualSettings.depthOfField.focusDistance.toFixed(3)}</output>
-        <span>DOF Focus Distance</span>
+        <span>DOF Focus Distance (m)</span>
         <input
           aria-label="DOF Focus Distance"
           disabled={!visualSettings.depthOfField.enabled}
@@ -2242,7 +2305,7 @@ function VisualControls({
 
       <label className="visual-control-row">
         <output>{visualSettings.depthOfField.focalLength.toFixed(3)}</output>
-        <span>DOF Focal Length</span>
+        <span>DOF Focal Length / Range (m)</span>
         <input
           aria-label="DOF Focal Length"
           disabled={!visualSettings.depthOfField.enabled}
@@ -2256,6 +2319,25 @@ function VisualControls({
           step={0.001}
           type="range"
           value={visualSettings.depthOfField.focalLength}
+        />
+      </label>
+
+      <label className="visual-control-row">
+        <output>{visualSettings.volumetricNoiseFrequency.toFixed(2)}x</output>
+        <span>Fog Noise Frequency</span>
+        <input
+          aria-label="Fog Noise Frequency"
+          max={8}
+          min={0.25}
+          onChange={(event) => {
+            onScalarSettingChange(
+              'volumetricNoiseFrequency',
+              Number(event.target.value)
+            )
+          }}
+          step={0.05}
+          type="range"
+          value={visualSettings.volumetricNoiseFrequency}
         />
       </label>
 
@@ -2306,6 +2388,14 @@ function VisualControls({
 export default function App() {
   const [controlsOpen, setControlsOpen] = useState(false)
   const [fps, setFps] = useState(0)
+  const [mazeLayout] = useState(() => {
+    const mazeId = new URLSearchParams(window.location.search).get('maze')
+
+    return (
+      (mazeId ? getMazeLayoutById(mazeId) : null) ??
+      getRandomMazeLayout()
+    )
+  })
   const [sceneLoaded, setSceneLoaded] = useState(false)
   const [visualSettings, setVisualSettings] = useState(createDefaultVisualSettings)
 
@@ -2387,7 +2477,11 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <div className="fps-counter">{Math.round(fps)} FPS</div>
+      <div className="fps-counter">
+        <div>{Math.round(fps)} FPS</div>
+        <div>{GIT_REVISION}</div>
+        <div>{GIT_REVISION_TIMESTAMP}</div>
+      </div>
       <LoadingOverlay complete={sceneLoaded} />
       <VisualControls
         controlsOpen={controlsOpen}
@@ -2432,6 +2526,7 @@ export default function App() {
           <Suspense fallback={null}>
             <Scene
               controlsOpen={controlsOpen}
+              layout={mazeLayout}
               onAssetsReady={onAssetsReady}
               visualSettings={visualSettings}
             />

@@ -2,98 +2,69 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  WALL_FACE_OFFSET,
-  WALL_LENGTH,
-  WALL_PLACEMENT_LIMIT,
-  getWallAttachmentLocalLayout,
+  AVAILABLE_MAZES,
+  DEFAULT_MAZE_LAYOUT,
+  MAZE_COUNT,
+  PLAYER_SPAWN_POSITION,
   SCONCE_RADIUS,
-  STANDALONE_REFERENCE_TORCH_POSITION,
-  STANDALONE_SCONCE_COUNT,
-  STANDALONE_SCONCE_LAYOUT,
-  STANDALONE_SCONCE_STEP,
-  WALL_LAYOUT,
-  WALL_WIDTH
+  WALL_FACE_OFFSET,
+  WALL_HEIGHT,
+  WALL_LENGTH,
+  WALL_WIDTH,
+  getRandomMazeLayout,
+  getWallBounds
 } from '../src/lib/sceneLayout.js'
 
-const expectedFaceOffset = (WALL_WIDTH / 2) + SCONCE_RADIUS
+test('keeps at least five persisted mazes available to the runtime', () => {
+  assert.ok(AVAILABLE_MAZES.length >= MAZE_COUNT)
+})
 
-test('places each sconce center one radius outside the wall face', () => {
-  for (const wall of WALL_LAYOUT) {
+test('returns one of the available mazes when selecting a random layout', () => {
+  const layout = getRandomMazeLayout(() => 0)
+
+  assert.equal(layout.maze.id, AVAILABLE_MAZES[0].id)
+  assert.ok(layout.walls.length > 0)
+  assert.ok(layout.lights.length > 0)
+})
+
+test('uses the requested wall mesh dimensions for maze wall segments', () => {
+  assert.equal(WALL_WIDTH, 0.25)
+  assert.equal(WALL_HEIGHT, 2)
+  assert.equal(WALL_LENGTH, 2)
+
+  for (const wall of DEFAULT_MAZE_LAYOUT.walls) {
+    const width = wall.bounds.maxX - wall.bounds.minX
+    const depth = wall.bounds.maxZ - wall.bounds.minZ
+
     if (wall.axis === 'x') {
-      assert.equal(wall.sconcePosition.x, wall.position.x)
-      assert.equal(
-        Math.abs(wall.sconcePosition.z - wall.position.z),
-        expectedFaceOffset
-      )
+      assert.equal(width, WALL_LENGTH)
+      assert.equal(depth, WALL_WIDTH)
     } else {
-      assert.equal(wall.sconcePosition.z, wall.position.z)
-      assert.equal(
-        Math.abs(wall.sconcePosition.x - wall.position.x),
-        expectedFaceOffset
-      )
+      assert.equal(width, WALL_WIDTH)
+      assert.equal(depth, WALL_LENGTH)
     }
   }
 })
 
-test('keeps each torch aligned with its wall sconce outside the wall face', () => {
-  for (const wall of WALL_LAYOUT) {
-    assert.equal(wall.torchPosition.x, wall.sconcePosition.x)
-    assert.equal(wall.torchPosition.z, wall.sconcePosition.z)
-    assert.equal(
-      wall.torchPosition.y,
-      wall.sconcePosition.y + SCONCE_RADIUS + 0.08
-    )
+test('places each sconce one radius outside the wall face on the lit-cell side', () => {
+  for (const light of DEFAULT_MAZE_LAYOUT.lights) {
+    const deltaX = light.sconcePosition.x - light.torchPosition.x
+    const deltaZ = light.sconcePosition.z - light.torchPosition.z
+
+    assert.equal(deltaX, 0)
+    assert.equal(deltaZ, 0)
+    assert.equal(light.torchPosition.y, light.sconcePosition.y + SCONCE_RADIUS + 0.08)
   }
 })
 
-test('uses wall-local attachment offsets that stay on the wall face after rotation', () => {
-  for (const wall of WALL_LAYOUT) {
-    const local = getWallAttachmentLocalLayout(wall)
+test('exposes wall bounds for collision checks', () => {
+  const bounds = getWallBounds(DEFAULT_MAZE_LAYOUT)
 
-    assert.equal(local.sconcePosition.x, 0)
-    assert.equal(local.torchPosition.x, 0)
-    assert.equal(local.sconcePosition.z, wall.sconceDirection * WALL_FACE_OFFSET)
-    assert.equal(local.torchPosition.z, wall.sconceDirection * WALL_FACE_OFFSET)
-    assert.equal(local.sconcePosition.y, wall.sconcePosition.y - wall.position.y)
-    assert.equal(local.torchPosition.y, wall.torchPosition.y - wall.position.y)
-  }
+  assert.equal(bounds.length, DEFAULT_MAZE_LAYOUT.walls.length)
+  assert.ok(bounds.every((wall) => wall.maxY - wall.minY === WALL_HEIGHT))
+  assert.equal(WALL_FACE_OFFSET, (WALL_WIDTH / 2) + SCONCE_RADIUS)
 })
 
-test('places the standalone sconce line just outside the wall assembly area', () => {
-  assert.equal(STANDALONE_SCONCE_LAYOUT.length, STANDALONE_SCONCE_COUNT)
-
-  const minimumOutsideX = WALL_PLACEMENT_LIMIT + (WALL_LENGTH / 2)
-  const first = STANDALONE_SCONCE_LAYOUT[0]
-
-  assert.equal(first.position.y, SCONCE_RADIUS)
-  assert.ok(first.position.x > minimumOutsideX)
-
-  for (let index = 1; index < STANDALONE_SCONCE_LAYOUT.length; index += 1) {
-    const previous = STANDALONE_SCONCE_LAYOUT[index - 1]
-    const current = STANDALONE_SCONCE_LAYOUT[index]
-
-    assert.equal(current.position.x, previous.position.x)
-    assert.equal(current.position.y, previous.position.y + STANDALONE_SCONCE_STEP)
-    assert.equal(current.position.z, previous.position.z + STANDALONE_SCONCE_STEP)
-  }
-})
-
-test('places the standalone torch reference outside the standalone sconce aabb', () => {
-  const minX = Math.min(...STANDALONE_SCONCE_LAYOUT.map((sconce) => sconce.position.x - SCONCE_RADIUS))
-  const maxX = Math.max(...STANDALONE_SCONCE_LAYOUT.map((sconce) => sconce.position.x + SCONCE_RADIUS))
-  const minY = Math.min(...STANDALONE_SCONCE_LAYOUT.map((sconce) => sconce.position.y - SCONCE_RADIUS))
-  const maxY = Math.max(...STANDALONE_SCONCE_LAYOUT.map((sconce) => sconce.position.y + SCONCE_RADIUS))
-  const minZ = Math.min(...STANDALONE_SCONCE_LAYOUT.map((sconce) => sconce.position.z - SCONCE_RADIUS))
-  const maxZ = Math.max(...STANDALONE_SCONCE_LAYOUT.map((sconce) => sconce.position.z + SCONCE_RADIUS))
-  const torch = STANDALONE_REFERENCE_TORCH_POSITION
-
-  const outsideAabb =
-    torch.x < minX ||
-    torch.x > maxX ||
-    torch.y < minY ||
-    torch.y > maxY ||
-    torch.z < minZ ||
-    torch.z > maxZ
-
-  assert.equal(outsideAabb, true)
+test('keeps the player spawn one meter above the ground', () => {
+  assert.deepEqual(PLAYER_SPAWN_POSITION, { x: 0, y: 1, z: 0 })
 })

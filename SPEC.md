@@ -17,18 +17,19 @@
 - The scene does not use a directional sunlight source.
 - The scene contains a large upward-facing ground plane centered at the origin.
 - The ground plane uses the extracted ShareTextures `puddle-ground` PBR pack rather than preview imagery.
-- The scene contains exactly 10 walls.
-- Each wall measures 2 meters tall by 4 meters long by 0.5 meters wide.
-- Each wall has its base at `Y = 0`.
-- Each wall is placed at a deterministic pseudo-random position within `-10m` to `+10m` on the world X and Z axes.
-- Each wall uses the extracted ShareTextures `stone-wall-29` PBR pack rather than preview imagery.
-- Each wall has a wall sconce attached to it.
-- Each wall sconce currently renders with a solid black unlit debug material while visibility investigation is in progress.
+- The scene instantiates one source-controlled legal maze at random on each load.
+- Each maze uses a grid of cells with walls on cell edges rather than filling the cells themselves.
+- Each maze wall is represented in the scene by a `0.25m x 2m x 2m` wall mesh.
+- Each maze wall has its base at `Y = 0`.
+- Each maze wall uses the extracted ShareTextures `stone-wall-29` PBR pack rather than preview imagery.
+- The scene does not include the previous deterministic pseudo-random wall field.
+- The scene does not include the previous standalone reference sconce line.
+- The scene uses wall sconces only where a generated maze light is assigned.
 - Each wall sconce uses a 0.25 meter radius lower hemisphere with the cut top replaced by a flat circular cap.
+- Each wall sconce uses the requested `metal-13` PBR texture pack rather than a debug material.
 - Each wall sconce is positioned with its center one sconce radius outside the wall face.
-- Each wall sconce remains visibly readable against the wall and under the torch it supports.
 - Each wall sconce supports a camera-facing torch billboard above it.
-- Each torch billboard and torch point light are positioned one sconce radius outside the wall face with the sconce.
+- Each torch billboard and torch point light are positioned against the same wall face as the sconce, on the side of the cell the light is intended to illuminate.
 - Each torch billboard sits directly on top of the sconce rather than floating above it.
 - Each torch billboard is 0.5 meters square.
 - Each torch billboard uses the linked source flipbook asset rather than a procedurally generated placeholder.
@@ -46,15 +47,6 @@
 - Each torch point light distance remains fixed at 10 meters.
 - Each torch point light flickers at twice the previous speed.
 - Each torch point light uses a warm fire-appropriate color.
-- The scene contains a standalone reference line of 10 sconces placed just outside the wall-assembly area.
-- The standalone reference sconces use the same capped lower-hemisphere bowl geometry and the same solid black unlit debug material as the wall sconces.
-- The standalone reference sconce line currently acts as a material-diagnosis ladder.
-- The standalone reference sconce at the bottom of the line uses the simplest solid black unlit material.
-- Each subsequent standalone reference sconce adds one more step of the original PBR material path so visibility failures can be isolated by position in the line.
-- The first standalone reference sconce rests on the ground with its bottom tangent to `Y = 0`.
-- Each subsequent standalone reference sconce is offset by `+0.25m` in height and `+0.25m` along the line direction, forming a rising diagonal.
-- The standalone reference sconce line contains no attached billboard or point light.
-- The scene contains one standalone torch billboard and point light near the standalone sconce line but outside the axis-aligned bounding box that contains the 10 standalone sconces.
 - Torch shadows are enabled within a fixed 40 meter radius of the camera.
 - Torch shadows within that radius reuse static shadow maps while the lights and occluders remain stationary.
 - The player collides with the ground plane and the walls.
@@ -72,22 +64,28 @@
 - Horizontal movement magnitude is stored as a scalar rather than a persistent world-space vector.
 - Horizontal movement is applied in the current camera-relative input direction.
 - Movement input that opposes current horizontal motion uses the deceleration rate instead of the acceleration rate.
+- On wall collision, only the component of player velocity along the collision normal is removed so the player can slide along walls.
 - The scene uses `postprocessing` Bloom.
 - The scene uses `postprocessing` Depth of Field.
 - The scene uses `n8ao` instead of the previous SSAO effect.
 - The scene includes screen-space reflections.
+- The scene includes volumetric lighting or fog shafts in the spirit of the three.js volume-lighting example.
 - The scene does not use God Rays.
 - Bloom, Depth of Field, Lens Flares, and SSR default to disabled.
-- The debug panel exposure control defaults to `0.0`.
+- The debug panel exposure control defaults to `-4.5`.
 - The debug panel exposes an IBL intensity multiplier across a wide enough range to rebalance the HDRI against the torches without relying on physically calibrated EV semantics.
 - The debug panel exposes a torch candela multiplier across a wide enough range to rebalance the torches against the HDRI without relying on physically calibrated EV semantics.
+- The debug panel exposes a torch flicker amount slider with a default value of `0.15`.
 - The debug panel lens flare control adjusts the effect using the lens flare opacity parameter rather than an arbitrary color-gain multiplier.
 - The debug panel exposes an ambient-occlusion mode dropdown with working `Off`, `N8AO`, and `SSAO` modes.
 - The debug panel exposes one shared ambient-occlusion intensity slider for the selected AO mode.
+- The debug panel exposes an ambient-occlusion radius control and labels the radius in scene units or screen-space units as appropriate for the selected AO mode.
 - The debug panel exposes Depth of Field `focusDistance`, `focalLength`, and `bokehScale`.
+- The debug panel labels Depth of Field `focusDistance` and `focalLength` with their units.
 - The debug panel exposes Bloom `kernelSize`.
+- The Bloom kernel-size control produces a visible change in the rendered bloom.
 - The debug panel does not expose obsolete atmosphere or sun-direction controls.
-- The page shows an FPS counter in the top-right corner.
+- The page shows an FPS counter in the top-right corner together with the current Git revision and revision timestamp.
 
 ## Loading And Startup
 - The page shows a centered loading overlay before the scene becomes visible.
@@ -127,8 +125,11 @@
 - The torch billboards animate smoothly through the flipbook loop without lighting artifacts from scene lights.
 - The torch billboards are excluded from screen-space reflections.
 - Screen-space reflections apply only to the scene's PBR materials rather than to unlit or transparent billboard materials.
+- Screen-space reflections remain visually stable and do not blow out reflections relative to the rest of the lighting stack.
 - Torch point lights and torch billboards read as a matched fire source rather than independent unrelated elements.
 - The scene reads as an overcast exterior space lit primarily by environment light and torches.
+- The maze walls define the primary navigable space instead of the previous open random-wall field.
+- The maze opening is visually readable as the one exterior break in the perimeter walls.
 - Exposure acts as a neutral stop-offset presentation control with `0.0` meaning no extra gain.
 - IBL intensity and torch candela controls are the primary balancing controls between the HDRI and torches.
 - Positive exposure values darken the rendered image by stops and negative values brighten it by stops.
@@ -136,7 +137,10 @@
 - Enabling SSR produces a visible reflection change on reflective scene surfaces.
 - Enabling SSR does not brighten the visible HDRI skybox independently of the reflected surfaces.
 - Selecting `N8AO` or `SSAO` produces a visible ambient-occlusion change around contact areas.
+- Selecting `SSAO` produces a visible ambient-occlusion change around contact areas rather than appearing inert.
 - Enabling lens flares produces a visible flare around visible torches.
+- Increasing or decreasing lens-flare opacity produces a visible corresponding change in the flare.
+- Increasing or decreasing volumetric fog or smoke parameters produces a visible corresponding change in volumetric lighting.
 - The page does not show speculative branding captions, launcher buttons, or click-to-enter copy.
 
 ## Debug Controls
@@ -147,7 +151,9 @@
 - The debug controls panel exposes the torch candela multiplier.
 - The debug controls panel exposes the torch flicker amount.
 - The debug controls panel exposes ambient-occlusion mode and intensity.
+- The debug controls panel exposes ambient-occlusion radius.
 - The debug controls panel exposes enabled and intensity controls for Bloom, Depth of Field, Lens Flares, SSR, and Vignette.
+- The debug controls panel exposes volumetric-lighting or fog controls, including amount and noise frequency.
 - The debug controls panel lays out each control row on one line in value-label-control order.
 - The debug controls panel does not expose controls for removed effects or removed atmosphere systems.
 
@@ -157,6 +163,7 @@
 - The frame rate remains stable during ordinary movement and camera motion.
 - The default scene configuration must benchmark at or above 120 frames per second in the project's automated browser performance test.
 - The project documents startup-time and test-duration benchmarks and treats regressions in those measurements as actionable.
+- Maze generation for one valid maze must complete in under 100 milliseconds.
 
 ## Testing Expectations
 - A production build succeeds before a change is considered complete.
@@ -168,4 +175,7 @@
 - The backquote shortcut is checked in the browser and verified to open the debug controls panel.
 - The debug controls panel is checked in the browser and verified to expose the new IBL and torch controls while omitting removed atmosphere controls.
 - The automated browser performance test is run and passes at or above 120 frames per second before a change is considered complete.
-- The sconce visibility smoke check writes named screenshot artifacts for each tested state under `test-artifacts/sconce-visibility` so the rendered evidence can be inspected directly.
+- Maze-generation logic is covered by automated tests that validate every persisted maze against the maze rules.
+- Maze-generation tests delete any generated maze files that fail validation.
+- Automated tests guarantee that the repository contains at least five valid persisted maze files by generating additional mazes when required.
+- The scene-instantiation path is checked in the browser and verified to load one of the persisted mazes, build the correct wall meshes, and place sconces and torches only at the maze-defined light positions.

@@ -24,8 +24,8 @@ function almostEqual(actual, expected, epsilon = 1e-6) {
 }
 
 test('keeps neutral exposure at zero stops', () => {
-  assert.equal(DEFAULT_EXPOSURE_STOPS, 0)
-  almostEqual(getRendererExposure(DEFAULT_EXPOSURE_STOPS), 1)
+  assert.equal(DEFAULT_EXPOSURE_STOPS, -4.5)
+  almostEqual(getRendererExposure(0), 1)
 })
 
 test('maps exposure stops to renderer exposure', () => {
@@ -42,7 +42,7 @@ test('maps exposure stops to renderer exposure', () => {
 test('exposes the ibl and torch control ranges', () => {
   assert.equal(DEFAULT_IBL_INTENSITY_MULTIPLIER, 1)
   assert.equal(DEFAULT_TORCH_CANDELA_MULTIPLIER, 1)
-  assert.equal(DEFAULT_TORCH_FLICKER_AMOUNT, 1)
+  assert.equal(DEFAULT_TORCH_FLICKER_AMOUNT, 0.15)
   assert.equal(MIN_IBL_INTENSITY_MULTIPLIER, 0)
   assert.equal(MAX_IBL_INTENSITY_MULTIPLIER, 16)
   assert.equal(MIN_TORCH_CANDELA_MULTIPLIER, 0)

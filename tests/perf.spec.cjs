@@ -16,7 +16,7 @@ test('default scene benchmark stays at or above 120 FPS', async ({ page }) => {
     pageErrors.push(String(error))
   })
 
-  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await page.goto('/?maze=maze-001', { waitUntil: 'domcontentloaded' })
   await expect
     .poll(async () => {
       return page.locator('.loading-overlay').getAttribute('data-loading-complete')

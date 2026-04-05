@@ -36,3 +36,6 @@
 - In this repository's vendored SSR pass, unsupported meshes must be hidden during the g-buffer render. Leaving them visible while merely skipping the MRT material replacement still lets unlit or transparent meshes contaminate SSR.
 - The `@react-three/postprocessing` lens flare effect's `opacity` uniform fades the flare out rather than making it stronger, so visible flare strength should primarily come from `colorGain`, `glareSize`, `flareSize`, and `haloScale`.
 - Post-effect debug controls are only trustworthy when they map to the actual wrapped effect props. In this repository, Bloom kernel size requires the non-`mipmapBlur` path, and Depth Of Field needs separate `focusDistance`, `focalLength`, and `bokehScale` controls.
+- Browser smoke tests for this project become much more stable when they can force a specific persisted maze via `?maze=<id>` instead of relying on a random runtime layout.
+- Once `three-atmosphere` is removed from the scene, remove the package itself as well. Leaving it installed makes the repo harder to reason about and can mask whether the runtime still depends on it.
+- The benchmark harness must wait for the Playwright web-server port before both smoke and perf runners. They share the same local `serve-root` port, so only guarding the smoke runner leaves a real race.
