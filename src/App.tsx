@@ -19,7 +19,6 @@ import {
   Group,
   LatheGeometry,
   Mesh,
-  MeshBasicMaterial,
   NoToneMapping,
   PMREMGenerator,
   Quaternion,
@@ -1545,10 +1544,6 @@ function Scene({
       }
     }
     const existing = globalWindow.__levelsjamDebug ?? {}
-    const debugIsolationMaterial = new MeshBasicMaterial({
-      color: new Color('black'),
-      side: DoubleSide
-    })
     let restoreDebugIsolation = () => {}
 
     const setDebugVisible = (role: string, index: number, visible: boolean) => {
@@ -1572,11 +1567,11 @@ function Scene({
       const savedVisibility: Array<{ object: { visible: boolean }, visible: boolean }> = []
       const savedMeshes: Array<{
         castShadow: boolean
-        material: Mesh['material']
         mesh: Mesh
         receiveShadow: boolean
       }> = []
       const savedBackground = scene.background
+      const savedEnvironment = scene.environment
 
       scene.traverse((object) => {
         savedVisibility.push({ object, visible: object.visible })
@@ -1595,17 +1590,16 @@ function Scene({
         if (match && object instanceof Mesh) {
           savedMeshes.push({
             castShadow: object.castShadow,
-            material: object.material,
             mesh: object,
             receiveShadow: object.receiveShadow
           })
           object.castShadow = false
           object.receiveShadow = false
-          object.material = debugIsolationMaterial
         }
       })
 
       scene.background = new Color('white')
+      scene.environment = null
       scene.visible = true
 
       restoreDebugIsolation = () => {
@@ -1615,9 +1609,9 @@ function Scene({
         for (const entry of savedMeshes) {
           entry.mesh.castShadow = entry.castShadow
           entry.mesh.receiveShadow = entry.receiveShadow
-          entry.mesh.material = entry.material
         }
         scene.background = savedBackground
+        scene.environment = savedEnvironment
       }
     }
 
@@ -1637,7 +1631,6 @@ function Scene({
       }
 
       clearDebugIsolation()
-      debugIsolationMaterial.dispose()
       delete globalWindow.__levelsjamDebug.clearDebugIsolation
       delete globalWindow.__levelsjamDebug.setDebugVisible
       delete globalWindow.__levelsjamDebug.isolateDebugRole

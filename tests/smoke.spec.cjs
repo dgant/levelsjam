@@ -276,7 +276,6 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   expect(sconceBodyMask.count).toBeGreaterThan(4_000)
   await page.evaluate(() => {
     window.__levelsjamDebug.clearDebugIsolation()
-    window.__levelsjamDebug.setDebugVisible('torch-billboard', 4, false)
   })
   await page.waitForTimeout(300)
   const sconceBodyVisible = await screenshotCanvasRegion(page, canvas, 220, 180, 0.46, 0.68)
@@ -287,13 +286,12 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   const sconceBodyHidden = await screenshotCanvasRegion(page, canvas, 220, 180, 0.46, 0.68)
   await page.evaluate(() => {
     window.__levelsjamDebug.setDebugVisible('sconce-body', 4, true)
-    window.__levelsjamDebug.setDebugVisible('torch-billboard', 4, true)
   })
-  expect(measureMaskedBrightness(sconceBodyVisible, sconceBodyMask)).toBeGreaterThan(10)
-  expect(measureMaskedBrightness(sconceBodyHidden, sconceBodyMask)).toBeLessThan(5)
+  expect(measureMaskedBrightness(sconceBodyVisible, sconceBodyMask)).toBeGreaterThan(15)
+  expect(measureMaskedBrightness(sconceBodyHidden, sconceBodyMask)).toBeLessThan(2)
   expect(
     measureMaskedDifference(sconceBodyVisible, sconceBodyHidden, sconceBodyMask)
-  ).toBeGreaterThan(10)
+  ).toBeGreaterThan(15)
   await page.evaluate(() => {
     window.__levelsjamDebug.setView([0, 2.5, 0], [0, 2.5, -10])
   })
