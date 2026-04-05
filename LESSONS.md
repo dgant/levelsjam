@@ -37,3 +37,4 @@
 - In this repository's vendored SSR pass, unsupported meshes must be hidden during the g-buffer render. Leaving them visible while merely skipping the MRT material replacement still lets unlit or transparent meshes contaminate SSR.
 - The `@react-three/postprocessing` lens flare effect's `opacity` uniform fades the flare out rather than making it stronger, so visible flare strength should primarily come from `colorGain`, `glareSize`, `flareSize`, and `haloScale`.
 - Post-effect debug controls are only trustworthy when they map to the actual wrapped effect props. In this repository, Bloom kernel size requires the non-`mipmapBlur` path, and Depth Of Field needs separate `focusDistance`, `focalLength`, and `bokehScale` controls.
+- A visibility proof that only changes a prop's cap or an overlapping shadow is not sufficient. For this repository, the sconce shell had to be checked from a side view where the hemisphere body itself occupies visible pixels.

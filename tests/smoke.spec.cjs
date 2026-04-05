@@ -175,21 +175,21 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
 
   await page.evaluate(() => {
     window.__levelsjamDebug.setView(
-      [-6.739980294369161, 1.5, 1.6],
-      [-6.739980294369161, 1.15, -0.4781253710389137]
+      [-5.8, 1.45, -0.48],
+      [-6.739980294369161, 1.2, -0.4781253710389137]
     )
   })
   await page.waitForTimeout(300)
-  const sconceRegionVisible = await screenshotCanvasRegion(page, canvas, 140, 140, 0.5, 0.5)
+  const sconceRegionVisible = await screenshotCanvasRegion(page, canvas, 220, 180, 0.52, 0.5)
   await page.evaluate(() => {
     window.__levelsjamDebug.setSconceVisible(4, false)
   })
   await page.waitForTimeout(200)
-  const sconceRegionHidden = await screenshotCanvasRegion(page, canvas, 140, 140, 0.5, 0.5)
+  const sconceRegionHidden = await screenshotCanvasRegion(page, canvas, 220, 180, 0.52, 0.5)
   await page.evaluate(() => {
     window.__levelsjamDebug.setSconceVisible(4, true)
   })
-  expect(measureDifference(sconceRegionVisible, sconceRegionHidden)).toBeGreaterThan(1.2)
+  expect(measureDifference(sconceRegionVisible, sconceRegionHidden)).toBeGreaterThan(2.5)
   await page.evaluate(() => {
     window.__levelsjamDebug.setView([0, 2.5, 0], [0, 2.5, -10])
   })
