@@ -76,6 +76,8 @@ import {
   PLAYER_EYE_HEIGHT,
   PLAYER_SPAWN_POSITION,
   SCONCE_RADIUS,
+  STANDALONE_REFERENCE_TORCH_POSITION,
+  STANDALONE_SCONCE_LAYOUT,
   TORCH_BASE_CANDELA,
   TORCH_BILLBOARD_SIZE,
   WALL_HEIGHT,
@@ -854,21 +856,12 @@ function WallSconce({
 
   return (
     <>
-      <mesh
-        castShadow
+      <SconceMesh
+        debugIndex={wall.index}
+        debugRole="sconce-body"
+        metal={metal}
         position={position}
-        receiveShadow
-        userData={{ debugIndex: wall.index, debugRole: 'sconce-body' }}
-      >
-        <latheGeometry args={[SCONCE_PROFILE_POINTS, 24]} />
-        <meshStandardMaterial
-          {...metal}
-          bumpScale={0.02}
-          metalness={0.85}
-          roughness={0.55}
-          side={DoubleSide}
-        />
-      </mesh>
+      />
       <TorchBillboard
         flickerAmount={flickerAmount}
         position={torchPosition}
@@ -880,6 +873,84 @@ function WallSconce({
         lightHandle={lightHandle}
         position={torchPosition}
         seed={wall.index + 1}
+        torchCandelaMultiplier={torchCandelaMultiplier}
+      />
+    </>
+  )
+}
+
+function SconceMesh({
+  debugIndex,
+  debugRole,
+  metal,
+  position
+}: {
+  debugIndex: number
+  debugRole: string
+  metal: PbrMaps
+  position: [number, number, number]
+}) {
+  return (
+    <mesh
+      castShadow
+      position={position}
+      receiveShadow
+      userData={{ debugIndex, debugRole }}
+    >
+      <latheGeometry args={[SCONCE_PROFILE_POINTS, 24]} />
+      <meshStandardMaterial
+        {...metal}
+        bumpScale={0.02}
+        metalness={0.85}
+        roughness={0.55}
+        side={DoubleSide}
+      />
+    </mesh>
+  )
+}
+
+function StandaloneSconceLine({
+  flickerAmount,
+  torchCandelaMultiplier
+}: {
+  flickerAmount: number
+  torchCandelaMultiplier: number
+}) {
+  const metal = useStandardPbrTextures(METAL_TEXTURE_URLS, METAL_TEXTURE_REPEAT)
+  const lightHandle = useRef<TorchLightHandle | null>(null)
+  const torchPosition: [number, number, number] = [
+    STANDALONE_REFERENCE_TORCH_POSITION.x,
+    STANDALONE_REFERENCE_TORCH_POSITION.y,
+    STANDALONE_REFERENCE_TORCH_POSITION.z
+  ]
+  const torchSeed = WALL_LAYOUT.length + 1
+
+  return (
+    <>
+      {STANDALONE_SCONCE_LAYOUT.map((sconce) => (
+        <SconceMesh
+          debugIndex={sconce.index}
+          debugRole="standalone-sconce-body"
+          key={`standalone-sconce-${sconce.index}`}
+          metal={metal}
+          position={[
+            sconce.position.x,
+            sconce.position.y,
+            sconce.position.z
+          ]}
+        />
+      ))}
+      <TorchBillboard
+        flickerAmount={flickerAmount}
+        position={torchPosition}
+        seed={torchSeed}
+        torchCandelaMultiplier={torchCandelaMultiplier}
+      />
+      <TorchLight
+        flickerAmount={flickerAmount}
+        lightHandle={lightHandle}
+        position={torchPosition}
+        seed={torchSeed}
         torchCandelaMultiplier={torchCandelaMultiplier}
       />
     </>
@@ -973,6 +1044,10 @@ function SceneGeometry({
     <>
       <Ground />
       <Walls
+        flickerAmount={flickerAmount}
+        torchCandelaMultiplier={torchCandelaMultiplier}
+      />
+      <StandaloneSconceLine
         flickerAmount={flickerAmount}
         torchCandelaMultiplier={torchCandelaMultiplier}
       />

@@ -23,6 +23,11 @@ export type WallLayout = {
   yaw: number
 }
 
+export type StandaloneSconceLayout = {
+  index: number
+  position: Vector3Like
+}
+
 export declare const PLAYER_RADIUS: number
 export declare const PLAYER_HEIGHT: number
 export declare const PLAYER_EYE_HEIGHT: number
@@ -36,8 +41,13 @@ export declare const SCONCE_RADIUS: number
 export declare const TORCH_BILLBOARD_SIZE: number
 export declare const TORCH_BASE_CANDELA: number
 export declare const WALL_FACE_OFFSET: number
+export declare const WALL_PLACEMENT_LIMIT: number
+export declare const STANDALONE_SCONCE_COUNT: number
+export declare const STANDALONE_SCONCE_STEP: number
 export declare const PLAYER_SPAWN_POSITION: Readonly<Vector3Like>
 export declare const WALL_LAYOUT: readonly WallLayout[]
+export declare const STANDALONE_SCONCE_LAYOUT: readonly StandaloneSconceLayout[]
+export declare const STANDALONE_REFERENCE_TORCH_POSITION: Readonly<Vector3Like>
 
 export declare function getWallBounds(): Array<WallLayout['bounds'] & { id: string }>
 export declare function getWallAttachmentLocalLayout(wall: WallLayout): {

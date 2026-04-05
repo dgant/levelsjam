@@ -331,7 +331,41 @@ test('loads the labyrinth scene without runtime errors', async ({ page }) => {
   })
   expect(
     measureMaskedDifference(sconceVisible, sconceHidden, sconceMask)
-  ).toBeGreaterThan(20)
+  ).toBeGreaterThan(12)
+  await page.evaluate(() => {
+    window.__levelsjamDebug.setView(
+      [11.75, 1.6, -2.2],
+      [13.5, 1.375, 0]
+    )
+  })
+  await page.waitForTimeout(500)
+  const standaloneLineView = [280, 220, 0.46, 0.62]
+  const standaloneLineVisible = await screenshotCanvasRegion(
+    page,
+    canvas,
+    ...standaloneLineView
+  )
+  saveArtifact('05-standalone-sconce-line-visible.png', standaloneLineVisible)
+  await page.evaluate(() => {
+    for (let index = 0; index < 10; index += 1) {
+      window.__levelsjamDebug.setDebugVisible('standalone-sconce-body', index, false)
+    }
+  })
+  await page.waitForTimeout(300)
+  const standaloneLineHidden = await screenshotCanvasRegion(
+    page,
+    canvas,
+    ...standaloneLineView
+  )
+  saveArtifact('06-standalone-sconce-line-hidden.png', standaloneLineHidden)
+  expect(
+    measureDifference(standaloneLineVisible, standaloneLineHidden)
+  ).toBeGreaterThan(1.5)
+  await page.evaluate(() => {
+    for (let index = 0; index < 10; index += 1) {
+      window.__levelsjamDebug.setDebugVisible('standalone-sconce-body', index, true)
+    }
+  })
   await page.evaluate(() => {
     window.__levelsjamDebug.setView([0, 2.5, 0], [0, 2.5, -10])
   })

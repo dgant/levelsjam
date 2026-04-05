@@ -46,6 +46,12 @@
 - Each torch point light distance remains fixed at 10 meters.
 - Each torch point light flickers at twice the previous speed.
 - Each torch point light uses a warm fire-appropriate color.
+- The scene contains a standalone reference line of 10 sconces placed just outside the wall-assembly area.
+- The standalone reference sconces use the same capped lower-hemisphere bowl geometry and `metal-13` PBR material as the wall sconces.
+- The first standalone reference sconce rests on the ground with its bottom tangent to `Y = 0`.
+- Each subsequent standalone reference sconce is offset by `+0.25m` in height and `+0.25m` along the line direction, forming a rising diagonal.
+- The standalone reference sconce line contains no attached billboard or point light.
+- The scene contains one standalone torch billboard and point light near the standalone sconce line but outside the axis-aligned bounding box that contains the 10 standalone sconces.
 - Torch shadows are enabled within a fixed 40 meter radius of the camera.
 - Torch shadows within that radius reuse static shadow maps while the lights and occluders remain stationary.
 - The player collides with the ground plane and the walls.

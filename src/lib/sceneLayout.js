@@ -11,6 +11,9 @@ export const SCONCE_RADIUS = 0.25
 export const TORCH_BILLBOARD_SIZE = 0.5
 export const TORCH_BASE_CANDELA = 1500
 export const WALL_FACE_OFFSET = (WALL_WIDTH / 2) + SCONCE_RADIUS
+export const WALL_PLACEMENT_LIMIT = 10
+export const STANDALONE_SCONCE_COUNT = 10
+export const STANDALONE_SCONCE_STEP = 0.25
 export const PLAYER_SPAWN_POSITION = Object.freeze({
   x: 0,
   y: GROUND_Y + 1,
@@ -73,9 +76,9 @@ function createWall(index, random) {
   const side = random() > 0.5 ? 1 : -1
   const yaw = axis === 'x' ? 0 : Math.PI / 2
   const position = {
-    x: (random() * 20) - 10,
+    x: (random() * WALL_PLACEMENT_LIMIT * 2) - WALL_PLACEMENT_LIMIT,
     y: GROUND_Y + (WALL_HEIGHT / 2),
-    z: (random() * 20) - 10
+    z: (random() * WALL_PLACEMENT_LIMIT * 2) - WALL_PLACEMENT_LIMIT
   }
   const bounds = computeWallBounds({ axis, position })
   const sconceOffset =
@@ -130,6 +133,28 @@ function generateWalls() {
 }
 
 export const WALL_LAYOUT = Object.freeze(generateWalls())
+
+const standaloneSconceLineBaseX =
+  WALL_PLACEMENT_LIMIT + (WALL_LENGTH / 2) + 1.5
+const standaloneSconceLineBaseZ =
+  -((STANDALONE_SCONCE_COUNT - 1) * STANDALONE_SCONCE_STEP * 0.5)
+
+export const STANDALONE_SCONCE_LAYOUT = Object.freeze(
+  Array.from({ length: STANDALONE_SCONCE_COUNT }, (_, index) => ({
+    index,
+    position: {
+      x: standaloneSconceLineBaseX,
+      y: GROUND_Y + SCONCE_RADIUS + (index * STANDALONE_SCONCE_STEP),
+      z: standaloneSconceLineBaseZ + (index * STANDALONE_SCONCE_STEP)
+    }
+  }))
+)
+
+export const STANDALONE_REFERENCE_TORCH_POSITION = Object.freeze({
+  x: standaloneSconceLineBaseX + 1.5,
+  y: GROUND_Y + SCONCE_RADIUS + (4.5 * STANDALONE_SCONCE_STEP),
+  z: standaloneSconceLineBaseZ + (4.5 * STANDALONE_SCONCE_STEP)
+})
 
 export function getWallBounds() {
   return WALL_LAYOUT.map((wall) => ({

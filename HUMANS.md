@@ -43,6 +43,8 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the torch billboard uses the linked `CampFire_l_nosmoke_front_Loop_01_4K_6x6.png` atlas.
 - Verify each sconce uses the requested capped lower-hemisphere bowl shape.
 - Verify the sconces are visibly readable outside the walls rather than disappearing behind the torch billboard or wall face.
+- Verify the standalone diagonal sconce line appears just outside the wall field, with 10 unlit-free sconces stepping up by `0.25m`.
+- Verify the standalone reference torch sits near that line but outside the line's AABB.
 - Verify the torch billboards animate and stay camera-facing even on walls whose parent groups are rotated.
 - Verify the visible flame fills the 0.5m billboard and sits on the sconce instead of appearing tiny or floating above it.
 - Verify each wall has a warm torch point light and the lights cast shadows.
