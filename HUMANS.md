@@ -38,10 +38,11 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the visible skybox comes from local `overcast_soil_1k.hdr`.
 - Verify `IBL Intensity 1.00x` is the canonical authored HDRI baseline rather than a corrective fudge factor.
 - Verify the visible skybox brightness tracks the same calibrated HDRI path as the environment lighting.
-- Verify the ground, walls, and sconces load the committed PBR texture packs instead of preview images.
+- Verify the ground and walls load the committed PBR texture packs instead of preview images.
 - Verify the torch billboard uses the linked flipbook asset rather than a generated placeholder atlas.
 - Verify the torch billboard uses the linked `CampFire_l_nosmoke_front_Loop_01_4K_6x6.png` atlas.
 - Verify each sconce uses the requested capped lower-hemisphere bowl shape.
+- Verify each sconce currently renders as a solid black unlit debug object.
 - Verify the sconces are visibly readable outside the walls rather than disappearing behind the torch billboard or wall face.
 - Verify the standalone diagonal sconce line appears just outside the wall field, with 10 unlit-free sconces stepping up by `0.25m`.
 - Verify the standalone reference torch sits near that line but outside the line's AABB.

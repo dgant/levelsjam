@@ -106,14 +106,6 @@ const WALL_TEXTURE_URLS = {
   normal: `${assetBase}textures/stone-wall-29/stonewall_29-1K/stonewall_29_normal-1K.png`,
   roughness: `${assetBase}textures/stone-wall-29/stonewall_29-1K/stonewall_29_roughness-1K.png`
 }
-const METAL_TEXTURE_URLS = {
-  ao: `${assetBase}textures/metal-13/metal_13-1K/metal_13_ambientocclusion-1K.png`,
-  color: `${assetBase}textures/metal-13/metal_13-1K/metal_13_basecolor-1K.png`,
-  height: `${assetBase}textures/metal-13/metal_13-1K/metal_13_height-1K.png`,
-  metallic: `${assetBase}textures/metal-13/metal_13-1K/metal_13_metallic-1K.png`,
-  normal: `${assetBase}textures/metal-13/metal_13-1K/metal_13_normal-1K.png`,
-  roughness: `${assetBase}textures/metal-13/metal_13-1K/metal_13_roughness-1K.png`
-}
 const LOOK_SENSITIVITY = 0.003
 const MAX_PITCH = Math.PI / 2 - 0.05
 const BACKQUOTE_CODE = 'Backquote'
@@ -128,7 +120,6 @@ const POINTER_UNLOCK_CODES = new Set([
 ])
 const PUDDLE_TEXTURE_REPEAT = 60
 const WALL_TEXTURE_REPEAT = 2
-const METAL_TEXTURE_REPEAT = 1
 const LOADING_DOT_INTERVAL_MS = 250
 const LOADING_FADE_DURATION_MS = 2000
 const FIRE_FLIPBOOK_GRID = 6
@@ -832,13 +823,11 @@ function TorchLight({
 function WallSconce({
   flickerAmount,
   lightHandle,
-  metal,
   torchCandelaMultiplier,
   wall
 }: {
   flickerAmount: number
   lightHandle: { current: TorchLightHandle | null }
-  metal: PbrMaps
   torchCandelaMultiplier: number
   wall: (typeof WALL_LAYOUT)[number]
 }) {
@@ -859,7 +848,6 @@ function WallSconce({
       <SconceMesh
         debugIndex={wall.index}
         debugRole="sconce-body"
-        metal={metal}
         position={position}
       />
       <TorchBillboard
@@ -882,12 +870,10 @@ function WallSconce({
 function SconceMesh({
   debugIndex,
   debugRole,
-  metal,
   position
 }: {
   debugIndex: number
   debugRole: string
-  metal: PbrMaps
   position: [number, number, number]
 }) {
   return (
@@ -898,11 +884,8 @@ function SconceMesh({
       userData={{ debugIndex, debugRole }}
     >
       <latheGeometry args={[SCONCE_PROFILE_POINTS, 24]} />
-      <meshStandardMaterial
-        {...metal}
-        bumpScale={0.02}
-        metalness={0.85}
-        roughness={0.55}
+      <meshBasicMaterial
+        color="black"
         side={DoubleSide}
       />
     </mesh>
@@ -916,7 +899,6 @@ function StandaloneSconceLine({
   flickerAmount: number
   torchCandelaMultiplier: number
 }) {
-  const metal = useStandardPbrTextures(METAL_TEXTURE_URLS, METAL_TEXTURE_REPEAT)
   const lightHandle = useRef<TorchLightHandle | null>(null)
   const torchPosition: [number, number, number] = [
     STANDALONE_REFERENCE_TORCH_POSITION.x,
@@ -932,7 +914,6 @@ function StandaloneSconceLine({
           debugIndex={sconce.index}
           debugRole="standalone-sconce-body"
           key={`standalone-sconce-${sconce.index}`}
-          metal={metal}
           position={[
             sconce.position.x,
             sconce.position.y,
@@ -966,7 +947,6 @@ function Walls({
 }) {
   const camera = useThree((state) => state.camera)
   const wall = useStandardPbrTextures(WALL_TEXTURE_URLS, WALL_TEXTURE_REPEAT)
-  const metal = useStandardPbrTextures(METAL_TEXTURE_URLS, METAL_TEXTURE_REPEAT)
   const lightHandles = useRef(
     WALL_LAYOUT.map(() => ({ current: null as TorchLightHandle | null }))
   )
@@ -1023,7 +1003,6 @@ function Walls({
           <WallSconce
             flickerAmount={flickerAmount}
             lightHandle={lightHandles.current[layout.index]}
-            metal={metal}
             torchCandelaMultiplier={torchCandelaMultiplier}
             wall={layout}
           />

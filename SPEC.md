@@ -22,8 +22,8 @@
 - Each wall has its base at `Y = 0`.
 - Each wall is placed at a deterministic pseudo-random position within `-10m` to `+10m` on the world X and Z axes.
 - Each wall uses the extracted ShareTextures `stone-wall-29` PBR pack rather than preview imagery.
-- Each wall has a metal wall sconce attached to it.
-- Each wall sconce uses the extracted ShareTextures `metal-13` PBR pack.
+- Each wall has a wall sconce attached to it.
+- Each wall sconce currently renders with a solid black unlit debug material while visibility investigation is in progress.
 - Each wall sconce uses a 0.25 meter radius lower hemisphere with the cut top replaced by a flat circular cap.
 - Each wall sconce is positioned with its center one sconce radius outside the wall face.
 - Each wall sconce remains visibly readable against the wall and under the torch it supports.
@@ -47,7 +47,7 @@
 - Each torch point light flickers at twice the previous speed.
 - Each torch point light uses a warm fire-appropriate color.
 - The scene contains a standalone reference line of 10 sconces placed just outside the wall-assembly area.
-- The standalone reference sconces use the same capped lower-hemisphere bowl geometry and `metal-13` PBR material as the wall sconces.
+- The standalone reference sconces use the same capped lower-hemisphere bowl geometry and the same solid black unlit debug material as the wall sconces.
 - The first standalone reference sconce rests on the ground with its bottom tangent to `Y = 0`.
 - Each subsequent standalone reference sconce is offset by `+0.25m` in height and `+0.25m` along the line direction, forming a rising diagonal.
 - The standalone reference sconce line contains no attached billboard or point light.
@@ -118,8 +118,7 @@
 - The environment map from `overcast_soil` provides specular reflection data for reflective materials.
 - The environment map from `overcast_soil` is treated as canonically authored intensity at an IBL multiplier of `1`.
 - The visible skybox and the environment lighting use the same calibrated HDRI intensity path.
-- The ground, walls, and sconces use extracted PBR texture packs with tiling based on a 1 meter world scale unless a source specifies otherwise.
-- The metal wall sconce uses the linked `metal-13` PBR channels in their correct material slots.
+- The ground and walls use extracted PBR texture packs with tiling based on a 1 meter world scale unless a source specifies otherwise.
 - Reflective and semi-reflective materials read from the shared environment consistently.
 - The torch billboards face the camera continuously.
 - The torch billboards animate smoothly through the flipbook loop without lighting artifacts from scene lights.
