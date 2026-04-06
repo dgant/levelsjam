@@ -31,6 +31,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify `W`, `A`, `S`, and `D` move the camera.
 - Verify the top-right overlay shows the active maze ID, Git revision, and revision timestamp.
 - Verify `F9` toggles the top-right overlay.
+- Verify the ground, walls, and sconces are using their full requested PBR material stacks when the current task calls for full-fidelity rendering rather than compatibility simplification.
 - Verify mouse movement changes view direction after an explicit click locks the pointer to the canvas.
 - Verify holding `Space` applies upward thrust and releasing it stops the ascent.
 - Verify the player starts 1 meter above the ground plane.

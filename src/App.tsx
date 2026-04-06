@@ -753,10 +753,13 @@ function Ground() {
       rotation-x={-Math.PI / 2}
     >
       <planeGeometry args={[GROUND_SIZE, GROUND_SIZE]} />
-      <meshStandardMaterial
-        map={puddle.map}
+      <meshPhysicalMaterial
+        {...puddle}
+        bumpScale={0.08}
+        clearcoat={1}
+        clearcoatRoughness={0.1}
         metalness={0}
-        roughness={0.55}
+        roughness={0.45}
       />
     </mesh>
   )
@@ -938,11 +941,16 @@ function WallSconce({
         debugRole="sconce-body"
         material={
           <meshStandardMaterial
+            bumpMap={metal.bumpMap}
+            bumpScale={0.02}
             color="white"
             envMapIntensity={1}
             map={metal.map}
             metalness={0.85}
+            metalnessMap={metal.metalnessMap}
+            normalMap={metal.normalMap}
             roughness={0.55}
+            roughnessMap={metal.roughnessMap}
             side={DoubleSide}
           />
         }
@@ -1146,7 +1154,8 @@ function MazeWalls({
         >
           <boxGeometry args={[WALL_LENGTH, WALL_HEIGHT, WALL_WIDTH]} />
           <meshStandardMaterial
-            map={wall.map}
+            {...wall}
+            bumpScale={0.05}
             metalness={0.02}
             roughness={0.92}
           />

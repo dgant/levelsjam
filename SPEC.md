@@ -17,17 +17,20 @@
 - The scene does not use a directional sunlight source.
 - The scene contains a large upward-facing ground plane centered at the origin.
 - The ground plane uses the extracted ShareTextures `puddle-ground` PBR pack rather than preview imagery.
+- The ground plane uses the full authored `puddle-ground` PBR material stack rather than a reduced compatibility material.
 - The scene instantiates one source-controlled legal maze at random on each load.
 - The default maze dimensions are 7 cells by 7 cells.
 - Each maze uses a grid of cells with walls on cell edges rather than filling the cells themselves.
 - Each maze wall is represented in the scene by a `0.25m x 2m x 2m` wall mesh.
 - Each maze wall has its base at `Y = 0`.
 - Each maze wall uses the extracted ShareTextures `stone-wall-29` PBR pack rather than preview imagery.
+- Each maze wall uses the full authored `stone-wall-29` PBR material stack rather than a reduced compatibility material.
 - The scene does not include the previous deterministic pseudo-random wall field.
 - The scene does not include the previous standalone reference sconce line.
 - The scene uses wall sconces only where a generated maze light is assigned.
 - Each wall sconce uses a 0.125 meter radius lower hemisphere with the cut top replaced by a flat circular cap.
 - Each wall sconce uses the requested `metal-13` PBR texture pack rather than a debug material.
+- Each wall sconce uses the full authored `metal-13` PBR material stack, excluding only the known-problematic ambient-occlusion map path.
 - Each wall sconce is positioned with its center one sconce radius outside the wall face.
 - Each wall sconce supports a camera-facing torch billboard above it.
 - Each torch billboard and torch point light are positioned against the same wall face as the sconce, on the side of the cell the light is intended to illuminate.
