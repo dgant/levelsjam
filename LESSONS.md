@@ -47,3 +47,4 @@
 - In this repository, "HDRI skybox and flame billboards render, but lit scene meshes do not" is a strong sign that the lit-material shader path is the problem. Check the real maze wall in the beauty pass, and simplify the lit material variant before assuming the textures or mesh placement are wrong.
 - In this repository, per-maze baked torch lightmaps are a practical way to keep full PBR wall and ground materials without exploding the forward-renderer shadow sampler count.
 - In this repository's current three.js stack, keeping the baked torch-light contribution visibly inspectable was more reliable with an explicit additive overlay pass than with the built-in material `lightMap` response alone.
+- A broad maze screenshot can miss baked wall-light regressions because the floor dominates the sampled pixels. The reliable smoke proof here is a deterministic wall-facing view on a known lit wall.

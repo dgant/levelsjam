@@ -161,7 +161,8 @@ const FIRE_FLIPBOOK_CROP_HEIGHT =
   FIRE_FLIPBOOK_FRAME_CROP.maxY - FIRE_FLIPBOOK_FRAME_CROP.minY
 const FIRE_COLOR = new Color('#ffb168')
 const FIRE_BILLBOARD_INTENSITY_SCALE = 1 / TORCH_BASE_CANDELA
-const LIGHTMAP_OVERLAY_INTENSITY_SCALE = 12
+const FLOOR_LIGHTMAP_OVERLAY_INTENSITY_SCALE = 12
+const WALL_LIGHTMAP_OVERLAY_INTENSITY_SCALE = 24
 const LENS_FLARE_COLOR_GAIN_SCALE = 8
 const FOG_VOLUME_HEIGHT = 6
 const FOG_VOLUME_SLICE_COUNT = 6
@@ -882,6 +883,7 @@ function Ground({
         position={[0, GROUND_Y + 0.002, 0]}
         receiveShadow
         rotation-x={-Math.PI / 2}
+        userData={{ debugIndex: 0, debugRole: 'maze-ground-lightmap' }}
       >
         <primitive
           attach="geometry"
@@ -889,6 +891,7 @@ function Ground({
         />
         <LightmapOverlayMaterial
           intensity={torchCandelaMultiplier}
+          intensityScale={FLOOR_LIGHTMAP_OVERLAY_INTENSITY_SCALE}
           lightmapTexture={lightmapTexture}
         />
       </mesh>
@@ -898,15 +901,17 @@ function Ground({
 
 function LightmapOverlayMaterial({
   intensity,
+  intensityScale,
   lightmapTexture
 }: {
   intensity: number
+  intensityScale: number
   lightmapTexture: Texture
 }) {
   return (
     <meshBasicMaterial
       blending={AdditiveBlending}
-      color={new Color().setScalar(intensity * LIGHTMAP_OVERLAY_INTENSITY_SCALE)}
+      color={new Color().setScalar(intensity * intensityScale)}
       depthWrite={false}
       map={lightmapTexture}
       polygonOffset
@@ -1302,19 +1307,21 @@ function MazeWallMesh({
         <meshStandardMaterial
           {...wallMaterialMaps}
           bumpScale={0.05}
-          lightMap={lightmapTexture}
-          lightMapIntensity={torchCandelaMultiplier}
           metalness={0.02}
           roughness={0.92}
         />
       </mesh>
-      <mesh renderOrder={1}>
+      <mesh
+        renderOrder={1}
+        userData={{ debugIndex: wallIndex, debugRole: 'maze-wall-lightmap' }}
+      >
         <primitive
           attach="geometry"
           object={overlayGeometry}
         />
         <LightmapOverlayMaterial
           intensity={torchCandelaMultiplier}
+          intensityScale={WALL_LIGHTMAP_OVERLAY_INTENSITY_SCALE}
           lightmapTexture={lightmapTexture}
         />
       </mesh>
@@ -1820,9 +1827,12 @@ function FlightRig({
           index: number
         ) => {
           hasLightMap: boolean
+          hasMap: boolean
           hasUv1: boolean
           hasUv2: boolean
           lightMapIntensity: number | null
+          mapChannel: number | null
+          materialColor: [number, number, number] | null
         } | null
         setView?: (
           cameraPosition: [number, number, number],
@@ -1856,9 +1866,12 @@ function FlightRig({
       getDebugMeshState: (role, index) => {
         let match: {
           hasLightMap: boolean
+          hasMap: boolean
           hasUv1: boolean
           hasUv2: boolean
           lightMapIntensity: number | null
+          mapChannel: number | null
+          materialColor: [number, number, number] | null
         } | null = null
 
         scene.traverse((object) => {
@@ -1872,18 +1885,32 @@ function FlightRig({
           }
 
           const material = object.material as {
+            color?: Color
             lightMap?: Texture | null
             lightMapIntensity?: number
+            map?: Texture | null
           }
 
           match = {
             hasLightMap: Boolean(material.lightMap),
+            hasMap: Boolean(material.map),
             hasUv1: Boolean(object.geometry?.getAttribute?.('uv1')),
             hasUv2: Boolean(object.geometry?.getAttribute?.('uv2')),
             lightMapIntensity:
               typeof material.lightMapIntensity === 'number'
                 ? material.lightMapIntensity
-                : null
+                : null,
+            mapChannel:
+              typeof material.map?.channel === 'number'
+                ? material.map.channel
+                : null,
+            materialColor: material.color
+              ? [
+                  material.color.r,
+                  material.color.g,
+                  material.color.b
+                ]
+              : null
           }
         })
 

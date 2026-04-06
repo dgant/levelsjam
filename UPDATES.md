@@ -52,3 +52,4 @@
 - When the task is to debug full-fidelity rendering rather than optimize, keep the requested full PBR material stacks and baked-all-shadows lighting enabled even if that temporarily hurts FPS. Compatibility simplifications should be treated as temporary diagnostics, not the default solution.
 - When replacing realtime torch lighting with baked maze lighting in this project, remove the obsolete flicker and point-light controls from the runtime and tests instead of leaving a dead hybrid path behind.
 - When a late baked-lightmap step makes maze generation slower, keep the under-100ms gate on the maze-topology phase and benchmark the bake separately instead of letting persistence loops wait forever on the old total-time threshold.
+- When verifying baked wall lighting in this project, use a deterministic wall-facing view and a lit-wall crop rather than a broad maze shot that can mostly measure the floor.
