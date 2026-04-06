@@ -47,3 +47,4 @@
 - Fixed-size baked point-light shadow maps do not remove the per-frame lighting and shadow-sampling cost. Measure the all-lights version before assuming static shadow maps make light culling unnecessary.
 - When reading keyboard state from a sparse key map in this project, treat missing keys as `false` before numeric conversion. `Number(undefined)` becomes `NaN` and can poison the whole movement state on the first frame.
 - When temporarily evaluating a lighting configuration that is expected to violate the normal FPS budget, disable the automated FPS gate explicitly in code and docs rather than letting it fail noisily.
+- When a user reports that only the HDRI skybox and flame billboards are visible, test the real maze wall material in the smoke harness. In this project that symptom points at the lit-material render path, not a missing texture URL or a misunderstanding about where the wall should be.

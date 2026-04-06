@@ -23,6 +23,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Run `npm run test:unit` to verify player spawn and collision math.
 - Run `npm run test:smoke` to exercise the built page through Playwright.
 - Run `npm run test:smoke:runner` when `npm run build:pages` has already prepared the root-published bundle.
+- Treat a scene that shows only the HDRI skybox and flame billboards as a render failure; the smoke test now checks that a real maze wall writes visible beauty-pass color.
 - `npm run test:perf` is temporarily disabled while the baked-all-shadows lighting configuration is under evaluation.
 - Run the maze-generation validation script or its test entrypoint whenever maze files or maze rules change.
 - Verify the main page renders the 3D scene without console errors.

@@ -201,9 +201,39 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       intervals: [100, 250, 500]
     })
     .not.toBeNull()
+  await expect
+    .poll(async () => {
+      return page.evaluate(() => window.__levelsjamDebug?.getDebugPosition?.('maze-wall', 0) ?? null)
+    }, {
+      timeout: 5_000,
+      intervals: [100, 250, 500]
+    })
+    .not.toBeNull()
+  const debugWallPosition = await page.evaluate(
+    () => window.__levelsjamDebug.getDebugPosition('maze-wall', 0)
+  )
   const debugSconcePosition = await page.evaluate(
     () => window.__levelsjamDebug.getDebugPosition('sconce-body', 0)
   )
+
+  await page.evaluate((position) => {
+    const [x, y, z] = position
+    window.__levelsjamDebug.setView(
+      [x - 1.6, y + 0.35, z - 0.9],
+      [x, y, z]
+    )
+  }, debugWallPosition)
+  await page.waitForTimeout(200)
+  const wallVisibleRegion = await screenshotCanvasRegion(page, canvas, 170, 120, 0.5, 0.7)
+  await page.evaluate(() => {
+    window.__levelsjamDebug.setDebugVisible('maze-wall', 0, false)
+  })
+  await page.waitForTimeout(200)
+  const wallHiddenRegion = await screenshotCanvasRegion(page, canvas, 170, 120, 0.5, 0.7)
+  expect(measureDifference(wallVisibleRegion, wallHiddenRegion)).toBeGreaterThan(6)
+  await page.evaluate(() => {
+    window.__levelsjamDebug.setDebugVisible('maze-wall', 0, true)
+  })
 
   await page.evaluate((position) => {
     const [x, y, z] = position

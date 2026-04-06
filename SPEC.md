@@ -185,6 +185,7 @@
 - The controls are checked in the browser for movement, looking, and thrust behavior.
 - Visual layout changes are reviewed in the rendered scene, not only in source code.
 - Collision behavior is checked in the browser for stable contact with the ground plane and the walls.
+- Automated browser smoke coverage verifies that a real maze wall material writes visible scene color in the default render path rather than leaving only the skybox and billboards visible.
 - The loading overlay is checked in the browser and verified to animate and then fade away after asset load.
 - The backquote shortcut is checked in the browser and verified to open the debug controls panel.
 - The debug controls panel is checked in the browser and verified to expose the new IBL and torch controls while omitting removed atmosphere controls.
