@@ -9,13 +9,9 @@ import {
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
 import { LensFlareEffect } from '@react-three/postprocessing'
 import {
-  AdditiveBlending,
   BasicShadowMap,
-  BoxGeometry,
-  BufferAttribute,
   CanvasTexture,
   Color,
-  DataTexture,
   DoubleSide,
   EquirectangularReflectionMapping,
   Euler,
@@ -29,16 +25,13 @@ import {
   NoToneMapping,
   NeutralToneMapping,
   PMREMGenerator,
-  PlaneGeometry,
   Quaternion,
   ReinhardToneMapping,
   RepeatWrapping,
-  RGBFormat,
   SRGBColorSpace,
   Texture,
   TextureLoader,
   Uniform,
-  UnsignedByteType,
   Vector2,
   Vector3
 } from 'three'
@@ -161,11 +154,12 @@ const FIRE_FLIPBOOK_CROP_HEIGHT =
   FIRE_FLIPBOOK_FRAME_CROP.maxY - FIRE_FLIPBOOK_FRAME_CROP.minY
 const FIRE_COLOR = new Color('#ffb168')
 const FIRE_BILLBOARD_INTENSITY_SCALE = 1 / TORCH_BASE_CANDELA
-const FLOOR_LIGHTMAP_OVERLAY_INTENSITY_SCALE = 24
-const WALL_LIGHTMAP_EMISSIVE_SCALE = 0.1
-const LENS_FLARE_COLOR_GAIN_SCALE = 8
+const FLOOR_LIGHTMAP_INTENSITY_SCALE = 1
+const WALL_LIGHTMAP_INTENSITY_SCALE = 1
+const LENS_FLARE_COLOR_GAIN_SCALE = 0.35
 const FOG_VOLUME_HEIGHT = 6
-const FOG_VOLUME_SLICE_COUNT = 6
+const FOG_VOLUME_SLICE_COUNT = 24
+const EFFECT_EPSILON = 0.0001
 const MAX_PHYSICS_SUBSTEPS = 10
 const MIN_LOADING_OVERLAY_MS = 300
 const AMBIENT_OCCLUSION_OPTIONS = [
@@ -385,12 +379,12 @@ function createDefaultVisualSettings(): VisualSettings {
     toneMapping: 'agx',
     bloom: { enabled: false, intensity: 0.7, kernelSize: 'large' },
     depthOfField: {
-      bokehScale: 1,
+      bokehScale: 0,
       enabled: false,
       focalLength: 0.03,
       focusDistance: 0.02
     },
-    lensFlare: { enabled: false, intensity: 1 },
+    lensFlare: { enabled: false, intensity: 0 },
     movement: {
       accelerationDistance:
         DEFAULT_MOVEMENT_SETTINGS.horizontalAccelerationDistance,
@@ -398,11 +392,26 @@ function createDefaultVisualSettings(): VisualSettings {
         DEFAULT_MOVEMENT_SETTINGS.horizontalDecelerationDistance,
       maxHorizontalSpeedMph: DEFAULT_MOVEMENT_SETTINGS.maxHorizontalSpeedMph
     },
-    ssr: { enabled: false, intensity: 0.6 },
+    ssr: { enabled: false, intensity: 0 },
     volumetricLighting: { enabled: false, intensity: 0.35 },
     volumetricNoiseFrequency: DEFAULT_VOLUMETRIC_NOISE_FREQUENCY,
     vignette: { enabled: false, intensity: 0.4 }
   }
+}
+
+function isEffectActive(effect: EffectSettings) {
+  return effect.enabled && effect.intensity > EFFECT_EPSILON
+}
+
+function isDepthOfFieldActive(settings: DepthOfFieldSettings) {
+  return settings.enabled && settings.bokehScale > EFFECT_EPSILON
+}
+
+function isAmbientOcclusionActive(settings: VisualSettings) {
+  return (
+    settings.ambientOcclusionMode !== 'off' &&
+    settings.ambientOcclusionIntensity > EFFECT_EPSILON
+  )
 }
 
 function configureRepeatedTexture(
@@ -571,25 +580,14 @@ function useMazeLightmapBytes(lightmap: MazeLightmap) {
   )
 }
 
-function useMazeLightmapTexture(lightmap: MazeLightmap, data: Uint8Array) {
-  const texture = useMemo(() => {
-    const nextTexture = new DataTexture(
-      data,
-      lightmap.atlasWidth,
-      lightmap.atlasHeight,
-      RGBFormat,
-      UnsignedByteType
-    )
-
-    nextTexture.channel = 2
-    nextTexture.flipY = true
-    nextTexture.generateMipmaps = false
-    nextTexture.magFilter = LinearFilter
-    nextTexture.minFilter = LinearFilter
-    nextTexture.needsUpdate = true
-
-    return nextTexture
-  }, [lightmap])
+function useGroundLightmapTexture(
+  lightmap: MazeLightmap,
+  lightmapBytes: Uint8Array
+) {
+  const texture = useMemo(
+    () => createLightmapFaceTexture(lightmapBytes, lightmap.atlasWidth, lightmap.groundRect),
+    [lightmap, lightmapBytes]
+  )
 
   useEffect(
     () => () => {
@@ -633,7 +631,6 @@ function createLightmapFaceTexture(
   context.putImageData(image, 0, 0)
 
   const texture = new CanvasTexture(canvas)
-  texture.channel = 0
   texture.flipY = true
   texture.generateMipmaps = false
   texture.magFilter = LinearFilter
@@ -665,84 +662,6 @@ function useWallLightmapFaceTextures(
   )
 
   return textures
-}
-
-function mapUvToLightmapRect(
-  u: number,
-  v: number,
-  rect: LightmapRect,
-  atlasWidth: number,
-  atlasHeight: number
-) {
-  const x =
-    rect.x + 0.5 + (u * Math.max(0, rect.width - 1))
-  const y =
-    rect.y + 0.5 + (v * Math.max(0, rect.height - 1))
-
-  return {
-    u: x / atlasWidth,
-    v: y / atlasHeight
-  }
-}
-
-function createGroundLightmapGeometry(layout: MazeLayout) {
-  const geometry = new PlaneGeometry(
-    layout.maze.width * MAZE_CELL_SIZE,
-    layout.maze.height * MAZE_CELL_SIZE
-  )
-  const uv = geometry.getAttribute('uv')
-  const uv1 = new Float32Array(uv.count * 2)
-
-  for (let index = 0; index < uv.count; index += 1) {
-    const mapped = mapUvToLightmapRect(
-      uv.getX(index),
-      uv.getY(index),
-      layout.maze.lightmap.groundRect,
-      layout.maze.lightmap.atlasWidth,
-      layout.maze.lightmap.atlasHeight
-    )
-
-    uv1[(index * 2)] = mapped.u
-    uv1[(index * 2) + 1] = mapped.v
-  }
-
-  geometry.setAttribute('uv', new BufferAttribute(uv1.slice(), 2))
-  geometry.setAttribute('uv1', new BufferAttribute(uv1, 2))
-  geometry.setAttribute('uv2', new BufferAttribute(uv1.slice(), 2))
-  return geometry
-}
-
-function createWallLightmapGeometry(wall: MazeLayout['walls'][number], lightmap: MazeLightmap) {
-  const geometry = new BoxGeometry(WALL_LENGTH, WALL_HEIGHT, WALL_WIDTH)
-  const uv = geometry.getAttribute('uv')
-  const normal = geometry.getAttribute('normal')
-  const uv1 = new Float32Array(uv.count * 2)
-  const wallRects = lightmap.wallRects[wall.id]
-
-  for (let index = 0; index < uv.count; index += 1) {
-    const normalX = normal.getX(index)
-    const normalZ = normal.getZ(index)
-    const rect =
-      normalZ > 0.5
-        ? wallRects.pz
-        : normalZ < -0.5
-          ? wallRects.nz
-          : lightmap.neutralRect
-    const mapped = mapUvToLightmapRect(
-      uv.getX(index),
-      uv.getY(index),
-      rect,
-      lightmap.atlasWidth,
-      lightmap.atlasHeight
-    )
-
-    uv1[(index * 2)] = mapped.u
-    uv1[(index * 2) + 1] = mapped.v
-  }
-
-  geometry.setAttribute('uv1', new BufferAttribute(uv1, 2))
-  geometry.setAttribute('uv2', new BufferAttribute(uv1.slice(), 2))
-  return geometry
 }
 
 function LoadingOverlay({
@@ -921,77 +840,34 @@ function EnvironmentLighting({
 
 function Ground({
   layout,
-  lightmapTexture,
+  groundLightmapTexture,
   torchCandelaMultiplier
 }: {
   layout: MazeLayout
-  lightmapTexture: Texture
+  groundLightmapTexture: Texture
   torchCandelaMultiplier: number
 }) {
   const puddle = usePuddleTextures(PUDDLE_TEXTURE_REPEAT)
-  const mazeGroundGeometry = useMemo(
-    () => createGroundLightmapGeometry(layout),
-    [layout]
-  )
 
   return (
-    <>
-      <mesh
-        position={[0, GROUND_Y, 0]}
-        receiveShadow
-        rotation-x={-Math.PI / 2}
-      >
-        <planeGeometry args={[GROUND_SIZE, GROUND_SIZE]} />
-        <meshPhysicalMaterial
-          {...puddle}
-          bumpScale={0.08}
-          clearcoat={1}
-          clearcoatRoughness={0.1}
-          metalness={0}
-          roughness={0.45}
-        />
-      </mesh>
-      <mesh
-        position={[0, GROUND_Y + 0.002, 0]}
-        receiveShadow
-        rotation-x={-Math.PI / 2}
-        userData={{ debugIndex: 0, debugRole: 'maze-ground-lightmap' }}
-      >
-        <primitive
-          attach="geometry"
-          object={mazeGroundGeometry}
-        />
-        <LightmapOverlayMaterial
-          intensity={torchCandelaMultiplier}
-          intensityScale={FLOOR_LIGHTMAP_OVERLAY_INTENSITY_SCALE}
-          lightmapTexture={lightmapTexture}
-        />
-      </mesh>
-    </>
-  )
-}
-
-function LightmapOverlayMaterial({
-  intensity,
-  intensityScale,
-  lightmapTexture
-}: {
-  intensity: number
-  intensityScale: number
-  lightmapTexture: Texture
-}) {
-  return (
-    <meshBasicMaterial
-      blending={AdditiveBlending}
-      color={new Color().setScalar(intensity * intensityScale)}
-      depthWrite={false}
-      map={lightmapTexture}
-      polygonOffset
-      polygonOffsetFactor={-1}
-      polygonOffsetUnits={-1}
-      toneMapped={false}
-      transparent
-    />
+    <mesh
+      position={[0, GROUND_Y, 0]}
+      receiveShadow
+      rotation-x={-Math.PI / 2}
+      userData={{ debugIndex: 0, debugRole: 'maze-ground-lightmap' }}
+    >
+      <planeGeometry args={[GROUND_SIZE, GROUND_SIZE]} />
+      <meshPhysicalMaterial
+        {...puddle}
+        bumpScale={0.08}
+        clearcoat={1}
+        clearcoatRoughness={0.1}
+        lightMap={groundLightmapTexture}
+        lightMapIntensity={torchCandelaMultiplier * FLOOR_LIGHTMAP_INTENSITY_SCALE}
+        metalness={0}
+        roughness={0.45}
+      />
+    </mesh>
   )
 }
 
@@ -1201,7 +1077,7 @@ function FogVolume({
         >
           <planeGeometry args={[GROUND_SIZE, GROUND_SIZE]} />
           <shaderMaterial
-            blending={AdditiveBlending}
+            depthTest={false}
             depthWrite={false}
             fragmentShader={`
               uniform float density;
@@ -1247,7 +1123,7 @@ function FogVolume({
                 float verticalFalloff = 1.0 - smoothstep(0.0, ${FOG_VOLUME_HEIGHT.toFixed(1)}, layerHeight);
                 float baseNoise = mix(0.45, 1.0, noise(samplePoint));
                 float horizontalFade = 1.0 - smoothstep(${(GROUND_SIZE * 0.33).toFixed(1)}, ${(GROUND_SIZE * 0.6).toFixed(1)}, length(vWorldPosition.xz));
-                float alpha = clamp(density * verticalFalloff * horizontalFade * baseNoise * 0.1, 0.0, 0.12);
+                float alpha = clamp(density * verticalFalloff * horizontalFade * baseNoise * 0.24, 0.0, 0.16);
                 if (alpha < 0.002) {
                   discard;
                 }
@@ -1259,7 +1135,6 @@ function FogVolume({
               materials.current[index] = material
             }}
             side={DoubleSide}
-            toneMapped={false}
             transparent
             uniforms={{
               density: { value: visible ? volumeIntensity : 0 },
@@ -1286,12 +1161,10 @@ function FogVolume({
 function MazeWalls({
   layout,
   lightmapBytes,
-  lightmapTexture,
   torchCandelaMultiplier
 }: {
   layout: MazeLayout
   lightmapBytes: Uint8Array
-  lightmapTexture: Texture
   torchCandelaMultiplier: number
 }) {
   const wall = useStandardPbrTextures(WALL_TEXTURE_URLS, WALL_TEXTURE_REPEAT)
@@ -1303,7 +1176,6 @@ function MazeWalls({
           key={mazeWall.id}
           lightmap={layout.maze.lightmap}
           lightmapBytes={lightmapBytes}
-          lightmapTexture={lightmapTexture}
           mazeWall={mazeWall}
           torchCandelaMultiplier={torchCandelaMultiplier}
           wallIndex={wallIndex}
@@ -1324,7 +1196,6 @@ function MazeWalls({
 function MazeWallMesh({
   lightmap,
   lightmapBytes,
-  lightmapTexture,
   mazeWall,
   torchCandelaMultiplier,
   wallIndex,
@@ -1332,26 +1203,15 @@ function MazeWallMesh({
 }: {
   lightmap: MazeLightmap
   lightmapBytes: Uint8Array
-  lightmapTexture: Texture
   mazeWall: MazeLayout['walls'][number]
   torchCandelaMultiplier: number
   wallIndex: number
   wallMaterialMaps: PbrMaps
 }) {
-  const geometry = useMemo(
-    () => createWallLightmapGeometry(mazeWall, lightmap),
-    [lightmap, mazeWall]
-  )
   const lightmapFaceTextures = useWallLightmapFaceTextures(
     lightmap,
     lightmapBytes,
     mazeWall.id
-  )
-  useEffect(
-    () => () => {
-      geometry.dispose()
-    },
-    [geometry]
   )
 
   return (
@@ -1368,10 +1228,7 @@ function MazeWallMesh({
         receiveShadow
         userData={{ debugIndex: wallIndex, debugRole: 'maze-wall' }}
       >
-        <primitive
-          attach="geometry"
-          object={geometry}
-        />
+        <boxGeometry args={[WALL_LENGTH, WALL_HEIGHT, WALL_WIDTH]} />
         <meshStandardMaterial
           {...wallMaterialMaps}
           bumpScale={0.05}
@@ -1381,27 +1238,35 @@ function MazeWallMesh({
       </mesh>
       <mesh
         position={[0, 0, (WALL_WIDTH / 2) + 0.002]}
+        receiveShadow
         renderOrder={1}
         userData={{ debugIndex: wallIndex, debugRole: 'maze-wall-lightmap' }}
       >
         <planeGeometry args={[WALL_LENGTH, WALL_HEIGHT]} />
-        <LightmapOverlayMaterial
-          intensity={torchCandelaMultiplier}
-          intensityScale={WALL_LIGHTMAP_EMISSIVE_SCALE}
-          lightmapTexture={lightmapFaceTextures.pz}
+        <meshStandardMaterial
+          {...wallMaterialMaps}
+          bumpScale={0.05}
+          lightMap={lightmapFaceTextures.pz}
+          lightMapIntensity={torchCandelaMultiplier * WALL_LIGHTMAP_INTENSITY_SCALE}
+          metalness={0.02}
+          roughness={0.92}
         />
       </mesh>
       <mesh
         position={[0, 0, -((WALL_WIDTH / 2) + 0.002)]}
+        receiveShadow
         renderOrder={1}
         rotation-y={Math.PI}
         userData={{ debugIndex: wallIndex, debugRole: 'maze-wall-lightmap' }}
       >
         <planeGeometry args={[WALL_LENGTH, WALL_HEIGHT]} />
-        <LightmapOverlayMaterial
-          intensity={torchCandelaMultiplier}
-          intensityScale={WALL_LIGHTMAP_EMISSIVE_SCALE}
-          lightmapTexture={lightmapFaceTextures.nz}
+        <meshStandardMaterial
+          {...wallMaterialMaps}
+          bumpScale={0.05}
+          lightMap={lightmapFaceTextures.nz}
+          lightMapIntensity={torchCandelaMultiplier * WALL_LIGHTMAP_INTENSITY_SCALE}
+          metalness={0.02}
+          roughness={0.92}
         />
       </mesh>
     </group>
@@ -1420,19 +1285,18 @@ function SceneGeometry({
   volumetricNoiseFrequency: number
 }) {
   const lightmapBytes = useMazeLightmapBytes(layout.maze.lightmap)
-  const lightmapTexture = useMazeLightmapTexture(layout.maze.lightmap, lightmapBytes)
+  const groundLightmapTexture = useGroundLightmapTexture(layout.maze.lightmap, lightmapBytes)
 
   return (
     <>
       <Ground
         layout={layout}
-        lightmapTexture={lightmapTexture}
+        groundLightmapTexture={groundLightmapTexture}
         torchCandelaMultiplier={torchCandelaMultiplier}
       />
       <MazeWalls
         layout={layout}
         lightmapBytes={lightmapBytes}
-        lightmapTexture={lightmapTexture}
         torchCandelaMultiplier={torchCandelaMultiplier}
       />
       {volumetricLighting.enabled ? (
@@ -1620,7 +1484,7 @@ function TorchLensFlareEffect({
         flareShape: 0.12,
         animated: true,
         anamorphic: false,
-        colorGain: FIRE_COLOR.clone().multiplyScalar(LENS_FLARE_COLOR_GAIN_SCALE * 0.05),
+        colorGain: FIRE_COLOR.clone().multiplyScalar(LENS_FLARE_COLOR_GAIN_SCALE),
         lensDirtTexture: null,
         haloScale: 0.18,
         secondaryGhosts: true,
@@ -1689,11 +1553,12 @@ function TorchLensFlareEffect({
 
     lensPosition.value.x = projectedPosition.x
     lensPosition.value.y = projectedPosition.y
-    const targetOpacity = 1 - Math.min(0.98, visibleIntensity * brightness * 0.05)
+    const flareStrength = Math.min(0.98, visibleIntensity * brightness * 0.02)
+    const targetOpacity = 1 - flareStrength
     opacity.value += (targetOpacity - opacity.value) * Math.min(1, delta / 0.12)
     colorGain.value
       .copy(FIRE_COLOR)
-      .multiplyScalar(brightness * visibleIntensity * LENS_FLARE_COLOR_GAIN_SCALE * 0.05)
+      .multiplyScalar(brightness * visibleIntensity * LENS_FLARE_COLOR_GAIN_SCALE)
   })
 
   useEffect(() => () => effect.dispose(), [effect])
@@ -1908,6 +1773,8 @@ function FlightRig({
           index: number
         ) => {
           emissiveColor: [number, number, number] | null
+          emissiveIntensity: number | null
+          emissiveMapChannel: number | null
           hasEmissiveMap: boolean
           hasLightMap: boolean
           hasMap: boolean
@@ -1949,6 +1816,8 @@ function FlightRig({
       getDebugMeshState: (role, index) => {
         let match: {
           emissiveColor: [number, number, number] | null
+          emissiveIntensity: number | null
+          emissiveMapChannel: number | null
           hasEmissiveMap: boolean
           hasLightMap: boolean
           hasMap: boolean
@@ -1971,6 +1840,7 @@ function FlightRig({
 
           const material = object.material as {
             emissive?: Color
+            emissiveIntensity?: number
             emissiveMap?: Texture | null
             color?: Color
             lightMap?: Texture | null
@@ -1986,6 +1856,14 @@ function FlightRig({
                   material.emissive.b
                 ]
               : null,
+            emissiveIntensity:
+              typeof material.emissiveIntensity === 'number'
+                ? material.emissiveIntensity
+                : null,
+            emissiveMapChannel:
+              typeof material.emissiveMap?.channel === 'number'
+                ? material.emissiveMap.channel
+                : null,
             hasEmissiveMap: Boolean(material.emissiveMap),
             hasLightMap: Boolean(material.lightMap),
             hasMap: Boolean(material.map),
@@ -2314,6 +2192,13 @@ function Scene({
     }
   }, [scene])
 
+  const ambientOcclusionActive = isAmbientOcclusionActive(visualSettings)
+  const bloomActive = isEffectActive(visualSettings.bloom)
+  const depthOfFieldActive = isDepthOfFieldActive(visualSettings.depthOfField)
+  const lensFlareActive = isEffectActive(visualSettings.lensFlare)
+  const ssrActive = isEffectActive(visualSettings.ssr)
+  const vignetteActive = isEffectActive(visualSettings.vignette)
+
   return (
     <>
       <EnvironmentLighting iblIntensity={visualSettings.iblIntensity} />
@@ -2323,67 +2208,65 @@ function Scene({
         volumetricLighting={visualSettings.volumetricLighting}
         volumetricNoiseFrequency={visualSettings.volumetricNoiseFrequency}
       />
-      {composerEnabled ? (
-        <EffectComposer enableNormalPass>
-          {visualSettings.ambientOcclusionMode === 'n8ao' ? (
-            <N8AO
-              aoRadius={visualSettings.ambientOcclusionRadius}
-              color="#000000"
-              denoiseRadius={6}
-              distanceFalloff={1}
-              intensity={visualSettings.ambientOcclusionIntensity * 3}
-              quality="medium"
-            />
-          ) : null}
-          {visualSettings.ambientOcclusionMode === 'ssao' ? (
-            <SSAO
-              bias={0.03}
-              distanceFalloff={0.1}
-              distanceThreshold={1}
-              intensity={visualSettings.ambientOcclusionIntensity * 6}
-              luminanceInfluence={0}
-              radius={visualSettings.ambientOcclusionRadius}
-              rangeFalloff={0.1}
-              rangeThreshold={0.001}
-              rings={6}
-              samples={32}
-            />
-          ) : null}
-          {visualSettings.ssr.enabled ? (
-            <SSREffectPrimitive intensity={visualSettings.ssr.intensity} />
-          ) : null}
-          {visualSettings.bloom.enabled ? (
-            <BloomEffectPrimitive
-              intensity={visualSettings.bloom.intensity}
-              kernelSize={visualSettings.bloom.kernelSize}
-            />
-          ) : null}
-          {visualSettings.depthOfField.enabled ? (
-            <DepthOfField
-              bokehScale={visualSettings.depthOfField.bokehScale}
-              focalLength={visualSettings.depthOfField.focalLength}
-              focusDistance={visualSettings.depthOfField.focusDistance}
-            />
-          ) : null}
-          {visualSettings.lensFlare.enabled ? (
-            <TorchLensFlare
-              intensity={visualSettings.lensFlare.intensity}
-              layout={layout}
-              torchCandelaMultiplier={visualSettings.torchCandelaMultiplier}
-            />
-          ) : null}
-          {visualSettings.vignette.enabled ? (
-            <Vignette darkness={visualSettings.vignette.intensity} />
-          ) : null}
-          <ExposureEffectPrimitive
-            exposure={getRendererExposure(visualSettings.exposureStops)}
+      <EffectComposer enableNormalPass>
+        {ambientOcclusionActive && visualSettings.ambientOcclusionMode === 'n8ao' ? (
+          <N8AO
+            aoRadius={visualSettings.ambientOcclusionRadius}
+            color="#000000"
+            denoiseRadius={6}
+            distanceFalloff={1}
+            intensity={visualSettings.ambientOcclusionIntensity * 3}
+            quality="medium"
           />
-          <ToneMapping
-            mode={TONE_MAPPING_MODES[visualSettings.toneMapping]}
-            resolution={256}
+        ) : null}
+        {ambientOcclusionActive && visualSettings.ambientOcclusionMode === 'ssao' ? (
+          <SSAO
+            bias={0.03}
+            distanceFalloff={0.1}
+            distanceThreshold={1}
+            intensity={visualSettings.ambientOcclusionIntensity * 6}
+            luminanceInfluence={0}
+            radius={visualSettings.ambientOcclusionRadius}
+            rangeFalloff={0.1}
+            rangeThreshold={0.001}
+            rings={6}
+            samples={32}
           />
-        </EffectComposer>
-      ) : null}
+        ) : null}
+        {ssrActive ? (
+          <SSREffectPrimitive intensity={visualSettings.ssr.intensity} />
+        ) : null}
+        {bloomActive ? (
+          <BloomEffectPrimitive
+            intensity={visualSettings.bloom.intensity}
+            kernelSize={visualSettings.bloom.kernelSize}
+          />
+        ) : null}
+        {depthOfFieldActive ? (
+          <DepthOfField
+            bokehScale={visualSettings.depthOfField.bokehScale}
+            focalLength={visualSettings.depthOfField.focalLength}
+            focusDistance={visualSettings.depthOfField.focusDistance}
+          />
+        ) : null}
+        {lensFlareActive ? (
+          <TorchLensFlare
+            intensity={visualSettings.lensFlare.intensity}
+            layout={layout}
+            torchCandelaMultiplier={visualSettings.torchCandelaMultiplier}
+          />
+        ) : null}
+        {vignetteActive ? (
+          <Vignette darkness={visualSettings.vignette.intensity} />
+        ) : null}
+        <ExposureEffectPrimitive
+          exposure={getRendererExposure(visualSettings.exposureStops)}
+        />
+        <ToneMapping
+          mode={TONE_MAPPING_MODES[visualSettings.toneMapping]}
+          resolution={256}
+        />
+      </EffectComposer>
       <FlightRig
         controlsOpen={controlsOpen}
         movementSettings={visualSettings.movement}
@@ -2853,13 +2736,7 @@ export default function App() {
   })
   const [sceneLoaded, setSceneLoaded] = useState(false)
   const [visualSettings, setVisualSettings] = useState(createDefaultVisualSettings)
-  const composerEnabled =
-    visualSettings.ambientOcclusionMode !== 'off' ||
-    visualSettings.ssr.enabled ||
-    visualSettings.bloom.enabled ||
-    visualSettings.depthOfField.enabled ||
-    visualSettings.lensFlare.enabled ||
-    visualSettings.vignette.enabled
+  const composerEnabled = true
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

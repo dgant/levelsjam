@@ -49,6 +49,10 @@
 - Each maze lightmap is source-controlled together with its maze definition.
 - Each torch billboard brightness derives from a 1500 candela torch baseline scaled by the shared torch intensity multiplier.
 - The maze floor and maze walls receive torch lighting from the baked maze lightmap instead of from realtime torch point lights.
+- The maze floor and maze walls integrate the baked torch lightmap directly into their PBR material path rather than drawing it as a separate transparent overlay mesh.
+- The baked torch lightmap follows the same exposure and tone-mapping path as the rest of the wall and floor shading.
+- Each baked maze lightmap stores grayscale torch intensity rather than a pre-tonemapped colored overlay.
+- Each baked maze lightmap is normalized to preserve headroom instead of clipping bright torch-adjacent texels to full white during bake generation.
 - The current scene does not include realtime torch flicker.
 - The current scene does not include realtime torch point lights.
 - The player collides with the ground plane and the walls.
@@ -75,8 +79,10 @@
 - The scene includes screen-space reflections.
 - The scene includes a full-maze volumetric fog volume that spans the ground footprint from 0 to 6 meters in altitude.
 - The scene does not render per-torch cone meshes as the volumetric-fog implementation.
+- The volumetric fog renders as a dense full-maze haze volume rather than as a sparse set of obvious slices or cones.
 - The scene does not use God Rays.
 - Bloom, Depth of Field, Lens Flares, SSR, Ambient Occlusion, and Vignette default to disabled.
+- Bloom, Depth of Field, Lens Flares, and SSR store zero-strength defaults so enabling them at zero does not transiently flash a nonzero effect.
 - The debug panel exposure control defaults to `-4.5`.
 - The debug panel exposes an IBL intensity multiplier across a wide enough range to rebalance the HDRI against the torches without relying on physically calibrated EV semantics.
 - The debug panel exposes a torch candela multiplier across a wide enough range to rebalance the torches against the HDRI without relying on physically calibrated EV semantics.
@@ -143,15 +149,19 @@
 - Exposure acts as a neutral stop-offset presentation control with `0.0` meaning no extra gain.
 - IBL intensity and torch candela controls are the primary balancing controls between the HDRI and torches.
 - Positive exposure values darken the rendered image by stops and negative values brighten it by stops.
+- The renderer uses the postprocessing composer path for the default scene as well as for optional post effects, so enabling an effect does not switch the scene onto a different tone-mapping pipeline.
 - Enabling SSR from the debug panel does not halt rendering or introduce runtime errors.
 - Enabling SSR produces a visible reflection change on reflective scene surfaces.
 - Enabling SSR does not brighten the visible HDRI skybox independently of the reflected surfaces.
+- Enabling SSR with an intensity of `0` behaves as a visual no-op.
 - Selecting `N8AO` or `SSAO` produces a visible ambient-occlusion change around contact areas.
 - Selecting `SSAO` produces a visible ambient-occlusion change around contact areas rather than appearing inert.
 - Enabling lens flares produces a visible flare around visible torches.
 - Increasing or decreasing lens-flare opacity produces a visible corresponding change in the flare.
+- Enabling lens flares with an intensity of `0` behaves as a visual no-op.
 - Lens flares apply to the set of visible torch lights rather than jumping between arbitrary lights frame to frame.
 - Increasing or decreasing volumetric fog or smoke parameters produces a visible corresponding change in the full-scene fog volume.
+- Enabling Depth of Field with a `0` bokeh scale behaves as a visual no-op.
 - The page does not show speculative branding captions, launcher buttons, or click-to-enter copy.
 
 ## Debug Controls

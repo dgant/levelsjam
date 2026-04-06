@@ -4,17 +4,18 @@ export const MAZE_CELL_SIZE = 2
 export const MAZE_WALL_THICKNESS = 0.25
 export const MAZE_WALL_HEIGHT = 2
 export const MAZE_TARGET_COUNT = 5
-export const MAZE_LIGHTMAP_VERSION = 2
+export const MAZE_LIGHTMAP_VERSION = 4
 export const MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS = 0.125
 
 const MAZE_LIGHTMAP_ATLAS_WIDTH = 256
-const MAZE_LIGHTMAP_GROUND_TILE_SIZE = 96
-const MAZE_LIGHTMAP_WALL_TILE_WIDTH = 16
-const MAZE_LIGHTMAP_WALL_TILE_HEIGHT = 16
+const MAZE_LIGHTMAP_GROUND_TILE_SIZE = 128
+const MAZE_LIGHTMAP_WALL_TILE_WIDTH = 32
+const MAZE_LIGHTMAP_WALL_TILE_HEIGHT = 32
 const MAZE_LIGHTMAP_NEUTRAL_TILE_SIZE = 4
 const MAZE_LIGHTMAP_TORCH_DISTANCE = 16
-const MAZE_LIGHTMAP_TORCH_COLOR = [255, 184, 112]
 const MAZE_LIGHTMAP_SAMPLE_EPSILON = 0.02
+const MAZE_LIGHTMAP_TORCH_STRENGTH = 1
+const MAZE_LIGHTMAP_TARGET_PEAK = 0.45
 
 const CARDINAL_DIRECTIONS = [
   { dx: 0, dy: -1, side: 'north' },
@@ -903,7 +904,7 @@ function isTorchOccluded(samplePosition, torchPosition, walls, skipWallId) {
 }
 
 function accumulateTorchLighting(samplePosition, sampleNormal, torchPlacements, walls, skipWallId) {
-  const litColor = [0, 0, 0]
+  let litIntensity = 0
 
   for (const torch of torchPlacements) {
     const toTorchX = torch.torchPosition.x - samplePosition.x
@@ -940,17 +941,15 @@ function accumulateTorchLighting(samplePosition, sampleNormal, torchPlacements, 
     const normalizedDistance = distance / MAZE_LIGHTMAP_TORCH_DISTANCE
     const falloff =
       ((1 - normalizedDistance) ** 2) / (1 + (distance * distance * 0.12))
-    const strength = lambert * falloff * 10
+    const strength = lambert * falloff * MAZE_LIGHTMAP_TORCH_STRENGTH
 
-    litColor[0] += (MAZE_LIGHTMAP_TORCH_COLOR[0] / 255) * strength
-    litColor[1] += (MAZE_LIGHTMAP_TORCH_COLOR[1] / 255) * strength
-    litColor[2] += (MAZE_LIGHTMAP_TORCH_COLOR[2] / 255) * strength
+    litIntensity += strength
   }
 
-  return litColor
+  return litIntensity
 }
 
-function writeLightmapRect(data, atlasWidth, atlasHeight, rect, samplePixel) {
+function writeLightmapRect(data, atlasWidth, rect, samplePixel) {
   for (let row = 0; row < rect.height; row += 1) {
     for (let column = 0; column < rect.width; column += 1) {
       const u = rect.width === 1 ? 0.5 : column / (rect.width - 1)
@@ -1004,12 +1003,64 @@ function bakeMazeLightmap(maze, sconceRadius = MAZE_LIGHTMAP_DEFAULT_SCONCE_RADI
   }
 
   const atlasHeight = getLightmapAtlasHeight(packer)
+  const atlasFloatData = new Float32Array(MAZE_LIGHTMAP_ATLAS_WIDTH * atlasHeight)
+  let peakIntensity = 0
+
+  const writeIntensityRect = (rect, sampleIntensity) => {
+    for (let row = 0; row < rect.height; row += 1) {
+      for (let column = 0; column < rect.width; column += 1) {
+        const u = rect.width === 1 ? 0.5 : column / (rect.width - 1)
+        const v = rect.height === 1 ? 0.5 : row / (rect.height - 1)
+        const intensity = Math.max(0, sampleIntensity(u, v))
+        const pixelOffset =
+          ((rect.y + row) * MAZE_LIGHTMAP_ATLAS_WIDTH) + rect.x + column
+
+        atlasFloatData[pixelOffset] = intensity
+        peakIntensity = Math.max(peakIntensity, intensity)
+      }
+    }
+  }
+
+  writeIntensityRect(
+    groundRect,
+    (u, v) => {
+      const sample = getGroundSample(maze, u, v)
+      return accumulateTorchLighting(
+        sample.position,
+        sample.normal,
+        torchPlacements,
+        walls
+      )
+    }
+  )
+
+  for (const wall of walls) {
+    for (const faceKey of ['nz', 'pz']) {
+      writeIntensityRect(
+        wallRects[wall.id][faceKey],
+        (u, v) => {
+          const sample = getWallFaceSample(wall, faceKey, u, v)
+          return accumulateTorchLighting(
+            sample.position,
+            sample.normal,
+            torchPlacements,
+            walls,
+            wall.id
+          )
+        }
+      )
+    }
+  }
+
   const atlasData = new Uint8Array(MAZE_LIGHTMAP_ATLAS_WIDTH * atlasHeight * 3)
+  const intensityScale =
+    peakIntensity > 0
+      ? MAZE_LIGHTMAP_TARGET_PEAK / peakIntensity
+      : 1
 
   writeLightmapRect(
     atlasData,
     MAZE_LIGHTMAP_ATLAS_WIDTH,
-    atlasHeight,
     neutralRect,
     () => [0, 0, 0]
   )
@@ -1017,43 +1068,34 @@ function bakeMazeLightmap(maze, sconceRadius = MAZE_LIGHTMAP_DEFAULT_SCONCE_RADI
   writeLightmapRect(
     atlasData,
     MAZE_LIGHTMAP_ATLAS_WIDTH,
-    atlasHeight,
     groundRect,
     (u, v) => {
-      const sample = getGroundSample(maze, u, v)
-      const color = accumulateTorchLighting(
-        sample.position,
-        sample.normal,
-        torchPlacements,
-        walls
-      )
-
-      return color.map((channel) =>
-        Math.max(0, Math.min(255, Math.round(channel * 255)))
-      )
+      const pixelOffset =
+        ((groundRect.y + Math.round(v * (groundRect.height - 1))) * MAZE_LIGHTMAP_ATLAS_WIDTH) +
+        groundRect.x +
+        Math.round(u * (groundRect.width - 1))
+      const intensity = Math.min(1, atlasFloatData[pixelOffset] * intensityScale)
+      const channel = Math.round(intensity * 255)
+      return [channel, channel, channel]
     }
   )
 
   for (const wall of walls) {
     for (const faceKey of ['nz', 'pz']) {
+      const rect = wallRects[wall.id][faceKey]
+
       writeLightmapRect(
         atlasData,
         MAZE_LIGHTMAP_ATLAS_WIDTH,
-        atlasHeight,
-        wallRects[wall.id][faceKey],
+        rect,
         (u, v) => {
-          const sample = getWallFaceSample(wall, faceKey, u, v)
-          const color = accumulateTorchLighting(
-            sample.position,
-            sample.normal,
-            torchPlacements,
-            walls,
-            wall.id
-          )
-
-          return color.map((channel) =>
-            Math.max(0, Math.min(255, Math.round(channel * 255)))
-          )
+          const pixelOffset =
+            ((rect.y + Math.round(v * (rect.height - 1))) * MAZE_LIGHTMAP_ATLAS_WIDTH) +
+            rect.x +
+            Math.round(u * (rect.width - 1))
+          const intensity = Math.min(1, atlasFloatData[pixelOffset] * intensityScale)
+          const channel = Math.round(intensity * 255)
+          return [channel, channel, channel]
         }
       )
     }

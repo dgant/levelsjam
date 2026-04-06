@@ -26,7 +26,7 @@ test('generates valid mazes under 100ms', () => {
   assert.equal(maze.height, MAZE_HEIGHT)
   assert.ok(maze.lightmap)
   assert.equal(typeof maze.lightmap.dataBase64, 'string')
-  assert.equal(maze.lightmap.version, 2)
+  assert.equal(maze.lightmap.version, 4)
   assert.ok(maze.generationMs < 100, `generation took ${maze.generationMs}ms`)
 })
 
@@ -36,7 +36,11 @@ test('persists at least five valid mazes', async () => {
 
   assert.ok(files.length >= MAZE_TARGET_COUNT)
 
-  for (const maze of MAZES) {
+  for (const fileName of files) {
+    const module = await import(
+      `${pathToFileURL(path.join(mazeDirectory, fileName)).href}?verify=${Math.random()}`
+    )
+    const maze = module.default
     const validation = validateMaze(maze)
     assert.equal(validation.valid, true, validation.errors.join('\n'))
     assert.ok(maze.lightmap)

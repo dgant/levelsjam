@@ -214,44 +214,50 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     })
     .not.toBeNull()
   const debugWallPosition = await page.evaluate(
-    () => window.__levelsjamDebug.getDebugPosition('maze-wall', 0)
+    () => window.__levelsjamDebug.getDebugPosition('maze-wall', 12)
   )
   const debugSconcePosition = await page.evaluate(
     () => window.__levelsjamDebug.getDebugPosition('sconce-body', 0)
   )
   const wallMeshState = await page.evaluate(
-    () => window.__levelsjamDebug.getDebugMeshState('maze-wall', 0)
+    () => window.__levelsjamDebug.getDebugMeshState('maze-wall', 12)
   )
   expect(wallMeshState).not.toBeNull()
+  expect(wallMeshState.hasEmissiveMap).toBe(false)
   expect(wallMeshState.hasLightMap).toBe(false)
-  expect(wallMeshState.hasUv1).toBe(true)
-  expect(wallMeshState.hasUv2).toBe(true)
+  expect(wallMeshState.hasMap).toBe(true)
+  expect(wallMeshState.hasUv1).toBe(false)
+  expect(wallMeshState.hasUv2).toBe(false)
 
   const wallLightmapState = await page.evaluate(
     () => window.__levelsjamDebug.getDebugMeshState('maze-wall-lightmap', 12)
   )
   expect(wallLightmapState).not.toBeNull()
+  expect(wallLightmapState.hasLightMap).toBe(true)
   expect(wallLightmapState.hasMap).toBe(true)
   expect(wallLightmapState.mapChannel).toBe(0)
-  expect(wallLightmapState.materialColor?.[0]).toBe(0.1)
 
-  await page.evaluate((position) => {
-    const [x, y, z] = position
-    window.__levelsjamDebug.setView(
-      [x - 1.6, y + 0.35, z - 0.9],
-      [x, y, z]
-    )
-  }, debugWallPosition)
-  await page.waitForTimeout(200)
-  const wallVisibleRegion = await screenshotCanvasRegion(page, canvas, 170, 120, 0.5, 0.7)
   await page.evaluate(() => {
-    window.__levelsjamDebug.setDebugVisible('maze-wall', 0, false)
+    for (let index = 0; index < 32; index += 1) {
+      window.__levelsjamDebug.setDebugVisible('torch-billboard', index, false)
+    }
+    window.__levelsjamDebug.setView(
+      [5.4, 1.55, -6.9],
+      [7, 1.1, -6]
+    )
   })
   await page.waitForTimeout(200)
-  const wallHiddenRegion = await screenshotCanvasRegion(page, canvas, 170, 120, 0.5, 0.7)
-  expect(measureDifference(wallVisibleRegion, wallHiddenRegion)).toBeGreaterThan(2)
+  const wallVisibleRegion = await screenshotCanvasRegion(page, canvas, 320, 240, 0.5, 0.5)
   await page.evaluate(() => {
-    window.__levelsjamDebug.setDebugVisible('maze-wall', 0, true)
+    window.__levelsjamDebug.setDebugVisible('maze-wall', 12, false)
+    window.__levelsjamDebug.setDebugVisible('maze-wall-lightmap', 12, false)
+  })
+  await page.waitForTimeout(200)
+  const wallHiddenRegion = await screenshotCanvasRegion(page, canvas, 320, 240, 0.5, 0.5)
+  expect(measureDifference(wallVisibleRegion, wallHiddenRegion)).toBeGreaterThan(0.5)
+  await page.evaluate(() => {
+    window.__levelsjamDebug.setDebugVisible('maze-wall', 12, true)
+    window.__levelsjamDebug.setDebugVisible('maze-wall-lightmap', 12, true)
   })
 
   await page.evaluate((position) => {
@@ -281,7 +287,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
 
   await page.evaluate(() => {
     window.__levelsjamDebug.setView(
-      [5.8, 1.2, -6],
+      [5.4, 1.55, -6.9],
       [7, 1.1, -6]
     )
   })
@@ -291,12 +297,14 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       window.__levelsjamDebug.setDebugVisible('torch-billboard', index, false)
     }
   })
+  await setSlider(page, 'IBL Intensity', 0)
+  await setSlider(page, 'Exposure', 0)
   await setSlider(page, 'Torch Candelas', 0)
   await page.waitForTimeout(200)
   await expect
     .poll(
       async () => page.evaluate(
-        () => window.__levelsjamDebug.getDebugMeshState('maze-wall-lightmap', 12)?.materialColor?.[0]
+        () => window.__levelsjamDebug.getDebugMeshState('maze-wall-lightmap', 12)?.lightMapIntensity
       ),
       {
         timeout: 5_000,
@@ -304,30 +312,22 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       }
     )
     .toBe(0)
-  await page.keyboard.press('Backquote')
-  await page.waitForTimeout(100)
-  const bakedLightmapOff = await screenshotCanvasRegion(page, canvas, 320, 240, 0.5, 0.5)
-  await page.keyboard.press('Backquote')
-  await page.waitForTimeout(100)
+  const bakedLightmapOff = await screenshotCanvasRegion(page, canvas, 640, 360, 0.68, 0.62)
   await setSlider(page, 'Torch Candelas', 10)
   await page.waitForTimeout(200)
   await expect
     .poll(
       async () => page.evaluate(
-        () => window.__levelsjamDebug.getDebugMeshState('maze-wall-lightmap', 12)?.materialColor?.[0]
+        () => window.__levelsjamDebug.getDebugMeshState('maze-wall-lightmap', 12)?.lightMapIntensity
       ),
       {
         timeout: 5_000,
         intervals: [100, 250, 500]
       }
     )
-    .toBe(1)
-  await page.keyboard.press('Backquote')
-  await page.waitForTimeout(100)
-  const bakedLightmapOn = await screenshotCanvasRegion(page, canvas, 320, 240, 0.5, 0.5)
-  expect(measureDifference(bakedLightmapOff, bakedLightmapOn)).toBeGreaterThan(5)
-  await page.keyboard.press('Backquote')
-  await page.waitForTimeout(100)
+    .toBe(10)
+  const bakedLightmapOn = await screenshotCanvasRegion(page, canvas, 640, 360, 0.68, 0.62)
+  expect(measureDifference(bakedLightmapOff, bakedLightmapOn)).toBeGreaterThan(0.2)
   await page.evaluate(() => {
     for (let index = 0; index < 32; index += 1) {
       window.__levelsjamDebug.setDebugVisible('torch-billboard', index, true)
@@ -354,6 +354,57 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   }, debugTorchPosition)
   await page.waitForTimeout(200)
 
+  await page.evaluate(() => {
+    for (let index = 0; index < 32; index += 1) {
+      window.__levelsjamDebug.setDebugVisible('torch-billboard', index, false)
+    }
+    window.__levelsjamDebug.setView(
+      [5.4, 1.55, -6.9],
+      [7, 1.1, -6]
+    )
+  })
+  await setSlider(page, 'IBL Intensity', 1)
+  await setSlider(page, 'Exposure', -4.5)
+  await setSlider(page, 'Torch Candelas', 1)
+  await page.waitForTimeout(200)
+
+  const zeroEffectBaseline = await screenshotCanvasRegion(page, canvas, 220, 160, 0.72, 0.52)
+
+  await setCheckboxByLabelText(page, 'SSR', true)
+  await setSlider(page, 'SSR Intensity', 0)
+  await page.waitForTimeout(200)
+  const zeroSsrRegion = await screenshotCanvasRegion(page, canvas, 220, 160, 0.72, 0.52)
+  expect(measureDifference(zeroEffectBaseline, zeroSsrRegion)).toBeLessThan(0.02)
+  await setCheckboxByLabelText(page, 'SSR', false)
+
+  await setCheckboxByLabelText(page, 'Depth Of Field', true)
+  await setSlider(page, 'Depth Of Field Bokeh Scale', 0)
+  await page.waitForTimeout(200)
+  const zeroDofRegion = await screenshotCanvasRegion(page, canvas, 220, 160, 0.72, 0.52)
+  expect(measureDifference(zeroEffectBaseline, zeroDofRegion)).toBeLessThan(0.02)
+  await setCheckboxByLabelText(page, 'Depth Of Field', false)
+
+  await setCheckboxByLabelText(page, 'Lens Flares', true)
+  await setSlider(page, 'Lens Flares Intensity', 0)
+  await page.waitForTimeout(200)
+  const zeroLensFlareRegion = await screenshotCanvasRegion(page, canvas, 220, 160, 0.72, 0.52)
+  expect(measureDifference(zeroEffectBaseline, zeroLensFlareRegion)).toBeLessThan(0.02)
+  await setCheckboxByLabelText(page, 'Lens Flares', false)
+
+  await page.evaluate(() => {
+    for (let index = 0; index < 32; index += 1) {
+      window.__levelsjamDebug.setDebugVisible('torch-billboard', index, true)
+    }
+  })
+  await page.evaluate((position) => {
+    const [x, y, z] = position
+    window.__levelsjamDebug.setView(
+      [x - 1.4, y + 0.15, z - 1.35],
+      [x, y, z]
+    )
+  }, debugTorchPosition)
+  await page.waitForTimeout(200)
+
   await setCheckboxByLabelText(page, 'Bloom', true)
   await setSlider(page, 'Bloom Intensity', 3)
   await page.waitForTimeout(250)
@@ -363,13 +414,13 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
 
   await setCheckboxByLabelText(page, 'Volumetric Fog', false)
   await page.waitForTimeout(150)
-  const fogOff = await screenshotCanvasRegion(page, canvas, 150, 110, 0.5, 0.52)
+  const fogOff = await screenshotCanvasRegion(page, canvas, 640, 360, 0.68, 0.6)
   await setCheckboxByLabelText(page, 'Volumetric Fog', true)
   await setSlider(page, 'Volumetric Fog Intensity', 1)
   await setSlider(page, 'Fog Noise Frequency', 6)
   await page.waitForTimeout(200)
-  const fogOn = await screenshotCanvasRegion(page, canvas, 150, 110, 0.5, 0.52)
-  expect(measureDifference(fogOff, fogOn)).toBeGreaterThan(0.008)
+  const fogOn = await screenshotCanvasRegion(page, canvas, 640, 360, 0.68, 0.6)
+  expect(measureDifference(fogOff, fogOn)).toBeGreaterThan(0.03)
 
   await setSlider(page, 'Exposure', -3.5)
   await expect

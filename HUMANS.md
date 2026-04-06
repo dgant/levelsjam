@@ -54,6 +54,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the baked lightmap visibly affects the maze walls and maze floor in the rendered scene.
 - Verify baked wall lighting in a wall-facing view, not only in a broad maze overview where the floor can dominate the image.
 - Verify the wall-facing view is on the torch-facing side of the wall, not the dark back face.
+- Verify the baked wall and floor lighting reads as grayscale intensity carried through the wall and ground PBR materials rather than as a colored post-tonemap overlay.
 - Verify the scene does not rely on realtime torch point lights for maze illumination.
 - Verify the fire flipbook runs at the updated faster rate.
 - Verify the tone mapper is `AgX` by default.
@@ -75,14 +76,17 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify enabling SSR visibly changes reflective surfaces.
 - Verify enabling SSR does not make the visible HDRI skybox jump brighter.
 - Verify enabling SSR does not reflect the torch billboards or their transparent pixels.
+- Verify enabling SSR with `0` intensity produces no visible scene change.
 - Verify enabling lens flares produces a visible flare around a visible torch.
 - Verify changing lens-flare opacity visibly changes the flare strength.
 - Verify the smallest nonzero lens-flare setting is still subtle enough to be useful.
 - Verify lens flares do not flicker between arbitrary torches from frame to frame.
+- Verify enabling lens flares with `0` intensity produces no visible scene change.
 - Verify the Bloom kernel-size control produces a visible bloom change.
 - Verify SSAO now produces a visible change where contact darkening should occur.
 - Verify the volumetric-lighting controls produce visible changes in the full-scene fog volume rather than in per-torch cone meshes.
 - Verify the fog volume occupies the maze footprint from ground level up to roughly 6 meters.
+- Verify enabling Depth Of Field with `0` bokeh scale produces no visible scene change.
 - Verify each control row in the visual controls panel keeps the value, label, and control on one line in that order.
 - Verify the FPS counter appears in the top-right corner and includes the Git revision and revision timestamp.
 - Verify pressing backquote opens the visual controls panel.
@@ -96,7 +100,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Treat the temporary `test:perf` disablement as intentional until the static baked-lightmap torch-lighting evaluation ends.
 - Keep `npm run test:unit` under 20 seconds.
 - Keep the prepared smoke runner `npm run test:smoke:runner` under 1 minute after a single `npm run build:pages`.
-- Latest measured benchmark on April 5, 2026: `node scripts/benchmark-startup.cjs` reached the first bright frame in about `541.7ms` on the background dev server, `npm run test:unit` took about `9410ms`, `npm run test:perf:runner` is intentionally skipped during the static baked-lightmap evaluation, and the prepared `npm run test:smoke:runner` took about `59445ms`.
+- Latest measured benchmark on April 6, 2026: `npm run build` took about `3.1s`, `npm run test:unit` took about `55.1s`, `npm run test:perf:runner` remains intentionally skipped during the static baked-lightmap evaluation, and `npm run test:smoke` took about `1.4m` including `build:pages`.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.
