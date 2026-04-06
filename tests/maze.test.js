@@ -24,6 +24,9 @@ test('generates valid mazes under 100ms', () => {
   assert.equal(validation.valid, true, validation.errors.join('\n'))
   assert.equal(maze.width, MAZE_WIDTH)
   assert.equal(maze.height, MAZE_HEIGHT)
+  assert.ok(maze.lightmap)
+  assert.equal(typeof maze.lightmap.dataBase64, 'string')
+  assert.equal(maze.lightmap.version, 1)
   assert.ok(maze.generationMs < 100, `generation took ${maze.generationMs}ms`)
 })
 
@@ -36,6 +39,7 @@ test('persists at least five valid mazes', async () => {
   for (const maze of MAZES) {
     const validation = validateMaze(maze)
     assert.equal(validation.valid, true, validation.errors.join('\n'))
+    assert.ok(maze.lightmap)
   }
 })
 
@@ -54,9 +58,12 @@ test('deletes invalid maze files and regenerates replacements', async () => {
       'export default { width: 4, height: 4, opening: { cell: { x: 0, y: 0 }, side: "north" }, openEdges: [], lights: [] }\n'
     )
 
-    const files = await ensureMazeFiles({ directory: temporaryDirectory })
+    const files = await ensureMazeFiles({
+      directory: temporaryDirectory,
+      targetCount: 1
+    })
 
-    assert.ok(files.length >= MAZE_TARGET_COUNT)
+    assert.ok(files.length >= 1)
     for (const fileName of files) {
       const module = await import(
         `${pathToFileURL(path.join(temporaryDirectory, fileName)).href}?verify=${Math.random()}`
@@ -74,11 +81,17 @@ test('converts persisted mazes into wall segments and torch placements', () => {
 
   assert.ok(layout.walls.length > 0)
   assert.ok(layout.lights.length > 0)
+  assert.ok(layout.maze.lightmap)
+  assert.equal(
+    Buffer.from(layout.maze.lightmap.dataBase64, 'base64').length,
+    layout.maze.lightmap.atlasWidth * layout.maze.lightmap.atlasHeight * 3
+  )
 
   for (const wall of layout.walls) {
     assert.ok(wall.bounds.maxY > wall.bounds.minY)
     assert.ok(wall.bounds.maxX > wall.bounds.minX)
     assert.ok(wall.bounds.maxZ > wall.bounds.minZ)
+    assert.ok(layout.maze.lightmap.wallRects[wall.id])
   }
 
   for (const light of layout.lights) {

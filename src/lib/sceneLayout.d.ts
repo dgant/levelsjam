@@ -24,6 +24,22 @@ export type MazeLayout = {
     torchPosition: Vector3Like
   }>
   maze: {
+    lightmap: {
+      atlasHeight: number
+      atlasWidth: number
+      bakeMs: number
+      dataBase64: string
+      groundRect: { height: number; width: number; x: number; y: number }
+      neutralRect: { height: number; width: number; x: number; y: number }
+      version: number
+      wallRects: Record<
+        string,
+        {
+          nz: { height: number; width: number; x: number; y: number }
+          pz: { height: number; width: number; x: number; y: number }
+        }
+      >
+    }
     height: number
     id: string
     width: number
@@ -42,6 +58,7 @@ export declare const PLAYER_HEIGHT: number
 export declare const PLAYER_EYE_HEIGHT: number
 export declare const GROUND_Y: number
 export declare const GROUND_SIZE: number
+export declare const MAZE_CELL_SIZE: number
 export declare const WALL_HEIGHT: number
 export declare const WALL_LENGTH: number
 export declare const WALL_WIDTH: number

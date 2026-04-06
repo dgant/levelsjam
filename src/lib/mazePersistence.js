@@ -2,10 +2,12 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
+  MAZE_LIGHTMAP_VERSION,
   MAZE_HEIGHT,
   MAZE_TARGET_COUNT,
   MAZE_WIDTH,
   generateMaze,
+  getMazeWallSegments,
   getMazeSignature,
   serializeMazeModule,
   validateMaze
@@ -51,6 +53,15 @@ function writeMazeIndex(directory, fileNames) {
   fs.writeFileSync(path.join(directory, 'index.js'), contents)
 }
 
+function needsMazeRewrite(maze) {
+  if (maze.lightmap?.version !== MAZE_LIGHTMAP_VERSION) {
+    return true
+  }
+
+  const walls = getMazeWallSegments(maze)
+  return walls.some((wall) => !maze.lightmap?.wallRects?.[wall.id])
+}
+
 export async function ensureMazeFiles({
   directory,
   targetCount = MAZE_TARGET_COUNT
@@ -63,14 +74,22 @@ export async function ensureMazeFiles({
 
   for (const fileName of fileNames) {
     const filePath = path.join(directory, fileName)
-    const maze = await importMazeModule(filePath)
+    let maze = await importMazeModule(filePath)
+    if (maze.width !== MAZE_WIDTH || maze.height !== MAZE_HEIGHT) {
+      fs.rmSync(filePath, { force: true })
+      continue
+    }
+
+    const shouldRewrite = needsMazeRewrite(maze)
+    if (shouldRewrite) {
+      maze = generateMaze(maze.seed ?? Date.now())
+      maze.id = path.basename(fileName, '.js')
+      fs.writeFileSync(filePath, serializeMazeModule(maze))
+    }
+
     const validation = validateMaze(maze)
 
-    if (
-      !validation.valid ||
-      maze.width !== MAZE_WIDTH ||
-      maze.height !== MAZE_HEIGHT
-    ) {
+    if (!validation.valid) {
       fs.rmSync(filePath, { force: true })
       continue
     }

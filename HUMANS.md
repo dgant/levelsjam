@@ -1,7 +1,7 @@
 # How To Work On This Project
 
 ## Current State
-The repository contains a runnable browser game prototype for GitHub Pages. The intended build serves a three.js scene with immediate mouse-look, WASD movement, hold-space vertical thrust, a local Poly Haven `overcast_soil` HDRI used for the visible skybox and IBL, a large `puddle-ground` floor plane, one randomly selected persisted maze built from `stone-wall-29` wall meshes, maze-mounted metal sconces with animated torch billboards, and a backquote visual-controls panel with exposure, IBL intensity, torch candela, torch flicker, ambient-occlusion mode, tone-mapper, post-effect controls, and build metadata in the FPS overlay.
+The repository contains a runnable browser game prototype for GitHub Pages. The intended build serves a three.js scene with immediate mouse-look, WASD movement, hold-space vertical thrust, a local Poly Haven `overcast_soil` HDRI used for the visible skybox and IBL, a large `puddle-ground` floor plane, one randomly selected persisted maze built from `stone-wall-29` wall meshes, maze-mounted metal sconces with animated torch billboards, baked per-maze torch lightmaps, and a backquote visual-controls panel with exposure, IBL intensity, torch candela, ambient-occlusion mode, tone-mapper, post-effect controls, and build metadata in the FPS overlay.
 
 ## Local Setup
 - Install Node.js 20 or newer.
@@ -24,8 +24,8 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Run `npm run test:smoke` to exercise the built page through Playwright.
 - Run `npm run test:smoke:runner` when `npm run build:pages` has already prepared the root-published bundle.
 - Treat a scene that shows only the HDRI skybox and flame billboards as a render failure; the smoke test now checks that a real maze wall writes visible beauty-pass color.
-- `npm run test:perf` is temporarily disabled while the baked-all-shadows lighting configuration is under evaluation.
-- Run the maze-generation validation script or its test entrypoint whenever maze files or maze rules change.
+- `npm run test:perf` is temporarily disabled while the static baked-lightmap torch-lighting evaluation is under way.
+- Run the maze-generation validation script or its test entrypoint whenever maze files or maze rules change so persisted mazes keep their baked lightmaps in sync.
 - Verify the main page renders the 3D scene without console errors.
 - Verify the loading overlay appears with `MINOTAUR` and `Entering the labyrinth...` before the scene fades in.
 - Verify `W`, `A`, `S`, and `D` move the camera.
@@ -50,16 +50,12 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the sconces are visibly readable outside the maze walls rather than disappearing into the surface behind them.
 - Verify the torch billboards animate and stay camera-facing even on walls whose parent groups are rotated.
 - Verify the visible flame fills the 0.5m billboard and that the billboard bottom edge is flush with the sconce top.
-- Verify each maze light location has a warm torch point light and the lights cast shadows.
-- Verify torch point lights remain enabled with a 16m light distance.
-- Verify torch point lights keep shadows enabled instead of being camera-distance culled.
-- Verify every torch shadow map uses the same fixed resolution.
-- Verify torch shadow maps bake once and then stop updating while the scene remains static.
-- Verify the default `Torch Flicker` value is `0.15`.
-- Verify the torch flicker runs at the updated faster rate and that reducing `Torch Flicker` toward `0.00` steadies the torch brightness.
+- Verify each persisted maze includes baked torch lightmap data.
+- Verify the baked lightmap visibly affects the maze walls and maze floor in the rendered scene.
+- Verify the scene does not rely on realtime torch point lights for maze illumination.
 - Verify the fire flipbook runs at the updated faster rate.
 - Verify the tone mapper is `AgX` by default.
-- Verify the visual controls panel exposes `Exposure`, `IBL Intensity`, `Torch Candelas`, `Torch Flicker`, `Ambient Occlusion`, `AO Intensity`, the tone mapper, and the enabled/intensity controls for Bloom, Depth Of Field, Lens Flares, SSR, and Vignette.
+- Verify the visual controls panel exposes `Exposure`, `IBL Intensity`, `Torch Candelas`, `Ambient Occlusion`, `AO Intensity`, the tone mapper, and the enabled/intensity controls for Bloom, Depth Of Field, Lens Flares, SSR, and Vignette.
 - Verify the visual controls panel also exposes `Bloom Kernel`, `AO Radius`, `DOF Focus Distance`, `DOF Focal Length`, `Depth Of Field Bokeh Scale`, and the volumetric fog controls.
 - Verify the visual controls panel exposes `Move Speed`, `Accel Distance`, and `Decel Distance`.
 - Verify the `DOF Focus Distance` slider reaches 8 meters.
@@ -92,13 +88,13 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify opening the panel releases mouse lock and clicking inside the panel does not relock the pointer.
 - Verify the loading subtitle width stays visually stable while the animated dots change.
 - Verify the loaded scene uses one of the persisted maze files instead of the previous random wall field.
-- Verify the repository contains at least five valid maze files and that maze validation remains under 100ms per generated maze.
+- Verify the repository contains at least five valid maze files, that each maze file includes baked lightmap data, and that maze topology generation remains under 100ms before the later bake step.
 - Benchmark startup with `npm run bench:startup` and test duration with `npm run bench:tests` before handoff.
 - Treat duration regressions as blocking issues.
-- Treat the temporary `test:perf` disablement as intentional until the baked-all-shadows lighting evaluation ends.
+- Treat the temporary `test:perf` disablement as intentional until the static baked-lightmap torch-lighting evaluation ends.
 - Keep `npm run test:unit` under 20 seconds.
 - Keep the prepared smoke runner `npm run test:smoke:runner` under 1 minute after a single `npm run build:pages`.
-- Latest measured benchmark on April 5, 2026: `node scripts/benchmark-startup.cjs` reached the first bright frame in about `268.2ms` on the background dev server, `npm run test:unit` took about `4626ms`, `npm run test:perf:runner` took about `5100ms`, and the prepared `npm run test:smoke:runner` took about `28479ms`.
+- Latest measured benchmark on April 5, 2026: `node scripts/benchmark-startup.cjs` reached the first bright frame in about `541.7ms` on the background dev server, `npm run test:unit` took about `9410ms`, `npm run test:perf:runner` is intentionally skipped during the static baked-lightmap evaluation, and the prepared `npm run test:smoke:runner` took about `59445ms`.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.

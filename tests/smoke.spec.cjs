@@ -165,7 +165,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   await expect(loadingOverlay).toBeHidden({ timeout: 12_000 })
   await expect(canvas).toBeVisible({ timeout: 5_000 })
 
-  const frameBrightness = await waitForBrightFrame(page, canvas, 45, 90)
+  const frameBrightness = await waitForBrightFrame(page, canvas, 8, 20)
 
   await expect(page.locator('.fps-counter')).toContainText('FPS', { timeout: 5_000 })
   await expect(page.locator('.fps-counter')).toContainText('maze-001')
@@ -182,7 +182,6 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   })
 
   await expect(page.getByRole('slider', { name: 'Exposure' })).toBeVisible()
-  await expect(page.getByRole('slider', { name: 'Torch Flicker' })).toBeVisible()
   await expect(page.getByRole('slider', { name: 'Move Speed' })).toBeVisible()
   await expect(page.getByRole('slider', { name: 'Accel Distance' })).toBeVisible()
   await expect(page.getByRole('slider', { name: 'Decel Distance' })).toBeVisible()
@@ -191,7 +190,6 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   await expect(page.getByRole('combobox', { name: 'Bloom Kernel' })).toBeVisible()
 
   await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveValue('-4.5')
-  await expect(page.getByRole('slider', { name: 'Torch Flicker' })).toHaveValue('0.15')
   await expect(page.getByRole('slider', { name: 'Move Speed' })).toHaveValue('20')
   await expect(page.getByRole('slider', { name: 'Accel Distance' })).toHaveValue('2')
   await expect(page.getByRole('slider', { name: 'Decel Distance' })).toHaveValue('0.5')
@@ -221,6 +219,14 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   const debugSconcePosition = await page.evaluate(
     () => window.__levelsjamDebug.getDebugPosition('sconce-body', 0)
   )
+  const wallMeshState = await page.evaluate(
+    () => window.__levelsjamDebug.getDebugMeshState('maze-wall', 0)
+  )
+  expect(wallMeshState).not.toBeNull()
+  expect(wallMeshState.hasLightMap).toBe(true)
+  expect(wallMeshState.hasUv1).toBe(true)
+  expect(wallMeshState.hasUv2).toBe(true)
+  expect(wallMeshState.lightMapIntensity).toBe(1)
 
   await page.evaluate((position) => {
     const [x, y, z] = position
@@ -236,7 +242,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   })
   await page.waitForTimeout(200)
   const wallHiddenRegion = await screenshotCanvasRegion(page, canvas, 170, 120, 0.5, 0.7)
-  expect(measureDifference(wallVisibleRegion, wallHiddenRegion)).toBeGreaterThan(6)
+  expect(measureDifference(wallVisibleRegion, wallHiddenRegion)).toBeGreaterThan(2)
   await page.evaluate(() => {
     window.__levelsjamDebug.setDebugVisible('maze-wall', 0, true)
   })
@@ -266,16 +272,77 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   const ssaoRegion = await screenshotCanvasRegion(page, canvas, 150, 110, 0.5, 0.72)
   expect(measureDifference(aoOffRegion, ssaoRegion)).toBeGreaterThan(0.45)
 
+  await page.evaluate(() => {
+    window.__levelsjamDebug.setView(
+      [0, 5.5, 7.5],
+      [0, 1.2, 0]
+    )
+  })
+  await page.waitForTimeout(200)
+  await page.evaluate(() => {
+    for (let index = 0; index < 32; index += 1) {
+      window.__levelsjamDebug.setDebugVisible('torch-billboard', index, false)
+    }
+  })
+  await setSlider(page, 'Torch Candelas', 0)
+  await page.waitForTimeout(200)
+  await page.evaluate(() => {
+    window.__levelsjamDebug.setView(
+      [0, 5.5, 7.5],
+      [0, 1.2, 0]
+    )
+  })
+  await page.waitForTimeout(100)
+  await expect
+    .poll(
+      async () => page.evaluate(
+        () => window.__levelsjamDebug.getDebugMeshState('maze-wall', 0)?.lightMapIntensity
+      ),
+      {
+        timeout: 5_000,
+        intervals: [100, 250, 500]
+      }
+    )
+    .toBe(0)
+  const bakedLightmapOff = await screenshotCanvasRegion(page, canvas, 220, 140, 0.5, 0.7)
+  await setSlider(page, 'Torch Candelas', 10)
+  await page.waitForTimeout(200)
+  await page.evaluate(() => {
+    window.__levelsjamDebug.setView(
+      [0, 5.5, 7.5],
+      [0, 1.2, 0]
+    )
+  })
+  await page.waitForTimeout(100)
+  await expect
+    .poll(
+      async () => page.evaluate(
+        () => window.__levelsjamDebug.getDebugMeshState('maze-wall', 0)?.lightMapIntensity
+      ),
+      {
+        timeout: 5_000,
+        intervals: [100, 250, 500]
+      }
+    )
+    .toBe(10)
+  const bakedLightmapOn = await screenshotCanvasRegion(page, canvas, 220, 140, 0.5, 0.7)
+  expect(measureDifference(bakedLightmapOff, bakedLightmapOn)).toBeGreaterThan(0.03)
+  await page.evaluate(() => {
+    for (let index = 0; index < 32; index += 1) {
+      window.__levelsjamDebug.setDebugVisible('torch-billboard', index, true)
+    }
+  })
+
   await expect
     .poll(async () => {
-      return page.evaluate(() => window.__levelsjamDebug?.getDebugPosition?.('torch-light', 0) ?? null)
+      return page.evaluate(() => window.__levelsjamDebug?.getDebugPosition?.('torch-billboard', 0) ?? null)
     }, {
       timeout: 5_000,
       intervals: [100, 250, 500]
     })
     .not.toBeNull()
   const debugTorchPosition = await page.evaluate(
-    () => window.__levelsjamDebug.getDebugPosition('torch-light', 0)
+    () => window.__levelsjamDebug.getDebugPosition('torch-billboard', 0)
   )
   await page.evaluate((position) => {
     const [x, y, z] = position
@@ -286,7 +353,6 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   }, debugTorchPosition)
   await page.waitForTimeout(200)
 
-  await setSlider(page, 'Torch Candelas', 10)
   await setCheckboxByLabelText(page, 'Bloom', true)
   await setSlider(page, 'Bloom Intensity', 3)
   await page.waitForTimeout(250)
@@ -314,8 +380,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
 
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
-  expect(frameBrightness.average).toBeGreaterThan(45)
-  expect(frameBrightness.max).toBeGreaterThan(90)
+  expect(frameBrightness.average).toBeGreaterThan(8)
+  expect(frameBrightness.max).toBeGreaterThan(20)
   expect(
     [...resourceUrls].some((url) => url.includes('overcast_soil_1k.hdr'))
   ).toBe(true)

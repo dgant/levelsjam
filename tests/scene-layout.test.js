@@ -28,6 +28,7 @@ test('returns one of the available mazes when selecting a random layout', () => 
   assert.equal(layout.maze.id, AVAILABLE_MAZES[0].id)
   assert.ok(layout.walls.length > 0)
   assert.ok(layout.lights.length > 0)
+  assert.ok(layout.maze.lightmap)
 })
 
 test('uses the requested wall mesh dimensions for maze wall segments', () => {

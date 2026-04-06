@@ -45,3 +45,5 @@
 - In this repository, sparse keyboard-state maps must be converted with `Boolean(...)` first. Using `Number(keys.current.KeyW)` when the key is absent yields `NaN`, which can corrupt the entire player and camera position on the first frame.
 - A non-black clear color is not enough proof that the scene rendered. Smoke brightness checks should sample an area expected to contain scene content, not just a background that can pass while the world is invisible.
 - In this repository, "HDRI skybox and flame billboards render, but lit scene meshes do not" is a strong sign that the lit-material shader path is the problem. Check the real maze wall in the beauty pass, and simplify the lit material variant before assuming the textures or mesh placement are wrong.
+- In this repository, per-maze baked torch lightmaps are a practical way to keep full PBR wall and ground materials without exploding the forward-renderer shadow sampler count.
+- In this repository's current three.js stack, keeping the baked torch-light contribution visibly inspectable was more reliable with an explicit additive overlay pass than with the built-in material `lightMap` response alone.

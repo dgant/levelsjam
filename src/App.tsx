@@ -11,26 +11,34 @@ import { LensFlareEffect } from '@react-three/postprocessing'
 import {
   AdditiveBlending,
   BasicShadowMap,
+  BoxGeometry,
+  BufferAttribute,
   CanvasTexture,
   Color,
+  DataTexture,
   DoubleSide,
   EquirectangularReflectionMapping,
   Euler,
+  LinearFilter,
   ACESFilmicToneMapping,
   AgXToneMapping,
   CineonToneMapping,
   LinearToneMapping,
+  Group,
   Mesh,
   NoToneMapping,
   NeutralToneMapping,
   PMREMGenerator,
+  PlaneGeometry,
   Quaternion,
   ReinhardToneMapping,
   RepeatWrapping,
+  RGBFormat,
   SRGBColorSpace,
   Texture,
   TextureLoader,
   Uniform,
+  UnsignedByteType,
   Vector2,
   Vector3
 } from 'three'
@@ -56,17 +64,12 @@ import {
   DEFAULT_EXPOSURE_STOPS,
   DEFAULT_IBL_INTENSITY_MULTIPLIER,
   DEFAULT_TORCH_CANDELA_MULTIPLIER,
-  DEFAULT_TORCH_FLICKER_AMOUNT,
   MAX_IBL_INTENSITY_MULTIPLIER,
   MAX_TORCH_CANDELA_MULTIPLIER,
-  MAX_TORCH_FLICKER_AMOUNT,
   MIN_IBL_INTENSITY_MULTIPLIER,
   MIN_TORCH_CANDELA_MULTIPLIER,
-  MIN_TORCH_FLICKER_AMOUNT,
   getHdrLightingIntensity,
-  getRendererExposure,
-  getTorchFlickerFactor,
-  scalePhotometricIntensity
+  getRendererExposure
 } from './lib/lightingCalibration.js'
 import {
   getCameraPosition,
@@ -79,6 +82,7 @@ import {
   updateVerticalVelocity
 } from './lib/playerMotion.js'
 import {
+  MAZE_CELL_SIZE,
   GROUND_SIZE,
   GROUND_Y,
   getMazeLayoutById,
@@ -145,7 +149,6 @@ const LOADING_FADE_DURATION_MS = 2000
 const FIRE_FLIPBOOK_GRID = 6
 const FIRE_FLIPBOOK_FRAME_COUNT = FIRE_FLIPBOOK_GRID * FIRE_FLIPBOOK_GRID
 const FIRE_FLIPBOOK_DURATION_SECONDS = 0.5
-const TORCH_FLICKER_SPEED = 2
 const FIRE_FLIPBOOK_FRAME_CROP = {
   maxX: 0.6187683284457478,
   maxY: 0.8123167155425219,
@@ -158,8 +161,7 @@ const FIRE_FLIPBOOK_CROP_HEIGHT =
   FIRE_FLIPBOOK_FRAME_CROP.maxY - FIRE_FLIPBOOK_FRAME_CROP.minY
 const FIRE_COLOR = new Color('#ffb168')
 const FIRE_BILLBOARD_INTENSITY_SCALE = 1 / TORCH_BASE_CANDELA
-const TORCH_SHADOW_MAP_SIZE = 512
-const TORCH_LIGHT_DISTANCE = 16
+const LIGHTMAP_OVERLAY_INTENSITY_SCALE = 12
 const LENS_FLARE_COLOR_GAIN_SCALE = 8
 const FOG_VOLUME_HEIGHT = 6
 const FOG_VOLUME_SLICE_COUNT = 6
@@ -295,7 +297,6 @@ type VisualSettings = {
   exposureStops: number
   iblIntensity: number
   torchCandelaMultiplier: number
-  torchFlickerAmount: number
   toneMapping: ToneMappingMode
   bloom: BloomSettings
   depthOfField: DepthOfFieldSettings
@@ -321,7 +322,6 @@ type ScalarSettingKey =
   | 'movementDecelerationDistance'
   | 'movementMaxHorizontalSpeedMph'
   | 'torchCandelaMultiplier'
-  | 'torchFlickerAmount'
   | 'volumetricNoiseFrequency'
 
 type PbrMaps = {
@@ -343,20 +343,14 @@ type BenchmarkResult = {
 
 type MazeLayout = ReturnType<typeof getRandomMazeLayout>
 
-type TorchLightHandle = {
-  castShadow: boolean
-  distance: number
-  intensity: number
-  shadow: {
-    autoUpdate: boolean
-    mapSize: {
-      height: number
-      set: (width: number, height: number) => void
-      width: number
-    }
-    needsUpdate: boolean
-  }
+type LightmapRect = {
+  height: number
+  width: number
+  x: number
+  y: number
 }
+
+type MazeLightmap = MazeLayout['maze']['lightmap']
 
 type StandardPbrTextureUrls = {
   ao?: string
@@ -387,7 +381,6 @@ function createDefaultVisualSettings(): VisualSettings {
     exposureStops: DEFAULT_EXPOSURE_STOPS,
     iblIntensity: DEFAULT_IBL_INTENSITY_MULTIPLIER,
     torchCandelaMultiplier: DEFAULT_TORCH_CANDELA_MULTIPLIER,
-    torchFlickerAmount: DEFAULT_TORCH_FLICKER_AMOUNT,
     toneMapping: 'agx',
     bloom: { enabled: false, intensity: 0.7, kernelSize: 'large' },
     depthOfField: {
@@ -559,14 +552,124 @@ function useFireFlipbookTexture() {
   return texture
 }
 
-function getTorchNoise(time: number, seed: number) {
-  const scaledTime = time * TORCH_FLICKER_SPEED
-  const oscillation =
-    Math.sin((scaledTime * 7.3) + seed) * 0.45 +
-    Math.sin((scaledTime * 12.1) + (seed * 1.7)) * 0.35 +
-    Math.sin((scaledTime * 19.3) + (seed * 0.6)) * 0.2
+function decodeBase64Bytes(base64: string) {
+  const decoded = window.atob(base64)
+  const bytes = new Uint8Array(decoded.length)
 
-  return Math.max(0, Math.min(1, (oscillation * 0.5) + 0.5))
+  for (let index = 0; index < decoded.length; index += 1) {
+    bytes[index] = decoded.charCodeAt(index)
+  }
+
+  return bytes
+}
+
+function useMazeLightmapTexture(lightmap: MazeLightmap) {
+  const texture = useMemo(() => {
+    const data = decodeBase64Bytes(lightmap.dataBase64)
+    const nextTexture = new DataTexture(
+      data,
+      lightmap.atlasWidth,
+      lightmap.atlasHeight,
+      RGBFormat,
+      UnsignedByteType
+    )
+
+    nextTexture.channel = 2
+    nextTexture.flipY = true
+    nextTexture.generateMipmaps = false
+    nextTexture.magFilter = LinearFilter
+    nextTexture.minFilter = LinearFilter
+    nextTexture.needsUpdate = true
+
+    return nextTexture
+  }, [lightmap])
+
+  useEffect(
+    () => () => {
+      texture.dispose()
+    },
+    [texture]
+  )
+
+  return texture
+}
+
+function mapUvToLightmapRect(
+  u: number,
+  v: number,
+  rect: LightmapRect,
+  atlasWidth: number,
+  atlasHeight: number
+) {
+  const x =
+    rect.x + 0.5 + (u * Math.max(0, rect.width - 1))
+  const y =
+    rect.y + 0.5 + (v * Math.max(0, rect.height - 1))
+
+  return {
+    u: x / atlasWidth,
+    v: y / atlasHeight
+  }
+}
+
+function createGroundLightmapGeometry(layout: MazeLayout) {
+  const geometry = new PlaneGeometry(
+    layout.maze.width * MAZE_CELL_SIZE,
+    layout.maze.height * MAZE_CELL_SIZE
+  )
+  const uv = geometry.getAttribute('uv')
+  const uv1 = new Float32Array(uv.count * 2)
+
+  for (let index = 0; index < uv.count; index += 1) {
+    const mapped = mapUvToLightmapRect(
+      uv.getX(index),
+      uv.getY(index),
+      layout.maze.lightmap.groundRect,
+      layout.maze.lightmap.atlasWidth,
+      layout.maze.lightmap.atlasHeight
+    )
+
+    uv1[(index * 2)] = mapped.u
+    uv1[(index * 2) + 1] = mapped.v
+  }
+
+  geometry.setAttribute('uv', new BufferAttribute(uv1.slice(), 2))
+  geometry.setAttribute('uv1', new BufferAttribute(uv1, 2))
+  geometry.setAttribute('uv2', new BufferAttribute(uv1.slice(), 2))
+  return geometry
+}
+
+function createWallLightmapGeometry(wall: MazeLayout['walls'][number], lightmap: MazeLightmap) {
+  const geometry = new BoxGeometry(WALL_LENGTH, WALL_HEIGHT, WALL_WIDTH)
+  const uv = geometry.getAttribute('uv')
+  const normal = geometry.getAttribute('normal')
+  const uv1 = new Float32Array(uv.count * 2)
+  const wallRects = lightmap.wallRects[wall.id]
+
+  for (let index = 0; index < uv.count; index += 1) {
+    const normalX = normal.getX(index)
+    const normalZ = normal.getZ(index)
+    const rect =
+      normalZ > 0.5
+        ? wallRects.pz
+        : normalZ < -0.5
+          ? wallRects.nz
+          : lightmap.neutralRect
+    const mapped = mapUvToLightmapRect(
+      uv.getX(index),
+      uv.getY(index),
+      rect,
+      lightmap.atlasWidth,
+      lightmap.atlasHeight
+    )
+
+    uv1[(index * 2)] = mapped.u
+    uv1[(index * 2) + 1] = mapped.v
+  }
+
+  geometry.setAttribute('uv1', new BufferAttribute(uv1, 2))
+  geometry.setAttribute('uv2', new BufferAttribute(uv1.slice(), 2))
+  return geometry
 }
 
 function LoadingOverlay({
@@ -743,35 +846,83 @@ function EnvironmentLighting({
   return null
 }
 
-function Ground() {
+function Ground({
+  layout,
+  lightmapTexture,
+  torchCandelaMultiplier
+}: {
+  layout: MazeLayout
+  lightmapTexture: Texture
+  torchCandelaMultiplier: number
+}) {
   const puddle = usePuddleTextures(PUDDLE_TEXTURE_REPEAT)
+  const mazeGroundGeometry = useMemo(
+    () => createGroundLightmapGeometry(layout),
+    [layout]
+  )
 
   return (
-    <mesh
-      position={[0, GROUND_Y, 0]}
-      receiveShadow
-      rotation-x={-Math.PI / 2}
-    >
-      <planeGeometry args={[GROUND_SIZE, GROUND_SIZE]} />
-      <meshPhysicalMaterial
-        {...puddle}
-        bumpScale={0.08}
-        clearcoat={1}
-        clearcoatRoughness={0.1}
-        metalness={0}
-        roughness={0.45}
-      />
-    </mesh>
+    <>
+      <mesh
+        position={[0, GROUND_Y, 0]}
+        receiveShadow
+        rotation-x={-Math.PI / 2}
+      >
+        <planeGeometry args={[GROUND_SIZE, GROUND_SIZE]} />
+        <meshPhysicalMaterial
+          {...puddle}
+          bumpScale={0.08}
+          clearcoat={1}
+          clearcoatRoughness={0.1}
+          metalness={0}
+          roughness={0.45}
+        />
+      </mesh>
+      <mesh
+        position={[0, GROUND_Y + 0.002, 0]}
+        receiveShadow
+        rotation-x={-Math.PI / 2}
+      >
+        <primitive
+          attach="geometry"
+          object={mazeGroundGeometry}
+        />
+        <LightmapOverlayMaterial
+          intensity={torchCandelaMultiplier}
+          lightmapTexture={lightmapTexture}
+        />
+      </mesh>
+    </>
+  )
+}
+
+function LightmapOverlayMaterial({
+  intensity,
+  lightmapTexture
+}: {
+  intensity: number
+  lightmapTexture: Texture
+}) {
+  return (
+    <meshBasicMaterial
+      blending={AdditiveBlending}
+      color={new Color().setScalar(intensity * LIGHTMAP_OVERLAY_INTENSITY_SCALE)}
+      depthWrite={false}
+      map={lightmapTexture}
+      polygonOffset
+      polygonOffsetFactor={-1}
+      polygonOffsetUnits={-1}
+      toneMapped={false}
+      transparent
+    />
   )
 }
 
 function TorchBillboard({
-  flickerAmount,
   position,
   seed,
   torchCandelaMultiplier
 }: {
-  flickerAmount: number
   position: [number, number, number]
   seed: number
   torchCandelaMultiplier: number
@@ -814,11 +965,9 @@ function TorchBillboard({
       ((row + FIRE_FLIPBOOK_FRAME_CROP.maxY) / FIRE_FLIPBOOK_GRID)
 
     if (material.current) {
-      const noise = getTorchNoise(elapsed, seed)
       const brightness =
         TORCH_BASE_CANDELA *
-        torchCandelaMultiplier *
-        getTorchFlickerFactor(noise, flickerAmount)
+        torchCandelaMultiplier
       const billboardMaterial = material.current.material as {
         color: Color
       }
@@ -853,72 +1002,10 @@ function TorchBillboard({
   )
 }
 
-function TorchLight({
-  flickerAmount,
-  seed,
-  torchCandelaMultiplier,
-  position
-}: {
-  flickerAmount: number
-  seed: number
-  torchCandelaMultiplier: number
-  position: [number, number, number]
-}) {
-  const light = useRef<TorchLightHandle | null>(null)
-
-  useFrame((state) => {
-    const noise = getTorchNoise(state.clock.getElapsedTime(), seed)
-    const lightRef = light.current
-
-    if (!lightRef) {
-      return
-    }
-
-    const brightness =
-      TORCH_BASE_CANDELA *
-      torchCandelaMultiplier *
-      getTorchFlickerFactor(noise, flickerAmount)
-
-    lightRef.intensity = scalePhotometricIntensity(brightness)
-    lightRef.distance = TORCH_LIGHT_DISTANCE
-  })
-
-  useEffect(() => {
-    if (light.current) {
-      light.current.castShadow = true
-      light.current.shadow.autoUpdate = false
-      light.current.shadow.mapSize.set(
-        TORCH_SHADOW_MAP_SIZE,
-        TORCH_SHADOW_MAP_SIZE
-      )
-      light.current.shadow.needsUpdate = true
-    }
-  }, [])
-
-  return (
-    <pointLight
-      color="#ffb56a"
-      decay={2}
-      distance={TORCH_LIGHT_DISTANCE}
-      intensity={scalePhotometricIntensity(
-        TORCH_BASE_CANDELA * torchCandelaMultiplier
-      )}
-      position={position}
-      ref={light}
-      userData={{ debugIndex: seed - 1, debugRole: 'torch-light' }}
-      shadow-bias={-0.0005}
-      shadow-mapSize-height={TORCH_SHADOW_MAP_SIZE}
-      shadow-mapSize-width={TORCH_SHADOW_MAP_SIZE}
-    />
-  )
-}
-
 function WallSconce({
-  flickerAmount,
   mazeLight,
   torchCandelaMultiplier
 }: {
-  flickerAmount: number
   mazeLight: MazeLayout['lights'][number]
   torchCandelaMultiplier: number
 }) {
@@ -957,13 +1044,6 @@ function WallSconce({
         position={position}
       />
       <TorchBillboard
-        flickerAmount={flickerAmount}
-        position={torchPosition}
-        seed={mazeLight.index + 1}
-        torchCandelaMultiplier={torchCandelaMultiplier}
-      />
-      <TorchLight
-        flickerAmount={flickerAmount}
         position={torchPosition}
         seed={mazeLight.index + 1}
         torchCandelaMultiplier={torchCandelaMultiplier}
@@ -1127,12 +1207,12 @@ function FogVolume({
 }
 
 function MazeWalls({
-  flickerAmount,
   layout,
+  lightmapTexture,
   torchCandelaMultiplier
 }: {
-  flickerAmount: number
   layout: MazeLayout
+  lightmapTexture: Texture
   torchCandelaMultiplier: number
 }) {
   const wall = useStandardPbrTextures(WALL_TEXTURE_URLS, WALL_TEXTURE_REPEAT)
@@ -1140,30 +1220,18 @@ function MazeWalls({
   return (
     <>
       {layout.walls.map((mazeWall, wallIndex) => (
-        <mesh
-          castShadow
+        <MazeWallMesh
           key={mazeWall.id}
-          position={[
-            mazeWall.center.x,
-            GROUND_Y + (WALL_HEIGHT / 2),
-            mazeWall.center.z
-          ]}
-          receiveShadow
-          rotation-y={mazeWall.yaw}
-          userData={{ debugIndex: wallIndex, debugRole: 'maze-wall' }}
-        >
-          <boxGeometry args={[WALL_LENGTH, WALL_HEIGHT, WALL_WIDTH]} />
-          <meshStandardMaterial
-            {...wall}
-            bumpScale={0.05}
-            metalness={0.02}
-            roughness={0.92}
-          />
-        </mesh>
+          lightmap={layout.maze.lightmap}
+          lightmapTexture={lightmapTexture}
+          mazeWall={mazeWall}
+          torchCandelaMultiplier={torchCandelaMultiplier}
+          wallIndex={wallIndex}
+          wallMaterialMaps={wall}
+        />
       ))}
       {layout.lights.map((mazeLight) => (
         <WallSconce
-          flickerAmount={flickerAmount}
           key={mazeLight.id}
           mazeLight={mazeLight}
           torchCandelaMultiplier={torchCandelaMultiplier}
@@ -1173,25 +1241,110 @@ function MazeWalls({
   )
 }
 
+function MazeWallMesh({
+  lightmap,
+  lightmapTexture,
+  mazeWall,
+  torchCandelaMultiplier,
+  wallIndex,
+  wallMaterialMaps
+}: {
+  lightmap: MazeLightmap
+  lightmapTexture: Texture
+  mazeWall: MazeLayout['walls'][number]
+  torchCandelaMultiplier: number
+  wallIndex: number
+  wallMaterialMaps: PbrMaps
+}) {
+  const geometry = useMemo(
+    () => createWallLightmapGeometry(mazeWall, lightmap),
+    [lightmap, mazeWall]
+  )
+  const overlayGeometry = useMemo(() => {
+    const nextGeometry = geometry.clone()
+    const lightUv =
+      geometry.getAttribute('uv2')?.clone() ??
+      geometry.getAttribute('uv1')?.clone()
+
+    if (lightUv) {
+      nextGeometry.setAttribute('uv', lightUv)
+    }
+
+    return nextGeometry
+  }, [geometry])
+
+  useEffect(
+    () => () => {
+      geometry.dispose()
+      overlayGeometry.dispose()
+    },
+    [geometry, overlayGeometry]
+  )
+
+  return (
+    <group
+      position={[
+        mazeWall.center.x,
+        GROUND_Y + (WALL_HEIGHT / 2),
+        mazeWall.center.z
+      ]}
+      rotation-y={mazeWall.yaw}
+    >
+      <mesh
+        castShadow
+        receiveShadow
+        userData={{ debugIndex: wallIndex, debugRole: 'maze-wall' }}
+      >
+        <primitive
+          attach="geometry"
+          object={geometry}
+        />
+        <meshStandardMaterial
+          {...wallMaterialMaps}
+          bumpScale={0.05}
+          lightMap={lightmapTexture}
+          lightMapIntensity={torchCandelaMultiplier}
+          metalness={0.02}
+          roughness={0.92}
+        />
+      </mesh>
+      <mesh renderOrder={1}>
+        <primitive
+          attach="geometry"
+          object={overlayGeometry}
+        />
+        <LightmapOverlayMaterial
+          intensity={torchCandelaMultiplier}
+          lightmapTexture={lightmapTexture}
+        />
+      </mesh>
+    </group>
+  )
+}
+
 function SceneGeometry({
-  flickerAmount,
   layout,
   torchCandelaMultiplier,
   volumetricLighting,
   volumetricNoiseFrequency
 }: {
-  flickerAmount: number
   layout: MazeLayout
   torchCandelaMultiplier: number
   volumetricLighting: EffectSettings
   volumetricNoiseFrequency: number
 }) {
+  const lightmapTexture = useMazeLightmapTexture(layout.maze.lightmap)
+
   return (
     <>
-      <Ground />
-      <MazeWalls
-        flickerAmount={flickerAmount}
+      <Ground
         layout={layout}
+        lightmapTexture={lightmapTexture}
+        torchCandelaMultiplier={torchCandelaMultiplier}
+      />
+      <MazeWalls
+        layout={layout}
+        lightmapTexture={lightmapTexture}
         torchCandelaMultiplier={torchCandelaMultiplier}
       />
       {volumetricLighting.enabled ? (
@@ -1355,13 +1508,11 @@ function ExposureEffectPrimitive({
 function TorchLensFlareEffect({
   intensity,
   mazeLight,
-  torchCandelaMultiplier,
-  torchFlickerAmount
+  torchCandelaMultiplier
 }: {
   intensity: number
   mazeLight: MazeLayout['lights'][number]
   torchCandelaMultiplier: number
-  torchFlickerAmount: number
 }) {
   const camera = useThree((state) => state.camera)
   const raycaster = useThree((state) => state.raycaster)
@@ -1416,10 +1567,7 @@ function TorchLensFlareEffect({
       return
     }
 
-    const noise = getTorchNoise(state.clock.getElapsedTime(), mazeLight.index + 1)
-    const brightness =
-      torchCandelaMultiplier *
-      getTorchFlickerFactor(noise, torchFlickerAmount)
+    const brightness = torchCandelaMultiplier
     const visibleIntensity = Math.max(0, intensity)
 
     targetPosition.copy(mazeLight.torchPosition)
@@ -1468,13 +1616,11 @@ function TorchLensFlareEffect({
 function TorchLensFlare({
   intensity,
   layout,
-  torchCandelaMultiplier,
-  torchFlickerAmount
+  torchCandelaMultiplier
 }: {
   intensity: number
   layout: MazeLayout
   torchCandelaMultiplier: number
-  torchFlickerAmount: number
 }) {
   return (
     <>
@@ -1484,7 +1630,6 @@ function TorchLensFlare({
           key={mazeLight.id}
           mazeLight={mazeLight}
           torchCandelaMultiplier={torchCandelaMultiplier}
-          torchFlickerAmount={torchFlickerAmount}
         />
       ))}
     </>
@@ -1670,6 +1815,15 @@ function FlightRig({
           role: string,
           index: number
         ) => [number, number, number] | null
+        getDebugMeshState?: (
+          role: string,
+          index: number
+        ) => {
+          hasLightMap: boolean
+          hasUv1: boolean
+          hasUv2: boolean
+          lightMapIntensity: number | null
+        } | null
         setView?: (
           cameraPosition: [number, number, number],
           target: [number, number, number]
@@ -1699,6 +1853,42 @@ function FlightRig({
 
         return match
       },
+      getDebugMeshState: (role, index) => {
+        let match: {
+          hasLightMap: boolean
+          hasUv1: boolean
+          hasUv2: boolean
+          lightMapIntensity: number | null
+        } | null = null
+
+        scene.traverse((object) => {
+          if (
+            match ||
+            !(object instanceof Mesh) ||
+            object.userData?.debugRole !== role ||
+            object.userData?.debugIndex !== index
+          ) {
+            return
+          }
+
+          const material = object.material as {
+            lightMap?: Texture | null
+            lightMapIntensity?: number
+          }
+
+          match = {
+            hasLightMap: Boolean(material.lightMap),
+            hasUv1: Boolean(object.geometry?.getAttribute?.('uv1')),
+            hasUv2: Boolean(object.geometry?.getAttribute?.('uv2')),
+            lightMapIntensity:
+              typeof material.lightMapIntensity === 'number'
+                ? material.lightMapIntensity
+                : null
+          }
+        })
+
+        return match
+      },
       setView: (cameraPosition, target) => {
         playerPosition.current.set(
           cameraPosition[0],
@@ -1722,6 +1912,7 @@ function FlightRig({
       }
 
       delete globalWindow.__levelsjamDebug.getDebugPosition
+      delete globalWindow.__levelsjamDebug.getDebugMeshState
       delete globalWindow.__levelsjamDebug.setView
       if (Object.keys(globalWindow.__levelsjamDebug).length === 0) {
         delete globalWindow.__levelsjamDebug
@@ -2005,7 +2196,6 @@ function Scene({
     <>
       <EnvironmentLighting iblIntensity={visualSettings.iblIntensity} />
       <SceneGeometry
-        flickerAmount={visualSettings.torchFlickerAmount}
         layout={layout}
         torchCandelaMultiplier={visualSettings.torchCandelaMultiplier}
         volumetricLighting={visualSettings.volumetricLighting}
@@ -2058,7 +2248,6 @@ function Scene({
               intensity={visualSettings.lensFlare.intensity}
               layout={layout}
               torchCandelaMultiplier={visualSettings.torchCandelaMultiplier}
-              torchFlickerAmount={visualSettings.torchFlickerAmount}
             />
           ) : null}
           {visualSettings.vignette.enabled ? (
@@ -2207,22 +2396,6 @@ function VisualControls({
             </option>
           ))}
         </select>
-      </label>
-
-      <label className="visual-control-row">
-        <output>{visualSettings.torchFlickerAmount.toFixed(2)}</output>
-        <span>Torch Flicker</span>
-        <input
-          aria-label="Torch Flicker"
-          max={MAX_TORCH_FLICKER_AMOUNT}
-          min={MIN_TORCH_FLICKER_AMOUNT}
-          onChange={(event) => {
-            onScalarSettingChange('torchFlickerAmount', Number(event.target.value))
-          }}
-          step={0.05}
-          type="range"
-          value={visualSettings.torchFlickerAmount}
-        />
       </label>
 
       <label className="visual-control-row">

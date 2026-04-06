@@ -33,7 +33,7 @@
 - Each wall sconce uses the full authored `metal-13` PBR material stack, excluding only the known-problematic ambient-occlusion map path.
 - Each wall sconce is positioned with its center one sconce radius outside the wall face.
 - Each wall sconce supports a camera-facing torch billboard above it.
-- Each torch billboard and torch point light are positioned against the same wall face as the sconce, on the side of the cell the light is intended to illuminate.
+- Each torch billboard is positioned against the same wall face as the sconce, on the side of the cell the light is intended to illuminate.
 - Each torch billboard's bottom edge is flush with the top of the sconce rather than floating above it.
 - Each torch billboard is 0.5 meters square.
 - Each torch billboard uses the linked source flipbook asset rather than a procedurally generated placeholder.
@@ -43,18 +43,13 @@
 - Each torch billboard uses an unlit material.
 - Each torch billboard brightness is scaled from a 1500 candela torch baseline.
 - Each torch billboard samples the linked atlas so the visible flame fills the specified quad and sits on the sconce instead of floating above it due to transparent frame padding.
-- Each torch has a shadow-casting point light located at the billboard center.
-- Each torch brightness uses `mix(1, noise, flickering) * intensity`.
-- Each torch brightness uses one user-adjustable intensity multiplier and one user-adjustable flicker amount slider.
-- Each torch point light intensity derives from the shared torch brightness value and a 1500 candela torch baseline.
-- Each torch billboard brightness derives from the same shared torch brightness value as the point light.
-- Each torch point light distance remains fixed at 5 meters.
-- Each torch point light flickers at twice the previous speed.
-- Each torch point light uses a warm fire-appropriate color.
-- Torch point lights remain enabled with a 16 meter light distance.
-- Torch point lights keep shadows enabled rather than being culled by a camera-distance policy.
-- Torch shadow maps use one fixed resolution for every torch light.
-- Torch shadow maps bake once and then stop updating while the lights and occluders remain stationary.
+- Each maze includes a baked torch lightmap generated as a late step in maze generation.
+- Each maze lightmap stores the static torch contribution for the maze floor and wall faces.
+- Each maze lightmap is source-controlled together with its maze definition.
+- Each torch billboard brightness derives from a 1500 candela torch baseline scaled by the shared torch intensity multiplier.
+- The maze floor and maze walls receive torch lighting from the baked maze lightmap instead of from realtime torch point lights.
+- The current scene does not include realtime torch flicker.
+- The current scene does not include realtime torch point lights.
 - The player collides with the ground plane and the walls.
 - The character collision volume is a capsule that is 1.75 meters tall and 0.25 meters in radius.
 - The player spawns 1 meter above the ground plane.
@@ -84,7 +79,6 @@
 - The debug panel exposure control defaults to `-4.5`.
 - The debug panel exposes an IBL intensity multiplier across a wide enough range to rebalance the HDRI against the torches without relying on physically calibrated EV semantics.
 - The debug panel exposes a torch candela multiplier across a wide enough range to rebalance the torches against the HDRI without relying on physically calibrated EV semantics.
-- The debug panel exposes a torch flicker amount slider with a default value of `0.15`.
 - The debug panel exposes player top speed, acceleration distance, and deceleration distance controls.
 - The debug panel lens flare control adjusts the effect using the lens flare opacity parameter rather than an arbitrary color-gain multiplier.
 - The debug panel lens flare control provides useful adjustment very close to zero rather than jumping immediately to an over-bright flare.
@@ -141,7 +135,7 @@
 - The torch billboards are excluded from screen-space reflections.
 - Screen-space reflections apply only to the scene's PBR materials rather than to unlit or transparent billboard materials.
 - Screen-space reflections remain visually stable and do not blow out reflections relative to the rest of the lighting stack.
-- Torch point lights and torch billboards read as a matched fire source rather than independent unrelated elements.
+- The baked torch lighting and the torch billboards read as a matched fire source rather than independent unrelated elements.
 - The scene reads as an overcast exterior space lit primarily by environment light and torches.
 - The maze walls define the primary navigable space instead of the previous open random-wall field.
 - The maze opening is visually readable as the one exterior break in the perimeter walls.
@@ -165,7 +159,6 @@
 - The debug controls panel exposes the active tone mapper.
 - The debug controls panel exposes the IBL intensity multiplier.
 - The debug controls panel exposes the torch candela multiplier.
-- The debug controls panel exposes the torch flicker amount.
 - The debug controls panel exposes player top speed.
 - The debug controls panel exposes player acceleration distance.
 - The debug controls panel exposes player deceleration distance.
@@ -180,9 +173,9 @@
 - The page becomes interactive quickly on load.
 - Startup avoids remote third-party lighting assets during play by serving required scene textures from the project.
 - The frame rate remains stable during ordinary movement and camera motion.
-- The automated browser performance test is temporarily disabled while the baked-all-shadows lighting configuration is under evaluation.
+- The automated browser performance test is temporarily disabled while the static baked-lightmap torch-lighting evaluation is under way.
 - The project documents startup-time and test-duration benchmarks and treats regressions in those measurements as actionable.
-- Maze generation for one valid maze must complete in under 100 milliseconds.
+- Maze topology generation for one valid maze must complete in under 100 milliseconds before the later baked-lightmap step runs.
 
 ## Testing Expectations
 - A production build succeeds before a change is considered complete.
@@ -194,7 +187,8 @@
 - The loading overlay is checked in the browser and verified to animate and then fade away after asset load.
 - The backquote shortcut is checked in the browser and verified to open the debug controls panel.
 - The debug controls panel is checked in the browser and verified to expose the new IBL and torch controls while omitting removed atmosphere controls.
-- The automated browser performance test remains disabled until the temporary baked-all-shadows lighting evaluation ends.
+- The automated browser performance test remains disabled until the temporary static baked-lightmap torch-lighting evaluation ends.
+- Automated browser smoke coverage verifies that the baked maze lightmap is present and contributes visible lighting.
 - Maze-generation logic is covered by automated tests that validate every persisted maze against the maze rules.
 - Maze-generation tests delete any generated maze files that fail validation.
 - Automated tests guarantee that the repository contains at least five valid persisted maze files by generating additional mazes when required.

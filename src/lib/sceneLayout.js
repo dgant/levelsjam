@@ -8,7 +8,7 @@ import {
   getMazeSceneLayout
 } from './maze.js'
 
-export { GROUND_Y }
+export { GROUND_Y, MAZE_CELL_SIZE }
 
 export const PLAYER_RADIUS = 0.25
 export const PLAYER_HEIGHT = 1.75
