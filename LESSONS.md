@@ -48,3 +48,4 @@
 - In this repository, per-maze baked torch lightmaps are a practical way to keep full PBR wall and ground materials without exploding the forward-renderer shadow sampler count.
 - In this repository's current three.js stack, keeping the baked torch-light contribution visibly inspectable was more reliable with an explicit additive overlay pass than with the built-in material `lightMap` response alone.
 - A broad maze screenshot can miss baked wall-light regressions because the floor dominates the sampled pixels. The reliable smoke proof here is a deterministic wall-facing view on a known lit wall.
+- The baked wall-face rotation must use the same Y-rotation sign as three.js itself. A hand-written sign error can bake the torch contribution onto the opposite side of z-axis walls while the meshes still render correctly.

@@ -228,12 +228,12 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   expect(wallMeshState.hasUv2).toBe(true)
 
   const wallLightmapState = await page.evaluate(
-    () => window.__levelsjamDebug.getDebugMeshState('maze-wall-lightmap', 0)
+    () => window.__levelsjamDebug.getDebugMeshState('maze-wall-lightmap', 12)
   )
   expect(wallLightmapState).not.toBeNull()
   expect(wallLightmapState.hasMap).toBe(true)
-  expect(wallLightmapState.mapChannel).toBe(2)
-  expect(wallLightmapState.materialColor?.[0]).toBe(24)
+  expect(wallLightmapState.mapChannel).toBe(0)
+  expect(wallLightmapState.materialColor?.[0]).toBe(0.1)
 
   await page.evaluate((position) => {
     const [x, y, z] = position
@@ -281,8 +281,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
 
   await page.evaluate(() => {
     window.__levelsjamDebug.setView(
-      [-6, 1.15, -5.2],
-      [-6, 1.1, -7]
+      [5.8, 1.2, -6],
+      [7, 1.1, -6]
     )
   })
   await page.waitForTimeout(200)
@@ -296,7 +296,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   await expect
     .poll(
       async () => page.evaluate(
-        () => window.__levelsjamDebug.getDebugMeshState('maze-wall-lightmap', 0)?.materialColor?.[0]
+        () => window.__levelsjamDebug.getDebugMeshState('maze-wall-lightmap', 12)?.materialColor?.[0]
       ),
       {
         timeout: 5_000,
@@ -304,22 +304,30 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       }
     )
     .toBe(0)
-  const bakedLightmapOff = await screenshotCanvasRegion(page, canvas, 300, 220, 0.5, 0.5)
+  await page.keyboard.press('Backquote')
+  await page.waitForTimeout(100)
+  const bakedLightmapOff = await screenshotCanvasRegion(page, canvas, 320, 240, 0.5, 0.5)
+  await page.keyboard.press('Backquote')
+  await page.waitForTimeout(100)
   await setSlider(page, 'Torch Candelas', 10)
   await page.waitForTimeout(200)
   await expect
     .poll(
       async () => page.evaluate(
-        () => window.__levelsjamDebug.getDebugMeshState('maze-wall-lightmap', 0)?.materialColor?.[0]
+        () => window.__levelsjamDebug.getDebugMeshState('maze-wall-lightmap', 12)?.materialColor?.[0]
       ),
       {
         timeout: 5_000,
         intervals: [100, 250, 500]
       }
     )
-    .toBe(240)
-  const bakedLightmapOn = await screenshotCanvasRegion(page, canvas, 300, 220, 0.5, 0.5)
-  expect(measureDifference(bakedLightmapOff, bakedLightmapOn)).toBeGreaterThan(1)
+    .toBe(1)
+  await page.keyboard.press('Backquote')
+  await page.waitForTimeout(100)
+  const bakedLightmapOn = await screenshotCanvasRegion(page, canvas, 320, 240, 0.5, 0.5)
+  expect(measureDifference(bakedLightmapOff, bakedLightmapOn)).toBeGreaterThan(5)
+  await page.keyboard.press('Backquote')
+  await page.waitForTimeout(100)
   await page.evaluate(() => {
     for (let index = 0; index < 32; index += 1) {
       window.__levelsjamDebug.setDebugVisible('torch-billboard', index, true)

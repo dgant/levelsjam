@@ -4,7 +4,7 @@ export const MAZE_CELL_SIZE = 2
 export const MAZE_WALL_THICKNESS = 0.25
 export const MAZE_WALL_HEIGHT = 2
 export const MAZE_TARGET_COUNT = 5
-export const MAZE_LIGHTMAP_VERSION = 1
+export const MAZE_LIGHTMAP_VERSION = 2
 export const MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS = 0.125
 
 const MAZE_LIGHTMAP_ATLAS_WIDTH = 256
@@ -788,8 +788,8 @@ function rotateWallLocalVector(localX, localZ, yaw) {
   const sine = Math.sin(yaw)
 
   return {
-    x: (localX * cosine) - (localZ * sine),
-    z: (localX * sine) + (localZ * cosine)
+    x: (localX * cosine) + (localZ * sine),
+    z: (-localX * sine) + (localZ * cosine)
   }
 }
 

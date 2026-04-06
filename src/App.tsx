@@ -161,8 +161,8 @@ const FIRE_FLIPBOOK_CROP_HEIGHT =
   FIRE_FLIPBOOK_FRAME_CROP.maxY - FIRE_FLIPBOOK_FRAME_CROP.minY
 const FIRE_COLOR = new Color('#ffb168')
 const FIRE_BILLBOARD_INTENSITY_SCALE = 1 / TORCH_BASE_CANDELA
-const FLOOR_LIGHTMAP_OVERLAY_INTENSITY_SCALE = 12
-const WALL_LIGHTMAP_OVERLAY_INTENSITY_SCALE = 24
+const FLOOR_LIGHTMAP_OVERLAY_INTENSITY_SCALE = 24
+const WALL_LIGHTMAP_EMISSIVE_SCALE = 0.1
 const LENS_FLARE_COLOR_GAIN_SCALE = 8
 const FOG_VOLUME_HEIGHT = 6
 const FOG_VOLUME_SLICE_COUNT = 6
@@ -564,9 +564,15 @@ function decodeBase64Bytes(base64: string) {
   return bytes
 }
 
-function useMazeLightmapTexture(lightmap: MazeLightmap) {
+function useMazeLightmapBytes(lightmap: MazeLightmap) {
+  return useMemo(
+    () => decodeBase64Bytes(lightmap.dataBase64),
+    [lightmap]
+  )
+}
+
+function useMazeLightmapTexture(lightmap: MazeLightmap, data: Uint8Array) {
   const texture = useMemo(() => {
-    const data = decodeBase64Bytes(lightmap.dataBase64)
     const nextTexture = new DataTexture(
       data,
       lightmap.atlasWidth,
@@ -593,6 +599,72 @@ function useMazeLightmapTexture(lightmap: MazeLightmap) {
   )
 
   return texture
+}
+
+function createLightmapFaceTexture(
+  data: Uint8Array,
+  atlasWidth: number,
+  rect: LightmapRect
+) {
+  const canvas = document.createElement('canvas')
+  canvas.width = rect.width
+  canvas.height = rect.height
+  const context = canvas.getContext('2d')
+
+  if (!context) {
+    throw new Error('Could not create 2D context for wall lightmap face texture')
+  }
+
+  const image = context.createImageData(rect.width, rect.height)
+
+  for (let row = 0; row < rect.height; row += 1) {
+    for (let column = 0; column < rect.width; column += 1) {
+      const atlasIndex =
+        ((((rect.y + row) * atlasWidth) + rect.x + column) * 3)
+      const pixelIndex = ((row * rect.width) + column) * 4
+
+      image.data[pixelIndex] = data[atlasIndex]
+      image.data[pixelIndex + 1] = data[atlasIndex + 1]
+      image.data[pixelIndex + 2] = data[atlasIndex + 2]
+      image.data[pixelIndex + 3] = 255
+    }
+  }
+
+  context.putImageData(image, 0, 0)
+
+  const texture = new CanvasTexture(canvas)
+  texture.channel = 0
+  texture.flipY = true
+  texture.generateMipmaps = false
+  texture.magFilter = LinearFilter
+  texture.minFilter = LinearFilter
+  texture.needsUpdate = true
+  return texture
+}
+
+function useWallLightmapFaceTextures(
+  lightmap: MazeLightmap,
+  lightmapBytes: Uint8Array,
+  wallId: string
+) {
+  const textures = useMemo(() => {
+    const rects = lightmap.wallRects[wallId]
+
+    return {
+      nz: createLightmapFaceTexture(lightmapBytes, lightmap.atlasWidth, rects.nz),
+      pz: createLightmapFaceTexture(lightmapBytes, lightmap.atlasWidth, rects.pz)
+    }
+  }, [lightmap, lightmapBytes, wallId])
+
+  useEffect(
+    () => () => {
+      textures.nz.dispose()
+      textures.pz.dispose()
+    },
+    [textures]
+  )
+
+  return textures
 }
 
 function mapUvToLightmapRect(
@@ -1213,10 +1285,12 @@ function FogVolume({
 
 function MazeWalls({
   layout,
+  lightmapBytes,
   lightmapTexture,
   torchCandelaMultiplier
 }: {
   layout: MazeLayout
+  lightmapBytes: Uint8Array
   lightmapTexture: Texture
   torchCandelaMultiplier: number
 }) {
@@ -1228,6 +1302,7 @@ function MazeWalls({
         <MazeWallMesh
           key={mazeWall.id}
           lightmap={layout.maze.lightmap}
+          lightmapBytes={lightmapBytes}
           lightmapTexture={lightmapTexture}
           mazeWall={mazeWall}
           torchCandelaMultiplier={torchCandelaMultiplier}
@@ -1248,6 +1323,7 @@ function MazeWalls({
 
 function MazeWallMesh({
   lightmap,
+  lightmapBytes,
   lightmapTexture,
   mazeWall,
   torchCandelaMultiplier,
@@ -1255,6 +1331,7 @@ function MazeWallMesh({
   wallMaterialMaps
 }: {
   lightmap: MazeLightmap
+  lightmapBytes: Uint8Array
   lightmapTexture: Texture
   mazeWall: MazeLayout['walls'][number]
   torchCandelaMultiplier: number
@@ -1265,25 +1342,16 @@ function MazeWallMesh({
     () => createWallLightmapGeometry(mazeWall, lightmap),
     [lightmap, mazeWall]
   )
-  const overlayGeometry = useMemo(() => {
-    const nextGeometry = geometry.clone()
-    const lightUv =
-      geometry.getAttribute('uv2')?.clone() ??
-      geometry.getAttribute('uv1')?.clone()
-
-    if (lightUv) {
-      nextGeometry.setAttribute('uv', lightUv)
-    }
-
-    return nextGeometry
-  }, [geometry])
-
+  const lightmapFaceTextures = useWallLightmapFaceTextures(
+    lightmap,
+    lightmapBytes,
+    mazeWall.id
+  )
   useEffect(
     () => () => {
       geometry.dispose()
-      overlayGeometry.dispose()
     },
-    [geometry, overlayGeometry]
+    [geometry]
   )
 
   return (
@@ -1312,17 +1380,28 @@ function MazeWallMesh({
         />
       </mesh>
       <mesh
+        position={[0, 0, (WALL_WIDTH / 2) + 0.002]}
         renderOrder={1}
         userData={{ debugIndex: wallIndex, debugRole: 'maze-wall-lightmap' }}
       >
-        <primitive
-          attach="geometry"
-          object={overlayGeometry}
-        />
+        <planeGeometry args={[WALL_LENGTH, WALL_HEIGHT]} />
         <LightmapOverlayMaterial
           intensity={torchCandelaMultiplier}
-          intensityScale={WALL_LIGHTMAP_OVERLAY_INTENSITY_SCALE}
-          lightmapTexture={lightmapTexture}
+          intensityScale={WALL_LIGHTMAP_EMISSIVE_SCALE}
+          lightmapTexture={lightmapFaceTextures.pz}
+        />
+      </mesh>
+      <mesh
+        position={[0, 0, -((WALL_WIDTH / 2) + 0.002)]}
+        renderOrder={1}
+        rotation-y={Math.PI}
+        userData={{ debugIndex: wallIndex, debugRole: 'maze-wall-lightmap' }}
+      >
+        <planeGeometry args={[WALL_LENGTH, WALL_HEIGHT]} />
+        <LightmapOverlayMaterial
+          intensity={torchCandelaMultiplier}
+          intensityScale={WALL_LIGHTMAP_EMISSIVE_SCALE}
+          lightmapTexture={lightmapFaceTextures.nz}
         />
       </mesh>
     </group>
@@ -1340,7 +1419,8 @@ function SceneGeometry({
   volumetricLighting: EffectSettings
   volumetricNoiseFrequency: number
 }) {
-  const lightmapTexture = useMazeLightmapTexture(layout.maze.lightmap)
+  const lightmapBytes = useMazeLightmapBytes(layout.maze.lightmap)
+  const lightmapTexture = useMazeLightmapTexture(layout.maze.lightmap, lightmapBytes)
 
   return (
     <>
@@ -1351,6 +1431,7 @@ function SceneGeometry({
       />
       <MazeWalls
         layout={layout}
+        lightmapBytes={lightmapBytes}
         lightmapTexture={lightmapTexture}
         torchCandelaMultiplier={torchCandelaMultiplier}
       />
@@ -1826,6 +1907,8 @@ function FlightRig({
           role: string,
           index: number
         ) => {
+          emissiveColor: [number, number, number] | null
+          hasEmissiveMap: boolean
           hasLightMap: boolean
           hasMap: boolean
           hasUv1: boolean
@@ -1865,6 +1948,8 @@ function FlightRig({
       },
       getDebugMeshState: (role, index) => {
         let match: {
+          emissiveColor: [number, number, number] | null
+          hasEmissiveMap: boolean
           hasLightMap: boolean
           hasMap: boolean
           hasUv1: boolean
@@ -1885,6 +1970,8 @@ function FlightRig({
           }
 
           const material = object.material as {
+            emissive?: Color
+            emissiveMap?: Texture | null
             color?: Color
             lightMap?: Texture | null
             lightMapIntensity?: number
@@ -1892,6 +1979,14 @@ function FlightRig({
           }
 
           match = {
+            emissiveColor: material.emissive
+              ? [
+                  material.emissive.r,
+                  material.emissive.g,
+                  material.emissive.b
+                ]
+              : null,
+            hasEmissiveMap: Boolean(material.emissiveMap),
             hasLightMap: Boolean(material.lightMap),
             hasMap: Boolean(material.map),
             hasUv1: Boolean(object.geometry?.getAttribute?.('uv1')),

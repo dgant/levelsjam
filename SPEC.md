@@ -45,6 +45,7 @@
 - Each torch billboard samples the linked atlas so the visible flame fills the specified quad and sits on the sconce instead of floating above it due to transparent frame padding.
 - Each maze includes a baked torch lightmap generated as a late step in maze generation.
 - Each maze lightmap stores the static torch contribution for the maze floor and wall faces.
+- Each maze wall face receives baked torch lighting on the side that faces the lit cell rather than on the wall's opposite face.
 - Each maze lightmap is source-controlled together with its maze definition.
 - Each torch billboard brightness derives from a 1500 candela torch baseline scaled by the shared torch intensity multiplier.
 - The maze floor and maze walls receive torch lighting from the baked maze lightmap instead of from realtime torch point lights.

@@ -53,6 +53,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify each persisted maze includes baked torch lightmap data.
 - Verify the baked lightmap visibly affects the maze walls and maze floor in the rendered scene.
 - Verify baked wall lighting in a wall-facing view, not only in a broad maze overview where the floor can dominate the image.
+- Verify the wall-facing view is on the torch-facing side of the wall, not the dark back face.
 - Verify the scene does not rely on realtime torch point lights for maze illumination.
 - Verify the fire flipbook runs at the updated faster rate.
 - Verify the tone mapper is `AgX` by default.

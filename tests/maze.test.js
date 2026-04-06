@@ -26,7 +26,7 @@ test('generates valid mazes under 100ms', () => {
   assert.equal(maze.height, MAZE_HEIGHT)
   assert.ok(maze.lightmap)
   assert.equal(typeof maze.lightmap.dataBase64, 'string')
-  assert.equal(maze.lightmap.version, 1)
+  assert.equal(maze.lightmap.version, 2)
   assert.ok(maze.generationMs < 100, `generation took ${maze.generationMs}ms`)
 })
 
