@@ -96,6 +96,8 @@
 - The Bloom kernel-size control updates the configured bloom kernel preset.
 - The debug panel does not expose obsolete atmosphere or sun-direction controls.
 - The page shows an FPS counter in the top-right corner together with the current Git revision and revision timestamp.
+- The top-right overlay also shows the active maze ID.
+- Pressing `F9` toggles the visibility of the top-right overlay.
 
 ## Loading And Startup
 - The page shows a centered loading overlay before the scene becomes visible.

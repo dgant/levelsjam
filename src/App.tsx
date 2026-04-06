@@ -127,6 +127,7 @@ const METAL_TEXTURE_URLS = {
 const LOOK_SENSITIVITY = 0.003
 const MAX_PITCH = Math.PI / 2 - 0.05
 const BACKQUOTE_CODE = 'Backquote'
+const OVERLAY_TOGGLE_CODE = 'F9'
 const POINTER_UNLOCK_CODES = new Set([
   'Escape',
   'AltLeft',
@@ -2537,6 +2538,7 @@ function VisualControls({
 export default function App() {
   const [controlsOpen, setControlsOpen] = useState(false)
   const [fps, setFps] = useState(0)
+  const [overlayVisible, setOverlayVisible] = useState(true)
   const [mazeLayout] = useState(() => {
     const mazeId = new URLSearchParams(window.location.search).get('maze')
 
@@ -2557,6 +2559,12 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code === OVERLAY_TOGGLE_CODE) {
+        event.preventDefault()
+        setOverlayVisible((visible) => !visible)
+        return
+      }
+
       if (event.code !== BACKQUOTE_CODE) {
         return
       }
@@ -2665,11 +2673,14 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <div className="fps-counter">
-        <div>{Math.round(fps)} FPS</div>
-        <div>{GIT_REVISION}</div>
-        <div>{GIT_REVISION_TIMESTAMP}</div>
-      </div>
+      {overlayVisible ? (
+        <div className="fps-counter">
+          <div>{Math.round(fps)} FPS</div>
+          <div>{mazeLayout.maze.id}</div>
+          <div>{GIT_REVISION}</div>
+          <div>{GIT_REVISION_TIMESTAMP}</div>
+        </div>
+      ) : null}
       <LoadingOverlay complete={sceneLoaded} />
       <VisualControls
         controlsOpen={controlsOpen}
