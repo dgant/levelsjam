@@ -95,6 +95,7 @@
 - The debug panel exposes player top speed, acceleration distance, and deceleration distance controls.
 - The debug panel lens flare control adjusts the effect using the lens flare opacity parameter rather than an arbitrary color-gain multiplier.
 - The debug panel lens flare control provides useful adjustment very close to zero rather than jumping immediately to an over-bright flare.
+- The debug panel SSR intensity control is clamped to a maximum of `1.0`.
 - The debug panel exposes an ambient-occlusion mode dropdown with working `Off`, `N8AO`, and `SSAO` modes.
 - The debug panel exposes one shared ambient-occlusion intensity slider for the selected AO mode.
 - The debug panel exposes an ambient-occlusion radius control and labels the radius in scene units or screen-space units as appropriate for the selected AO mode.
@@ -147,6 +148,7 @@
 - The visible skybox remains the authored HDRI even when local reflection probes drive material reflections.
 - The environment map from `overcast_soil` is treated as canonically authored intensity at an IBL multiplier of `1`.
 - The visible skybox and the environment lighting use the same calibrated HDRI intensity path.
+- The reflective floor and sconce materials use the same calibrated HDRI intensity path for their global specular fallback instead of a separate brighter scale.
 - The ground and walls use extracted PBR texture packs with tiling based on a 1 meter world scale unless a source specifies otherwise.
 - Reflective and semi-reflective materials read from the shared environment consistently, with the nearest local maze reflection probe taking precedence over the global HDRI for in-maze specular.
 - The reflective maze floor patch uses local reflection probes so puddled areas can reflect nearby torch sources rather than only the global HDRI.
@@ -154,9 +156,11 @@
 - Reflective maze sconces blend nearby local reflection probes with weighted interpolation rather than switching between one nearest probe at the object position.
 - Local reflection probes do not make baked lighting or image-based lighting appear to flicker as the camera moves between maze cells.
 - Local reflection probes capture the baked maze lighting state so reflected maze surfaces remain consistent with the torch-lightmap shadows.
+- Local reflection probes also capture the authored HDRI sky where it is locally visible so disabling reflection captures does not reveal a completely different sky contribution.
 - The torch billboards face the camera continuously.
 - The torch billboards animate smoothly through the flipbook loop without lighting artifacts from scene lights.
 - The torch billboards are excluded from screen-space reflections.
+- The torch billboards are excluded from SSAO so ambient occlusion only affects the opaque maze geometry.
 - Screen-space reflections apply only to the scene's PBR materials rather than to unlit or transparent billboard materials.
 - Screen-space reflections remain visually stable and do not blow out reflections relative to the rest of the lighting stack.
 - The baked torch lighting and the torch billboards read as a matched fire source rather than independent unrelated elements.
@@ -173,12 +177,16 @@
 - Enabling SSR with an intensity of `0` behaves as a visual no-op.
 - Selecting `N8AO` or `SSAO` produces a visible ambient-occlusion change around contact areas.
 - Selecting `SSAO` produces a visible ambient-occlusion change around contact areas rather than appearing inert.
+- Adjusting `SSAO` intensity or radius produces a visible corresponding change instead of leaving the image effectively unchanged.
+- `SSAO` remains visually stable enough that noisy grain does not dominate the rendered image at the default debug ranges.
 - Enabling `N8AO`, `SSAO`, or Depth of Field does not halt rendering or make the page unresponsive.
 - Enabling lens flares produces a visible flare around visible torches.
 - Increasing or decreasing lens-flare opacity produces a visible corresponding change in the flare.
+- Enabling lens flares at a small nonzero value does not black out the frame.
 - Enabling lens flares with an intensity of `0` behaves as a visual no-op.
 - Lens flares apply to the set of visible torch lights rather than jumping between arbitrary lights frame to frame.
 - Increasing or decreasing volumetric fog or smoke parameters produces a visible corresponding change in the full-scene fog volume.
+- Enabling volumetric fog with an intensity of `0` behaves as a visual no-op.
 - Enabling Depth of Field with a `0` bokeh scale behaves as a visual no-op.
 - The page does not show speculative branding captions, launcher buttons, or click-to-enter copy.
 

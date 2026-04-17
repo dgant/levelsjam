@@ -64,6 +64,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify disabling `Reflection Captures` removes the local probe contribution from the puddled maze floor while leaving the global HDRI environment intact.
 - Verify toggling `Reflection Captures` produces a visible change on an in-maze reflective floor patch.
 - Verify enabling `Show Reflection Probes` draws a probe sphere at each maze probe position.
+- Verify the reflection-probe spheres show captured HDRI-backed local reflections rather than black or empty captures.
 - Verify `window.__levelsjamDebug.getReflectionProbeState()` reports a nonzero probe count and becomes `ready: true` after load.
 - Verify moving the camera between maze cells does not change `window.__levelsjamDebug.getReflectionProbeState().activeProbeId` from `null` or make the scene lighting flicker.
 - Verify the fire flipbook runs at the updated faster rate.
@@ -87,10 +88,12 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify enabling SSR visibly changes reflective surfaces.
 - Verify enabling SSR does not make the visible HDRI skybox jump brighter.
 - Verify enabling SSR does not reflect the torch billboards or their transparent pixels.
+- Verify the torch billboards remain excluded from SSAO as well as SSR.
 - Verify enabling SSR with `0` intensity produces no visible scene change.
 - Verify enabling lens flares produces a visible flare around a visible torch.
 - Verify changing lens-flare opacity visibly changes the flare strength.
 - Verify the smallest nonzero lens-flare setting is still subtle enough to be useful.
+- Verify a small nonzero lens-flare setting does not black out the frame.
 - Verify lens flares do not flicker between arbitrary torches from frame to frame.
 - Verify enabling lens flares with `0` intensity produces no visible scene change.
 - Verify the Bloom kernel-size control produces a visible bloom change.
@@ -98,6 +101,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify enabling `SSAO` still allows a programmatic camera move to produce a visibly updated frame.
 - Verify the volumetric-lighting controls produce visible changes in the full-scene fog volume rather than in per-torch cone meshes.
 - Verify the fog volume occupies the maze footprint from ground level up to roughly 6 meters.
+- Verify enabling volumetric fog with an intensity of `0` produces no visible scene change.
 - Verify enabling Depth Of Field with a nonzero bokeh scale still allows a programmatic camera move to produce a visibly updated frame.
 - Verify enabling Depth Of Field with `0` bokeh scale produces no visible scene change.
 - Verify each control row in the visual controls panel keeps the value, label, and control on one line in that order.

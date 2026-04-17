@@ -1,13 +1,13 @@
 import {
   DepthOfField,
   EffectComposer,
+  LensFlare as PostLensFlare,
   N8AO,
   SSAO,
   ToneMapping,
   Vignette
 } from '@react-three/postprocessing'
-import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
-import { LensFlareEffect } from '@react-three/postprocessing'
+import { Canvas, createPortal, useFrame, useLoader, useThree } from '@react-three/fiber'
 import {
   BasicShadowMap,
   CanvasTexture,
@@ -37,6 +37,7 @@ import {
   ReinhardToneMapping,
   RepeatWrapping,
   SRGBColorSpace,
+  Scene as ThreeScene,
   Shader,
   SphereGeometry,
   Texture,
@@ -58,10 +59,10 @@ import {
   useState
 } from 'react'
 import {
-  BlendFunction,
   BloomEffect,
   Effect,
   KernelSize,
+  RenderPass,
   ToneMappingMode as PostToneMappingMode
 } from 'postprocessing'
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js'
@@ -177,8 +178,7 @@ const MAZE_GROUND_PATCH_OFFSET_Y = 0.002
 const REFLECTION_PROBE_RENDER_SIZE = 64
 const REFLECTION_PROBE_FAR = 48
 const REFLECTION_PROBE_EMISSIVE_RADIUS = 0.16
-const REFLECTION_PROBE_EMISSIVE_SCALE = 3
-const LENS_FLARE_COLOR_GAIN_SCALE = 0.35
+const REFLECTION_PROBE_EMISSIVE_SCALE = 64
 const FOG_VOLUME_HEIGHT = 6
 const FOG_VOLUME_SLICE_COUNT = 24
 const EFFECT_EPSILON = 0.0001
@@ -462,7 +462,7 @@ function createDefaultVisualSettings(): VisualSettings {
       maxHorizontalSpeedMph: DEFAULT_MOVEMENT_SETTINGS.maxHorizontalSpeedMph
     },
     ssr: { enabled: false, intensity: 0 },
-    volumetricLighting: { enabled: false, intensity: 0.35 },
+    volumetricLighting: { enabled: false, intensity: 0 },
     volumetricNoiseFrequency: DEFAULT_VOLUMETRIC_NOISE_FREQUENCY,
     vignette: { enabled: false, intensity: 0.4 }
   }
@@ -533,7 +533,7 @@ vec4 sampleProbeBlendEnvMap( vec3 direction, float roughness ) {
     return sampleProbeBlendLocalMaps( direction, roughness, probeBlendWeights );
   }
 
-  return textureCubeUV( envMap, envMapRotation * direction, roughness );
+  return textureCubeUV( envMap, envMapRotation * direction, roughness ) * envMapIntensity;
 }
 
 vec3 getIBLIrradiance( const in vec3 normal ) {
@@ -543,7 +543,7 @@ vec3 getIBLIrradiance( const in vec3 normal ) {
     vec3 worldNormal = inverseTransformDirection( normal, viewMatrix );
     vec4 envMapColor = sampleProbeBlendEnvMap( worldNormal, 1.0 );
 
-    return PI * envMapColor.rgb * envMapIntensity;
+    return PI * envMapColor.rgb;
 
   #else
 
@@ -563,7 +563,7 @@ vec3 getIBLRadiance( const in vec3 viewDir, const in vec3 normal, const in float
 
     vec4 envMapColor = sampleProbeBlendEnvMap( reflectVec, roughness );
 
-    return envMapColor.rgb * envMapIntensity;
+    return envMapColor.rgb;
 
   #else
 
@@ -1153,9 +1153,6 @@ function EnvironmentLighting({
   const environmentTarget = useRef<{ dispose: () => void; texture: Texture } | null>(null)
   const reflectionProbeTargets = useRef<Array<{ dispose: () => void; texture: Texture }>>([])
   const calibratedIntensity = getHdrLightingIntensity(iblIntensity)
-  const authoredProbeHdrIntensity = getHdrLightingIntensity(
-    DEFAULT_IBL_INTENSITY_MULTIPLIER
-  )
 
   useEffect(() => {
     scene.userData.reflectionProbeState = {
@@ -1268,8 +1265,6 @@ function EnvironmentLighting({
       }
 
       scene.add(emissiveGroup)
-      scene.background = null
-      scene.backgroundIntensity = 1
       scene.environment = null
       scene.environmentIntensity = 1
 
@@ -1345,7 +1340,6 @@ function EnvironmentLighting({
       }
     }
   }, [
-    authoredProbeHdrIntensity,
     gl,
     hdrTexture,
     layout.lights,
@@ -1360,12 +1354,14 @@ function EnvironmentLighting({
 
 function GroundSurfaceMaterial({
   globalEnvMap,
+  globalEnvMapIntensity = 1,
   lightMap,
   lightMapIntensity,
   maps,
   probeBlend
 }: {
   globalEnvMap?: Texture | null
+  globalEnvMapIntensity?: number
   lightMap?: Texture
   lightMapIntensity?: number
   maps: PbrMaps
@@ -1386,12 +1382,12 @@ function GroundSurfaceMaterial({
       {...maps}
       bumpScale={0.08}
       envMap={globalEnvMap ?? null}
-      envMapIntensity={1}
+      envMapIntensity={globalEnvMapIntensity}
       lightMap={lightMap}
       lightMapIntensity={lightMapIntensity}
       metalness={0}
       ref={materialRef}
-      roughness={0.45}
+      roughness={0.18}
     />
   )
 }
@@ -1400,6 +1396,7 @@ function GroundPatchMesh({
   bakedLightmapsEnabled,
   debugIndex,
   environmentTexture,
+  environmentIntensity,
   groundBounds,
   groundLightmapTexture,
   maps,
@@ -1410,6 +1407,7 @@ function GroundPatchMesh({
   bakedLightmapsEnabled: boolean
   debugIndex: number
   environmentTexture: Texture | null
+  environmentIntensity: number
   groundBounds: MazeLightmap['groundBounds']
   groundLightmapTexture: Texture
   maps: PbrMaps
@@ -1442,6 +1440,7 @@ function GroundPatchMesh({
       />
       <GroundSurfaceMaterial
         globalEnvMap={environmentTexture}
+        globalEnvMapIntensity={environmentIntensity}
         lightMap={bakedLightmapsEnabled ? groundLightmapTexture : undefined}
         lightMapIntensity={
           bakedLightmapsEnabled
@@ -1458,6 +1457,7 @@ function GroundPatchMesh({
 function Ground({
   bakedLightmapsEnabled,
   environmentTexture,
+  environmentIntensity,
   layout,
   groundLightmapTexture,
   reflectionCapturesEnabled,
@@ -1466,6 +1466,7 @@ function Ground({
 }: {
   bakedLightmapsEnabled: boolean
   environmentTexture: Texture | null
+  environmentIntensity: number
   layout: MazeLayout
   groundLightmapTexture: Texture
   reflectionCapturesEnabled: boolean
@@ -1489,6 +1490,7 @@ function Ground({
         <planeGeometry args={[GROUND_SIZE, GROUND_SIZE]} />
         <GroundSurfaceMaterial
           globalEnvMap={environmentTexture}
+          globalEnvMapIntensity={environmentIntensity}
           maps={puddle}
         />
       </mesh>
@@ -1497,6 +1499,7 @@ function Ground({
           bakedLightmapsEnabled={bakedLightmapsEnabled}
           debugIndex={index}
           environmentTexture={environmentTexture}
+          environmentIntensity={environmentIntensity}
           groundBounds={layout.maze.lightmap.groundBounds}
           groundLightmapTexture={groundLightmapTexture}
           key={rect.id}
@@ -1517,10 +1520,12 @@ function Ground({
 }
 
 function TorchBillboard({
+  billboardScene,
   position,
   seed,
   torchCandelaMultiplier
 }: {
+  billboardScene: ThreeScene
   position: [number, number, number]
   seed: number
   torchCandelaMultiplier: number
@@ -1576,7 +1581,7 @@ function TorchBillboard({
     }
   })
 
-  return (
+  return createPortal(
     <group
       position={position}
       ref={group}
@@ -1596,19 +1601,24 @@ function TorchBillboard({
           transparent
         />
       </mesh>
-    </group>
+    </group>,
+    billboardScene
   )
 }
 
 function WallSconce({
+  billboardScene,
   environmentTexture,
+  environmentIntensity,
   layout,
   mazeLight,
   reflectionCapturesEnabled,
   reflectionProbeTextures,
   torchCandelaMultiplier
 }: {
+  billboardScene: ThreeScene
   environmentTexture: Texture | null
+  environmentIntensity: number
   layout: MazeLayout
   mazeLight: MazeLayout['lights'][number]
   reflectionCapturesEnabled: boolean
@@ -1655,13 +1665,13 @@ function WallSconce({
             bumpScale={0.02}
             color="white"
             envMap={environmentTexture ?? null}
-            envMapIntensity={1}
+            envMapIntensity={environmentIntensity}
             map={metal.map}
             metalness={0.85}
             metalnessMap={metal.metalnessMap}
             normalMap={metal.normalMap}
             ref={materialRef}
-            roughness={0.55}
+            roughness={0.3}
             roughnessMap={metal.roughnessMap}
             side={DoubleSide}
           />
@@ -1669,6 +1679,7 @@ function WallSconce({
         position={position}
       />
       <TorchBillboard
+        billboardScene={billboardScene}
         position={torchPosition}
         seed={mazeLight.index + 1}
         torchCandelaMultiplier={torchCandelaMultiplier}
@@ -1795,7 +1806,7 @@ function FogVolume({
                 float verticalFalloff = 1.0 - smoothstep(0.0, ${FOG_VOLUME_HEIGHT.toFixed(1)}, layerHeight);
                 float baseNoise = mix(0.45, 1.0, noise(samplePoint));
                 float horizontalFade = 1.0 - smoothstep(${(GROUND_SIZE * 0.33).toFixed(1)}, ${(GROUND_SIZE * 0.6).toFixed(1)}, length(vWorldPosition.xz));
-                float alpha = clamp(density * verticalFalloff * horizontalFade * baseNoise * 0.24, 0.0, 0.16);
+                float alpha = clamp(density * verticalFalloff * horizontalFade * baseNoise * 0.05, 0.0, 0.04);
                 if (alpha < 0.002) {
                   discard;
                 }
@@ -1874,7 +1885,9 @@ function ReflectionProbeVisualization({
 
 function MazeWalls({
   bakedLightmapsEnabled,
+  billboardScene,
   environmentTexture,
+  environmentIntensity,
   layout,
   lightmapBytes,
   reflectionCapturesEnabled,
@@ -1882,7 +1895,9 @@ function MazeWalls({
   torchCandelaMultiplier
 }: {
   bakedLightmapsEnabled: boolean
+  billboardScene: ThreeScene
   environmentTexture: Texture | null
+  environmentIntensity: number
   layout: MazeLayout
   lightmapBytes: Uint8Array
   reflectionCapturesEnabled: boolean
@@ -1907,7 +1922,9 @@ function MazeWalls({
       ))}
       {layout.lights.map((mazeLight) => (
         <WallSconce
+          billboardScene={billboardScene}
           environmentTexture={environmentTexture}
+          environmentIntensity={environmentIntensity}
           key={mazeLight.id}
           layout={layout}
           mazeLight={mazeLight}
@@ -2012,7 +2029,9 @@ function MazeWallMesh({
 
 function SceneGeometry({
   bakedLightmapsEnabled,
+  billboardScene,
   environmentTexture,
+  environmentIntensity,
   layout,
   reflectionCapturesEnabled,
   reflectionProbeTextures,
@@ -2022,7 +2041,9 @@ function SceneGeometry({
   volumetricNoiseFrequency
 }: {
   bakedLightmapsEnabled: boolean
+  billboardScene: ThreeScene
   environmentTexture: Texture | null
+  environmentIntensity: number
   layout: MazeLayout
   reflectionCapturesEnabled: boolean
   reflectionProbeTextures: Texture[]
@@ -2039,6 +2060,7 @@ function SceneGeometry({
       <Ground
         bakedLightmapsEnabled={bakedLightmapsEnabled}
         environmentTexture={environmentTexture}
+        environmentIntensity={environmentIntensity}
         layout={layout}
         groundLightmapTexture={groundLightmapTexture}
         reflectionCapturesEnabled={reflectionCapturesEnabled}
@@ -2047,7 +2069,9 @@ function SceneGeometry({
       />
       <MazeWalls
         bakedLightmapsEnabled={bakedLightmapsEnabled}
+        billboardScene={billboardScene}
         environmentTexture={environmentTexture}
+        environmentIntensity={environmentIntensity}
         layout={layout}
         lightmapBytes={lightmapBytes}
         reflectionCapturesEnabled={reflectionCapturesEnabled}
@@ -2059,7 +2083,7 @@ function SceneGeometry({
         reflectionProbeTextures={reflectionProbeTextures}
         visible={showReflectionProbes}
       />
-      {volumetricLighting.enabled ? (
+      {isEffectActive(volumetricLighting) ? (
         <FogVolume
           noiseFrequency={volumetricNoiseFrequency}
           visible={volumetricLighting.enabled}
@@ -2113,6 +2137,7 @@ function SSREffectPrimitive({
 }) {
   const camera = useThree((state) => state.camera)
   const scene = useThree((state) => state.scene)
+  const clampedIntensity = Math.min(1, Math.max(0, intensity))
   const effect = useMemo(
     () =>
       new SSREffect(scene, camera, {
@@ -2121,7 +2146,7 @@ function SSREffectPrimitive({
         correction: 1,
         distance: 18,
         fade: 0.12,
-        intensity,
+        intensity: clampedIntensity,
         ior: 1.333,
         jitter: 0.05,
         jitterRoughness: 0.1,
@@ -2135,12 +2160,12 @@ function SSREffectPrimitive({
         useNormalMap: true,
         useRoughnessMap: true
       }),
-    [camera, intensity, scene]
+    [camera, clampedIntensity, scene]
   )
 
   useEffect(() => {
-    effect.intensity = intensity
-  }, [effect, intensity])
+    effect.intensity = clampedIntensity
+  }, [clampedIntensity, effect])
 
   useEffect(() => () => effect.dispose(), [effect])
 
@@ -2217,6 +2242,31 @@ function ExposureEffectPrimitive({
   return <primitive object={effect as unknown as Effect} />
 }
 
+function BillboardRenderPass({
+  billboardScene
+}: {
+  billboardScene: ThreeScene
+}) {
+  const camera = useThree((state) => state.camera)
+  const pass = useMemo(() => {
+    const renderPass = new RenderPass(billboardScene, camera)
+
+    renderPass.clearPass.enabled = false
+    renderPass.ignoreBackground = true
+    renderPass.skipShadowMapUpdate = true
+    return renderPass
+  }, [billboardScene, camera])
+
+  useEffect(() => {
+    pass.mainCamera = camera
+    pass.mainScene = billboardScene
+  }, [billboardScene, camera, pass])
+
+  useEffect(() => () => pass.dispose(), [pass])
+
+  return <primitive object={pass} />
+}
+
 function TorchLensFlareEffect({
   intensity,
   mazeLight,
@@ -2226,104 +2276,41 @@ function TorchLensFlareEffect({
   mazeLight: MazeLayout['lights'][number]
   torchCandelaMultiplier: number
 }) {
-  const camera = useThree((state) => state.camera)
-  const raycaster = useThree((state) => state.raycaster)
-  const scene = useThree((state) => state.scene)
-  const size = useThree((state) => state.size)
-  const effect = useMemo(
-    () =>
-      new LensFlareEffect({
-        blendFunction: BlendFunction.NORMAL,
-        enabled: true,
-        glareSize: 0.08,
-        lensPosition: new Vector3(),
-        screenRes: new Vector2(size.width, size.height),
-        starPoints: 6,
-        flareSize: 0.006,
-        flareSpeed: 0.01,
-        flareShape: 0.12,
-        animated: true,
-        anamorphic: false,
-        colorGain: FIRE_COLOR.clone().multiplyScalar(LENS_FLARE_COLOR_GAIN_SCALE),
-        lensDirtTexture: null,
-        haloScale: 0.18,
-        secondaryGhosts: true,
-        aditionalStreaks: true,
-        ghostScale: 0.12,
-        opacity: 1,
-        starBurst: false
-      }),
-    [size.height, size.width]
+  const flareScale = Math.pow(Math.max(0, intensity), 1.5) * torchCandelaMultiplier
+  const colorGain = useMemo(
+    () => FIRE_COLOR.clone().multiplyScalar(flareScale * 0.18),
+    [flareScale]
   )
-  const projectedPosition = useMemo(() => new Vector3(), [])
-  const rayDirection = useMemo(() => new Vector3(), [])
-  const targetPosition = useMemo(() => new Vector3(), [])
+  const lensPosition = useMemo(
+    () =>
+      new Vector3(
+        mazeLight.torchPosition.x,
+        mazeLight.torchPosition.y,
+        mazeLight.torchPosition.z
+      ),
+    [
+      mazeLight.torchPosition.x,
+      mazeLight.torchPosition.y,
+      mazeLight.torchPosition.z
+    ]
+  )
 
-  useEffect(() => {
-    const resolution = effect.uniforms.get('screenRes')
-
-    if (!resolution) {
-      return
-    }
-
-    resolution.value.x = size.width
-    resolution.value.y = size.height
-  }, [effect, size.height, size.width])
-
-  useFrame((state, delta) => {
-    const lensPosition = effect.uniforms.get('lensPosition')
-    const opacity = effect.uniforms.get('opacity')
-    const colorGain = effect.uniforms.get('colorGain')
-
-    if (!lensPosition || !opacity || !colorGain) {
-      return
-    }
-
-    const brightness = torchCandelaMultiplier
-    const visibleIntensity = Math.max(0, intensity)
-
-    targetPosition.copy(mazeLight.torchPosition)
-    projectedPosition.copy(targetPosition).project(camera)
-
-    if (
-      projectedPosition.z < -1 ||
-      projectedPosition.z > 1 ||
-      Math.abs(projectedPosition.x) > 1.2 ||
-      Math.abs(projectedPosition.y) > 1.2
-    ) {
-      opacity.value += (1 - opacity.value) * Math.min(1, delta / 0.12)
-      return
-    }
-
-    rayDirection.copy(targetPosition).sub(camera.position)
-    const distanceToTorch = rayDirection.length()
-    rayDirection.normalize()
-    raycaster.set(camera.position, rayDirection)
-
-    const hit = raycaster.intersectObjects(scene.children, true)[0]
-    const visible =
-      !hit ||
-      hit.distance >= distanceToTorch - 0.05 ||
-      hit.object.userData.lensflare === 'no-occlusion'
-
-    if (!visible) {
-      opacity.value += (1 - opacity.value) * Math.min(1, delta / 0.12)
-      return
-    }
-
-    lensPosition.value.x = projectedPosition.x
-    lensPosition.value.y = projectedPosition.y
-    const flareStrength = Math.min(0.98, visibleIntensity * brightness * 0.02)
-    const targetOpacity = 1 - flareStrength
-    opacity.value += (targetOpacity - opacity.value) * Math.min(1, delta / 0.12)
-    colorGain.value
-      .copy(FIRE_COLOR)
-      .multiplyScalar(brightness * visibleIntensity * LENS_FLARE_COLOR_GAIN_SCALE)
-  })
-
-  useEffect(() => () => effect.dispose(), [effect])
-
-  return <primitive object={effect as unknown as Effect} />
+  return (
+    <PostLensFlare
+      aditionalStreaks={false}
+      colorGain={colorGain}
+      flareShape={0.08}
+      flareSize={0.0012 + (flareScale * 0.002)}
+      glareSize={0.02 + (flareScale * 0.035)}
+      ghostScale={0.08 + (flareScale * 0.08)}
+      haloScale={0.12 + (flareScale * 0.12)}
+      lensPosition={lensPosition}
+      opacity={0}
+      secondaryGhosts
+      smoothTime={0.12}
+      starBurst={false}
+    />
+  )
 }
 
 function TorchLensFlare({
@@ -2571,24 +2558,34 @@ function FlightRig({
     }
     const existing = globalWindow.__levelsjamDebug ?? {}
     const worldPosition = new Vector3()
+    const getDebugRoots = () => [
+      scene,
+      ...(
+        scene.userData.billboardScene instanceof ThreeScene
+          ? [scene.userData.billboardScene as ThreeScene]
+          : []
+      )
+    ]
 
     globalWindow.__levelsjamDebug = {
       ...existing,
       getDebugPosition: (role, index) => {
         let match: [number, number, number] | null = null
 
-        scene.traverse((object) => {
-          if (
-            match ||
-            object.userData?.debugRole !== role ||
-            object.userData?.debugIndex !== index
-          ) {
-            return
-          }
+        for (const root of getDebugRoots()) {
+          root.traverse((object) => {
+            if (
+              match ||
+              object.userData?.debugRole !== role ||
+              object.userData?.debugIndex !== index
+            ) {
+              return
+            }
 
-          object.getWorldPosition(worldPosition)
-          match = [worldPosition.x, worldPosition.y, worldPosition.z]
-        })
+            object.getWorldPosition(worldPosition)
+            match = [worldPosition.x, worldPosition.y, worldPosition.z]
+          })
+        }
 
         return match
       },
@@ -2621,76 +2618,78 @@ function FlightRig({
           } | null
         } | null = null
 
-        scene.traverse((object) => {
-          if (
-            match ||
-            !(object instanceof Mesh) ||
-            object.userData?.debugRole !== role ||
-            object.userData?.debugIndex !== index
-          ) {
-            return
-          }
+        for (const root of getDebugRoots()) {
+          root.traverse((object) => {
+            if (
+              match ||
+              !(object instanceof Mesh) ||
+              object.userData?.debugRole !== role ||
+              object.userData?.debugIndex !== index
+            ) {
+              return
+            }
 
-          const material = object.material as {
-            emissive?: Color
-            emissiveIntensity?: number
-            emissiveMap?: Texture | null
-            color?: Color
-            envMap?: Texture | null
-            envMapIntensity?: number
-            lightMap?: Texture | null
-            lightMapIntensity?: number
-            map?: Texture | null
-          }
+            const material = object.material as {
+              emissive?: Color
+              emissiveIntensity?: number
+              emissiveMap?: Texture | null
+              color?: Color
+              envMap?: Texture | null
+              envMapIntensity?: number
+              lightMap?: Texture | null
+              lightMapIntensity?: number
+              map?: Texture | null
+            }
 
-          match = {
-            emissiveColor: material.emissive
-              ? [
-                  material.emissive.r,
-                  material.emissive.g,
-                  material.emissive.b
-                ]
-              : null,
-            emissiveIntensity:
-              typeof material.emissiveIntensity === 'number'
-                ? material.emissiveIntensity
+            match = {
+              emissiveColor: material.emissive
+                ? [
+                    material.emissive.r,
+                    material.emissive.g,
+                    material.emissive.b
+                  ]
                 : null,
-            emissiveMapChannel:
-              typeof material.emissiveMap?.channel === 'number'
-                ? material.emissiveMap.channel
+              emissiveIntensity:
+                typeof material.emissiveIntensity === 'number'
+                  ? material.emissiveIntensity
+                  : null,
+              emissiveMapChannel:
+                typeof material.emissiveMap?.channel === 'number'
+                  ? material.emissiveMap.channel
+                  : null,
+              envMapIntensity:
+                typeof material.envMapIntensity === 'number'
+                  ? material.envMapIntensity
+                  : null,
+              hasEmissiveMap: Boolean(material.emissiveMap),
+              hasEnvMap: Boolean(material.envMap),
+              hasLightMap: Boolean(material.lightMap),
+              hasMap: Boolean(material.map),
+              hasUv1: Boolean(object.geometry?.getAttribute?.('uv1')),
+              hasUv2: Boolean(object.geometry?.getAttribute?.('uv2')),
+              lightMapChannel:
+                typeof material.lightMap?.channel === 'number'
+                  ? material.lightMap.channel
+                  : null,
+              lightMapIntensity:
+                typeof material.lightMapIntensity === 'number'
+                  ? material.lightMapIntensity
+                  : null,
+              mapChannel:
+                typeof material.map?.channel === 'number'
+                  ? material.map.channel
+                  : null,
+              materialColor: material.color
+                ? [
+                    material.color.r,
+                    material.color.g,
+                    material.color.b
+                  ]
                 : null,
-            envMapIntensity:
-              typeof material.envMapIntensity === 'number'
-                ? material.envMapIntensity
-                : null,
-            hasEmissiveMap: Boolean(material.emissiveMap),
-            hasEnvMap: Boolean(material.envMap),
-            hasLightMap: Boolean(material.lightMap),
-            hasMap: Boolean(material.map),
-            hasUv1: Boolean(object.geometry?.getAttribute?.('uv1')),
-            hasUv2: Boolean(object.geometry?.getAttribute?.('uv2')),
-            lightMapChannel:
-              typeof material.lightMap?.channel === 'number'
-                ? material.lightMap.channel
-                : null,
-            lightMapIntensity:
-              typeof material.lightMapIntensity === 'number'
-                ? material.lightMapIntensity
-                : null,
-            mapChannel:
-              typeof material.map?.channel === 'number'
-                ? material.map.channel
-                : null,
-            materialColor: material.color
-              ? [
-                  material.color.r,
-                  material.color.g,
-                  material.color.b
-                ]
-              : null,
-            probeBlend: material.userData?.probeBlendDebug ?? null
-          }
-        })
+              probeBlend: material.userData?.probeBlendDebug ?? null
+            }
+          })
+        }
 
         return match
       },
@@ -2894,8 +2893,23 @@ function Scene({
   }, [onAssetsReady])
 
   const scene = useThree((state) => state.scene)
+  const billboardScene = useMemo(() => new ThreeScene(), [])
   const [environmentTexture, setEnvironmentTexture] = useState<Texture | null>(null)
   const [reflectionProbeTextures, setReflectionProbeTextures] = useState<Texture[]>([])
+  const environmentIntensity = useMemo(
+    () => getHdrLightingIntensity(visualSettings.iblIntensity),
+    [visualSettings.iblIntensity]
+  )
+
+  useEffect(() => {
+    scene.userData.billboardScene = billboardScene
+
+    return () => {
+      if (scene.userData.billboardScene === billboardScene) {
+        delete scene.userData.billboardScene
+      }
+    }
+  }, [billboardScene, scene])
 
   useEffect(() => {
     const globalWindow = window as Window & {
@@ -2910,17 +2924,20 @@ function Scene({
       }
     }
     const existing = globalWindow.__levelsjamDebug ?? {}
+    const debugRoots = [scene, billboardScene]
     let restoreDebugIsolation = () => {}
 
     const setDebugVisible = (role: string, index: number, visible: boolean) => {
-      scene.traverse((object) => {
-        if (
-          object.userData?.debugRole === role &&
-          object.userData?.debugIndex === index
-        ) {
-          object.visible = visible
-        }
-      })
+      for (const root of debugRoots) {
+        root.traverse((object) => {
+          if (
+            object.userData?.debugRole === role &&
+            object.userData?.debugIndex === index
+          ) {
+            object.visible = visible
+          }
+        })
+      }
     }
 
     const clearDebugIsolation = () => {
@@ -2939,30 +2956,32 @@ function Scene({
       const savedBackground = scene.background
       const savedEnvironment = scene.environment
 
-      scene.traverse((object) => {
-        savedVisibility.push({ object, visible: object.visible })
-        const match =
-          object.userData?.debugRole === role &&
-          object.userData?.debugIndex === index
+      for (const root of debugRoots) {
+        root.traverse((object) => {
+          savedVisibility.push({ object, visible: object.visible })
+          const match =
+            object.userData?.debugRole === role &&
+            object.userData?.debugIndex === index
 
-        if (
-          !match &&
-          (object instanceof Mesh ||
-            'isLight' in object)
-        ) {
-          object.visible = false
-        }
+          if (
+            !match &&
+            (object instanceof Mesh ||
+              'isLight' in object)
+          ) {
+            object.visible = false
+          }
 
-        if (match && object instanceof Mesh) {
-          savedMeshes.push({
-            castShadow: object.castShadow,
-            mesh: object,
-            receiveShadow: object.receiveShadow
-          })
-          object.castShadow = false
-          object.receiveShadow = false
-        }
-      })
+          if (match && object instanceof Mesh) {
+            savedMeshes.push({
+              castShadow: object.castShadow,
+              mesh: object,
+              receiveShadow: object.receiveShadow
+            })
+            object.castShadow = false
+            object.receiveShadow = false
+          }
+        })
+      }
 
       scene.background = new Color('white')
       scene.environment = null
@@ -3001,7 +3020,7 @@ function Scene({
         delete globalWindow.__levelsjamDebug
       }
     }
-  }, [scene])
+  }, [billboardScene, scene])
 
   const ambientOcclusionActive = isAmbientOcclusionActive(visualSettings)
   const bloomActive = isEffectActive(visualSettings.bloom)
@@ -3020,7 +3039,9 @@ function Scene({
       />
       <SceneGeometry
         bakedLightmapsEnabled={visualSettings.bakedLightmapsEnabled}
+        billboardScene={billboardScene}
         environmentTexture={environmentTexture}
+        environmentIntensity={environmentIntensity}
         layout={layout}
         reflectionCapturesEnabled={visualSettings.reflectionCapturesEnabled}
         reflectionProbeTextures={reflectionProbeTextures}
@@ -3046,18 +3067,18 @@ function Scene({
         ) : null}
         {ambientOcclusionActive && visualSettings.ambientOcclusionMode === 'ssao' ? (
           <SSAO
-            bias={0.03}
-            depthAwareUpsampling={false}
-            distanceFalloff={0.1}
-            distanceThreshold={1}
-            intensity={visualSettings.ambientOcclusionIntensity * 6}
-            luminanceInfluence={0}
-            radius={visualSettings.ambientOcclusionRadius}
-            rangeFalloff={0.1}
-            rangeThreshold={0.001}
-            resolutionScale={0.25}
-            rings={3}
-            samples={8}
+            bias={0.025}
+            depthAwareUpsampling
+            distanceFalloff={0.03}
+            distanceThreshold={0.97}
+            intensity={visualSettings.ambientOcclusionIntensity}
+            luminanceInfluence={0.7}
+            radius={Math.min(0.35, visualSettings.ambientOcclusionRadius * 0.08)}
+            rangeFalloff={0.001}
+            rangeThreshold={0.0005}
+            resolutionScale={0.75}
+            rings={4}
+            samples={21}
           />
         ) : null}
         {ssrActive ? (
@@ -3077,6 +3098,7 @@ function Scene({
             resolutionScale={0.25}
           />
         ) : null}
+        <BillboardRenderPass billboardScene={billboardScene} />
         {lensFlareActive ? (
           <TorchLensFlare
             intensity={visualSettings.lensFlare.intensity}
@@ -3144,9 +3166,9 @@ function VisualControls({
     min: number
     step: number
   }> = [
-    { key: 'lensFlare', label: 'Lens Flares', min: 0, max: 0.2, step: 0.005 },
-    { key: 'ssr', label: 'SSR', min: 0, max: 2, step: 0.05 },
-    { key: 'volumetricLighting', label: 'Volumetric Fog', min: 0, max: 1, step: 0.05 },
+    { key: 'lensFlare', label: 'Lens Flares', min: 0, max: 0.1, step: 0.001 },
+    { key: 'ssr', label: 'SSR', min: 0, max: 1, step: 0.05 },
+    { key: 'volumetricLighting', label: 'Volumetric Fog', min: 0, max: 1, step: 0.01 },
     { key: 'vignette', label: 'Vignette', min: 0, max: 1, step: 0.05 }
   ]
 

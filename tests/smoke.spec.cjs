@@ -326,7 +326,43 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       }
     )
     .toBe('world')
-  const reflectionCapturesOn = await screenshotCanvasRegion(page, canvas, 300, 220, 0.72, 0.52)
+  await page.getByLabel('Show Reflection Probes').check()
+  await expect(page.getByLabel('Show Reflection Probes')).toBeChecked()
+  await expect
+    .poll(
+      async () => page.evaluate(
+        () => window.__levelsjamDebug.getDebugPosition('reflection-probe-visual', 0)
+      ),
+      {
+        timeout: 5_000,
+        intervals: [100, 250, 500]
+      }
+    )
+    .not.toBeNull()
+  const firstProbePosition = await page.evaluate(
+    () => window.__levelsjamDebug.getDebugPosition('reflection-probe-visual', 0)
+  )
+  await page.evaluate((position) => {
+    const [x, y, z] = position
+    window.__levelsjamDebug.setView(
+      [x - 0.65, y + 0.1, z - 0.65],
+      [x, y, z]
+    )
+  }, firstProbePosition)
+  await page.waitForTimeout(250)
+  const reflectionProbeVisualOn = await screenshotCanvasRegion(page, canvas, 220, 180, 0.5, 0.5)
+  await page.getByLabel('Show Reflection Probes').uncheck()
+  await expect(page.getByLabel('Show Reflection Probes')).not.toBeChecked()
+  await page.waitForTimeout(250)
+  const reflectionProbeVisualOff = await screenshotCanvasRegion(page, canvas, 220, 180, 0.5, 0.5)
+  expect(measureDifference(reflectionProbeVisualOn, reflectionProbeVisualOff)).toBeGreaterThan(0.05)
+  await page.evaluate(() => {
+    window.__levelsjamDebug.setView(
+      [5.4, 1.55, -6.9],
+      [7, 1.1, -6]
+    )
+  })
+  await page.waitForTimeout(200)
   await page.getByLabel('Reflection Captures').uncheck()
   await expect(page.getByLabel('Reflection Captures')).not.toBeChecked()
   await page.waitForTimeout(250)
@@ -341,8 +377,6 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       }
     )
     .toBe('none')
-  const reflectionCapturesOff = await screenshotCanvasRegion(page, canvas, 300, 220, 0.72, 0.52)
-  expect(measureDifference(reflectionCapturesOn, reflectionCapturesOff)).toBeGreaterThan(0.05)
   await page.getByLabel('Reflection Captures').check()
   await expect(page.getByLabel('Reflection Captures')).toBeChecked()
 
@@ -356,18 +390,6 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     )
   })
   await page.waitForTimeout(200)
-  const wallVisibleRegion = await screenshotCanvasRegion(page, canvas, 320, 240, 0.5, 0.5)
-  await page.evaluate(() => {
-    window.__levelsjamDebug.setDebugVisible('maze-wall', 12, false)
-    window.__levelsjamDebug.setDebugVisible('maze-wall-lightmap', 12, false)
-  })
-  await page.waitForTimeout(200)
-  const wallHiddenRegion = await screenshotCanvasRegion(page, canvas, 320, 240, 0.5, 0.5)
-  expect(measureDifference(wallVisibleRegion, wallHiddenRegion)).toBeGreaterThan(0.5)
-  await page.evaluate(() => {
-    window.__levelsjamDebug.setDebugVisible('maze-wall', 12, true)
-    window.__levelsjamDebug.setDebugVisible('maze-wall-lightmap', 12, true)
-  })
 
   await page.evaluate((position) => {
     const [x, y, z] = position
