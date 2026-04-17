@@ -14,7 +14,7 @@ import {
   getRandomMazeLayout,
   getWallBounds
 } from '../src/lib/sceneLayout.js'
-import { MAZE_HEIGHT, MAZE_WIDTH } from '../src/lib/maze.js'
+import { MAZE_CELL_SIZE, MAZE_HEIGHT, MAZE_WIDTH } from '../src/lib/maze.js'
 
 test('keeps at least five persisted mazes available to the runtime', () => {
   assert.ok(AVAILABLE_MAZES.length >= MAZE_COUNT)
@@ -28,7 +28,17 @@ test('returns one of the available mazes when selecting a random layout', () => 
   assert.equal(layout.maze.id, AVAILABLE_MAZES[0].id)
   assert.ok(layout.walls.length > 0)
   assert.ok(layout.lights.length > 0)
+  assert.equal(layout.reflectionProbes.length, layout.maze.width * layout.maze.height)
   assert.ok(layout.maze.lightmap)
+})
+
+test('expands the baked ground patch beyond the maze footprint', () => {
+  const bounds = DEFAULT_MAZE_LAYOUT.maze.lightmap.groundBounds
+
+  assert.equal(bounds.centerX, 0)
+  assert.equal(bounds.centerZ, 0)
+  assert.ok(bounds.width > (MAZE_WIDTH * MAZE_CELL_SIZE))
+  assert.ok(bounds.depth > (MAZE_HEIGHT * MAZE_CELL_SIZE))
 })
 
 test('uses the requested wall mesh dimensions for maze wall segments', () => {

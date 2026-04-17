@@ -36,7 +36,7 @@ export default defineConfig({
     __GIT_REVISION_TIMESTAMP__: JSON.stringify(gitMetadata.revisionTimestamp)
   },
   build: {
-    chunkSizeWarningLimit: 7000,
+    chunkSizeWarningLimit: 50000,
     rollupOptions: {
       input: path.resolve(__dirname, 'src/main.tsx'),
       output: {

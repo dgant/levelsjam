@@ -44,15 +44,20 @@
 - Each torch billboard brightness is scaled from a 1500 candela torch baseline.
 - Each torch billboard samples the linked atlas so the visible flame fills the specified quad and sits on the sconce instead of floating above it due to transparent frame padding.
 - Each maze includes a baked torch lightmap generated as a late step in maze generation.
-- Each maze lightmap stores the static torch contribution for the maze floor and wall faces.
+- Each maze lightmap stores the static torch contribution for the maze floor patch and wall faces.
 - Each maze wall face receives baked torch lighting on the side that faces the lit cell rather than on the wall's opposite face.
 - Each maze lightmap is source-controlled together with its maze definition.
 - Each torch billboard brightness derives from a 1500 candela torch baseline scaled by the shared torch intensity multiplier.
-- The maze floor and maze walls receive torch lighting from the baked maze lightmap instead of from realtime torch point lights.
-- The maze floor and maze walls integrate the baked torch lightmap directly into their PBR material path rather than drawing it as a separate transparent overlay mesh.
+- The maze floor patch and maze walls receive torch lighting from the baked maze lightmap instead of from realtime torch point lights.
+- The maze floor patch bounds expand beyond the maze footprint by the baked torch-light radius so the lit area covers the maze and its nearby spill.
+- The infinite background ground outside the maze floor patch remains an unbaked PBR surface.
+- The maze floor patch and maze walls integrate the baked torch lightmap directly into their PBR material path rather than drawing it as a separate transparent overlay mesh.
 - The baked torch lightmap follows the same exposure and tone-mapping path as the rest of the wall and floor shading.
 - Each baked maze lightmap stores grayscale torch intensity rather than a pre-tonemapped colored overlay.
 - Each baked maze lightmap is normalized to preserve headroom instead of clipping bright torch-adjacent texels to full white during bake generation.
+- Each baked maze lightmap uses supersampled texel evaluation so torch gradients on walls and the maze floor patch are smoother than a single-sample bake.
+- Each baked maze wall-face lightmap uses a higher texel density than the current base wall-material textures require for albedo detail.
+- Each baked maze floor-patch lightmap uses a higher texel density than the previous full-ground bake.
 - The current scene does not include realtime torch flicker.
 - The current scene does not include realtime torch point lights.
 - The player collides with the ground plane and the walls.
@@ -133,10 +138,13 @@
 - The environment map from `overcast_soil` provides the visible skybox.
 - The environment map from `overcast_soil` provides image-based lighting.
 - The environment map from `overcast_soil` provides specular reflection data for reflective materials.
+- The scene also derives local specular reflection data from static maze reflection probes captured inside the maze.
+- The current reflection probes are authored-baseline captures rather than live-recaptured responses to every debug-slider change.
+- The visible skybox remains the authored HDRI even when local reflection probes drive material reflections.
 - The environment map from `overcast_soil` is treated as canonically authored intensity at an IBL multiplier of `1`.
 - The visible skybox and the environment lighting use the same calibrated HDRI intensity path.
 - The ground and walls use extracted PBR texture packs with tiling based on a 1 meter world scale unless a source specifies otherwise.
-- Reflective and semi-reflective materials read from the shared environment consistently.
+- Reflective and semi-reflective materials read from the shared environment consistently, with the nearest local maze reflection probe taking precedence over the global HDRI for in-maze specular.
 - The torch billboards face the camera continuously.
 - The torch billboards animate smoothly through the flipbook loop without lighting artifacts from scene lights.
 - The torch billboards are excluded from screen-space reflections.

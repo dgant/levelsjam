@@ -29,6 +29,18 @@ export type MazeLayout = {
       atlasWidth: number
       bakeMs: number
       dataBase64: string
+      groundBounds: {
+        centerX: number
+        centerZ: number
+        depth: number
+        height: number
+        margin: number
+        maxX: number
+        maxZ: number
+        minX: number
+        minZ: number
+        width: number
+      }
       groundRect: { height: number; width: number; x: number; y: number }
       neutralRect: { height: number; width: number; x: number; y: number }
       version: number
@@ -44,6 +56,11 @@ export type MazeLayout = {
     id: string
     width: number
   }
+  reflectionProbes: Array<{
+    cell: { x: number; y: number }
+    id: string
+    position: Vector3Like
+  }>
   walls: Array<{
     axis: 'x' | 'z'
     bounds: WallBounds

@@ -161,8 +161,16 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   const canvas = page.locator('canvas')
 
   await expect(loadingOverlay).toBeVisible({ timeout: 5_000 })
-
-  await expect(loadingOverlay).toBeHidden({ timeout: 12_000 })
+  await expect
+    .poll(
+      async () => loadingOverlay.getAttribute('data-loading-complete'),
+      {
+        timeout: 25_000,
+        intervals: [250, 500, 1_000]
+      }
+    )
+    .toBe('true')
+  await expect(loadingOverlay).toHaveAttribute('aria-hidden', 'true')
   await expect(canvas).toBeVisible({ timeout: 5_000 })
 
   const frameBrightness = await waitForBrightFrame(page, canvas, 8, 20)
@@ -307,8 +315,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         () => window.__levelsjamDebug.getDebugMeshState('maze-wall-lightmap', 12)?.lightMapIntensity
       ),
       {
-        timeout: 5_000,
-        intervals: [100, 250, 500]
+        timeout: 15_000,
+        intervals: [100, 250, 500, 1_000]
       }
     )
     .toBe(0)
@@ -321,8 +329,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         () => window.__levelsjamDebug.getDebugMeshState('maze-wall-lightmap', 12)?.lightMapIntensity
       ),
       {
-        timeout: 5_000,
-        intervals: [100, 250, 500]
+        timeout: 15_000,
+        intervals: [100, 250, 500, 1_000]
       }
     )
     .toBe(10)

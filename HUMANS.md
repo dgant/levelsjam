@@ -1,7 +1,7 @@
 # How To Work On This Project
 
 ## Current State
-The repository contains a runnable browser game prototype for GitHub Pages. The intended build serves a three.js scene with immediate mouse-look, WASD movement, hold-space vertical thrust, a local Poly Haven `overcast_soil` HDRI used for the visible skybox and IBL, a large `puddle-ground` floor plane, one randomly selected persisted maze built from `stone-wall-29` wall meshes, maze-mounted metal sconces with animated torch billboards, baked per-maze torch lightmaps, and a backquote visual-controls panel with exposure, IBL intensity, torch candela, ambient-occlusion mode, tone-mapper, post-effect controls, and build metadata in the FPS overlay.
+The repository contains a runnable browser game prototype for GitHub Pages. The intended build serves a three.js scene with immediate mouse-look, WASD movement, hold-space vertical thrust, a local Poly Haven `overcast_soil` HDRI used for the visible skybox and IBL, an infinite `puddle-ground` base plane plus a maze-local lit floor patch, one randomly selected persisted maze built from `stone-wall-29` wall meshes, maze-mounted metal sconces with animated torch billboards, baked per-maze torch lightmaps, static local reflection probes for in-maze specular response, and a backquote visual-controls panel with exposure, IBL intensity, torch candela, ambient-occlusion mode, tone-mapper, post-effect controls, and build metadata in the FPS overlay.
 
 ## Local Setup
 - Install Node.js 20 or newer.
@@ -51,11 +51,15 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the torch billboards animate and stay camera-facing even on walls whose parent groups are rotated.
 - Verify the visible flame fills the 0.5m billboard and that the billboard bottom edge is flush with the sconce top.
 - Verify each persisted maze includes baked torch lightmap data.
-- Verify the baked lightmap visibly affects the maze walls and maze floor in the rendered scene.
+- Verify the baked lightmap visibly affects the maze walls and the maze-local lit floor patch in the rendered scene.
+- Verify the infinite base ground remains present outside the lit floor patch.
 - Verify baked wall lighting in a wall-facing view, not only in a broad maze overview where the floor can dominate the image.
 - Verify the wall-facing view is on the torch-facing side of the wall, not the dark back face.
 - Verify the baked wall and floor lighting reads as grayscale intensity carried through the wall and ground PBR materials rather than as a colored post-tonemap overlay.
+- Verify the baked floor patch extends beyond the maze footprint by the authored torch-light radius margin.
 - Verify the scene does not rely on realtime torch point lights for maze illumination.
+- Verify reflective maze materials respond to the local maze reflection probes rather than only to the global HDRI.
+- Verify `window.__levelsjamDebug.getReflectionProbeState()` reports a nonzero probe count and becomes `ready: true` after load.
 - Verify the fire flipbook runs at the updated faster rate.
 - Verify the tone mapper is `AgX` by default.
 - Verify the visual controls panel exposes `Exposure`, `IBL Intensity`, `Torch Candelas`, `Ambient Occlusion`, `AO Intensity`, the tone mapper, and the enabled/intensity controls for Bloom, Depth Of Field, Lens Flares, SSR, and Vignette.
@@ -100,7 +104,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Treat the temporary `test:perf` disablement as intentional until the static baked-lightmap torch-lighting evaluation ends.
 - Keep `npm run test:unit` under 20 seconds.
 - Keep the prepared smoke runner `npm run test:smoke:runner` under 1 minute after a single `npm run build:pages`.
-- Latest measured benchmark on April 6, 2026: `npm run build` took about `3.1s`, `npm run test:unit` took about `55.1s`, `npm run test:perf:runner` remains intentionally skipped during the static baked-lightmap evaluation, and `npm run test:smoke` took about `1.4m` including `build:pages`.
+- Latest measured benchmark on April 17, 2026: `npm run bench:startup` on the dev server reached the first rendered frame in about `1.14s`; `npm run build` took about `4.1s`; `npm run test:unit` took about `1.8m`; `npm run test:perf:runner` remains intentionally skipped during the static baked-lightmap evaluation; and `npm run test:smoke` took about `2.3m` including `build:pages`.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.

@@ -9,8 +9,10 @@ import { MAZES } from '../src/data/mazes/index.js'
 import {
   MAZE_HEIGHT,
   MAZE_TARGET_COUNT,
+  MAZE_CELL_SIZE,
   MAZE_WIDTH,
   generateMaze,
+  getMazeFloorLightmapBounds,
   getMazeSceneLayout,
   validateMaze
 } from '../src/lib/maze.js'
@@ -26,7 +28,11 @@ test('generates valid mazes under 100ms', () => {
   assert.equal(maze.height, MAZE_HEIGHT)
   assert.ok(maze.lightmap)
   assert.equal(typeof maze.lightmap.dataBase64, 'string')
-  assert.equal(maze.lightmap.version, 4)
+  assert.equal(maze.lightmap.version, 6)
+  assert.deepEqual(
+    maze.lightmap.groundBounds,
+    getMazeFloorLightmapBounds(maze)
+  )
   assert.ok(maze.generationMs < 100, `generation took ${maze.generationMs}ms`)
 })
 
@@ -85,17 +91,26 @@ test('converts persisted mazes into wall segments and torch placements', () => {
 
   assert.ok(layout.walls.length > 0)
   assert.ok(layout.lights.length > 0)
+  assert.equal(layout.reflectionProbes.length, layout.maze.width * layout.maze.height)
   assert.ok(layout.maze.lightmap)
   assert.equal(
     Buffer.from(layout.maze.lightmap.dataBase64, 'base64').length,
     layout.maze.lightmap.atlasWidth * layout.maze.lightmap.atlasHeight * 3
   )
+  assert.equal(layout.maze.lightmap.groundRect.width, 256)
+  assert.equal(layout.maze.lightmap.groundRect.height, 256)
+  assert.ok(layout.maze.lightmap.groundBounds.width > (layout.maze.width * MAZE_CELL_SIZE))
+  assert.ok(layout.maze.lightmap.groundBounds.depth > (layout.maze.height * MAZE_CELL_SIZE))
 
   for (const wall of layout.walls) {
     assert.ok(wall.bounds.maxY > wall.bounds.minY)
     assert.ok(wall.bounds.maxX > wall.bounds.minX)
     assert.ok(wall.bounds.maxZ > wall.bounds.minZ)
     assert.ok(layout.maze.lightmap.wallRects[wall.id])
+    assert.equal(layout.maze.lightmap.wallRects[wall.id].nz.width, 32)
+    assert.equal(layout.maze.lightmap.wallRects[wall.id].nz.height, 32)
+    assert.equal(layout.maze.lightmap.wallRects[wall.id].pz.width, 32)
+    assert.equal(layout.maze.lightmap.wallRects[wall.id].pz.height, 32)
   }
 
   for (const light of layout.lights) {
