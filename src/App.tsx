@@ -471,13 +471,17 @@ function createInvertedGrayscaleTexture(source: Texture) {
 
 function usePuddleTextures(repeat: number) {
   const maxAnisotropy = useThree((state) => state.gl.capabilities.getMaxAnisotropy())
-  const textures = useLoader(TextureLoader, [
+  const sourceTextures = useLoader(TextureLoader, [
     PUDDLE_TEXTURE_URLS.color,
     PUDDLE_TEXTURE_URLS.normal,
     PUDDLE_TEXTURE_URLS.gloss,
     PUDDLE_TEXTURE_URLS.displacement,
     PUDDLE_TEXTURE_URLS.ao
   ]) as [Texture, Texture, Texture, Texture, Texture]
+  const textures = useMemo(
+    () => sourceTextures.map((texture) => texture.clone()) as [Texture, Texture, Texture, Texture, Texture],
+    [sourceTextures]
+  )
   const roughnessTexture = useMemo(
     () => createInvertedGrayscaleTexture(textures[2]),
     [textures]
@@ -494,9 +498,12 @@ function usePuddleTextures(repeat: number) {
 
   useEffect(
     () => () => {
+      for (const texture of textures) {
+        texture.dispose()
+      }
       roughnessTexture.dispose()
     },
-    [roughnessTexture]
+    [roughnessTexture, textures]
   )
 
   return {
@@ -828,20 +835,18 @@ function getReflectionProbeIndexForPosition(
 function EnvironmentLighting({
   layout,
   iblIntensity,
-  torchCandelaMultiplier
+  onReflectionProbeTexturesChange
 }: {
   layout: MazeLayout
   iblIntensity: number
-  torchCandelaMultiplier: number
+  onReflectionProbeTexturesChange: (textures: Texture[]) => void
 }) {
-  const camera = useThree((state) => state.camera)
   const gl = useThree((state) => state.gl)
   const scene = useThree((state) => state.scene)
   const hdrTexture = useLoader(HDRLoader, ENVIRONMENT_URL)
   const pmremGenerator = useMemo(() => new PMREMGenerator(gl), [gl])
   const environmentTarget = useRef<{ dispose: () => void; texture: Texture } | null>(null)
   const reflectionProbeTargets = useRef<Array<{ dispose: () => void; texture: Texture }>>([])
-  const activeReflectionProbeIndex = useRef(-1)
   const calibratedIntensity = getHdrLightingIntensity(iblIntensity)
   const authoredProbeHdrIntensity = getHdrLightingIntensity(
     DEFAULT_IBL_INTENSITY_MULTIPLIER
@@ -853,11 +858,13 @@ function EnvironmentLighting({
       probeCount: layout.reflectionProbes.length,
       ready: false
     }
+    onReflectionProbeTexturesChange([])
 
     return () => {
       delete scene.userData.reflectionProbeState
+      onReflectionProbeTexturesChange([])
     }
-  }, [layout.reflectionProbes.length, scene])
+  }, [layout.reflectionProbes.length, onReflectionProbeTexturesChange, scene])
 
   useEffect(() => {
     hdrTexture.mapping = EquirectangularReflectionMapping
@@ -897,7 +904,6 @@ function EnvironmentLighting({
 
     const previousTargets = reflectionProbeTargets.current
     reflectionProbeTargets.current = []
-    activeReflectionProbeIndex.current = -1
 
     if (scene.environment !== baseEnvironment.texture) {
       scene.environment = baseEnvironment.texture
@@ -978,6 +984,7 @@ function EnvironmentLighting({
 
     previousTargets.forEach((target) => target.dispose())
     reflectionProbeTargets.current = nextTargets
+    onReflectionProbeTexturesChange(nextTargets.map((target) => target.texture))
     scene.userData.reflectionProbeState = {
       activeProbeId: null,
       probeCount: layout.reflectionProbes.length,
@@ -988,6 +995,7 @@ function EnvironmentLighting({
       for (const target of nextTargets) {
         target.dispose()
       }
+      onReflectionProbeTexturesChange([])
       if (scene.environment !== baseEnvironment.texture) {
         scene.environment = baseEnvironment.texture
       }
@@ -1004,61 +1012,24 @@ function EnvironmentLighting({
     hdrTexture,
     layout.lights,
     layout.reflectionProbes,
+    onReflectionProbeTexturesChange,
     pmremGenerator,
     scene
   ])
-
-  useFrame(() => {
-    const baseEnvironment = environmentTarget.current
-
-    if (!baseEnvironment) {
-      return
-    }
-
-    if (reflectionProbeTargets.current.length !== layout.reflectionProbes.length) {
-      if (scene.environment !== baseEnvironment.texture) {
-        scene.environment = baseEnvironment.texture
-      }
-      scene.environmentIntensity = calibratedIntensity
-      activeReflectionProbeIndex.current = -1
-      scene.userData.reflectionProbeState = {
-        activeProbeId: null,
-        probeCount: layout.reflectionProbes.length,
-        ready: false
-      }
-      return
-    }
-
-    const probeIndex = getReflectionProbeIndexForPosition(layout, camera.position)
-    const probeTarget = reflectionProbeTargets.current[probeIndex]
-
-    if (!probeTarget) {
-      return
-    }
-
-    if (activeReflectionProbeIndex.current !== probeIndex) {
-      scene.environment = probeTarget.texture
-      activeReflectionProbeIndex.current = probeIndex
-    }
-    scene.environmentIntensity = 1
-    scene.userData.reflectionProbeState = {
-      activeProbeId: layout.reflectionProbes[probeIndex]?.id ?? null,
-      probeCount: layout.reflectionProbes.length,
-      ready: true
-    }
-  })
 
   return null
 }
 
 function GroundSurfaceMaterial({
   lightMap,
-  lightMapIntensity
+  lightMapIntensity,
+  repeat
 }: {
   lightMap?: Texture
   lightMapIntensity?: number
+  repeat: number
 }) {
-  const puddle = usePuddleTextures(PUDDLE_TEXTURE_REPEAT)
+  const puddle = usePuddleTextures(repeat)
 
   return (
     <meshPhysicalMaterial
@@ -1089,6 +1060,7 @@ function Ground({
     depth,
     width
   } = layout.maze.lightmap.groundBounds
+  const patchRepeat = PUDDLE_TEXTURE_REPEAT * (width / GROUND_SIZE)
 
   return (
     <>
@@ -1099,7 +1071,7 @@ function Ground({
         userData={{ debugIndex: 0, debugRole: 'maze-ground-base' }}
       >
         <planeGeometry args={[GROUND_SIZE, GROUND_SIZE]} />
-        <GroundSurfaceMaterial />
+        <GroundSurfaceMaterial repeat={PUDDLE_TEXTURE_REPEAT} />
       </mesh>
       <mesh
         position={[centerX, GROUND_Y + MAZE_GROUND_PATCH_OFFSET_Y, centerZ]}
@@ -1111,10 +1083,20 @@ function Ground({
         <GroundSurfaceMaterial
           lightMap={groundLightmapTexture}
           lightMapIntensity={torchCandelaMultiplier * FLOOR_LIGHTMAP_INTENSITY_SCALE}
+          repeat={patchRepeat}
         />
       </mesh>
     </>
   )
+}
+
+function getReflectionProbeTextureForPosition(
+  layout: MazeLayout,
+  reflectionProbeTextures: Texture[],
+  position: Vector3
+) {
+  const probeIndex = getReflectionProbeIndexForPosition(layout, position)
+  return reflectionProbeTextures[probeIndex] ?? null
 }
 
 function TorchBillboard({
@@ -1202,10 +1184,14 @@ function TorchBillboard({
 }
 
 function WallSconce({
+  layout,
   mazeLight,
+  reflectionProbeTextures,
   torchCandelaMultiplier
 }: {
+  layout: MazeLayout
   mazeLight: MazeLayout['lights'][number]
+  reflectionProbeTextures: Texture[]
   torchCandelaMultiplier: number
 }) {
   const metal = useStandardPbrTextures(METAL_TEXTURE_URLS, METAL_TEXTURE_REPEAT)
@@ -1219,6 +1205,19 @@ function WallSconce({
     mazeLight.torchPosition.y,
     mazeLight.torchPosition.z
   ]
+  const reflectionProbeTexture = useMemo(
+    () =>
+      getReflectionProbeTextureForPosition(
+        layout,
+        reflectionProbeTextures,
+        new Vector3(
+          mazeLight.sconcePosition.x,
+          mazeLight.sconcePosition.y,
+          mazeLight.sconcePosition.z
+        )
+      ),
+    [layout, mazeLight.sconcePosition.x, mazeLight.sconcePosition.y, mazeLight.sconcePosition.z, reflectionProbeTextures]
+  )
 
   return (
     <>
@@ -1230,6 +1229,7 @@ function WallSconce({
             bumpMap={metal.bumpMap}
             bumpScale={0.02}
             color="white"
+            envMap={reflectionProbeTexture ?? undefined}
             envMapIntensity={1}
             map={metal.map}
             metalness={0.85}
@@ -1407,10 +1407,12 @@ function FogVolume({
 function MazeWalls({
   layout,
   lightmapBytes,
+  reflectionProbeTextures,
   torchCandelaMultiplier
 }: {
   layout: MazeLayout
   lightmapBytes: Uint8Array
+  reflectionProbeTextures: Texture[]
   torchCandelaMultiplier: number
 }) {
   const wall = useStandardPbrTextures(WALL_TEXTURE_URLS, WALL_TEXTURE_REPEAT)
@@ -1420,9 +1422,11 @@ function MazeWalls({
       {layout.walls.map((mazeWall, wallIndex) => (
         <MazeWallMesh
           key={mazeWall.id}
+          layout={layout}
           lightmap={layout.maze.lightmap}
           lightmapBytes={lightmapBytes}
           mazeWall={mazeWall}
+          reflectionProbeTextures={reflectionProbeTextures}
           torchCandelaMultiplier={torchCandelaMultiplier}
           wallIndex={wallIndex}
           wallMaterialMaps={wall}
@@ -1431,7 +1435,9 @@ function MazeWalls({
       {layout.lights.map((mazeLight) => (
         <WallSconce
           key={mazeLight.id}
+          layout={layout}
           mazeLight={mazeLight}
+          reflectionProbeTextures={reflectionProbeTextures}
           torchCandelaMultiplier={torchCandelaMultiplier}
         />
       ))}
@@ -1440,16 +1446,20 @@ function MazeWalls({
 }
 
 function MazeWallMesh({
+  layout,
   lightmap,
   lightmapBytes,
   mazeWall,
+  reflectionProbeTextures,
   torchCandelaMultiplier,
   wallIndex,
   wallMaterialMaps
 }: {
+  layout: MazeLayout
   lightmap: MazeLightmap
   lightmapBytes: Uint8Array
   mazeWall: MazeLayout['walls'][number]
+  reflectionProbeTextures: Texture[]
   torchCandelaMultiplier: number
   wallIndex: number
   wallMaterialMaps: PbrMaps
@@ -1458,6 +1468,19 @@ function MazeWallMesh({
     lightmap,
     lightmapBytes,
     mazeWall.id
+  )
+  const reflectionProbeTexture = useMemo(
+    () =>
+      getReflectionProbeTextureForPosition(
+        layout,
+        reflectionProbeTextures,
+        new Vector3(
+          mazeWall.center.x,
+          GROUND_Y + (WALL_HEIGHT / 2),
+          mazeWall.center.z
+        )
+      ),
+    [layout, mazeWall.center.x, mazeWall.center.z, reflectionProbeTextures]
   )
 
   return (
@@ -1478,6 +1501,8 @@ function MazeWallMesh({
         <meshStandardMaterial
           {...wallMaterialMaps}
           bumpScale={0.05}
+          envMap={reflectionProbeTexture ?? undefined}
+          envMapIntensity={1}
           metalness={0.02}
           roughness={0.92}
         />
@@ -1492,6 +1517,8 @@ function MazeWallMesh({
         <meshStandardMaterial
           {...wallMaterialMaps}
           bumpScale={0.05}
+          envMap={reflectionProbeTexture ?? undefined}
+          envMapIntensity={1}
           lightMap={lightmapFaceTextures.pz}
           lightMapIntensity={torchCandelaMultiplier * WALL_LIGHTMAP_INTENSITY_SCALE}
           metalness={0.02}
@@ -1509,6 +1536,8 @@ function MazeWallMesh({
         <meshStandardMaterial
           {...wallMaterialMaps}
           bumpScale={0.05}
+          envMap={reflectionProbeTexture ?? undefined}
+          envMapIntensity={1}
           lightMap={lightmapFaceTextures.nz}
           lightMapIntensity={torchCandelaMultiplier * WALL_LIGHTMAP_INTENSITY_SCALE}
           metalness={0.02}
@@ -1521,11 +1550,13 @@ function MazeWallMesh({
 
 function SceneGeometry({
   layout,
+  reflectionProbeTextures,
   torchCandelaMultiplier,
   volumetricLighting,
   volumetricNoiseFrequency
 }: {
   layout: MazeLayout
+  reflectionProbeTextures: Texture[]
   torchCandelaMultiplier: number
   volumetricLighting: EffectSettings
   volumetricNoiseFrequency: number
@@ -1543,6 +1574,7 @@ function SceneGeometry({
       <MazeWalls
         layout={layout}
         lightmapBytes={lightmapBytes}
+        reflectionProbeTextures={reflectionProbeTextures}
         torchCandelaMultiplier={torchCandelaMultiplier}
       />
       {volumetricLighting.enabled ? (
@@ -2340,6 +2372,7 @@ function Scene({
   }, [onAssetsReady])
 
   const scene = useThree((state) => state.scene)
+  const [reflectionProbeTextures, setReflectionProbeTextures] = useState<Texture[]>([])
 
   useEffect(() => {
     const globalWindow = window as Window & {
@@ -2459,10 +2492,11 @@ function Scene({
       <EnvironmentLighting
         iblIntensity={visualSettings.iblIntensity}
         layout={layout}
-        torchCandelaMultiplier={visualSettings.torchCandelaMultiplier}
+        onReflectionProbeTexturesChange={setReflectionProbeTextures}
       />
       <SceneGeometry
         layout={layout}
+        reflectionProbeTextures={reflectionProbeTextures}
         torchCandelaMultiplier={visualSettings.torchCandelaMultiplier}
         volumetricLighting={visualSettings.volumetricLighting}
         volumetricNoiseFrequency={visualSettings.volumetricNoiseFrequency}

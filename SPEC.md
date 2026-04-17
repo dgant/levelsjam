@@ -51,6 +51,7 @@
 - The maze floor patch and maze walls receive torch lighting from the baked maze lightmap instead of from realtime torch point lights.
 - The maze floor patch bounds expand beyond the maze footprint by the baked torch-light radius so the lit area covers the maze and its nearby spill.
 - The infinite background ground outside the maze floor patch remains an unbaked PBR surface.
+- The maze floor patch preserves the same world-space PBR texture scale as the surrounding infinite ground rather than retileing the puddle textures at a different density.
 - The maze floor patch and maze walls integrate the baked torch lightmap directly into their PBR material path rather than drawing it as a separate transparent overlay mesh.
 - The baked torch lightmap follows the same exposure and tone-mapping path as the rest of the wall and floor shading.
 - Each baked maze lightmap stores grayscale torch intensity rather than a pre-tonemapped colored overlay.
@@ -145,6 +146,7 @@
 - The visible skybox and the environment lighting use the same calibrated HDRI intensity path.
 - The ground and walls use extracted PBR texture packs with tiling based on a 1 meter world scale unless a source specifies otherwise.
 - Reflective and semi-reflective materials read from the shared environment consistently, with the nearest local maze reflection probe taking precedence over the global HDRI for in-maze specular.
+- Local reflection probes do not make baked lighting or image-based lighting appear to flicker as the camera moves between maze cells.
 - The torch billboards face the camera continuously.
 - The torch billboards animate smoothly through the flipbook loop without lighting artifacts from scene lights.
 - The torch billboards are excluded from screen-space reflections.

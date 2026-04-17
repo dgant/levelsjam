@@ -57,9 +57,11 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the wall-facing view is on the torch-facing side of the wall, not the dark back face.
 - Verify the baked wall and floor lighting reads as grayscale intensity carried through the wall and ground PBR materials rather than as a colored post-tonemap overlay.
 - Verify the baked floor patch extends beyond the maze footprint by the authored torch-light radius margin.
+- Verify the maze floor patch preserves the same puddle-ground world texture scale as the surrounding infinite ground.
 - Verify the scene does not rely on realtime torch point lights for maze illumination.
 - Verify reflective maze materials respond to the local maze reflection probes rather than only to the global HDRI.
 - Verify `window.__levelsjamDebug.getReflectionProbeState()` reports a nonzero probe count and becomes `ready: true` after load.
+- Verify moving the camera between maze cells does not change `window.__levelsjamDebug.getReflectionProbeState().activeProbeId` from `null` or make the scene lighting flicker.
 - Verify the fire flipbook runs at the updated faster rate.
 - Verify the tone mapper is `AgX` by default.
 - Verify the visual controls panel exposes `Exposure`, `IBL Intensity`, `Torch Candelas`, `Ambient Occlusion`, `AO Intensity`, the tone mapper, and the enabled/intensity controls for Bloom, Depth Of Field, Lens Flares, SSR, and Vignette.
