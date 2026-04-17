@@ -60,11 +60,14 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the maze floor patch preserves the same puddle-ground world texture scale as the surrounding infinite ground.
 - Verify the scene does not rely on realtime torch point lights for maze illumination.
 - Verify reflective maze materials respond to the local maze reflection probes rather than only to the global HDRI.
+- Verify disabling `Reflection Captures` removes the local probe contribution from the puddled maze floor while leaving the global HDRI environment intact.
+- Verify enabling `Show Reflection Probes` draws a probe sphere at each maze probe position.
 - Verify `window.__levelsjamDebug.getReflectionProbeState()` reports a nonzero probe count and becomes `ready: true` after load.
 - Verify moving the camera between maze cells does not change `window.__levelsjamDebug.getReflectionProbeState().activeProbeId` from `null` or make the scene lighting flicker.
 - Verify the fire flipbook runs at the updated faster rate.
 - Verify the tone mapper is `AgX` by default.
 - Verify the visual controls panel exposes `Exposure`, `IBL Intensity`, `Torch Candelas`, `Ambient Occlusion`, `AO Intensity`, the tone mapper, and the enabled/intensity controls for Bloom, Depth Of Field, Lens Flares, SSR, and Vignette.
+- Verify the visual controls panel also exposes `Baked Lightmaps`, `Reflection Captures`, and `Show Reflection Probes`.
 - Verify the visual controls panel also exposes `Bloom Kernel`, `AO Radius`, `DOF Focus Distance`, `DOF Focal Length`, `Depth Of Field Bokeh Scale`, and the volumetric fog controls.
 - Verify the visual controls panel exposes `Move Speed`, `Accel Distance`, and `Decel Distance`.
 - Verify the `DOF Focus Distance` slider reaches 8 meters.

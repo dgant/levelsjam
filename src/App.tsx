@@ -11,11 +11,13 @@ import { LensFlareEffect } from '@react-three/postprocessing'
 import {
   BasicShadowMap,
   CanvasTexture,
+  ClampToEdgeWrapping,
   Color,
   CubeCamera,
   DoubleSide,
   EquirectangularReflectionMapping,
   Euler,
+  Float32BufferAttribute,
   HalfFloatType,
   LinearFilter,
   ACESFilmicToneMapping,
@@ -28,6 +30,7 @@ import {
   NoToneMapping,
   NeutralToneMapping,
   PMREMGenerator,
+  PlaneGeometry,
   Quaternion,
   ReinhardToneMapping,
   RepeatWrapping,
@@ -299,8 +302,11 @@ type VisualSettings = {
   ambientOcclusionIntensity: number
   ambientOcclusionMode: AmbientOcclusionMode
   ambientOcclusionRadius: number
+  bakedLightmapsEnabled: boolean
   exposureStops: number
   iblIntensity: number
+  reflectionCapturesEnabled: boolean
+  showReflectionProbes: boolean
   torchCandelaMultiplier: number
   toneMapping: ToneMappingMode
   bloom: BloomSettings
@@ -355,6 +361,15 @@ type LightmapRect = {
   y: number
 }
 
+type GroundPatchRect = {
+  centerX: number
+  centerZ: number
+  depth: number
+  id: string
+  probeIndex: number | null
+  width: number
+}
+
 type MazeLightmap = MazeLayout['maze']['lightmap']
 
 type StandardPbrTextureUrls = {
@@ -383,8 +398,11 @@ function createDefaultVisualSettings(): VisualSettings {
     ambientOcclusionIntensity: 1,
     ambientOcclusionRadius: DEFAULT_AO_RADIUS_METERS,
     ambientOcclusionMode: 'off',
+    bakedLightmapsEnabled: true,
     exposureStops: DEFAULT_EXPOSURE_STOPS,
     iblIntensity: DEFAULT_IBL_INTENSITY_MULTIPLIER,
+    reflectionCapturesEnabled: true,
+    showReflectionProbes: false,
     torchCandelaMultiplier: DEFAULT_TORCH_CANDELA_MULTIPLIER,
     toneMapping: 'agx',
     bloom: { enabled: false, intensity: 0.7, kernelSize: 'large' },
@@ -606,6 +624,8 @@ function useGroundLightmapTexture(
     [lightmap, lightmapBytes]
   )
 
+  texture.channel = 1
+
   useEffect(
     () => () => {
       texture.dispose()
@@ -652,8 +672,97 @@ function createLightmapFaceTexture(
   texture.generateMipmaps = false
   texture.magFilter = LinearFilter
   texture.minFilter = LinearFilter
+  texture.wrapS = ClampToEdgeWrapping
+  texture.wrapT = ClampToEdgeWrapping
   texture.needsUpdate = true
   return texture
+}
+
+function buildGroundPatchRects(layout: MazeLayout) {
+  const groundBounds = layout.maze.lightmap.groundBounds
+  const mazeWidth = layout.maze.width * MAZE_CELL_SIZE
+  const mazeDepth = layout.maze.height * MAZE_CELL_SIZE
+  const mazeMinX = -(mazeWidth / 2)
+  const mazeMaxX = mazeWidth / 2
+  const mazeMinZ = -(mazeDepth / 2)
+  const mazeMaxZ = mazeDepth / 2
+  const rects: GroundPatchRect[] = []
+
+  for (let cellY = 0; cellY < layout.maze.height; cellY += 1) {
+    for (let cellX = 0; cellX < layout.maze.width; cellX += 1) {
+      rects.push({
+        centerX: mazeMinX + (cellX * MAZE_CELL_SIZE) + (MAZE_CELL_SIZE / 2),
+        centerZ: mazeMinZ + (cellY * MAZE_CELL_SIZE) + (MAZE_CELL_SIZE / 2),
+        depth: MAZE_CELL_SIZE,
+        id: `cell-${cellX}-${cellY}`,
+        probeIndex: (cellY * layout.maze.width) + cellX,
+        width: MAZE_CELL_SIZE
+      })
+    }
+  }
+
+  const pushRect = (
+    id: string,
+    minX: number,
+    maxX: number,
+    minZ: number,
+    maxZ: number
+  ) => {
+    const width = maxX - minX
+    const depth = maxZ - minZ
+
+    if (width <= 0 || depth <= 0) {
+      return
+    }
+
+    rects.push({
+      centerX: (minX + maxX) / 2,
+      centerZ: (minZ + maxZ) / 2,
+      depth,
+      id,
+      probeIndex: null,
+      width
+    })
+  }
+
+  pushRect('margin-north', mazeMinX, mazeMaxX, groundBounds.minZ, mazeMinZ)
+  pushRect('margin-south', mazeMinX, mazeMaxX, mazeMaxZ, groundBounds.maxZ)
+  pushRect('margin-west', groundBounds.minX, mazeMinX, mazeMinZ, mazeMaxZ)
+  pushRect('margin-east', mazeMaxX, groundBounds.maxX, mazeMinZ, mazeMaxZ)
+  pushRect('margin-nw', groundBounds.minX, mazeMinX, groundBounds.minZ, mazeMinZ)
+  pushRect('margin-ne', mazeMaxX, groundBounds.maxX, groundBounds.minZ, mazeMinZ)
+  pushRect('margin-sw', groundBounds.minX, mazeMinX, mazeMaxZ, groundBounds.maxZ)
+  pushRect('margin-se', mazeMaxX, groundBounds.maxX, mazeMaxZ, groundBounds.maxZ)
+
+  return rects
+}
+
+function createGroundPatchGeometry(
+  rect: GroundPatchRect,
+  groundBounds: MazeLightmap['groundBounds']
+) {
+  const geometry = new PlaneGeometry(rect.width, rect.depth, 1, 1)
+  const positions = geometry.getAttribute('position')
+  const mapUvs: number[] = []
+  const lightmapUvs: number[] = []
+
+  for (let index = 0; index < positions.count; index += 1) {
+    const localX = positions.getX(index)
+    const localY = positions.getY(index)
+    const worldX = rect.centerX + localX
+    const worldZ = rect.centerZ - localY
+    const mapU = (worldX + (GROUND_SIZE / 2)) / GROUND_SIZE
+    const mapV = 1 - ((worldZ + (GROUND_SIZE / 2)) / GROUND_SIZE)
+    const lightmapU = (worldX - groundBounds.minX) / groundBounds.width
+    const lightmapV = 1 - ((worldZ - groundBounds.minZ) / groundBounds.depth)
+
+    mapUvs.push(mapU, mapV)
+    lightmapUvs.push(lightmapU, lightmapV)
+  }
+
+  geometry.setAttribute('uv', new Float32BufferAttribute(mapUvs, 2))
+  geometry.setAttribute('uv1', new Float32BufferAttribute(lightmapUvs, 2))
+  return geometry
 }
 
 function useWallLightmapFaceTextures(
@@ -919,7 +1028,8 @@ function EnvironmentLighting({
     scene.traverse((object) => {
       if (
         object.userData?.debugRole === 'torch-billboard' ||
-        object.userData?.debugRole === 'global-fog-volume'
+        object.userData?.debugRole === 'global-fog-volume' ||
+        object.userData?.debugRole === 'reflection-probe-visual'
       ) {
         hiddenObjects.push({ object, visible: object.visible })
         object.visible = false
@@ -1021,22 +1131,24 @@ function EnvironmentLighting({
 }
 
 function GroundSurfaceMaterial({
+  envMap,
   lightMap,
   lightMapIntensity,
-  repeat
+  maps
 }: {
+  envMap?: Texture | null
   lightMap?: Texture
   lightMapIntensity?: number
-  repeat: number
+  maps: PbrMaps
 }) {
-  const puddle = usePuddleTextures(repeat)
-
   return (
     <meshPhysicalMaterial
-      {...puddle}
+      {...maps}
       bumpScale={0.08}
       clearcoat={1}
       clearcoatRoughness={0.1}
+      envMap={envMap ?? null}
+      envMapIntensity={envMap ? 1 : 0}
       lightMap={lightMap}
       lightMapIntensity={lightMapIntensity}
       metalness={0}
@@ -1045,22 +1157,82 @@ function GroundSurfaceMaterial({
   )
 }
 
-function Ground({
-  layout,
+function GroundPatchMesh({
+  bakedLightmapsEnabled,
+  debugIndex,
+  envMap,
+  groundBounds,
   groundLightmapTexture,
+  maps,
+  rect,
   torchCandelaMultiplier
 }: {
-  layout: MazeLayout
+  bakedLightmapsEnabled: boolean
+  debugIndex: number
+  envMap?: Texture | null
+  groundBounds: MazeLightmap['groundBounds']
   groundLightmapTexture: Texture
+  maps: PbrMaps
+  rect: GroundPatchRect
   torchCandelaMultiplier: number
 }) {
-  const {
-    centerX,
-    centerZ,
-    depth,
-    width
-  } = layout.maze.lightmap.groundBounds
-  const patchRepeat = PUDDLE_TEXTURE_REPEAT * (width / GROUND_SIZE)
+  const geometry = useMemo(
+    () => createGroundPatchGeometry(rect, groundBounds),
+    [groundBounds, rect]
+  )
+
+  useEffect(
+    () => () => {
+      geometry.dispose()
+    },
+    [geometry]
+  )
+
+  return (
+    <mesh
+      position={[rect.centerX, GROUND_Y + MAZE_GROUND_PATCH_OFFSET_Y, rect.centerZ]}
+      receiveShadow
+      rotation-x={-Math.PI / 2}
+      userData={{ debugIndex, debugRole: 'maze-ground-lightmap' }}
+    >
+      <primitive
+        attach="geometry"
+        object={geometry}
+      />
+      <GroundSurfaceMaterial
+        envMap={envMap ?? null}
+        lightMap={bakedLightmapsEnabled ? groundLightmapTexture : undefined}
+        lightMapIntensity={
+          bakedLightmapsEnabled
+            ? torchCandelaMultiplier * FLOOR_LIGHTMAP_INTENSITY_SCALE
+            : 0
+        }
+        maps={maps}
+      />
+    </mesh>
+  )
+}
+
+function Ground({
+  bakedLightmapsEnabled,
+  layout,
+  groundLightmapTexture,
+  reflectionCapturesEnabled,
+  reflectionProbeTextures,
+  torchCandelaMultiplier
+}: {
+  bakedLightmapsEnabled: boolean
+  layout: MazeLayout
+  groundLightmapTexture: Texture
+  reflectionCapturesEnabled: boolean
+  reflectionProbeTextures: Texture[]
+  torchCandelaMultiplier: number
+}) {
+  const puddle = usePuddleTextures(PUDDLE_TEXTURE_REPEAT)
+  const groundPatchRects = useMemo(
+    () => buildGroundPatchRects(layout),
+    [layout]
+  )
 
   return (
     <>
@@ -1071,21 +1243,33 @@ function Ground({
         userData={{ debugIndex: 0, debugRole: 'maze-ground-base' }}
       >
         <planeGeometry args={[GROUND_SIZE, GROUND_SIZE]} />
-        <GroundSurfaceMaterial repeat={PUDDLE_TEXTURE_REPEAT} />
+        <GroundSurfaceMaterial maps={puddle} />
       </mesh>
-      <mesh
-        position={[centerX, GROUND_Y + MAZE_GROUND_PATCH_OFFSET_Y, centerZ]}
-        receiveShadow
-        rotation-x={-Math.PI / 2}
-        userData={{ debugIndex: 0, debugRole: 'maze-ground-lightmap' }}
-      >
-        <planeGeometry args={[width, depth]} />
-        <GroundSurfaceMaterial
-          lightMap={groundLightmapTexture}
-          lightMapIntensity={torchCandelaMultiplier * FLOOR_LIGHTMAP_INTENSITY_SCALE}
-          repeat={patchRepeat}
+      {groundPatchRects.map((rect, index) => (
+        <GroundPatchMesh
+          bakedLightmapsEnabled={bakedLightmapsEnabled}
+          debugIndex={index}
+          envMap={
+            reflectionCapturesEnabled
+              ? (
+                  rect.probeIndex === null
+                    ? getReflectionProbeTextureForPosition(
+                        layout,
+                        reflectionProbeTextures,
+                        new Vector3(rect.centerX, GROUND_Y + 0.05, rect.centerZ)
+                      )
+                    : (reflectionProbeTextures[rect.probeIndex] ?? null)
+                )
+              : null
+          }
+          groundBounds={layout.maze.lightmap.groundBounds}
+          groundLightmapTexture={groundLightmapTexture}
+          key={rect.id}
+          maps={puddle}
+          rect={rect}
+          torchCandelaMultiplier={torchCandelaMultiplier}
         />
-      </mesh>
+      ))}
     </>
   )
 }
@@ -1186,11 +1370,13 @@ function TorchBillboard({
 function WallSconce({
   layout,
   mazeLight,
+  reflectionCapturesEnabled,
   reflectionProbeTextures,
   torchCandelaMultiplier
 }: {
   layout: MazeLayout
   mazeLight: MazeLayout['lights'][number]
+  reflectionCapturesEnabled: boolean
   reflectionProbeTextures: Texture[]
   torchCandelaMultiplier: number
 }) {
@@ -1229,8 +1415,12 @@ function WallSconce({
             bumpMap={metal.bumpMap}
             bumpScale={0.02}
             color="white"
-            envMap={reflectionProbeTexture ?? undefined}
-            envMapIntensity={1}
+            envMap={
+              reflectionCapturesEnabled
+                ? (reflectionProbeTexture ?? null)
+                : null
+            }
+            envMapIntensity={reflectionCapturesEnabled ? 1 : 0}
             map={metal.map}
             metalness={0.85}
             metalnessMap={metal.metalnessMap}
@@ -1404,14 +1594,60 @@ function FogVolume({
   )
 }
 
+function ReflectionProbeVisualization({
+  layout,
+  reflectionProbeTextures,
+  visible
+}: {
+  layout: MazeLayout
+  reflectionProbeTextures: Texture[]
+  visible: boolean
+}) {
+  if (!visible) {
+    return null
+  }
+
+  return (
+    <>
+      {layout.reflectionProbes.map((probe, index) => {
+        const texture = reflectionProbeTextures[index]
+
+        if (!texture) {
+          return null
+        }
+
+        return (
+          <mesh
+            key={probe.id}
+            position={[probe.position.x, probe.position.y, probe.position.z]}
+            userData={{ debugIndex: index, debugRole: 'reflection-probe-visual' }}
+          >
+            <sphereGeometry args={[0.18, 16, 16]} />
+            <meshStandardMaterial
+              envMap={texture}
+              envMapIntensity={1}
+              metalness={1}
+              roughness={0}
+            />
+          </mesh>
+        )
+      })}
+    </>
+  )
+}
+
 function MazeWalls({
+  bakedLightmapsEnabled,
   layout,
   lightmapBytes,
+  reflectionCapturesEnabled,
   reflectionProbeTextures,
   torchCandelaMultiplier
 }: {
+  bakedLightmapsEnabled: boolean
   layout: MazeLayout
   lightmapBytes: Uint8Array
+  reflectionCapturesEnabled: boolean
   reflectionProbeTextures: Texture[]
   torchCandelaMultiplier: number
 }) {
@@ -1421,12 +1657,11 @@ function MazeWalls({
     <>
       {layout.walls.map((mazeWall, wallIndex) => (
         <MazeWallMesh
+          bakedLightmapsEnabled={bakedLightmapsEnabled}
           key={mazeWall.id}
-          layout={layout}
           lightmap={layout.maze.lightmap}
           lightmapBytes={lightmapBytes}
           mazeWall={mazeWall}
-          reflectionProbeTextures={reflectionProbeTextures}
           torchCandelaMultiplier={torchCandelaMultiplier}
           wallIndex={wallIndex}
           wallMaterialMaps={wall}
@@ -1437,6 +1672,7 @@ function MazeWalls({
           key={mazeLight.id}
           layout={layout}
           mazeLight={mazeLight}
+          reflectionCapturesEnabled={reflectionCapturesEnabled}
           reflectionProbeTextures={reflectionProbeTextures}
           torchCandelaMultiplier={torchCandelaMultiplier}
         />
@@ -1446,20 +1682,18 @@ function MazeWalls({
 }
 
 function MazeWallMesh({
-  layout,
+  bakedLightmapsEnabled,
   lightmap,
   lightmapBytes,
   mazeWall,
-  reflectionProbeTextures,
   torchCandelaMultiplier,
   wallIndex,
   wallMaterialMaps
 }: {
-  layout: MazeLayout
+  bakedLightmapsEnabled: boolean
   lightmap: MazeLightmap
   lightmapBytes: Uint8Array
   mazeWall: MazeLayout['walls'][number]
-  reflectionProbeTextures: Texture[]
   torchCandelaMultiplier: number
   wallIndex: number
   wallMaterialMaps: PbrMaps
@@ -1468,19 +1702,6 @@ function MazeWallMesh({
     lightmap,
     lightmapBytes,
     mazeWall.id
-  )
-  const reflectionProbeTexture = useMemo(
-    () =>
-      getReflectionProbeTextureForPosition(
-        layout,
-        reflectionProbeTextures,
-        new Vector3(
-          mazeWall.center.x,
-          GROUND_Y + (WALL_HEIGHT / 2),
-          mazeWall.center.z
-        )
-      ),
-    [layout, mazeWall.center.x, mazeWall.center.z, reflectionProbeTextures]
   )
 
   return (
@@ -1501,8 +1722,6 @@ function MazeWallMesh({
         <meshStandardMaterial
           {...wallMaterialMaps}
           bumpScale={0.05}
-          envMap={reflectionProbeTexture ?? undefined}
-          envMapIntensity={1}
           metalness={0.02}
           roughness={0.92}
         />
@@ -1517,10 +1736,12 @@ function MazeWallMesh({
         <meshStandardMaterial
           {...wallMaterialMaps}
           bumpScale={0.05}
-          envMap={reflectionProbeTexture ?? undefined}
-          envMapIntensity={1}
-          lightMap={lightmapFaceTextures.pz}
-          lightMapIntensity={torchCandelaMultiplier * WALL_LIGHTMAP_INTENSITY_SCALE}
+          lightMap={bakedLightmapsEnabled ? lightmapFaceTextures.pz : undefined}
+          lightMapIntensity={
+            bakedLightmapsEnabled
+              ? torchCandelaMultiplier * WALL_LIGHTMAP_INTENSITY_SCALE
+              : 0
+          }
           metalness={0.02}
           roughness={0.92}
         />
@@ -1536,10 +1757,12 @@ function MazeWallMesh({
         <meshStandardMaterial
           {...wallMaterialMaps}
           bumpScale={0.05}
-          envMap={reflectionProbeTexture ?? undefined}
-          envMapIntensity={1}
-          lightMap={lightmapFaceTextures.nz}
-          lightMapIntensity={torchCandelaMultiplier * WALL_LIGHTMAP_INTENSITY_SCALE}
+          lightMap={bakedLightmapsEnabled ? lightmapFaceTextures.nz : undefined}
+          lightMapIntensity={
+            bakedLightmapsEnabled
+              ? torchCandelaMultiplier * WALL_LIGHTMAP_INTENSITY_SCALE
+              : 0
+          }
           metalness={0.02}
           roughness={0.92}
         />
@@ -1549,14 +1772,20 @@ function MazeWallMesh({
 }
 
 function SceneGeometry({
+  bakedLightmapsEnabled,
   layout,
+  reflectionCapturesEnabled,
   reflectionProbeTextures,
+  showReflectionProbes,
   torchCandelaMultiplier,
   volumetricLighting,
   volumetricNoiseFrequency
 }: {
+  bakedLightmapsEnabled: boolean
   layout: MazeLayout
+  reflectionCapturesEnabled: boolean
   reflectionProbeTextures: Texture[]
+  showReflectionProbes: boolean
   torchCandelaMultiplier: number
   volumetricLighting: EffectSettings
   volumetricNoiseFrequency: number
@@ -1567,15 +1796,25 @@ function SceneGeometry({
   return (
     <>
       <Ground
+        bakedLightmapsEnabled={bakedLightmapsEnabled}
         layout={layout}
         groundLightmapTexture={groundLightmapTexture}
+        reflectionCapturesEnabled={reflectionCapturesEnabled}
+        reflectionProbeTextures={reflectionProbeTextures}
         torchCandelaMultiplier={torchCandelaMultiplier}
       />
       <MazeWalls
+        bakedLightmapsEnabled={bakedLightmapsEnabled}
         layout={layout}
         lightmapBytes={lightmapBytes}
+        reflectionCapturesEnabled={reflectionCapturesEnabled}
         reflectionProbeTextures={reflectionProbeTextures}
         torchCandelaMultiplier={torchCandelaMultiplier}
+      />
+      <ReflectionProbeVisualization
+        layout={layout}
+        reflectionProbeTextures={reflectionProbeTextures}
+        visible={showReflectionProbes}
       />
       {volumetricLighting.enabled ? (
         <FogVolume
@@ -2053,11 +2292,14 @@ function FlightRig({
           emissiveColor: [number, number, number] | null
           emissiveIntensity: number | null
           emissiveMapChannel: number | null
+          envMapIntensity: number | null
           hasEmissiveMap: boolean
+          hasEnvMap: boolean
           hasLightMap: boolean
           hasMap: boolean
           hasUv1: boolean
           hasUv2: boolean
+          lightMapChannel: number | null
           lightMapIntensity: number | null
           mapChannel: number | null
           materialColor: [number, number, number] | null
@@ -2101,11 +2343,14 @@ function FlightRig({
           emissiveColor: [number, number, number] | null
           emissiveIntensity: number | null
           emissiveMapChannel: number | null
+          envMapIntensity: number | null
           hasEmissiveMap: boolean
+          hasEnvMap: boolean
           hasLightMap: boolean
           hasMap: boolean
           hasUv1: boolean
           hasUv2: boolean
+          lightMapChannel: number | null
           lightMapIntensity: number | null
           mapChannel: number | null
           materialColor: [number, number, number] | null
@@ -2126,6 +2371,8 @@ function FlightRig({
             emissiveIntensity?: number
             emissiveMap?: Texture | null
             color?: Color
+            envMap?: Texture | null
+            envMapIntensity?: number
             lightMap?: Texture | null
             lightMapIntensity?: number
             map?: Texture | null
@@ -2147,11 +2394,20 @@ function FlightRig({
               typeof material.emissiveMap?.channel === 'number'
                 ? material.emissiveMap.channel
                 : null,
+            envMapIntensity:
+              typeof material.envMapIntensity === 'number'
+                ? material.envMapIntensity
+                : null,
             hasEmissiveMap: Boolean(material.emissiveMap),
+            hasEnvMap: Boolean(material.envMap),
             hasLightMap: Boolean(material.lightMap),
             hasMap: Boolean(material.map),
             hasUv1: Boolean(object.geometry?.getAttribute?.('uv1')),
             hasUv2: Boolean(object.geometry?.getAttribute?.('uv2')),
+            lightMapChannel:
+              typeof material.lightMap?.channel === 'number'
+                ? material.lightMap.channel
+                : null,
             lightMapIntensity:
               typeof material.lightMapIntensity === 'number'
                 ? material.lightMapIntensity
@@ -2495,8 +2751,11 @@ function Scene({
         onReflectionProbeTexturesChange={setReflectionProbeTextures}
       />
       <SceneGeometry
+        bakedLightmapsEnabled={visualSettings.bakedLightmapsEnabled}
         layout={layout}
+        reflectionCapturesEnabled={visualSettings.reflectionCapturesEnabled}
         reflectionProbeTextures={reflectionProbeTextures}
+        showReflectionProbes={visualSettings.showReflectionProbes}
         torchCandelaMultiplier={visualSettings.torchCandelaMultiplier}
         volumetricLighting={visualSettings.volumetricLighting}
         volumetricNoiseFrequency={visualSettings.volumetricNoiseFrequency}
@@ -2573,6 +2832,7 @@ function Scene({
 
 function VisualControls({
   onAmbientOcclusionModeChange,
+  onBooleanSettingChange,
   onBloomSettingChange,
   controlsOpen,
   onDepthOfFieldSettingChange,
@@ -2582,6 +2842,10 @@ function VisualControls({
   visualSettings
 }: {
   onAmbientOcclusionModeChange: (value: AmbientOcclusionMode) => void
+  onBooleanSettingChange: (
+    key: 'bakedLightmapsEnabled' | 'reflectionCapturesEnabled' | 'showReflectionProbes',
+    value: boolean
+  ) => void
   onBloomSettingChange: (patch: Partial<BloomSettings>) => void
   controlsOpen: boolean
   onDepthOfFieldSettingChange: (patch: Partial<DepthOfFieldSettings>) => void
@@ -2695,6 +2959,45 @@ function VisualControls({
           ))}
         </select>
       </label>
+
+      <div className="visual-control-row">
+        <output>{visualSettings.bakedLightmapsEnabled ? 'on' : 'off'}</output>
+        <span>Baked Lightmaps</span>
+        <input
+          aria-label="Baked Lightmaps"
+          checked={visualSettings.bakedLightmapsEnabled}
+          onChange={(event) => {
+            onBooleanSettingChange('bakedLightmapsEnabled', event.target.checked)
+          }}
+          type="checkbox"
+        />
+      </div>
+
+      <div className="visual-control-row">
+        <output>{visualSettings.reflectionCapturesEnabled ? 'on' : 'off'}</output>
+        <span>Reflection Captures</span>
+        <input
+          aria-label="Reflection Captures"
+          checked={visualSettings.reflectionCapturesEnabled}
+          onChange={(event) => {
+            onBooleanSettingChange('reflectionCapturesEnabled', event.target.checked)
+          }}
+          type="checkbox"
+        />
+      </div>
+
+      <div className="visual-control-row">
+        <output>{visualSettings.showReflectionProbes ? 'on' : 'off'}</output>
+        <span>Show Reflection Probes</span>
+        <input
+          aria-label="Show Reflection Probes"
+          checked={visualSettings.showReflectionProbes}
+          onChange={(event) => {
+            onBooleanSettingChange('showReflectionProbes', event.target.checked)
+          }}
+          type="checkbox"
+        />
+      </div>
 
       <label className="visual-control-row">
         <output>{visualSettings.movement.maxHorizontalSpeedMph.toFixed(1)}mph</output>
@@ -3139,6 +3442,16 @@ export default function App() {
     }))
   }
 
+  const onBooleanSettingChange = (
+    key: 'bakedLightmapsEnabled' | 'reflectionCapturesEnabled' | 'showReflectionProbes',
+    value: boolean
+  ) => {
+    setVisualSettings((current) => ({
+      ...current,
+      [key]: value
+    }))
+  }
+
   const onAssetsReady = () => {
     startTransition(() => {
       setSceneLoaded(true)
@@ -3159,6 +3472,7 @@ export default function App() {
       <VisualControls
         controlsOpen={controlsOpen}
         onAmbientOcclusionModeChange={onAmbientOcclusionModeChange}
+        onBooleanSettingChange={onBooleanSettingChange}
         onBloomSettingChange={onBloomSettingChange}
         onDepthOfFieldSettingChange={onDepthOfFieldSettingChange}
         onEffectSettingChange={onEffectSettingChange}

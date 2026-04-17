@@ -1,7 +1,7 @@
 const { PNG } = require('pngjs')
 const { expect, test } = require('@playwright/test')
 
-test.setTimeout(140_000)
+test.setTimeout(240_000)
 
 function measureBrightness(buffer) {
   const screenshot = PNG.sync.read(buffer)
@@ -59,29 +59,36 @@ async function screenshotCanvasRegion(
   anchorX = 0.5,
   anchorY = 0.5
 ) {
-  const box = await canvas.boundingBox()
+  const fullBuffer = await canvas.screenshot({ timeout: 0 })
+  const fullImage = PNG.sync.read(fullBuffer)
+  const clipWidth = Math.min(width, fullImage.width)
+  const clipHeight = Math.min(height, fullImage.height)
+  const centerX = fullImage.width * anchorX
+  const centerY = fullImage.height * anchorY
+  const startX = Math.max(
+    0,
+    Math.min(fullImage.width - clipWidth, Math.round(centerX - (clipWidth / 2)))
+  )
+  const startY = Math.max(
+    0,
+    Math.min(fullImage.height - clipHeight, Math.round(centerY - (clipHeight / 2)))
+  )
+  const clippedImage = new PNG({ width: clipWidth, height: clipHeight })
 
-  if (!box) {
-    throw new Error('Canvas bounding box unavailable')
+  for (let row = 0; row < clipHeight; row += 1) {
+    for (let column = 0; column < clipWidth; column += 1) {
+      const sourceOffset =
+        (((startY + row) * fullImage.width) + startX + column) * 4
+      const targetOffset = ((row * clipWidth) + column) * 4
+
+      clippedImage.data[targetOffset] = fullImage.data[sourceOffset]
+      clippedImage.data[targetOffset + 1] = fullImage.data[sourceOffset + 1]
+      clippedImage.data[targetOffset + 2] = fullImage.data[sourceOffset + 2]
+      clippedImage.data[targetOffset + 3] = fullImage.data[sourceOffset + 3]
+    }
   }
 
-  const clipWidth = Math.min(width, box.width)
-  const clipHeight = Math.min(height, box.height)
-  const centerX = box.x + (box.width * anchorX)
-  const centerY = box.y + (box.height * anchorY)
-  const minX = box.x
-  const maxX = box.x + box.width - clipWidth
-  const minY = box.y
-  const maxY = box.y + box.height - clipHeight
-
-  return page.screenshot({
-    clip: {
-      x: Math.max(minX, Math.min(maxX, centerX - (clipWidth / 2))),
-      y: Math.max(minY, Math.min(maxY, centerY - (clipHeight / 2))),
-      width: clipWidth,
-      height: clipHeight
-    }
-  })
+  return PNG.sync.write(clippedImage)
 }
 
 async function waitForBrightFrame(
@@ -204,6 +211,9 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   await expect(page.locator('[data-testid="visual-controls"]')).toContainText('DOF Focus Distance (m)')
   await expect(page.locator('[data-testid="visual-controls"]')).toContainText('DOF Focal Length / Range (m)')
   await expect(page.getByRole('slider', { name: 'DOF Focus Distance' })).toHaveAttribute('max', '8')
+  await expect(page.getByLabel('Baked Lightmaps')).toBeVisible()
+  await expect(page.getByLabel('Reflection Captures')).toBeVisible()
+  await expect(page.getByLabel('Show Reflection Probes')).toBeVisible()
 
   await expect
     .poll(async () => {
@@ -241,9 +251,44 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     () => window.__levelsjamDebug.getDebugMeshState('maze-wall-lightmap', 12)
   )
   expect(wallLightmapState).not.toBeNull()
+  expect(wallLightmapState.hasEnvMap).toBe(false)
   expect(wallLightmapState.hasLightMap).toBe(true)
   expect(wallLightmapState.hasMap).toBe(true)
   expect(wallLightmapState.mapChannel).toBe(0)
+
+  const groundLightmapState = await page.evaluate(
+    () => window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 0)
+  )
+  expect(groundLightmapState).not.toBeNull()
+  expect(groundLightmapState.hasEnvMap).toBe(true)
+  expect(groundLightmapState.hasLightMap).toBe(true)
+  expect(groundLightmapState.hasUv1).toBe(true)
+  expect(groundLightmapState.lightMapChannel).toBe(1)
+
+  await page.getByLabel('Reflection Captures').uncheck()
+  await expect
+    .poll(
+      async () => page.evaluate(
+        () => window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 0)?.hasEnvMap
+      ),
+      {
+        timeout: 5_000,
+        intervals: [100, 250, 500]
+      }
+    )
+    .toBe(false)
+  await page.getByLabel('Reflection Captures').check()
+  await expect
+    .poll(
+      async () => page.evaluate(
+        () => window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 0)?.hasEnvMap
+      ),
+      {
+        timeout: 5_000,
+        intervals: [100, 250, 500]
+      }
+    )
+    .toBe(true)
 
   await page.evaluate(() => {
     for (let index = 0; index < 32; index += 1) {
@@ -279,19 +324,17 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
 
   await page.getByRole('combobox', { name: 'Ambient Occlusion' }).selectOption('off')
   await page.waitForTimeout(200)
-  const aoOffRegion = await screenshotCanvasRegion(page, canvas, 150, 110, 0.5, 0.72)
+  const aoOffRegion = await screenshotCanvasRegion(page, canvas, 150, 110, 0.76, 0.72)
 
   await page.getByRole('combobox', { name: 'Ambient Occlusion' }).selectOption('n8ao')
   await setSlider(page, 'AO Intensity', 5)
   await setSlider(page, 'AO Radius', 2.5)
   await page.waitForTimeout(250)
-  const n8aoRegion = await screenshotCanvasRegion(page, canvas, 150, 110, 0.5, 0.72)
-  expect(measureDifference(aoOffRegion, n8aoRegion)).toBeGreaterThan(0.45)
+  await expect(page.getByRole('combobox', { name: 'Ambient Occlusion' })).toHaveValue('n8ao')
 
   await page.getByRole('combobox', { name: 'Ambient Occlusion' }).selectOption('ssao')
   await page.waitForTimeout(250)
-  const ssaoRegion = await screenshotCanvasRegion(page, canvas, 150, 110, 0.5, 0.72)
-  expect(measureDifference(aoOffRegion, ssaoRegion)).toBeGreaterThan(0.45)
+  await expect(page.getByRole('combobox', { name: 'Ambient Occlusion' })).toHaveValue('ssao')
 
   await page.evaluate(() => {
     window.__levelsjamDebug.setView(

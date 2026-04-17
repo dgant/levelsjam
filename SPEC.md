@@ -104,6 +104,9 @@
 - The debug panel allows Depth of Field focus distance values up to 8 meters.
 - The debug panel exposes Bloom `kernelSize`.
 - The Bloom kernel-size control updates the configured bloom kernel preset.
+- The debug panel exposes a checkbox that disables baked maze lightmaps while leaving the underlying maze geometry visible.
+- The debug panel exposes a checkbox that disables local maze reflection captures while leaving the global HDRI environment active.
+- The debug panel exposes a checkbox, disabled by default, that draws a sphere at each maze reflection-probe position using that probe's captured reflection texture.
 - The debug panel does not expose obsolete atmosphere or sun-direction controls.
 - The page shows an FPS counter in the top-right corner together with the current Git revision and revision timestamp.
 - The top-right overlay also shows the active maze ID.
@@ -146,7 +149,9 @@
 - The visible skybox and the environment lighting use the same calibrated HDRI intensity path.
 - The ground and walls use extracted PBR texture packs with tiling based on a 1 meter world scale unless a source specifies otherwise.
 - Reflective and semi-reflective materials read from the shared environment consistently, with the nearest local maze reflection probe taking precedence over the global HDRI for in-maze specular.
+- The reflective maze floor patch uses local reflection probes so puddled areas can reflect nearby torch sources rather than only the global HDRI.
 - Local reflection probes do not make baked lighting or image-based lighting appear to flicker as the camera moves between maze cells.
+- Local reflection probes capture the baked maze lighting state so reflected maze surfaces remain consistent with the torch-lightmap shadows.
 - The torch billboards face the camera continuously.
 - The torch billboards animate smoothly through the flipbook loop without lighting artifacts from scene lights.
 - The torch billboards are excluded from screen-space reflections.
@@ -187,6 +192,7 @@
 - The debug controls panel exposes ambient-occlusion radius.
 - The debug controls panel exposes enabled and intensity controls for Bloom, Depth of Field, Lens Flares, SSR, and Vignette.
 - The debug controls panel exposes volumetric-lighting or fog controls, including amount and noise frequency.
+- The debug controls panel exposes toggles for baked maze lightmaps, local reflection captures, and reflection-probe visualization.
 - The debug controls panel lays out each control row on one line in value-label-control order.
 - The debug controls panel does not expose controls for removed effects or removed atmosphere systems.
 
