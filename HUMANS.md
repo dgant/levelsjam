@@ -49,7 +49,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify each sconce renders with the requested `metal-13` PBR textures rather than a debug material.
 - Verify the sconces are visibly readable outside the maze walls rather than disappearing into the surface behind them.
 - Verify the torch billboards animate and stay camera-facing even on walls whose parent groups are rotated.
-- Verify the visible flame fills the 0.5m billboard and that the billboard bottom edge is flush with the sconce top.
+- Verify the visible flame fills the square billboard, that the billboard width matches its wall clearance, and that the billboard bottom edge is flush with the sconce top.
 - Verify each persisted maze includes baked torch lightmap data.
 - Verify the baked lightmap visibly affects the maze walls and the maze-local lit floor patch in the rendered scene.
 - Verify the infinite base ground remains present outside the lit floor patch.
@@ -62,6 +62,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify reflective maze materials respond to the local maze reflection probes rather than only to the global HDRI.
 - Verify reflective floor highlights transition smoothly across maze cells instead of stepping abruptly at reflection-probe region boundaries.
 - Verify disabling `Reflection Captures` removes the local probe contribution from the puddled maze floor while leaving the global HDRI environment intact.
+- Verify toggling `Reflection Captures` produces a visible change on an in-maze reflective floor patch.
 - Verify enabling `Show Reflection Probes` draws a probe sphere at each maze probe position.
 - Verify `window.__levelsjamDebug.getReflectionProbeState()` reports a nonzero probe count and becomes `ready: true` after load.
 - Verify moving the camera between maze cells does not change `window.__levelsjamDebug.getReflectionProbeState().activeProbeId` from `null` or make the scene lighting flicker.
@@ -94,8 +95,10 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify enabling lens flares with `0` intensity produces no visible scene change.
 - Verify the Bloom kernel-size control produces a visible bloom change.
 - Verify SSAO now produces a visible change where contact darkening should occur.
+- Verify enabling `SSAO` still allows a programmatic camera move to produce a visibly updated frame.
 - Verify the volumetric-lighting controls produce visible changes in the full-scene fog volume rather than in per-torch cone meshes.
 - Verify the fog volume occupies the maze footprint from ground level up to roughly 6 meters.
+- Verify enabling Depth Of Field with a nonzero bokeh scale still allows a programmatic camera move to produce a visibly updated frame.
 - Verify enabling Depth Of Field with `0` bokeh scale produces no visible scene change.
 - Verify each control row in the visual controls panel keeps the value, label, and control on one line in that order.
 - Verify the FPS counter appears in the top-right corner and includes the Git revision and revision timestamp.
@@ -110,7 +113,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Treat the temporary `test:perf` disablement as intentional until the static baked-lightmap torch-lighting evaluation ends.
 - Keep `npm run test:unit` under 20 seconds.
 - Keep the prepared smoke runner `npm run test:smoke:runner` under 1 minute after a single `npm run build:pages`.
-- Latest measured benchmark on April 17, 2026: `npm run bench:startup` on the dev server reached the first rendered frame in about `1.14s`; `npm run build` took about `4.1s`; `npm run test:unit` took about `1.8m`; `npm run test:perf:runner` remains intentionally skipped during the static baked-lightmap evaluation; and `npm run test:smoke` took about `2.3m` including `build:pages`.
+- Latest measured benchmark on April 17, 2026: `npm run bench:startup` on the dev server reached the first rendered frame in about `2.23s`; `npm run build` took about `4.9s`; `npm run test:unit` took about `1.88m` and still missed the `20s` target; `npm run test:perf:runner` remains intentionally skipped during the static baked-lightmap evaluation; and `npm run test:smoke:runner` took about `3.6m` after a prepared `build:pages`, which still misses the `1m` target.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.

@@ -91,6 +91,36 @@ async function screenshotCanvasRegion(
   return PNG.sync.write(clippedImage)
 }
 
+async function measureAnimatedCanvasDifference(
+  page,
+  canvas,
+  width = 220,
+  height = 160,
+  anchorX = 0.5,
+  anchorY = 0.5,
+  waitMs = 500
+) {
+  const firstFrame = await screenshotCanvasRegion(
+    page,
+    canvas,
+    width,
+    height,
+    anchorX,
+    anchorY
+  )
+  await page.waitForTimeout(waitMs)
+  const secondFrame = await screenshotCanvasRegion(
+    page,
+    canvas,
+    width,
+    height,
+    anchorX,
+    anchorY
+  )
+
+  return measureDifference(firstFrame, secondFrame)
+}
+
 async function waitForBrightFrame(
   page,
   canvas,
@@ -260,12 +290,59 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     () => window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 0)
   )
   expect(groundLightmapState).not.toBeNull()
+  expect(groundLightmapState.hasEnvMap).toBe(true)
   expect(groundLightmapState.hasLightMap).toBe(true)
   expect(groundLightmapState.hasUv1).toBe(true)
   expect(groundLightmapState.lightMapChannel).toBe(1)
 
+  const centerGroundPatchPosition = await page.evaluate(
+    () => window.__levelsjamDebug.getDebugPosition('maze-ground-lightmap', 36)
+  )
+  expect(centerGroundPatchPosition).not.toBeNull()
+  await page.evaluate(() => {
+    for (let index = 0; index < 32; index += 1) {
+      window.__levelsjamDebug.setDebugVisible('torch-billboard', index, false)
+    }
+  })
+  await page.evaluate((position) => {
+    const [x, y, z] = position
+    window.__levelsjamDebug.setView(
+      [x - 1.8, y + 0.9, z - 1.4],
+      [x + 0.6, y + 0.02, z]
+    )
+  }, centerGroundPatchPosition)
+  await page.waitForTimeout(250)
+  await page.getByLabel('Reflection Captures').check()
+  await expect(page.getByLabel('Reflection Captures')).toBeChecked()
+  await page.waitForTimeout(250)
+  await expect
+    .poll(
+      async () => page.evaluate(
+        () => window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 36)?.probeBlend?.mode
+      ),
+      {
+        timeout: 5_000,
+        intervals: [100, 250, 500]
+      }
+    )
+    .toBe('world')
+  const reflectionCapturesOn = await screenshotCanvasRegion(page, canvas, 300, 220, 0.72, 0.52)
   await page.getByLabel('Reflection Captures').uncheck()
   await expect(page.getByLabel('Reflection Captures')).not.toBeChecked()
+  await page.waitForTimeout(250)
+  await expect
+    .poll(
+      async () => page.evaluate(
+        () => window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 36)?.probeBlend?.mode
+      ),
+      {
+        timeout: 5_000,
+        intervals: [100, 250, 500]
+      }
+    )
+    .toBe('none')
+  const reflectionCapturesOff = await screenshotCanvasRegion(page, canvas, 300, 220, 0.72, 0.52)
+  expect(measureDifference(reflectionCapturesOn, reflectionCapturesOff)).toBeGreaterThan(0.05)
   await page.getByLabel('Reflection Captures').check()
   await expect(page.getByLabel('Reflection Captures')).toBeChecked()
 
@@ -407,18 +484,84 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   expect(measureDifference(zeroEffectBaseline, zeroSsrRegion)).toBeLessThan(0.02)
   await setCheckboxByLabelText(page, 'SSR', false)
 
+  const responsiveViewA = {
+    camera: [debugTorchPosition[0] - 1.4, debugTorchPosition[1] + 0.15, debugTorchPosition[2] - 1.35],
+    target: [debugTorchPosition[0], debugTorchPosition[1], debugTorchPosition[2]]
+  }
+  const responsiveViewB = {
+    camera: [debugTorchPosition[0] - 1.05, debugTorchPosition[1] + 0.28, debugTorchPosition[2] - 1.1],
+    target: [debugTorchPosition[0] + 0.18, debugTorchPosition[1] + 0.06, debugTorchPosition[2] - 0.08]
+  }
+
+  await setCheckboxByLabelText(page, 'Depth Of Field', false)
+  await page.getByRole('combobox', { name: 'Ambient Occlusion' }).selectOption('off')
+  await page.evaluate(() => {
+    for (let index = 0; index < 32; index += 1) {
+      window.__levelsjamDebug.setDebugVisible('torch-billboard', index, true)
+    }
+  })
+  await page.evaluate((view) => {
+    window.__levelsjamDebug.setView(view.camera, view.target)
+  }, responsiveViewA)
+  await page.waitForTimeout(250)
+
+  await page.getByRole('combobox', { name: 'Ambient Occlusion' }).selectOption('ssao')
+  await setSlider(page, 'AO Intensity', 3)
+  await setSlider(page, 'AO Radius', 2)
+  await page.waitForTimeout(250)
+  const ssaoResponsiveBefore = await screenshotCanvasRegion(page, canvas, 220, 160, 0.5, 0.5)
+  await page.evaluate((view) => {
+    window.__levelsjamDebug.setView(view.camera, view.target)
+  }, responsiveViewB)
+  await page.waitForTimeout(500)
+  const ssaoResponsiveAfter = await screenshotCanvasRegion(page, canvas, 220, 160, 0.5, 0.5)
+  expect(measureDifference(ssaoResponsiveBefore, ssaoResponsiveAfter)).toBeGreaterThan(0.02)
+  await page.getByRole('combobox', { name: 'Ambient Occlusion' }).selectOption('off')
+  await page.evaluate((view) => {
+    window.__levelsjamDebug.setView(view.camera, view.target)
+  }, responsiveViewA)
+  await page.waitForTimeout(250)
+
+  await setCheckboxByLabelText(page, 'Depth Of Field', true)
+  await setSlider(page, 'DOF Focus Distance', 2)
+  await setSlider(page, 'DOF Focal Length', 2)
+  await setSlider(page, 'Depth Of Field Bokeh Scale', 1.5)
+  await page.waitForTimeout(250)
+  const dofResponsiveBefore = await screenshotCanvasRegion(page, canvas, 220, 160, 0.5, 0.5)
+  await page.evaluate((view) => {
+    window.__levelsjamDebug.setView(view.camera, view.target)
+  }, responsiveViewB)
+  await page.waitForTimeout(500)
+  const dofResponsiveAfter = await screenshotCanvasRegion(page, canvas, 220, 160, 0.5, 0.5)
+  expect(measureDifference(dofResponsiveBefore, dofResponsiveAfter)).toBeGreaterThan(0.02)
+  await setSlider(page, 'Depth Of Field Bokeh Scale', 0)
+  await page.waitForTimeout(200)
+  await setCheckboxByLabelText(page, 'Depth Of Field', false)
+  await page.evaluate(() => {
+    for (let index = 0; index < 32; index += 1) {
+      window.__levelsjamDebug.setDebugVisible('torch-billboard', index, false)
+    }
+    window.__levelsjamDebug.setView(
+      [5.4, 1.55, -6.9],
+      [7, 1.1, -6]
+    )
+  })
+  await page.waitForTimeout(250)
+
+  const zeroDofBaseline = await screenshotCanvasRegion(page, canvas, 220, 160, 0.72, 0.52)
   await setCheckboxByLabelText(page, 'Depth Of Field', true)
   await setSlider(page, 'Depth Of Field Bokeh Scale', 0)
   await page.waitForTimeout(200)
   const zeroDofRegion = await screenshotCanvasRegion(page, canvas, 220, 160, 0.72, 0.52)
-  expect(measureDifference(zeroEffectBaseline, zeroDofRegion)).toBeLessThan(0.02)
+  expect(measureDifference(zeroDofBaseline, zeroDofRegion)).toBeLessThan(0.02)
   await setCheckboxByLabelText(page, 'Depth Of Field', false)
 
+  const zeroLensFlareBaseline = await screenshotCanvasRegion(page, canvas, 220, 160, 0.72, 0.52)
   await setCheckboxByLabelText(page, 'Lens Flares', true)
   await setSlider(page, 'Lens Flares Intensity', 0)
   await page.waitForTimeout(200)
   const zeroLensFlareRegion = await screenshotCanvasRegion(page, canvas, 220, 160, 0.72, 0.52)
-  expect(measureDifference(zeroEffectBaseline, zeroLensFlareRegion)).toBeLessThan(0.02)
+  expect(measureDifference(zeroLensFlareBaseline, zeroLensFlareRegion)).toBeLessThan(0.02)
   await setCheckboxByLabelText(page, 'Lens Flares', false)
 
   await page.evaluate(() => {

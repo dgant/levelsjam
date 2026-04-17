@@ -35,7 +35,7 @@
 - Each wall sconce supports a camera-facing torch billboard above it.
 - Each torch billboard is positioned against the same wall face as the sconce, on the side of the cell the light is intended to illuminate.
 - Each torch billboard's bottom edge is flush with the top of the sconce rather than floating above it.
-- Each torch billboard is 0.5 meters square.
+- Each torch billboard is square and its width matches its wall clearance so the flame quad never clips into the wall behind it.
 - Each torch billboard uses the linked source flipbook asset rather than a procedurally generated placeholder.
 - Each torch billboard uses the local committed `CampFire_l_nosmoke_front_Loop_01_4K_6x6.png` atlas copied from the linked source asset.
 - Each torch billboard uses a 6x6 fire flipbook atlas.
@@ -173,6 +173,7 @@
 - Enabling SSR with an intensity of `0` behaves as a visual no-op.
 - Selecting `N8AO` or `SSAO` produces a visible ambient-occlusion change around contact areas.
 - Selecting `SSAO` produces a visible ambient-occlusion change around contact areas rather than appearing inert.
+- Enabling `N8AO`, `SSAO`, or Depth of Field does not halt rendering or make the page unresponsive.
 - Enabling lens flares produces a visible flare around visible torches.
 - Increasing or decreasing lens-flare opacity produces a visible corresponding change in the flare.
 - Enabling lens flares with an intensity of `0` behaves as a visual no-op.

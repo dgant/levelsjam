@@ -174,7 +174,7 @@ const FIRE_BILLBOARD_INTENSITY_SCALE = 1 / TORCH_BASE_CANDELA
 const FLOOR_LIGHTMAP_INTENSITY_SCALE = 1
 const WALL_LIGHTMAP_INTENSITY_SCALE = 1
 const MAZE_GROUND_PATCH_OFFSET_Y = 0.002
-const REFLECTION_PROBE_RENDER_SIZE = 128
+const REFLECTION_PROBE_RENDER_SIZE = 64
 const REFLECTION_PROBE_FAR = 48
 const REFLECTION_PROBE_EMISSIVE_RADIUS = 0.16
 const REFLECTION_PROBE_EMISSIVE_SCALE = 3
@@ -627,6 +627,29 @@ function updateProbeBlendShaderUniforms(
   )
 }
 
+function updateProbeBlendMaterialDebugState(
+  material: ThreeMeshPhysicalMaterial | ThreeMeshStandardMaterial | null,
+  probeBlend: ProbeBlendConfig
+) {
+  if (!material) {
+    return
+  }
+
+  material.userData.probeBlendDebug = {
+    mode: probeBlend.mode,
+    probeTextureCount: probeBlend.probeTextures.filter(Boolean).length,
+    region: probeBlend.region
+      ? {
+          minX: probeBlend.region.minX,
+          minZ: probeBlend.region.minZ,
+          sizeX: probeBlend.region.sizeX,
+          sizeZ: probeBlend.region.sizeZ
+        }
+      : null,
+    weights: probeBlend.weights ? [...probeBlend.weights] : null
+  }
+}
+
 function useProbeBlendMaterialShader(
   materialRef: RefObject<ThreeMeshPhysicalMaterial | ThreeMeshStandardMaterial | null>,
   probeBlend: ProbeBlendConfig
@@ -641,6 +664,7 @@ function useProbeBlendMaterialShader(
     }
 
     material.customProgramCacheKey = () => 'probe-blend-v1'
+    updateProbeBlendMaterialDebugState(material, probeBlend)
     material.onBeforeCompile = (shader: Shader) => {
       const probeBlendShader = shader as ProbeBlendShader
 
@@ -655,8 +679,17 @@ function useProbeBlendMaterialShader(
       probeBlendShader.vertexShader =
         `varying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.vertexShader}`
           .replace(
-            '#include <worldpos_vertex>',
-            '#include <worldpos_vertex>\n\tvProbeBlendWorldPosition = worldPosition.xyz;'
+            '#include <project_vertex>',
+            `vec4 probeBlendWorldPosition = vec4( transformed, 1.0 );
+\t#ifdef USE_BATCHING
+\t\tprobeBlendWorldPosition = batchingMatrix * probeBlendWorldPosition;
+\t#endif
+\t#ifdef USE_INSTANCING
+\t\tprobeBlendWorldPosition = instanceMatrix * probeBlendWorldPosition;
+\t#endif
+\tprobeBlendWorldPosition = modelMatrix * probeBlendWorldPosition;
+\tvProbeBlendWorldPosition = probeBlendWorldPosition.xyz;
+\t#include <project_vertex>`
           )
       probeBlendShader.fragmentShader =
         `varying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
@@ -678,11 +711,12 @@ function useProbeBlendMaterialShader(
       }
       shaderRef.current = null
     }
-  }, [materialRef, probeBlend.mode])
+  }, [materialRef])
 
   useEffect(() => {
+    updateProbeBlendMaterialDebugState(materialRef.current, probeBlend)
     updateProbeBlendShaderUniforms(shaderRef.current, probeBlend)
-  }, [probeBlend])
+  }, [materialRef, probeBlend])
 }
 
 function configureRepeatedTexture(
@@ -1104,10 +1138,12 @@ function StartupReporter() {
 function EnvironmentLighting({
   layout,
   iblIntensity,
+  onEnvironmentTextureChange,
   onReflectionProbeTexturesChange
 }: {
   layout: MazeLayout
   iblIntensity: number
+  onEnvironmentTextureChange: (texture: Texture | null) => void
   onReflectionProbeTexturesChange: (textures: Texture[]) => void
 }) {
   const gl = useThree((state) => state.gl)
@@ -1127,13 +1163,15 @@ function EnvironmentLighting({
       probeCount: layout.reflectionProbes.length,
       ready: false
     }
+    onEnvironmentTextureChange(null)
     onReflectionProbeTexturesChange([])
 
     return () => {
       delete scene.userData.reflectionProbeState
+      onEnvironmentTextureChange(null)
       onReflectionProbeTexturesChange([])
     }
-  }, [layout.reflectionProbes.length, onReflectionProbeTexturesChange, scene])
+  }, [layout.reflectionProbes.length, onEnvironmentTextureChange, onReflectionProbeTexturesChange, scene])
 
   useEffect(() => {
     hdrTexture.mapping = EquirectangularReflectionMapping
@@ -1145,6 +1183,7 @@ function EnvironmentLighting({
     scene.environment = nextEnvironment.texture
     scene.backgroundIntensity = calibratedIntensity
     scene.environmentIntensity = calibratedIntensity
+    onEnvironmentTextureChange(nextEnvironment.texture)
 
     return () => {
       if (scene.background === hdrTexture) {
@@ -1157,8 +1196,9 @@ function EnvironmentLighting({
       environmentTarget.current = null
       pmremGenerator.dispose()
       hdrTexture.dispose()
+      onEnvironmentTextureChange(null)
     }
-  }, [gl, hdrTexture, pmremGenerator, scene])
+  }, [gl, hdrTexture, onEnvironmentTextureChange, pmremGenerator, scene])
 
   useEffect(() => {
     scene.backgroundIntensity = calibratedIntensity
@@ -1173,6 +1213,10 @@ function EnvironmentLighting({
 
     const previousTargets = reflectionProbeTargets.current
     reflectionProbeTargets.current = []
+    const previousBackground = scene.background
+    const previousBackgroundIntensity = scene.backgroundIntensity
+    const previousEnvironment = scene.environment
+    const previousEnvironmentIntensity = scene.environmentIntensity
 
     if (scene.environment !== baseEnvironment.texture) {
       scene.environment = baseEnvironment.texture
@@ -1184,88 +1228,112 @@ function EnvironmentLighting({
       ready: false
     }
 
-    const hiddenObjects: Array<{ object: { visible: boolean }; visible: boolean }> = []
-    scene.traverse((object) => {
-      if (
-        object.userData?.debugRole === 'torch-billboard' ||
-        object.userData?.debugRole === 'global-fog-volume' ||
-        object.userData?.debugRole === 'reflection-probe-visual'
-      ) {
-        hiddenObjects.push({ object, visible: object.visible })
-        object.visible = false
+    let nextTargets: Array<{ dispose: () => void; texture: Texture }> = []
+    let cancelled = false
+    const bakeHandle = window.setTimeout(() => {
+      if (cancelled) {
+        return
       }
-    })
 
-    const emissiveGeometry = new SphereGeometry(REFLECTION_PROBE_EMISSIVE_RADIUS, 12, 12)
-    const emissiveGroup = new Group()
-    const emissiveMeshes: Mesh[] = []
-
-    for (const mazeLight of layout.lights) {
-      const emissiveMaterial = new MeshBasicMaterial({
-        color: FIRE_COLOR.clone().multiplyScalar(
-          REFLECTION_PROBE_EMISSIVE_SCALE
-        )
+      const hiddenObjects: Array<{ object: { visible: boolean }; visible: boolean }> = []
+      scene.traverse((object) => {
+        if (
+          object.userData?.debugRole === 'torch-billboard' ||
+          object.userData?.debugRole === 'global-fog-volume' ||
+          object.userData?.debugRole === 'reflection-probe-visual'
+        ) {
+          hiddenObjects.push({ object, visible: object.visible })
+          object.visible = false
+        }
       })
-      const emissiveMesh = new Mesh(emissiveGeometry, emissiveMaterial)
-      emissiveMesh.position.set(
-        mazeLight.torchPosition.x,
-        mazeLight.torchPosition.y,
-        mazeLight.torchPosition.z
-      )
-      emissiveGroup.add(emissiveMesh)
-      emissiveMeshes.push(emissiveMesh)
-    }
 
-    scene.add(emissiveGroup)
-    scene.background = hdrTexture
-    scene.backgroundIntensity = authoredProbeHdrIntensity
-    scene.environment = baseEnvironment.texture
-    scene.environmentIntensity = authoredProbeHdrIntensity
+      const emissiveGeometry = new SphereGeometry(REFLECTION_PROBE_EMISSIVE_RADIUS, 12, 12)
+      const emissiveGroup = new Group()
+      const emissiveMeshes: Mesh[] = []
 
-    const nextTargets = layout.reflectionProbes.map((probe) => {
-      const cubeRenderTarget = new WebGLCubeRenderTarget(
-        REFLECTION_PROBE_RENDER_SIZE,
-        { type: HalfFloatType }
-      )
-      const cubeCamera = new CubeCamera(0.1, REFLECTION_PROBE_FAR, cubeRenderTarget)
+      for (const mazeLight of layout.lights) {
+        const emissiveMaterial = new MeshBasicMaterial({
+          color: FIRE_COLOR.clone().multiplyScalar(
+            REFLECTION_PROBE_EMISSIVE_SCALE
+          )
+        })
+        const emissiveMesh = new Mesh(emissiveGeometry, emissiveMaterial)
+        emissiveMesh.position.set(
+          mazeLight.torchPosition.x,
+          mazeLight.torchPosition.y,
+          mazeLight.torchPosition.z
+        )
+        emissiveGroup.add(emissiveMesh)
+        emissiveMeshes.push(emissiveMesh)
+      }
 
-      cubeCamera.position.set(
-        probe.position.x,
-        probe.position.y,
-        probe.position.z
-      )
-      scene.add(cubeCamera)
-      cubeCamera.update(gl, scene)
-      scene.remove(cubeCamera)
+      scene.add(emissiveGroup)
+      scene.background = null
+      scene.backgroundIntensity = 1
+      scene.environment = null
+      scene.environmentIntensity = 1
 
-      const probeTarget = pmremGenerator.fromCubemap(cubeRenderTarget.texture)
-      cubeRenderTarget.dispose()
-      return probeTarget
-    })
+      nextTargets = layout.reflectionProbes.map((probe) => {
+        const cubeRenderTarget = new WebGLCubeRenderTarget(
+          REFLECTION_PROBE_RENDER_SIZE,
+          { type: HalfFloatType }
+        )
+        const cubeCamera = new CubeCamera(0.1, REFLECTION_PROBE_FAR, cubeRenderTarget)
 
-    scene.remove(emissiveGroup)
-    emissiveGeometry.dispose()
-    for (const emissiveMesh of emissiveMeshes) {
-      ;(emissiveMesh.material as MeshBasicMaterial).dispose()
-    }
-    for (const entry of hiddenObjects) {
-      entry.object.visible = entry.visible
-    }
+        cubeCamera.position.set(
+          probe.position.x,
+          probe.position.y,
+          probe.position.z
+        )
+        scene.add(cubeCamera)
+        cubeCamera.update(gl, scene)
+        scene.remove(cubeCamera)
 
-    previousTargets.forEach((target) => target.dispose())
-    reflectionProbeTargets.current = nextTargets
-    onReflectionProbeTexturesChange(nextTargets.map((target) => target.texture))
-    scene.userData.reflectionProbeState = {
-      activeProbeId: null,
-      probeCount: layout.reflectionProbes.length,
-      ready: nextTargets.length === layout.reflectionProbes.length
-    }
+        const probeTarget = pmremGenerator.fromCubemap(cubeRenderTarget.texture)
+        cubeRenderTarget.dispose()
+        return probeTarget
+      })
+
+      scene.remove(emissiveGroup)
+      emissiveGeometry.dispose()
+      for (const emissiveMesh of emissiveMeshes) {
+        ;(emissiveMesh.material as MeshBasicMaterial).dispose()
+      }
+      for (const entry of hiddenObjects) {
+        entry.object.visible = entry.visible
+      }
+      scene.background = previousBackground
+      scene.backgroundIntensity = previousBackgroundIntensity
+      scene.environment = previousEnvironment
+      scene.environmentIntensity = previousEnvironmentIntensity
+
+      if (cancelled) {
+        nextTargets.forEach((target) => target.dispose())
+        nextTargets = []
+        return
+      }
+
+      previousTargets.forEach((target) => target.dispose())
+      reflectionProbeTargets.current = nextTargets
+      onReflectionProbeTexturesChange(nextTargets.map((target) => target.texture))
+      scene.userData.reflectionProbeState = {
+        activeProbeId: null,
+        probeCount: layout.reflectionProbes.length,
+        ready: nextTargets.length === layout.reflectionProbes.length
+      }
+    }, 0)
 
     return () => {
+      cancelled = true
+      window.clearTimeout(bakeHandle)
       for (const target of nextTargets) {
         target.dispose()
       }
       onReflectionProbeTexturesChange([])
+      scene.background = previousBackground
+      scene.backgroundIntensity = previousBackgroundIntensity
+      scene.environment = previousEnvironment
+      scene.environmentIntensity = previousEnvironmentIntensity
       if (scene.environment !== baseEnvironment.texture) {
         scene.environment = baseEnvironment.texture
       }
@@ -1291,11 +1359,13 @@ function EnvironmentLighting({
 }
 
 function GroundSurfaceMaterial({
+  globalEnvMap,
   lightMap,
   lightMapIntensity,
   maps,
   probeBlend
 }: {
+  globalEnvMap?: Texture | null
   lightMap?: Texture
   lightMapIntensity?: number
   maps: PbrMaps
@@ -1315,8 +1385,7 @@ function GroundSurfaceMaterial({
     <meshPhysicalMaterial
       {...maps}
       bumpScale={0.08}
-      clearcoat={1}
-      clearcoatRoughness={0.1}
+      envMap={globalEnvMap ?? null}
       envMapIntensity={1}
       lightMap={lightMap}
       lightMapIntensity={lightMapIntensity}
@@ -1330,6 +1399,7 @@ function GroundSurfaceMaterial({
 function GroundPatchMesh({
   bakedLightmapsEnabled,
   debugIndex,
+  environmentTexture,
   groundBounds,
   groundLightmapTexture,
   maps,
@@ -1339,6 +1409,7 @@ function GroundPatchMesh({
 }: {
   bakedLightmapsEnabled: boolean
   debugIndex: number
+  environmentTexture: Texture | null
   groundBounds: MazeLightmap['groundBounds']
   groundLightmapTexture: Texture
   maps: PbrMaps
@@ -1370,6 +1441,7 @@ function GroundPatchMesh({
         object={geometry}
       />
       <GroundSurfaceMaterial
+        globalEnvMap={environmentTexture}
         lightMap={bakedLightmapsEnabled ? groundLightmapTexture : undefined}
         lightMapIntensity={
           bakedLightmapsEnabled
@@ -1385,6 +1457,7 @@ function GroundPatchMesh({
 
 function Ground({
   bakedLightmapsEnabled,
+  environmentTexture,
   layout,
   groundLightmapTexture,
   reflectionCapturesEnabled,
@@ -1392,6 +1465,7 @@ function Ground({
   torchCandelaMultiplier
 }: {
   bakedLightmapsEnabled: boolean
+  environmentTexture: Texture | null
   layout: MazeLayout
   groundLightmapTexture: Texture
   reflectionCapturesEnabled: boolean
@@ -1413,12 +1487,16 @@ function Ground({
         userData={{ debugIndex: 0, debugRole: 'maze-ground-base' }}
       >
         <planeGeometry args={[GROUND_SIZE, GROUND_SIZE]} />
-        <GroundSurfaceMaterial maps={puddle} />
+        <GroundSurfaceMaterial
+          globalEnvMap={environmentTexture}
+          maps={puddle}
+        />
       </mesh>
       {groundPatchRects.map((rect, index) => (
         <GroundPatchMesh
           bakedLightmapsEnabled={bakedLightmapsEnabled}
           debugIndex={index}
+          environmentTexture={environmentTexture}
           groundBounds={layout.maze.lightmap.groundBounds}
           groundLightmapTexture={groundLightmapTexture}
           key={rect.id}
@@ -1523,12 +1601,14 @@ function TorchBillboard({
 }
 
 function WallSconce({
+  environmentTexture,
   layout,
   mazeLight,
   reflectionCapturesEnabled,
   reflectionProbeTextures,
   torchCandelaMultiplier
 }: {
+  environmentTexture: Texture | null
   layout: MazeLayout
   mazeLight: MazeLayout['lights'][number]
   reflectionCapturesEnabled: boolean
@@ -1574,6 +1654,7 @@ function WallSconce({
             bumpMap={metal.bumpMap}
             bumpScale={0.02}
             color="white"
+            envMap={environmentTexture ?? null}
             envMapIntensity={1}
             map={metal.map}
             metalness={0.85}
@@ -1793,6 +1874,7 @@ function ReflectionProbeVisualization({
 
 function MazeWalls({
   bakedLightmapsEnabled,
+  environmentTexture,
   layout,
   lightmapBytes,
   reflectionCapturesEnabled,
@@ -1800,6 +1882,7 @@ function MazeWalls({
   torchCandelaMultiplier
 }: {
   bakedLightmapsEnabled: boolean
+  environmentTexture: Texture | null
   layout: MazeLayout
   lightmapBytes: Uint8Array
   reflectionCapturesEnabled: boolean
@@ -1824,6 +1907,7 @@ function MazeWalls({
       ))}
       {layout.lights.map((mazeLight) => (
         <WallSconce
+          environmentTexture={environmentTexture}
           key={mazeLight.id}
           layout={layout}
           mazeLight={mazeLight}
@@ -1928,6 +2012,7 @@ function MazeWallMesh({
 
 function SceneGeometry({
   bakedLightmapsEnabled,
+  environmentTexture,
   layout,
   reflectionCapturesEnabled,
   reflectionProbeTextures,
@@ -1937,6 +2022,7 @@ function SceneGeometry({
   volumetricNoiseFrequency
 }: {
   bakedLightmapsEnabled: boolean
+  environmentTexture: Texture | null
   layout: MazeLayout
   reflectionCapturesEnabled: boolean
   reflectionProbeTextures: Texture[]
@@ -1952,6 +2038,7 @@ function SceneGeometry({
     <>
       <Ground
         bakedLightmapsEnabled={bakedLightmapsEnabled}
+        environmentTexture={environmentTexture}
         layout={layout}
         groundLightmapTexture={groundLightmapTexture}
         reflectionCapturesEnabled={reflectionCapturesEnabled}
@@ -1960,6 +2047,7 @@ function SceneGeometry({
       />
       <MazeWalls
         bakedLightmapsEnabled={bakedLightmapsEnabled}
+        environmentTexture={environmentTexture}
         layout={layout}
         lightmapBytes={lightmapBytes}
         reflectionCapturesEnabled={reflectionCapturesEnabled}
@@ -2458,6 +2546,17 @@ function FlightRig({
           lightMapIntensity: number | null
           mapChannel: number | null
           materialColor: [number, number, number] | null
+          probeBlend: {
+            mode: 'constant' | 'none' | 'world'
+            probeTextureCount: number
+            region: {
+              minX: number
+              minZ: number
+              sizeX: number
+              sizeZ: number
+            } | null
+            weights: number[] | null
+          } | null
         } | null
         getReflectionProbeState?: () => {
           activeProbeId: string | null
@@ -2509,6 +2608,17 @@ function FlightRig({
           lightMapIntensity: number | null
           mapChannel: number | null
           materialColor: [number, number, number] | null
+          probeBlend: {
+            mode: 'constant' | 'none' | 'world'
+            probeTextureCount: number
+            region: {
+              minX: number
+              minZ: number
+              sizeX: number
+              sizeZ: number
+            } | null
+            weights: number[] | null
+          } | null
         } | null = null
 
         scene.traverse((object) => {
@@ -2577,7 +2687,8 @@ function FlightRig({
                   material.color.g,
                   material.color.b
                 ]
-              : null
+              : null,
+            probeBlend: material.userData?.probeBlendDebug ?? null
           }
         })
 
@@ -2783,6 +2894,7 @@ function Scene({
   }, [onAssetsReady])
 
   const scene = useThree((state) => state.scene)
+  const [environmentTexture, setEnvironmentTexture] = useState<Texture | null>(null)
   const [reflectionProbeTextures, setReflectionProbeTextures] = useState<Texture[]>([])
 
   useEffect(() => {
@@ -2903,10 +3015,12 @@ function Scene({
       <EnvironmentLighting
         iblIntensity={visualSettings.iblIntensity}
         layout={layout}
+        onEnvironmentTextureChange={setEnvironmentTexture}
         onReflectionProbeTexturesChange={setReflectionProbeTextures}
       />
       <SceneGeometry
         bakedLightmapsEnabled={visualSettings.bakedLightmapsEnabled}
+        environmentTexture={environmentTexture}
         layout={layout}
         reflectionCapturesEnabled={visualSettings.reflectionCapturesEnabled}
         reflectionProbeTextures={reflectionProbeTextures}
@@ -2915,7 +3029,11 @@ function Scene({
         volumetricLighting={visualSettings.volumetricLighting}
         volumetricNoiseFrequency={visualSettings.volumetricNoiseFrequency}
       />
-      <EffectComposer enableNormalPass>
+      <EffectComposer
+        enableNormalPass
+        multisampling={0}
+        resolutionScale={0.5}
+      >
         {ambientOcclusionActive && visualSettings.ambientOcclusionMode === 'n8ao' ? (
           <N8AO
             aoRadius={visualSettings.ambientOcclusionRadius}
@@ -2929,6 +3047,7 @@ function Scene({
         {ambientOcclusionActive && visualSettings.ambientOcclusionMode === 'ssao' ? (
           <SSAO
             bias={0.03}
+            depthAwareUpsampling={false}
             distanceFalloff={0.1}
             distanceThreshold={1}
             intensity={visualSettings.ambientOcclusionIntensity * 6}
@@ -2936,8 +3055,9 @@ function Scene({
             radius={visualSettings.ambientOcclusionRadius}
             rangeFalloff={0.1}
             rangeThreshold={0.001}
-            rings={6}
-            samples={32}
+            resolutionScale={0.25}
+            rings={3}
+            samples={8}
           />
         ) : null}
         {ssrActive ? (
@@ -2954,6 +3074,7 @@ function Scene({
             bokehScale={visualSettings.depthOfField.bokehScale}
             focalLength={visualSettings.depthOfField.focalLength}
             focusDistance={visualSettings.depthOfField.focusDistance}
+            resolutionScale={0.25}
           />
         ) : null}
         {lensFlareActive ? (

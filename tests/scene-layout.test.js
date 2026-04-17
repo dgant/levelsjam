@@ -7,6 +7,7 @@ import {
   MAZE_COUNT,
   PLAYER_SPAWN_POSITION,
   SCONCE_RADIUS,
+  TORCH_BILLBOARD_SIZE,
   WALL_FACE_OFFSET,
   WALL_HEIGHT,
   WALL_LENGTH,
@@ -69,6 +70,10 @@ test('places each sconce one radius outside the wall face on the lit-cell side',
     assert.equal(deltaZ, 0)
     assert.equal(light.torchPosition.y, light.sconcePosition.y + 0.25)
   }
+})
+
+test('sizes the torch billboard to match its wall clearance', () => {
+  assert.equal(TORCH_BILLBOARD_SIZE, WALL_FACE_OFFSET)
 })
 
 test('exposes wall bounds for collision checks', () => {
