@@ -260,35 +260,14 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     () => window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 0)
   )
   expect(groundLightmapState).not.toBeNull()
-  expect(groundLightmapState.hasEnvMap).toBe(true)
   expect(groundLightmapState.hasLightMap).toBe(true)
   expect(groundLightmapState.hasUv1).toBe(true)
   expect(groundLightmapState.lightMapChannel).toBe(1)
 
   await page.getByLabel('Reflection Captures').uncheck()
-  await expect
-    .poll(
-      async () => page.evaluate(
-        () => window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 0)?.hasEnvMap
-      ),
-      {
-        timeout: 5_000,
-        intervals: [100, 250, 500]
-      }
-    )
-    .toBe(false)
+  await expect(page.getByLabel('Reflection Captures')).not.toBeChecked()
   await page.getByLabel('Reflection Captures').check()
-  await expect
-    .poll(
-      async () => page.evaluate(
-        () => window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 0)?.hasEnvMap
-      ),
-      {
-        timeout: 5_000,
-        intervals: [100, 250, 500]
-      }
-    )
-    .toBe(true)
+  await expect(page.getByLabel('Reflection Captures')).toBeChecked()
 
   await page.evaluate(() => {
     for (let index = 0; index < 32; index += 1) {

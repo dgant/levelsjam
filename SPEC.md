@@ -150,6 +150,8 @@
 - The ground and walls use extracted PBR texture packs with tiling based on a 1 meter world scale unless a source specifies otherwise.
 - Reflective and semi-reflective materials read from the shared environment consistently, with the nearest local maze reflection probe taking precedence over the global HDRI for in-maze specular.
 - The reflective maze floor patch uses local reflection probes so puddled areas can reflect nearby torch sources rather than only the global HDRI.
+- The reflective maze floor patch blends nearby local reflection probes with weighted interpolation rather than switching between one nearest probe per region.
+- Reflective maze sconces blend nearby local reflection probes with weighted interpolation rather than switching between one nearest probe at the object position.
 - Local reflection probes do not make baked lighting or image-based lighting appear to flicker as the camera moves between maze cells.
 - Local reflection probes capture the baked maze lighting state so reflected maze surfaces remain consistent with the torch-lightmap shadows.
 - The torch billboards face the camera continuously.

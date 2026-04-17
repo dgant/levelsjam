@@ -60,6 +60,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the maze floor patch preserves the same puddle-ground world texture scale as the surrounding infinite ground.
 - Verify the scene does not rely on realtime torch point lights for maze illumination.
 - Verify reflective maze materials respond to the local maze reflection probes rather than only to the global HDRI.
+- Verify reflective floor highlights transition smoothly across maze cells instead of stepping abruptly at reflection-probe region boundaries.
 - Verify disabling `Reflection Captures` removes the local probe contribution from the puddled maze floor while leaving the global HDRI environment intact.
 - Verify enabling `Show Reflection Probes` draws a probe sphere at each maze probe position.
 - Verify `window.__levelsjamDebug.getReflectionProbeState()` reports a nonzero probe count and becomes `ready: true` after load.

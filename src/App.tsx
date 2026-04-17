@@ -27,6 +27,8 @@ import {
   Group,
   Mesh,
   MeshBasicMaterial,
+  MeshPhysicalMaterial as ThreeMeshPhysicalMaterial,
+  MeshStandardMaterial as ThreeMeshStandardMaterial,
   NoToneMapping,
   NeutralToneMapping,
   PMREMGenerator,
@@ -35,12 +37,14 @@ import {
   ReinhardToneMapping,
   RepeatWrapping,
   SRGBColorSpace,
+  Shader,
   SphereGeometry,
   Texture,
   TextureLoader,
   Uniform,
   Vector2,
   Vector3,
+  Vector4,
   WebGLCubeRenderTarget
 } from 'three'
 import {
@@ -48,6 +52,7 @@ import {
   Suspense,
   useEffect,
   useMemo,
+  type RefObject,
   type ReactNode,
   useRef,
   useState
@@ -99,6 +104,10 @@ import {
   WALL_WIDTH
 } from './lib/sceneLayout.js'
 import { computeLocalBillboardQuaternion } from './lib/billboard.js'
+import {
+  buildGroundReflectionProbeRects,
+  getReflectionProbeBlendForPosition
+} from './lib/reflectionProbeBlending.js'
 
 declare const __GIT_REVISION__: string
 declare const __GIT_REVISION_TIMESTAMP__: string
@@ -366,8 +375,40 @@ type GroundPatchRect = {
   centerZ: number
   depth: number
   id: string
-  probeIndex: number | null
+  probeIndices: [number, number, number, number]
+  region: {
+    minX: number
+    minZ: number
+    sizeX: number
+    sizeZ: number
+  }
   width: number
+}
+
+type ProbeBlendMode = 'none' | 'constant' | 'world'
+
+type ProbeBlendConfig = {
+  mode: ProbeBlendMode
+  probeTextures: Array<Texture | null>
+  region?: {
+    minX: number
+    minZ: number
+    sizeX: number
+    sizeZ: number
+  }
+  weights?: [number, number, number, number]
+}
+
+type ProbeBlendShader = Shader & {
+  uniforms: Shader['uniforms'] & {
+    localProbeEnvMap0?: Uniform<Texture | null>
+    localProbeEnvMap1?: Uniform<Texture | null>
+    localProbeEnvMap2?: Uniform<Texture | null>
+    localProbeEnvMap3?: Uniform<Texture | null>
+    probeBlendMode?: Uniform<number>
+    probeBlendRegion?: Uniform<Vector4>
+    probeBlendWeights?: Uniform<Vector4>
+  }
 }
 
 type MazeLightmap = MazeLayout['maze']['lightmap']
@@ -440,6 +481,208 @@ function isAmbientOcclusionActive(settings: VisualSettings) {
     settings.ambientOcclusionMode !== 'off' &&
     settings.ambientOcclusionIntensity > EFFECT_EPSILON
   )
+}
+
+const PROBE_BLEND_SHADER_CHUNK = `
+#ifdef USE_ENVMAP
+
+uniform sampler2D localProbeEnvMap0;
+uniform sampler2D localProbeEnvMap1;
+uniform sampler2D localProbeEnvMap2;
+uniform sampler2D localProbeEnvMap3;
+uniform int probeBlendMode;
+uniform vec4 probeBlendWeights;
+uniform vec4 probeBlendRegion;
+
+vec4 sampleProbeBlendTexture( sampler2D probeMap, vec3 direction, float roughness ) {
+  return textureCubeUV( probeMap, envMapRotation * direction, roughness );
+}
+
+vec4 sampleProbeBlendLocalMaps( vec3 direction, float roughness, vec4 weights ) {
+  vec4 color0 = sampleProbeBlendTexture( localProbeEnvMap0, direction, roughness );
+  vec4 color1 = sampleProbeBlendTexture( localProbeEnvMap1, direction, roughness );
+  vec4 color2 = sampleProbeBlendTexture( localProbeEnvMap2, direction, roughness );
+  vec4 color3 = sampleProbeBlendTexture( localProbeEnvMap3, direction, roughness );
+
+  return
+    ( color0 * weights.x ) +
+    ( color1 * weights.y ) +
+    ( color2 * weights.z ) +
+    ( color3 * weights.w );
+}
+
+vec4 sampleProbeBlendEnvMap( vec3 direction, float roughness ) {
+  if ( probeBlendMode == 1 ) {
+    float tx = probeBlendRegion.z > 0.0
+      ? clamp( ( vProbeBlendWorldPosition.x - probeBlendRegion.x ) / probeBlendRegion.z, 0.0, 1.0 )
+      : 0.0;
+    float tz = probeBlendRegion.w > 0.0
+      ? clamp( ( vProbeBlendWorldPosition.z - probeBlendRegion.y ) / probeBlendRegion.w, 0.0, 1.0 )
+      : 0.0;
+    vec4 weights = vec4(
+      ( 1.0 - tx ) * ( 1.0 - tz ),
+      tx * ( 1.0 - tz ),
+      ( 1.0 - tx ) * tz,
+      tx * tz
+    );
+
+    return sampleProbeBlendLocalMaps( direction, roughness, weights );
+  }
+
+  if ( probeBlendMode == 2 ) {
+    return sampleProbeBlendLocalMaps( direction, roughness, probeBlendWeights );
+  }
+
+  return textureCubeUV( envMap, envMapRotation * direction, roughness );
+}
+
+vec3 getIBLIrradiance( const in vec3 normal ) {
+
+  #ifdef ENVMAP_TYPE_CUBE_UV
+
+    vec3 worldNormal = inverseTransformDirection( normal, viewMatrix );
+    vec4 envMapColor = sampleProbeBlendEnvMap( worldNormal, 1.0 );
+
+    return PI * envMapColor.rgb * envMapIntensity;
+
+  #else
+
+    return vec3( 0.0 );
+
+  #endif
+
+}
+
+vec3 getIBLRadiance( const in vec3 viewDir, const in vec3 normal, const in float roughness ) {
+
+  #ifdef ENVMAP_TYPE_CUBE_UV
+
+    vec3 reflectVec = reflect( - viewDir, normal );
+    reflectVec = normalize( mix( reflectVec, normal, pow4( roughness ) ) );
+    reflectVec = inverseTransformDirection( reflectVec, viewMatrix );
+
+    vec4 envMapColor = sampleProbeBlendEnvMap( reflectVec, roughness );
+
+    return envMapColor.rgb * envMapIntensity;
+
+  #else
+
+    return vec3( 0.0 );
+
+  #endif
+
+}
+
+  #ifdef USE_ANISOTROPY
+
+    vec3 getIBLAnisotropyRadiance( const in vec3 viewDir, const in vec3 normal, const in float roughness, const in vec3 bitangent, const in float anisotropy ) {
+
+      #ifdef ENVMAP_TYPE_CUBE_UV
+
+        vec3 bentNormal = cross( bitangent, viewDir );
+        bentNormal = normalize( cross( bentNormal, bitangent ) );
+        bentNormal = normalize( mix( bentNormal, normal, pow2( pow2( 1.0 - anisotropy * ( 1.0 - roughness ) ) ) ) );
+
+        return getIBLRadiance( viewDir, bentNormal, roughness );
+
+      #else
+
+        return vec3( 0.0 );
+
+      #endif
+
+    }
+
+  #endif
+
+#endif
+`
+
+function updateProbeBlendShaderUniforms(
+  shader: ProbeBlendShader | null,
+  probeBlend: ProbeBlendConfig
+) {
+  if (!shader) {
+    return
+  }
+
+  shader.uniforms.localProbeEnvMap0!.value = probeBlend.probeTextures[0] ?? null
+  shader.uniforms.localProbeEnvMap1!.value = probeBlend.probeTextures[1] ?? null
+  shader.uniforms.localProbeEnvMap2!.value = probeBlend.probeTextures[2] ?? null
+  shader.uniforms.localProbeEnvMap3!.value = probeBlend.probeTextures[3] ?? null
+  shader.uniforms.probeBlendMode!.value =
+    probeBlend.mode === 'world'
+      ? 1
+      : probeBlend.mode === 'constant'
+        ? 2
+        : 0
+  shader.uniforms.probeBlendWeights!.value.set(
+    ...(probeBlend.weights ?? [1, 0, 0, 0])
+  )
+  shader.uniforms.probeBlendRegion!.value.set(
+    probeBlend.region?.minX ?? 0,
+    probeBlend.region?.minZ ?? 0,
+    probeBlend.region?.sizeX ?? 0,
+    probeBlend.region?.sizeZ ?? 0
+  )
+}
+
+function useProbeBlendMaterialShader(
+  materialRef: RefObject<ThreeMeshPhysicalMaterial | ThreeMeshStandardMaterial | null>,
+  probeBlend: ProbeBlendConfig
+) {
+  const shaderRef = useRef<ProbeBlendShader | null>(null)
+
+  useEffect(() => {
+    const material = materialRef.current
+
+    if (!material) {
+      return
+    }
+
+    material.customProgramCacheKey = () => 'probe-blend-v1'
+    material.onBeforeCompile = (shader: Shader) => {
+      const probeBlendShader = shader as ProbeBlendShader
+
+      probeBlendShader.uniforms.localProbeEnvMap0 = new Uniform<Texture | null>(null)
+      probeBlendShader.uniforms.localProbeEnvMap1 = new Uniform<Texture | null>(null)
+      probeBlendShader.uniforms.localProbeEnvMap2 = new Uniform<Texture | null>(null)
+      probeBlendShader.uniforms.localProbeEnvMap3 = new Uniform<Texture | null>(null)
+      probeBlendShader.uniforms.probeBlendMode = new Uniform(0)
+      probeBlendShader.uniforms.probeBlendWeights = new Uniform(new Vector4(1, 0, 0, 0))
+      probeBlendShader.uniforms.probeBlendRegion = new Uniform(new Vector4(0, 0, 0, 0))
+
+      probeBlendShader.vertexShader =
+        `varying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.vertexShader}`
+          .replace(
+            '#include <worldpos_vertex>',
+            '#include <worldpos_vertex>\n\tvProbeBlendWorldPosition = worldPosition.xyz;'
+          )
+      probeBlendShader.fragmentShader =
+        `varying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
+          .replace(
+            '#include <envmap_physical_pars_fragment>',
+            PROBE_BLEND_SHADER_CHUNK
+          )
+
+      shaderRef.current = probeBlendShader
+      updateProbeBlendShaderUniforms(probeBlendShader, probeBlend)
+    }
+
+    material.needsUpdate = true
+
+    return () => {
+      if (materialRef.current === material) {
+        material.onBeforeCompile = () => {}
+        material.needsUpdate = true
+      }
+      shaderRef.current = null
+    }
+  }, [materialRef, probeBlend.mode])
+
+  useEffect(() => {
+    updateProbeBlendShaderUniforms(shaderRef.current, probeBlend)
+  }, [probeBlend])
 }
 
 function configureRepeatedTexture(
@@ -678,65 +921,6 @@ function createLightmapFaceTexture(
   return texture
 }
 
-function buildGroundPatchRects(layout: MazeLayout) {
-  const groundBounds = layout.maze.lightmap.groundBounds
-  const mazeWidth = layout.maze.width * MAZE_CELL_SIZE
-  const mazeDepth = layout.maze.height * MAZE_CELL_SIZE
-  const mazeMinX = -(mazeWidth / 2)
-  const mazeMaxX = mazeWidth / 2
-  const mazeMinZ = -(mazeDepth / 2)
-  const mazeMaxZ = mazeDepth / 2
-  const rects: GroundPatchRect[] = []
-
-  for (let cellY = 0; cellY < layout.maze.height; cellY += 1) {
-    for (let cellX = 0; cellX < layout.maze.width; cellX += 1) {
-      rects.push({
-        centerX: mazeMinX + (cellX * MAZE_CELL_SIZE) + (MAZE_CELL_SIZE / 2),
-        centerZ: mazeMinZ + (cellY * MAZE_CELL_SIZE) + (MAZE_CELL_SIZE / 2),
-        depth: MAZE_CELL_SIZE,
-        id: `cell-${cellX}-${cellY}`,
-        probeIndex: (cellY * layout.maze.width) + cellX,
-        width: MAZE_CELL_SIZE
-      })
-    }
-  }
-
-  const pushRect = (
-    id: string,
-    minX: number,
-    maxX: number,
-    minZ: number,
-    maxZ: number
-  ) => {
-    const width = maxX - minX
-    const depth = maxZ - minZ
-
-    if (width <= 0 || depth <= 0) {
-      return
-    }
-
-    rects.push({
-      centerX: (minX + maxX) / 2,
-      centerZ: (minZ + maxZ) / 2,
-      depth,
-      id,
-      probeIndex: null,
-      width
-    })
-  }
-
-  pushRect('margin-north', mazeMinX, mazeMaxX, groundBounds.minZ, mazeMinZ)
-  pushRect('margin-south', mazeMinX, mazeMaxX, mazeMaxZ, groundBounds.maxZ)
-  pushRect('margin-west', groundBounds.minX, mazeMinX, mazeMinZ, mazeMaxZ)
-  pushRect('margin-east', mazeMaxX, groundBounds.maxX, mazeMinZ, mazeMaxZ)
-  pushRect('margin-nw', groundBounds.minX, mazeMinX, groundBounds.minZ, mazeMinZ)
-  pushRect('margin-ne', mazeMaxX, groundBounds.maxX, groundBounds.minZ, mazeMinZ)
-  pushRect('margin-sw', groundBounds.minX, mazeMinX, mazeMaxZ, groundBounds.maxZ)
-  pushRect('margin-se', mazeMaxX, groundBounds.maxX, mazeMaxZ, groundBounds.maxZ)
-
-  return rects
-}
-
 function createGroundPatchGeometry(
   rect: GroundPatchRect,
   groundBounds: MazeLightmap['groundBounds']
@@ -915,30 +1099,6 @@ function StartupReporter() {
   })
 
   return null
-}
-
-function getReflectionProbeIndexForPosition(
-  layout: MazeLayout,
-  position: Vector3
-) {
-  const halfWidth = (layout.maze.width * MAZE_CELL_SIZE) / 2
-  const halfDepth = (layout.maze.height * MAZE_CELL_SIZE) / 2
-  const cellX = Math.max(
-    0,
-    Math.min(
-      layout.maze.width - 1,
-      Math.floor((position.x + halfWidth) / MAZE_CELL_SIZE)
-    )
-  )
-  const cellY = Math.max(
-    0,
-    Math.min(
-      layout.maze.height - 1,
-      Math.floor((position.z + halfDepth) / MAZE_CELL_SIZE)
-    )
-  )
-
-  return (cellY * layout.maze.width) + cellX
 }
 
 function EnvironmentLighting({
@@ -1131,27 +1291,37 @@ function EnvironmentLighting({
 }
 
 function GroundSurfaceMaterial({
-  envMap,
   lightMap,
   lightMapIntensity,
-  maps
+  maps,
+  probeBlend
 }: {
-  envMap?: Texture | null
   lightMap?: Texture
   lightMapIntensity?: number
   maps: PbrMaps
+  probeBlend?: ProbeBlendConfig
 }) {
+  const materialRef = useRef<ThreeMeshPhysicalMaterial>(null)
+
+  useProbeBlendMaterialShader(
+    materialRef,
+    probeBlend ?? {
+      mode: 'none',
+      probeTextures: []
+    }
+  )
+
   return (
     <meshPhysicalMaterial
       {...maps}
       bumpScale={0.08}
       clearcoat={1}
       clearcoatRoughness={0.1}
-      envMap={envMap ?? null}
-      envMapIntensity={envMap ? 1 : 0}
+      envMapIntensity={1}
       lightMap={lightMap}
       lightMapIntensity={lightMapIntensity}
       metalness={0}
+      ref={materialRef}
       roughness={0.45}
     />
   )
@@ -1160,19 +1330,19 @@ function GroundSurfaceMaterial({
 function GroundPatchMesh({
   bakedLightmapsEnabled,
   debugIndex,
-  envMap,
   groundBounds,
   groundLightmapTexture,
   maps,
+  probeBlend,
   rect,
   torchCandelaMultiplier
 }: {
   bakedLightmapsEnabled: boolean
   debugIndex: number
-  envMap?: Texture | null
   groundBounds: MazeLightmap['groundBounds']
   groundLightmapTexture: Texture
   maps: PbrMaps
+  probeBlend: ProbeBlendConfig
   rect: GroundPatchRect
   torchCandelaMultiplier: number
 }) {
@@ -1200,7 +1370,6 @@ function GroundPatchMesh({
         object={geometry}
       />
       <GroundSurfaceMaterial
-        envMap={envMap ?? null}
         lightMap={bakedLightmapsEnabled ? groundLightmapTexture : undefined}
         lightMapIntensity={
           bakedLightmapsEnabled
@@ -1208,6 +1377,7 @@ function GroundPatchMesh({
             : 0
         }
         maps={maps}
+        probeBlend={probeBlend}
       />
     </mesh>
   )
@@ -1230,7 +1400,7 @@ function Ground({
 }) {
   const puddle = usePuddleTextures(PUDDLE_TEXTURE_REPEAT)
   const groundPatchRects = useMemo(
-    () => buildGroundPatchRects(layout),
+    () => buildGroundReflectionProbeRects(layout) as GroundPatchRect[],
     [layout]
   )
 
@@ -1249,38 +1419,23 @@ function Ground({
         <GroundPatchMesh
           bakedLightmapsEnabled={bakedLightmapsEnabled}
           debugIndex={index}
-          envMap={
-            reflectionCapturesEnabled
-              ? (
-                  rect.probeIndex === null
-                    ? getReflectionProbeTextureForPosition(
-                        layout,
-                        reflectionProbeTextures,
-                        new Vector3(rect.centerX, GROUND_Y + 0.05, rect.centerZ)
-                      )
-                    : (reflectionProbeTextures[rect.probeIndex] ?? null)
-                )
-              : null
-          }
           groundBounds={layout.maze.lightmap.groundBounds}
           groundLightmapTexture={groundLightmapTexture}
           key={rect.id}
           maps={puddle}
+          probeBlend={{
+            mode: reflectionCapturesEnabled ? 'world' : 'none',
+            probeTextures: rect.probeIndices.map(
+              (probeIndex) => reflectionProbeTextures[probeIndex] ?? null
+            ),
+            region: rect.region
+          }}
           rect={rect}
           torchCandelaMultiplier={torchCandelaMultiplier}
         />
       ))}
     </>
   )
-}
-
-function getReflectionProbeTextureForPosition(
-  layout: MazeLayout,
-  reflectionProbeTextures: Texture[],
-  position: Vector3
-) {
-  const probeIndex = getReflectionProbeIndexForPosition(layout, position)
-  return reflectionProbeTextures[probeIndex] ?? null
 }
 
 function TorchBillboard({
@@ -1381,6 +1536,7 @@ function WallSconce({
   torchCandelaMultiplier: number
 }) {
   const metal = useStandardPbrTextures(METAL_TEXTURE_URLS, METAL_TEXTURE_REPEAT)
+  const materialRef = useRef<ThreeMeshStandardMaterial>(null)
   const position: [number, number, number] = [
     mazeLight.sconcePosition.x,
     mazeLight.sconcePosition.y,
@@ -1391,19 +1547,22 @@ function WallSconce({
     mazeLight.torchPosition.y,
     mazeLight.torchPosition.z
   ]
-  const reflectionProbeTexture = useMemo(
+  const reflectionProbeBlend = useMemo(
     () =>
-      getReflectionProbeTextureForPosition(
-        layout,
-        reflectionProbeTextures,
-        new Vector3(
-          mazeLight.sconcePosition.x,
-          mazeLight.sconcePosition.y,
-          mazeLight.sconcePosition.z
-        )
-      ),
+      getReflectionProbeBlendForPosition(layout, {
+        x: mazeLight.sconcePosition.x,
+        z: mazeLight.sconcePosition.z
+      }),
     [layout, mazeLight.sconcePosition.x, mazeLight.sconcePosition.y, mazeLight.sconcePosition.z, reflectionProbeTextures]
   )
+
+  useProbeBlendMaterialShader(materialRef, {
+    mode: reflectionCapturesEnabled ? 'constant' : 'none',
+    probeTextures: reflectionProbeBlend.probeIndices.map(
+      (probeIndex) => reflectionProbeTextures[probeIndex] ?? null
+    ),
+    weights: reflectionProbeBlend.weights as [number, number, number, number]
+  })
 
   return (
     <>
@@ -1415,16 +1574,12 @@ function WallSconce({
             bumpMap={metal.bumpMap}
             bumpScale={0.02}
             color="white"
-            envMap={
-              reflectionCapturesEnabled
-                ? (reflectionProbeTexture ?? null)
-                : null
-            }
-            envMapIntensity={reflectionCapturesEnabled ? 1 : 0}
+            envMapIntensity={1}
             map={metal.map}
             metalness={0.85}
             metalnessMap={metal.metalnessMap}
             normalMap={metal.normalMap}
+            ref={materialRef}
             roughness={0.55}
             roughnessMap={metal.roughnessMap}
             side={DoubleSide}
