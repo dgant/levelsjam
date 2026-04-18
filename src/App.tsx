@@ -7,7 +7,7 @@ import {
   ToneMapping,
   Vignette
 } from '@react-three/postprocessing'
-import { Canvas, createPortal, useFrame, useLoader, useThree } from '@react-three/fiber'
+import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
 import {
   BasicShadowMap,
   CanvasTexture,
@@ -37,7 +37,6 @@ import {
   ReinhardToneMapping,
   RepeatWrapping,
   SRGBColorSpace,
-  Scene as ThreeScene,
   Shader,
   SphereGeometry,
   Texture,
@@ -62,7 +61,6 @@ import {
   BloomEffect,
   Effect,
   KernelSize,
-  RenderPass,
   ToneMappingMode as PostToneMappingMode
 } from 'postprocessing'
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js'
@@ -1520,12 +1518,10 @@ function Ground({
 }
 
 function TorchBillboard({
-  billboardScene,
   position,
   seed,
   torchCandelaMultiplier
 }: {
-  billboardScene: ThreeScene
   position: [number, number, number]
   seed: number
   torchCandelaMultiplier: number
@@ -1581,7 +1577,7 @@ function TorchBillboard({
     }
   })
 
-  return createPortal(
+  return (
     <group
       position={position}
       ref={group}
@@ -1601,13 +1597,11 @@ function TorchBillboard({
           transparent
         />
       </mesh>
-    </group>,
-    billboardScene
+    </group>
   )
 }
 
 function WallSconce({
-  billboardScene,
   environmentTexture,
   environmentIntensity,
   layout,
@@ -1616,7 +1610,6 @@ function WallSconce({
   reflectionProbeTextures,
   torchCandelaMultiplier
 }: {
-  billboardScene: ThreeScene
   environmentTexture: Texture | null
   environmentIntensity: number
   layout: MazeLayout
@@ -1679,7 +1672,6 @@ function WallSconce({
         position={position}
       />
       <TorchBillboard
-        billboardScene={billboardScene}
         position={torchPosition}
         seed={mazeLight.index + 1}
         torchCandelaMultiplier={torchCandelaMultiplier}
@@ -1885,7 +1877,6 @@ function ReflectionProbeVisualization({
 
 function MazeWalls({
   bakedLightmapsEnabled,
-  billboardScene,
   environmentTexture,
   environmentIntensity,
   layout,
@@ -1895,7 +1886,6 @@ function MazeWalls({
   torchCandelaMultiplier
 }: {
   bakedLightmapsEnabled: boolean
-  billboardScene: ThreeScene
   environmentTexture: Texture | null
   environmentIntensity: number
   layout: MazeLayout
@@ -1922,7 +1912,6 @@ function MazeWalls({
       ))}
       {layout.lights.map((mazeLight) => (
         <WallSconce
-          billboardScene={billboardScene}
           environmentTexture={environmentTexture}
           environmentIntensity={environmentIntensity}
           key={mazeLight.id}
@@ -2029,7 +2018,6 @@ function MazeWallMesh({
 
 function SceneGeometry({
   bakedLightmapsEnabled,
-  billboardScene,
   environmentTexture,
   environmentIntensity,
   layout,
@@ -2041,7 +2029,6 @@ function SceneGeometry({
   volumetricNoiseFrequency
 }: {
   bakedLightmapsEnabled: boolean
-  billboardScene: ThreeScene
   environmentTexture: Texture | null
   environmentIntensity: number
   layout: MazeLayout
@@ -2069,7 +2056,6 @@ function SceneGeometry({
       />
       <MazeWalls
         bakedLightmapsEnabled={bakedLightmapsEnabled}
-        billboardScene={billboardScene}
         environmentTexture={environmentTexture}
         environmentIntensity={environmentIntensity}
         layout={layout}
@@ -2240,31 +2226,6 @@ function ExposureEffectPrimitive({
   useEffect(() => () => effect.dispose(), [effect])
 
   return <primitive object={effect as unknown as Effect} />
-}
-
-function BillboardRenderPass({
-  billboardScene
-}: {
-  billboardScene: ThreeScene
-}) {
-  const camera = useThree((state) => state.camera)
-  const pass = useMemo(() => {
-    const renderPass = new RenderPass(billboardScene, camera)
-
-    renderPass.clearPass.enabled = false
-    renderPass.ignoreBackground = true
-    renderPass.skipShadowMapUpdate = true
-    return renderPass
-  }, [billboardScene, camera])
-
-  useEffect(() => {
-    pass.mainCamera = camera
-    pass.mainScene = billboardScene
-  }, [billboardScene, camera, pass])
-
-  useEffect(() => () => pass.dispose(), [pass])
-
-  return <primitive object={pass} />
 }
 
 function TorchLensFlareEffect({
@@ -2558,14 +2519,7 @@ function FlightRig({
     }
     const existing = globalWindow.__levelsjamDebug ?? {}
     const worldPosition = new Vector3()
-    const getDebugRoots = () => [
-      scene,
-      ...(
-        scene.userData.billboardScene instanceof ThreeScene
-          ? [scene.userData.billboardScene as ThreeScene]
-          : []
-      )
-    ]
+    const getDebugRoots = () => [scene]
 
     globalWindow.__levelsjamDebug = {
       ...existing,
@@ -2893,23 +2847,12 @@ function Scene({
   }, [onAssetsReady])
 
   const scene = useThree((state) => state.scene)
-  const billboardScene = useMemo(() => new ThreeScene(), [])
   const [environmentTexture, setEnvironmentTexture] = useState<Texture | null>(null)
   const [reflectionProbeTextures, setReflectionProbeTextures] = useState<Texture[]>([])
   const environmentIntensity = useMemo(
     () => getHdrLightingIntensity(visualSettings.iblIntensity),
     [visualSettings.iblIntensity]
   )
-
-  useEffect(() => {
-    scene.userData.billboardScene = billboardScene
-
-    return () => {
-      if (scene.userData.billboardScene === billboardScene) {
-        delete scene.userData.billboardScene
-      }
-    }
-  }, [billboardScene, scene])
 
   useEffect(() => {
     const globalWindow = window as Window & {
@@ -2924,7 +2867,7 @@ function Scene({
       }
     }
     const existing = globalWindow.__levelsjamDebug ?? {}
-    const debugRoots = [scene, billboardScene]
+    const debugRoots = [scene]
     let restoreDebugIsolation = () => {}
 
     const setDebugVisible = (role: string, index: number, visible: boolean) => {
@@ -3020,7 +2963,7 @@ function Scene({
         delete globalWindow.__levelsjamDebug
       }
     }
-  }, [billboardScene, scene])
+  }, [scene])
 
   const ambientOcclusionActive = isAmbientOcclusionActive(visualSettings)
   const bloomActive = isEffectActive(visualSettings.bloom)
@@ -3039,7 +2982,6 @@ function Scene({
       />
       <SceneGeometry
         bakedLightmapsEnabled={visualSettings.bakedLightmapsEnabled}
-        billboardScene={billboardScene}
         environmentTexture={environmentTexture}
         environmentIntensity={environmentIntensity}
         layout={layout}
@@ -3098,7 +3040,6 @@ function Scene({
             resolutionScale={0.25}
           />
         ) : null}
-        <BillboardRenderPass billboardScene={billboardScene} />
         {lensFlareActive ? (
           <TorchLensFlare
             intensity={visualSettings.lensFlare.intensity}
