@@ -56,6 +56,7 @@
 - The maze floor patch and maze walls integrate the baked torch lightmap directly into their PBR material path rather than drawing it as a separate transparent overlay mesh.
 - The maze walls apply their baked torch lightmap on the actual wall mesh through authored lightmap UVs instead of through duplicate front-face or back-face overlay planes.
 - The baked wall-face lightmap aligns with both local wall-face UV orientations so off-center torch gradients do not appear mirrored on one face orientation.
+- The baked wall-face lightmap assigns each wall its own slice consistently for both `x`-axis and `z`-axis wall runs, so a torch shadow cannot appear on an adjacent parallel wall that does not host that torch.
 - The baked torch lightmap follows the same exposure and tone-mapping path as the rest of the wall and floor shading.
 - Each baked maze lightmap stores grayscale torch intensity rather than a pre-tonemapped colored overlay.
 - Each baked maze lightmap is normalized to preserve headroom instead of clipping bright torch-adjacent texels to full white during bake generation.

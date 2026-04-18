@@ -30,7 +30,7 @@ test('generates valid mazes under 100ms', () => {
   assert.equal(maze.height, MAZE_HEIGHT)
   assert.ok(maze.lightmap)
   assert.equal(typeof maze.lightmap.dataBase64, 'string')
-  assert.equal(maze.lightmap.version, 9)
+  assert.equal(maze.lightmap.version, 10)
   assert.deepEqual(
     maze.lightmap.groundBounds,
     getMazeFloorLightmapBounds(maze)
@@ -233,4 +233,36 @@ test('three box geometry mirrors local -Z face UVs relative to +Z', () => {
 
   assert.ok(pzLeftUv < pzRightUv, `expected +Z face UVs to increase with local X, got ${pzLeftUv}..${pzRightUv}`)
   assert.ok(nzLeftUv > nzRightUv, `expected -Z face UVs to be mirrored in local X, got ${nzLeftUv}..${nzRightUv}`)
+})
+
+test('assigns z-axis wall-run lightmap slices to the correct wall', () => {
+  const maze = {
+    height: 2,
+    id: 'z-order-test',
+    lights: [{ cell: { x: 0, y: 0 }, side: 'west' }],
+    openEdges: [{ from: { x: 0, y: 0 }, to: { x: 0, y: 1 } }],
+    opening: { cell: { x: 0, y: 0 }, side: 'north' },
+    width: 1
+  }
+  const lightmap = bakeMazeLightmap(maze)
+  const bytes = Buffer.from(lightmap.dataBase64, 'base64')
+  const getFaceAverage = (wallId, faceKey) => {
+    const rect = lightmap.wallRects[wallId][faceKey]
+    let sum = 0
+
+    for (let row = 0; row < rect.height; row += 1) {
+      for (let column = 0; column < rect.width; column += 1) {
+        sum += bytes[((((rect.y + row) * lightmap.atlasWidth) + rect.x + column) * 3)]
+      }
+    }
+
+    return sum / (rect.width * rect.height)
+  }
+  const litWallAverage = getFaceAverage('0,0:west:exterior', 'pz')
+  const adjacentWallAverage = getFaceAverage('0,1:west:exterior', 'pz')
+
+  assert.ok(
+    litWallAverage > adjacentWallAverage,
+    `expected the torch wall to bake brighter than the adjacent z-run wall, got ${litWallAverage} <= ${adjacentWallAverage}`
+  )
 })

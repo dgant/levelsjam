@@ -4,7 +4,7 @@ export const MAZE_CELL_SIZE = 2
 export const MAZE_WALL_THICKNESS = 0.25
 export const MAZE_WALL_HEIGHT = 2
 export const MAZE_TARGET_COUNT = 5
-export const MAZE_LIGHTMAP_VERSION = 9
+export const MAZE_LIGHTMAP_VERSION = 10
 export const MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS = 0.125
 
 const MAZE_LIGHTMAP_GROUND_TILE_SIZE = 256
@@ -818,23 +818,25 @@ function getWallSurfaceGroups(walls) {
   }
 
   return Array.from(groups.values()).map((group) => {
+    const getLocalAlongCoordinate = (wall) =>
+      (wall.center.x * Math.cos(group.yaw)) -
+      (wall.center.z * Math.sin(group.yaw))
     const walls = group.walls.slice().sort((a, b) => {
-      const aAlong = group.axis === 'x' ? a.center.x : a.center.z
-      const bAlong = group.axis === 'x' ? b.center.x : b.center.z
+      const aAlong = getLocalAlongCoordinate(a)
+      const bAlong = getLocalAlongCoordinate(b)
 
       return aAlong - bAlong
     })
-    const firstAlong = group.axis === 'x' ? walls[0].center.x : walls[0].center.z
-    const lastAlong = group.axis === 'x'
-      ? walls[walls.length - 1].center.x
-      : walls[walls.length - 1].center.z
-    const fixedCoordinate = group.axis === 'x'
-      ? walls[0].center.z
-      : walls[0].center.x
-    const centerAlong = (firstAlong + lastAlong) / 2
-    const center = group.axis === 'x'
-      ? { x: centerAlong, z: fixedCoordinate }
-      : { x: fixedCoordinate, z: centerAlong }
+    const center = walls.reduce(
+      (accumulator, wall) => ({
+        x: accumulator.x + wall.center.x,
+        z: accumulator.z + wall.center.z
+      }),
+      { x: 0, z: 0 }
+    )
+
+    center.x /= walls.length
+    center.z /= walls.length
 
     for (let index = 0; index < walls.length; index += 1) {
       walls[index].surfaceGroupMemberIndex = index
