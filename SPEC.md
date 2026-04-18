@@ -55,6 +55,7 @@
 - The maze floor patch preserves the same world-space PBR texture scale as the surrounding infinite ground rather than retileing the puddle textures at a different density.
 - The maze floor patch and maze walls integrate the baked torch lightmap directly into their PBR material path rather than drawing it as a separate transparent overlay mesh.
 - The maze walls apply their baked torch lightmap on the actual wall mesh through authored lightmap UVs instead of through duplicate front-face or back-face overlay planes.
+- The baked wall-face lightmap aligns with both local wall-face UV orientations so off-center torch gradients do not appear mirrored on one face orientation.
 - The baked torch lightmap follows the same exposure and tone-mapping path as the rest of the wall and floor shading.
 - Each baked maze lightmap stores grayscale torch intensity rather than a pre-tonemapped colored overlay.
 - Each baked maze lightmap is normalized to preserve headroom instead of clipping bright torch-adjacent texels to full white during bake generation.
@@ -62,6 +63,7 @@
 - Each baked maze wall-face lightmap uses a higher texel density than the current base wall-material textures require for albedo detail.
 - Each baked maze floor-patch lightmap uses a higher texel density than the previous full-ground bake.
 - Adjacent coplanar wall segments that form one continuous surface receive continuous baked torch lighting without artificial seam darkening or brightening at their shared edge.
+- The baked wall lighting includes local occlusion from the wall sconce body so the attached wall can show a shadow beneath the sconce.
 - The current scene does not include realtime torch flicker.
 - The current scene does not include realtime torch point lights.
 - The player collides with the ground plane and the walls.

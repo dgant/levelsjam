@@ -950,7 +950,10 @@ function useGroundLightmapTexture(
 function createLightmapFaceTexture(
   data: Uint8Array,
   atlasWidth: number,
-  rect: LightmapRect
+  rect: LightmapRect,
+  options: {
+    mirrorX?: boolean
+  } = {}
 ) {
   const canvas = document.createElement('canvas')
   canvas.width = rect.width
@@ -965,8 +968,11 @@ function createLightmapFaceTexture(
 
   for (let row = 0; row < rect.height; row += 1) {
     for (let column = 0; column < rect.width; column += 1) {
+      const sourceColumn = options.mirrorX
+        ? (rect.width - 1 - column)
+        : column
       const atlasIndex =
-        ((((rect.y + row) * atlasWidth) + rect.x + column) * 3)
+        ((((rect.y + row) * atlasWidth) + rect.x + sourceColumn) * 3)
       const pixelIndex = ((row * rect.width) + column) * 4
 
       image.data[pixelIndex] = data[atlasIndex]
@@ -1031,7 +1037,10 @@ function useWallLightmapTextures(
         lightmap.atlasWidth,
         lightmap.neutralRect
       ),
-      nz: createLightmapFaceTexture(lightmapBytes, lightmap.atlasWidth, rects.nz),
+      // BoxGeometry's local -Z face UVs are mirrored horizontally relative to +Z.
+      nz: createLightmapFaceTexture(lightmapBytes, lightmap.atlasWidth, rects.nz, {
+        mirrorX: true
+      }),
       pz: createLightmapFaceTexture(lightmapBytes, lightmap.atlasWidth, rects.pz)
     }
   }, [lightmap, lightmapBytes, wallId])

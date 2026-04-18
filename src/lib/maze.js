@@ -4,7 +4,7 @@ export const MAZE_CELL_SIZE = 2
 export const MAZE_WALL_THICKNESS = 0.25
 export const MAZE_WALL_HEIGHT = 2
 export const MAZE_TARGET_COUNT = 5
-export const MAZE_LIGHTMAP_VERSION = 8
+export const MAZE_LIGHTMAP_VERSION = 9
 export const MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS = 0.125
 
 const MAZE_LIGHTMAP_GROUND_TILE_SIZE = 256
@@ -1060,6 +1060,57 @@ function segmentIntersectsBounds(start, end, bounds) {
   return exit > 0 && entry < 1
 }
 
+function segmentIntersectsSphere(start, end, center, radius) {
+  const directionX = end.x - start.x
+  const directionY = end.y - start.y
+  const directionZ = end.z - start.z
+  const toStartX = start.x - center.x
+  const toStartY = start.y - center.y
+  const toStartZ = start.z - center.z
+  const a =
+    (directionX * directionX) +
+    (directionY * directionY) +
+    (directionZ * directionZ)
+
+  if (a <= 1e-8) {
+    return false
+  }
+
+  const b = 2 * (
+    (toStartX * directionX) +
+    (toStartY * directionY) +
+    (toStartZ * directionZ)
+  )
+  const c =
+    (toStartX * toStartX) +
+    (toStartY * toStartY) +
+    (toStartZ * toStartZ) -
+    (radius * radius)
+  const discriminant = (b * b) - (4 * a * c)
+
+  if (discriminant < 0) {
+    return false
+  }
+
+  const root = Math.sqrt(discriminant)
+  const near = (-b - root) / (2 * a)
+  const far = (-b + root) / (2 * a)
+
+  return (
+    (near > 0 && near < 1) ||
+    (far > 0 && far < 1)
+  )
+}
+
+function isTorchBlockedBySconce(samplePosition, torchPlacement, sconceRadius) {
+  return segmentIntersectsSphere(
+    samplePosition,
+    torchPlacement.torchPosition,
+    torchPlacement.sconcePosition,
+    sconceRadius
+  )
+}
+
 function isTorchOccluded(
   samplePosition,
   torchPosition,
@@ -1089,7 +1140,8 @@ function accumulateTorchLighting(
   torchPlacements,
   walls,
   skipWallId,
-  skipSurfaceGroupId
+  skipSurfaceGroupId,
+  sconceRadius
 ) {
   let litIntensity = 0
 
@@ -1112,6 +1164,16 @@ function accumulateTorchLighting(
       (sampleNormal.z * directionZ)
 
     if (lambert <= 0) {
+      continue
+    }
+
+    if (
+      isTorchBlockedBySconce(
+        samplePosition,
+        torch,
+        sconceRadius
+      )
+    ) {
       continue
     }
 
@@ -1267,7 +1329,10 @@ export function bakeMazeLightmap(
         sample.position,
         sample.normal,
         torchPlacements,
-        walls
+        walls,
+        null,
+        null,
+        sconceRadius
       )
     }
   )
@@ -1285,7 +1350,8 @@ export function bakeMazeLightmap(
             torchPlacements,
             walls,
             null,
-            surfaceGroup.id
+            surfaceGroup.id,
+            sconceRadius
           )
         },
         { alignUToRectEdges: true }

@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { pathToFileURL } from 'node:url'
+import { BoxGeometry } from 'three'
 
 import { MAZES } from '../src/data/mazes/index.js'
 import {
@@ -29,7 +30,7 @@ test('generates valid mazes under 100ms', () => {
   assert.equal(maze.height, MAZE_HEIGHT)
   assert.ok(maze.lightmap)
   assert.equal(typeof maze.lightmap.dataBase64, 'string')
-  assert.equal(maze.lightmap.version, 8)
+  assert.equal(maze.lightmap.version, 9)
   assert.deepEqual(
     maze.lightmap.groundBounds,
     getMazeFloorLightmapBounds(maze)
@@ -162,4 +163,74 @@ test('keeps baked lighting continuous across an open coplanar wall run', () => {
     averageSeamDifference <= 2,
     `expected open coplanar wall seam to stay continuous, got average edge delta ${averageSeamDifference}`
   )
+})
+
+test('bakes local sconce occlusion into the attached wall face', () => {
+  const shadowMaze = {
+    height: 1,
+    id: 'shadow-test',
+    lights: [{ cell: { x: 0, y: 0 }, side: 'north' }],
+    openEdges: [],
+    opening: { cell: { x: 0, y: 0 }, side: 'south' },
+    width: 1
+  }
+  const lightmap = bakeMazeLightmap(shadowMaze)
+  const bytes = Buffer.from(lightmap.dataBase64, 'base64')
+  const rect = lightmap.wallRects['0,0:north:exterior'].pz
+  const sample = (column, row) => {
+    const atlasOffset =
+      ((((rect.y + row) * lightmap.atlasWidth) + rect.x + column) * 3)
+
+    return bytes[atlasOffset]
+  }
+  const shadowRow = 16
+  const centerColumn = Math.floor(rect.width / 2)
+  const sideColumn = centerColumn - 6
+  const center = sample(centerColumn, shadowRow)
+  const left = sample(sideColumn, shadowRow)
+  const right = sample(rect.width - 1 - sideColumn, shadowRow)
+
+  assert.ok(
+    center < left && center < right,
+    `expected sconce occlusion shadow at row ${shadowRow}, got center=${center} left=${left} right=${right}`
+  )
+})
+
+test('three box geometry mirrors local -Z face UVs relative to +Z', () => {
+  const geometry = new BoxGeometry(1, 1, 1)
+  const positions = geometry.getAttribute('position')
+  const uvs = geometry.getAttribute('uv')
+  const findVertexUvX = (materialIndex, predicate) => {
+    const group = geometry.groups.find((entry) => entry.materialIndex === materialIndex)
+
+    assert.ok(group, `missing geometry group ${materialIndex}`)
+
+    for (let offset = group.start; offset < (group.start + group.count); offset += 1) {
+      const vertexIndex = geometry.index.array[offset]
+      if (predicate(vertexIndex)) {
+        return uvs.getX(vertexIndex)
+      }
+    }
+
+    throw new Error(`no matching vertex found for group ${materialIndex}`)
+  }
+  const pzLeftUv = findVertexUvX(
+    4,
+    (vertexIndex) => positions.getZ(vertexIndex) > 0 && positions.getX(vertexIndex) < 0
+  )
+  const pzRightUv = findVertexUvX(
+    4,
+    (vertexIndex) => positions.getZ(vertexIndex) > 0 && positions.getX(vertexIndex) > 0
+  )
+  const nzLeftUv = findVertexUvX(
+    5,
+    (vertexIndex) => positions.getZ(vertexIndex) < 0 && positions.getX(vertexIndex) < 0
+  )
+  const nzRightUv = findVertexUvX(
+    5,
+    (vertexIndex) => positions.getZ(vertexIndex) < 0 && positions.getX(vertexIndex) > 0
+  )
+
+  assert.ok(pzLeftUv < pzRightUv, `expected +Z face UVs to increase with local X, got ${pzLeftUv}..${pzRightUv}`)
+  assert.ok(nzLeftUv > nzRightUv, `expected -Z face UVs to be mirrored in local X, got ${nzLeftUv}..${nzRightUv}`)
 })
