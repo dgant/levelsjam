@@ -68,7 +68,11 @@ test('places each sconce one radius outside the wall face on the lit-cell side',
 
     assert.equal(deltaX, 0)
     assert.equal(deltaZ, 0)
-    assert.equal(light.torchPosition.y, light.sconcePosition.y + 0.25)
+    assert.equal(light.torchPosition.y, light.sconcePosition.y + SCONCE_RADIUS)
+    assert.equal(
+      light.torchPosition.y - (TORCH_BILLBOARD_SIZE / 2),
+      light.sconcePosition.y
+    )
   }
 })
 

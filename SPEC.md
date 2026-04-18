@@ -58,15 +58,21 @@
 - The baked wall-face lightmap aligns with both local wall-face UV orientations so off-center torch gradients do not appear mirrored on one face orientation.
 - The baked wall-face lightmap assigns each wall its own slice consistently for both `x`-axis and `z`-axis wall runs, so a torch shadow cannot appear on an adjacent parallel wall that does not host that torch.
 - The baked torch lightmap follows the same exposure and tone-mapping path as the rest of the wall and floor shading.
-- Each baked maze lightmap stores grayscale torch intensity rather than a pre-tonemapped colored overlay.
+- Each baked maze lightmap stores warm torch-tinted RGB lighting rather than grayscale intensity or a pre-tonemapped overlay.
 - Each baked maze lightmap is normalized to preserve headroom instead of clipping bright torch-adjacent texels to full white during bake generation.
 - Each baked maze lightmap uses supersampled texel evaluation so torch gradients on walls and the maze floor patch are smoother than a single-sample bake.
 - Each baked maze wall-face lightmap uses a higher texel density than the current base wall-material textures require for albedo detail.
+- Each baked maze wall-face lightmap uses `128x128` texels per wall face.
 - Each baked maze floor-patch lightmap uses a higher texel density than the previous full-ground bake.
 - Adjacent coplanar wall segments that form one continuous surface receive continuous baked torch lighting without artificial seam darkening or brightening at their shared edge.
 - The baked wall lighting includes local occlusion from the wall sconce body so the attached wall can show a shadow beneath the sconce.
+- The runtime wall lightmap upload preserves the bake's vertical orientation so wall-mounted torch shadows appear below the sconce rather than flipped above it.
 - The current scene does not include realtime torch flicker.
 - The current scene does not include realtime torch point lights.
+- Reflection probe captures include temporary shadow-casting torch lights so captured specular reflections can include torch-lit shadowing.
+- The top of each wall sconce aligns to the bottom of its torch billboard by default so the flame billboard does not appear to float above the fixture.
+- Screen-space ambient occlusion controls visibly affect the scene when enabled.
+- Lens flares, SSR, and volumetric fog remain visually stable as their intensity controls increase and must not black out the scene.
 - The player collides with the ground plane and the walls.
 - The character collision volume is a capsule that is 1.75 meters tall and 0.25 meters in radius.
 - The player spawns 1 meter above the ground plane.

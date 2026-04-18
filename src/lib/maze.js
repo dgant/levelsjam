@@ -4,12 +4,12 @@ export const MAZE_CELL_SIZE = 2
 export const MAZE_WALL_THICKNESS = 0.25
 export const MAZE_WALL_HEIGHT = 2
 export const MAZE_TARGET_COUNT = 5
-export const MAZE_LIGHTMAP_VERSION = 10
+export const MAZE_LIGHTMAP_VERSION = 11
 export const MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS = 0.125
 
 const MAZE_LIGHTMAP_GROUND_TILE_SIZE = 256
-const MAZE_LIGHTMAP_WALL_TILE_WIDTH = 32
-const MAZE_LIGHTMAP_WALL_TILE_HEIGHT = 32
+const MAZE_LIGHTMAP_WALL_TILE_WIDTH = 128
+const MAZE_LIGHTMAP_WALL_TILE_HEIGHT = 128
 const MAZE_LIGHTMAP_NEUTRAL_TILE_SIZE = 4
 const MAZE_LIGHTMAP_TORCH_DISTANCE = 16
 const MAZE_LIGHTMAP_GROUND_MARGIN = MAZE_LIGHTMAP_TORCH_DISTANCE
@@ -19,6 +19,11 @@ const MAZE_LIGHTMAP_TARGET_PEAK = 0.45
 const MAZE_LIGHTMAP_GROUND_SUPERSAMPLE_GRID = 1
 const MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID = 2
 const MAZE_REFLECTION_PROBE_Y = 1.25
+const MAZE_LIGHTMAP_TORCH_TINT = {
+  blue: 104 / 255,
+  green: 177 / 255,
+  red: 1
+}
 
 const CARDINAL_DIRECTIONS = [
   { dx: 0, dy: -1, side: 'north' },
@@ -1369,12 +1374,11 @@ export function bakeMazeLightmap(
 
   for (let pixelIndex = 0; pixelIndex < atlasFloatData.length; pixelIndex += 1) {
     const intensity = Math.min(1, atlasFloatData[pixelIndex] * intensityScale)
-    const channel = Math.round(intensity * 255)
     const outputOffset = pixelIndex * 3
 
-    atlasData[outputOffset] = channel
-    atlasData[outputOffset + 1] = channel
-    atlasData[outputOffset + 2] = channel
+    atlasData[outputOffset] = Math.round(intensity * MAZE_LIGHTMAP_TORCH_TINT.red * 255)
+    atlasData[outputOffset + 1] = Math.round(intensity * MAZE_LIGHTMAP_TORCH_TINT.green * 255)
+    atlasData[outputOffset + 2] = Math.round(intensity * MAZE_LIGHTMAP_TORCH_TINT.blue * 255)
   }
 
   return {
@@ -1404,7 +1408,7 @@ export function getMazeTorchPlacements(maze, sconceRadius) {
     }
     const torchPosition = {
       x: sconcePosition.x,
-      y: sconcePosition.y + 0.25,
+      y: sconcePosition.y + sconceRadius,
       z: sconcePosition.z
     }
 

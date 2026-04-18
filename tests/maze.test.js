@@ -30,7 +30,7 @@ test('generates valid mazes under 100ms', () => {
   assert.equal(maze.height, MAZE_HEIGHT)
   assert.ok(maze.lightmap)
   assert.equal(typeof maze.lightmap.dataBase64, 'string')
-  assert.equal(maze.lightmap.version, 10)
+  assert.equal(maze.lightmap.version, 11)
   assert.deepEqual(
     maze.lightmap.groundBounds,
     getMazeFloorLightmapBounds(maze)
@@ -109,10 +109,10 @@ test('converts persisted mazes into wall segments and torch placements', () => {
     assert.ok(wall.bounds.maxX > wall.bounds.minX)
     assert.ok(wall.bounds.maxZ > wall.bounds.minZ)
     assert.ok(layout.maze.lightmap.wallRects[wall.id])
-    assert.equal(layout.maze.lightmap.wallRects[wall.id].nz.width, 32)
-    assert.equal(layout.maze.lightmap.wallRects[wall.id].nz.height, 32)
-    assert.equal(layout.maze.lightmap.wallRects[wall.id].pz.width, 32)
-    assert.equal(layout.maze.lightmap.wallRects[wall.id].pz.height, 32)
+    assert.equal(layout.maze.lightmap.wallRects[wall.id].nz.width, 128)
+    assert.equal(layout.maze.lightmap.wallRects[wall.id].nz.height, 128)
+    assert.equal(layout.maze.lightmap.wallRects[wall.id].pz.width, 128)
+    assert.equal(layout.maze.lightmap.wallRects[wall.id].pz.height, 128)
   }
 
   for (const light of layout.lights) {
@@ -183,9 +183,9 @@ test('bakes local sconce occlusion into the attached wall face', () => {
 
     return bytes[atlasOffset]
   }
-  const shadowRow = 16
+  const shadowRow = 78
   const centerColumn = Math.floor(rect.width / 2)
-  const sideColumn = centerColumn - 6
+  const sideColumn = centerColumn - 18
   const center = sample(centerColumn, shadowRow)
   const left = sample(sideColumn, shadowRow)
   const right = sample(rect.width - 1 - sideColumn, shadowRow)
