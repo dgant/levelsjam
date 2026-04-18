@@ -522,6 +522,11 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   await page.waitForTimeout(200)
   const zeroSsrRegion = await screenshotCanvasRegion(page, canvas, 220, 160, 0.72, 0.52)
   expect(measureDifference(zeroEffectBaseline, zeroSsrRegion)).toBeLessThan(0.02)
+  await setSlider(page, 'SSR Intensity', 0.5)
+  await page.waitForTimeout(300)
+  const activeSsrRegion = await screenshotCanvasRegion(page, canvas, 220, 160, 0.72, 0.52)
+  expect(measureDifference(zeroEffectBaseline, activeSsrRegion)).toBeGreaterThan(0.01)
+  expect(measureBrightness(activeSsrRegion).average).toBeGreaterThan(5)
   await setCheckboxByLabelText(page, 'SSR', false)
 
   const responsiveViewA = {

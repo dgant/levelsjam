@@ -183,7 +183,7 @@ test('bakes local sconce occlusion into the attached wall face', () => {
 
     return bytes[atlasOffset]
   }
-  const shadowRow = 78
+  const shadowRow = 64
   const centerColumn = Math.floor(rect.width / 2)
   const sideColumn = centerColumn - 18
   const center = sample(centerColumn, shadowRow)
@@ -193,6 +193,35 @@ test('bakes local sconce occlusion into the attached wall face', () => {
   assert.ok(
     center < left && center < right,
     `expected sconce occlusion shadow at row ${shadowRow}, got center=${center} left=${left} right=${right}`
+  )
+})
+
+test('keeps mid-wall torch lighting visible below the sconce top', () => {
+  const wallMaze = {
+    height: 1,
+    id: 'wall-gradient-test',
+    lights: [{ cell: { x: 0, y: 0 }, side: 'north' }],
+    openEdges: [],
+    opening: { cell: { x: 0, y: 0 }, side: 'south' },
+    width: 1
+  }
+  const lightmap = bakeMazeLightmap(wallMaze)
+  const bytes = Buffer.from(lightmap.dataBase64, 'base64')
+  const rect = lightmap.wallRects['0,0:north:exterior'].pz
+  const sampleRowAverage = (row) => {
+    let sum = 0
+
+    for (let column = 0; column < rect.width; column += 1) {
+      sum += bytes[((((rect.y + row) * lightmap.atlasWidth) + rect.x + column) * 3)]
+    }
+
+    return sum / rect.width
+  }
+  const midWallAverage = sampleRowAverage(72)
+
+  assert.ok(
+    midWallAverage > 0,
+    `expected visible baked torch contribution below the sconce top, got row-72 average ${midWallAverage}`
   )
 })
 

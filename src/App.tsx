@@ -1,6 +1,7 @@
 import {
   DepthOfField,
   EffectComposer,
+  LensFlareEffect as PostLensFlareEffectImpl,
   N8AO,
   SSAO,
   ToneMapping,
@@ -8,7 +9,6 @@ import {
 } from '@react-three/postprocessing'
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
 import {
-  AdditiveBlending,
   BasicShadowMap,
   Camera as ThreeCamera,
   CanvasTexture,
@@ -22,6 +22,7 @@ import {
   Float32BufferAttribute,
   HalfFloatType,
   LinearFilter,
+  MathUtils,
   NearestFilter,
   ACESFilmicToneMapping,
   AgXToneMapping,
@@ -197,6 +198,7 @@ const REFLECTION_PROBE_LIGHT_ANGLE = 1.05
 const REFLECTION_PROBE_SHADOW_MAP_SIZE = 256
 const FOG_VOLUME_HEIGHT = 6
 const FOG_VOLUME_SLICE_COUNT = 24
+const FOG_VOLUME_MAX_TORCHES = 16
 const EFFECT_EPSILON = 0.0001
 const MAX_PHYSICS_SUBSTEPS = 10
 const MIN_LOADING_OVERLAY_MS = 300
@@ -909,39 +911,6 @@ function useFireFlipbookTexture() {
     texture.anisotropy = Math.min(maxAnisotropy, 8)
     texture.needsUpdate = true
   }, [maxAnisotropy, texture])
-
-  return texture
-}
-
-function useSoftFlareTexture() {
-  const texture = useMemo(() => {
-    const canvas = document.createElement('canvas')
-    canvas.width = 128
-    canvas.height = 128
-    const context = canvas.getContext('2d')
-
-    if (!context) {
-      throw new Error('Could not create 2D context for flare texture')
-    }
-
-    const gradient = context.createRadialGradient(64, 64, 0, 64, 64, 64)
-    gradient.addColorStop(0, 'rgba(255, 255, 255, 1)')
-    gradient.addColorStop(0.18, 'rgba(255, 244, 220, 0.9)')
-    gradient.addColorStop(0.45, 'rgba(255, 196, 128, 0.32)')
-    gradient.addColorStop(1, 'rgba(255, 177, 104, 0)')
-    context.fillStyle = gradient
-    context.fillRect(0, 0, canvas.width, canvas.height)
-
-    const nextTexture = new CanvasTexture(canvas)
-    nextTexture.flipY = false
-    nextTexture.generateMipmaps = false
-    nextTexture.magFilter = LinearFilter
-    nextTexture.minFilter = LinearFilter
-    nextTexture.needsUpdate = true
-    return nextTexture
-  }, [])
-
-  useEffect(() => () => texture.dispose(), [texture])
 
   return texture
 }
@@ -2024,10 +1993,12 @@ function SconceMesh({
 
 function FogVolume({
   noiseFrequency,
+  torchPositions,
   visible,
   volumeIntensity
 }: {
   noiseFrequency: number
+  torchPositions: Array<{ x: number, y: number, z: number }>
   visible: boolean
   volumeIntensity: number
 }) {
@@ -2036,9 +2007,24 @@ function FogVolume({
       density?: { value: number }
       layerHeight?: { value: number }
       noiseFrequency?: { value: number }
+      torchCount?: { value: number }
+      torchPositions?: { value: Vector3[] }
       time?: { value: number }
     }
   } | null>>([])
+  const fogTorchPositions = useMemo(
+    () =>
+      Array.from({ length: FOG_VOLUME_MAX_TORCHES }, (_, index) => {
+        const torch = torchPositions[index]
+
+        return new Vector3(
+          torch?.x ?? 10000,
+          torch?.y ?? 10000,
+          torch?.z ?? 10000
+        )
+      }),
+    [torchPositions]
+  )
   const layerHeights = useMemo(
     () =>
       Array.from({ length: FOG_VOLUME_SLICE_COUNT }, (_, index) => {
@@ -2056,26 +2042,30 @@ function FogVolume({
 
       uniforms.density.value = visible ? volumeIntensity : 0
       uniforms.noiseFrequency.value = noiseFrequency
+      uniforms.torchCount.value = Math.min(FOG_VOLUME_MAX_TORCHES, torchPositions.length)
+      uniforms.torchPositions.value = fogTorchPositions
       uniforms.time.value = state.clock.getElapsedTime()
     }
-  })
+  }, [fogTorchPositions, noiseFrequency, torchPositions.length, visible, volumeIntensity])
 
   return (
     <group userData={{ debugRole: 'global-fog-volume' }}>
       {layerHeights.map((layerHeight, index) => (
         <mesh
-          key={layerHeight}
-          position={[0, GROUND_Y + layerHeight, 0]}
-          rotation-x={-Math.PI / 2}
+            key={layerHeight}
+            position={[0, GROUND_Y + layerHeight, 0]}
+            rotation-x={-Math.PI / 2}
         >
           <planeGeometry args={[GROUND_SIZE, GROUND_SIZE]} />
           <shaderMaterial
-            depthTest={false}
+            depthTest
             depthWrite={false}
             fragmentShader={`
               uniform float density;
               uniform float layerHeight;
               uniform float noiseFrequency;
+              uniform int torchCount;
+              uniform vec3 torchPositions[${FOG_VOLUME_MAX_TORCHES}];
               uniform float time;
               varying vec3 vWorldPosition;
 
@@ -2116,12 +2106,42 @@ function FogVolume({
                 float verticalFalloff = 1.0 - smoothstep(0.0, ${FOG_VOLUME_HEIGHT.toFixed(1)}, layerHeight);
                 float baseNoise = mix(0.45, 1.0, noise(samplePoint));
                 float horizontalFade = 1.0 - smoothstep(${(GROUND_SIZE * 0.33).toFixed(1)}, ${(GROUND_SIZE * 0.6).toFixed(1)}, length(vWorldPosition.xz));
-                float alpha = clamp(density * verticalFalloff * horizontalFade * baseNoise * 0.22, 0.0, 0.16);
+                float torchScatter = 0.0;
+
+                for (int torchIndex = 0; torchIndex < ${FOG_VOLUME_MAX_TORCHES}; torchIndex += 1) {
+                  if (torchIndex >= torchCount) {
+                    continue;
+                  }
+
+                  vec3 toTorch = torchPositions[torchIndex] - vWorldPosition;
+                  float torchDistance = length(toTorch);
+                  float torchInfluence = max(0.0, 1.0 - (torchDistance / 7.5));
+                  float heightInfluence = max(0.0, 1.0 - (abs(toTorch.y) / 3.0));
+
+                  torchScatter += torchInfluence * torchInfluence * heightInfluence;
+                }
+
+                float alpha = clamp(
+                  density *
+                  verticalFalloff *
+                  horizontalFade *
+                  baseNoise *
+                  (0.9 / ${FOG_VOLUME_SLICE_COUNT.toFixed(1)}) *
+                  (0.8 + (torchScatter * 0.35)),
+                  0.0,
+                  0.08
+                );
                 if (alpha < 0.0005) {
                   discard;
                 }
 
-                gl_FragColor = vec4(vec3(0.56, 0.58, 0.62), alpha);
+                vec3 fogColor = mix(
+                  vec3(0.56, 0.58, 0.62),
+                  vec3(0.92, 0.69, 0.42),
+                  clamp(torchScatter * 0.45, 0.0, 1.0)
+                );
+
+                gl_FragColor = vec4(fogColor, alpha);
               }
             `}
             ref={(material) => {
@@ -2133,6 +2153,8 @@ function FogVolume({
               density: { value: visible ? volumeIntensity : 0 },
               layerHeight: { value: layerHeight },
               noiseFrequency: { value: noiseFrequency },
+              torchCount: { value: Math.min(FOG_VOLUME_MAX_TORCHES, torchPositions.length) },
+              torchPositions: { value: fogTorchPositions },
               time: { value: 0 }
             }}
             vertexShader={`
@@ -2402,6 +2424,7 @@ function SceneGeometry({
       {isEffectActive(volumetricLighting) ? (
         <FogVolume
           noiseFrequency={volumetricNoiseFrequency}
+          torchPositions={layout.lights.map((light) => light.torchPosition)}
           visible={volumetricLighting.enabled}
           volumeIntensity={volumetricLighting.intensity}
         />
@@ -2457,32 +2480,30 @@ function SSREffectPrimitive({
   const effect = useMemo(
     () =>
       new SSREffect(scene, camera, {
-        blend: 0.85,
-        blur: 0.15,
+        blend: 0.92,
+        blur: 0.3,
         correction: 1,
-        distance: 10,
-        fade: 0.08,
-        intensity: 0.25,
+        distance: 18,
+        fade: 0.12,
+        intensity: clampedIntensity,
         ior: 1.333,
-        jitter: 0.02,
-        jitterRoughness: 0.05,
-        maxDepthDifference: 2,
+        jitter: 0.05,
+        jitterRoughness: 0.1,
+        maxDepthDifference: 6,
         maxRoughness: 0.95,
         missedRays: true,
-        refineSteps: 2,
-        resolutionScale: 0.35,
-        steps: 10,
-        thickness: 1.5,
+        refineSteps: 5,
+        resolutionScale: 0.75,
+        steps: 24,
+        thickness: 4,
         useNormalMap: true,
         useRoughnessMap: true
       }),
-    [camera, clampedIntensity, scene]
+    [camera, scene]
   )
 
   useEffect(() => {
-    effect.intensity = 0.25
-    effect.blendMode.blendFunction = BlendFunction.SRC
-    effect.blendMode.opacity.value = clampedIntensity
+    effect.intensity = clampedIntensity
   }, [clampedIntensity, effect])
 
   useEffect(() => () => effect.dispose(), [effect])
@@ -2560,6 +2581,132 @@ function ExposureEffectPrimitive({
   return <primitive object={effect as unknown as Effect} />
 }
 
+function TorchLensFlareEffectPrimitive({
+  intensity,
+  mazeLight,
+  torchCandelaMultiplier
+}: {
+  intensity: number
+  mazeLight: MazeLayout['lights'][number]
+  torchCandelaMultiplier: number
+}) {
+  const camera = useThree((state) => state.camera)
+  const raycaster = useThree((state) => state.raycaster)
+  const scene = useThree((state) => state.scene)
+  const viewport = useThree((state) => state.viewport)
+  const lensPosition = useMemo(
+    () =>
+      new Vector3(
+        mazeLight.torchPosition.x,
+        mazeLight.torchPosition.y,
+        mazeLight.torchPosition.z
+      ),
+    [
+      mazeLight.torchPosition.x,
+      mazeLight.torchPosition.y,
+      mazeLight.torchPosition.z
+    ]
+  )
+  const projectedPosition = useMemo(() => new Vector3(), [])
+  const raycasterPosition = useMemo(() => new Vector2(), [])
+  const effect = useMemo(
+    () =>
+      new PostLensFlareEffectImpl({
+        aditionalStreaks: false,
+        animated: true,
+        anamorphic: false,
+        blendFunction: BlendFunction.NORMAL,
+        colorGain: new Color(0, 0, 0),
+        enabled: true,
+        flareShape: 0.08,
+        flareSize: 0.0025,
+        flareSpeed: 0.01,
+        ghostScale: 0.14,
+        glareSize: 0.03,
+        haloScale: 0.16,
+        lensDirtTexture: null,
+        lensPosition: new Vector3(),
+        opacity: 1,
+        screenRes: new Vector2(viewport.width, viewport.height),
+        secondaryGhosts: true,
+        starBurst: false,
+        starPoints: 6
+      }),
+    [viewport.height, viewport.width]
+  )
+
+  useFrame((_, delta) => {
+    const lensUniform = effect.uniforms.get('lensPosition')
+    const opacityUniform = effect.uniforms.get('opacity')
+    const colorGainUniform = effect.uniforms.get('colorGain')
+    const screenResUniform = effect.uniforms.get('screenRes')
+
+    if (
+      !lensUniform ||
+      !opacityUniform ||
+      !colorGainUniform ||
+      !screenResUniform
+    ) {
+      return
+    }
+
+    screenResUniform.value.set(viewport.width, viewport.height)
+    projectedPosition.copy(lensPosition).project(camera)
+
+    if (projectedPosition.z >= 1) {
+      opacityUniform.value = 1
+      return
+    }
+
+    lensUniform.value.set(projectedPosition.x, projectedPosition.y)
+    raycasterPosition.set(projectedPosition.x, projectedPosition.y)
+    raycaster.setFromCamera(raycasterPosition, camera)
+
+    let visibility = 1
+    const hitObject = raycaster.intersectObjects(scene.children, true)[0]?.object
+
+    if (hitObject && hitObject !== camera) {
+      if (hitObject.userData?.lensflare === 'no-occlusion') {
+        visibility = 1
+      } else if (hitObject instanceof Mesh) {
+        const material = Array.isArray(hitObject.material)
+          ? hitObject.material[0]
+          : hitObject.material
+
+        if (material?.uniforms?._transmission?.value > 0.2) {
+          visibility = 0.8
+        } else if (material?._transmission && material._transmission > 0.2) {
+          visibility = 0.8
+        } else if (material?.transparent) {
+          visibility = Math.max(0, 1 - (material.opacity ?? 1))
+        } else {
+          visibility = 0
+        }
+      } else {
+        visibility = 0
+      }
+    }
+
+    const normalizedIntensity = Math.min(1, intensity / 0.02)
+    const targetOpacity = 1 - (Math.sqrt(normalizedIntensity) * visibility)
+
+    opacityUniform.value = MathUtils.damp(
+      opacityUniform.value,
+      targetOpacity,
+      18,
+      delta
+    )
+    colorGainUniform.value.copy(FIRE_COLOR).multiplyScalar(
+      (0.25 + (normalizedIntensity * 0.45)) *
+      Math.sqrt(torchCandelaMultiplier)
+    )
+  })
+
+  useEffect(() => () => effect.dispose(), [effect])
+
+  return <primitive object={effect as unknown as Effect} />
+}
+
 function TorchLensFlare({
   intensity,
   layout,
@@ -2569,74 +2716,18 @@ function TorchLensFlare({
   layout: MazeLayout
   torchCandelaMultiplier: number
 }) {
-  const camera = useThree((state) => state.camera)
-  const texture = useSoftFlareTexture()
-  const groups = useRef<Group[]>([])
-  const parentWorldQuaternion = useMemo(() => new Quaternion(), [])
-  const localBillboardQuaternion = useMemo(() => new Quaternion(), [])
+  const activeLight = layout.lights[0] ?? null
 
-  useFrame(() => {
-    for (const group of groups.current) {
-      if (!group) {
-        continue
-      }
-
-      if (group.parent) {
-        group.parent.getWorldQuaternion(parentWorldQuaternion)
-        group.quaternion.copy(
-          computeLocalBillboardQuaternion(
-            parentWorldQuaternion,
-            camera.quaternion,
-            localBillboardQuaternion
-          )
-        )
-      } else {
-        group.quaternion.copy(camera.quaternion)
-      }
-    }
-  })
+  if (!activeLight) {
+    return null
+  }
 
   return (
-    <>
-      {layout.lights.map((mazeLight, index) => {
-        const opacity = Math.min(0.12, intensity * 4)
-        const scale =
-          0.6 +
-          (Math.sqrt(Math.max(0, intensity)) * 2.2 * Math.sqrt(torchCandelaMultiplier))
-
-        return (
-          <group
-            key={mazeLight.id}
-            position={[
-              mazeLight.torchPosition.x,
-              mazeLight.torchPosition.y,
-              mazeLight.torchPosition.z
-            ]}
-            ref={(group) => {
-              if (group) {
-                groups.current[index] = group
-              }
-            }}
-            renderOrder={20}
-            userData={{ debugIndex: mazeLight.index, debugRole: 'torch-lens-flare' }}
-          >
-            <mesh renderOrder={20}>
-              <planeGeometry args={[scale, scale]} />
-              <meshBasicMaterial
-                blending={AdditiveBlending}
-                color={FIRE_COLOR.clone().multiplyScalar(0.22 + (intensity * 2))}
-                depthTest={false}
-                depthWrite={false}
-                map={texture}
-                opacity={opacity}
-                toneMapped={false}
-                transparent
-              />
-            </mesh>
-          </group>
-        )
-      })}
-    </>
+    <TorchLensFlareEffectPrimitive
+      intensity={intensity}
+      mazeLight={activeLight}
+      torchCandelaMultiplier={torchCandelaMultiplier}
+    />
   )
 }
 
@@ -3407,18 +3498,19 @@ function Scene({
         ) : null}
         {ambientOcclusionActive && visualSettings.ambientOcclusionMode === 'ssao' ? (
           <SSAO
-            bias={0.5}
+            key={`ssao-${visualSettings.ambientOcclusionIntensity}-${visualSettings.ambientOcclusionRadius}`}
+            bias={0.025}
             depthAwareUpsampling
-            distanceFalloff={0}
-            distanceThreshold={1}
-            intensity={visualSettings.ambientOcclusionIntensity * 3}
-            luminanceInfluence={0.9}
-            radius={visualSettings.ambientOcclusionRadius * 8}
-            rangeFalloff={0.1}
-            rangeThreshold={0.5}
-            resolutionScale={0.75}
-            rings={4}
-            samples={30}
+            distanceFalloff={0.03}
+            distanceThreshold={0.97}
+            intensity={visualSettings.ambientOcclusionIntensity * 4}
+            luminanceInfluence={0.2}
+            radius={Math.max(6, visualSettings.ambientOcclusionRadius * 24)}
+            rangeFalloff={0.001}
+            rangeThreshold={0.0005}
+            resolutionScale={1}
+            rings={6}
+            samples={48}
           />
         ) : null}
         {ssrActive ? (

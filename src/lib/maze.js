@@ -1109,8 +1109,69 @@ function segmentIntersectsSphere(start, end, center, radius) {
   )
 }
 
+function segmentIntersectsLowerHemisphereCap(start, end, center, radius) {
+  const directionX = end.x - start.x
+  const directionY = end.y - start.y
+  const directionZ = end.z - start.z
+  const toStartX = start.x - center.x
+  const toStartY = start.y - center.y
+  const toStartZ = start.z - center.z
+  const a =
+    (directionX * directionX) +
+    (directionY * directionY) +
+    (directionZ * directionZ)
+
+  if (a > 1e-8) {
+    const b = 2 * (
+      (toStartX * directionX) +
+      (toStartY * directionY) +
+      (toStartZ * directionZ)
+    )
+    const c =
+      (toStartX * toStartX) +
+      (toStartY * toStartY) +
+      (toStartZ * toStartZ) -
+      (radius * radius)
+    const discriminant = (b * b) - (4 * a * c)
+
+    if (discriminant >= 0) {
+      const root = Math.sqrt(discriminant)
+      const near = (-b - root) / (2 * a)
+      const far = (-b + root) / (2 * a)
+
+      for (const t of [near, far]) {
+        if (t > 1e-6 && t < (1 - 1e-6)) {
+          const intersectionY = start.y + (directionY * t)
+
+          if (intersectionY <= center.y + 1e-6) {
+            return true
+          }
+        }
+      }
+    }
+  }
+
+  if (Math.abs(directionY) > 1e-8) {
+    const planeT = (center.y - start.y) / directionY
+
+    if (planeT > 1e-6 && planeT < (1 - 1e-6)) {
+      const planeX = start.x + (directionX * planeT)
+      const planeZ = start.z + (directionZ * planeT)
+      const distanceToCenterSquared =
+        ((planeX - center.x) * (planeX - center.x)) +
+        ((planeZ - center.z) * (planeZ - center.z))
+
+      if (distanceToCenterSquared <= ((radius * radius) + 1e-6)) {
+        return true
+      }
+    }
+  }
+
+  return false
+}
+
 function isTorchBlockedBySconce(samplePosition, torchPlacement, sconceRadius) {
-  return segmentIntersectsSphere(
+  return segmentIntersectsLowerHemisphereCap(
     samplePosition,
     torchPlacement.torchPosition,
     torchPlacement.sconcePosition,
@@ -1408,7 +1469,7 @@ export function getMazeTorchPlacements(maze, sconceRadius) {
     }
     const torchPosition = {
       x: sconcePosition.x,
-      y: sconcePosition.y + sconceRadius,
+      y: sconcePosition.y + 0.25,
       z: sconcePosition.z
     }
 
