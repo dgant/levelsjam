@@ -4,7 +4,7 @@ export const MAZE_CELL_SIZE = 2
 export const MAZE_WALL_THICKNESS = 0.25
 export const MAZE_WALL_HEIGHT = 2
 export const MAZE_TARGET_COUNT = 5
-export const MAZE_LIGHTMAP_VERSION = 6
+export const MAZE_LIGHTMAP_VERSION = 8
 export const MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS = 0.125
 
 const MAZE_LIGHTMAP_GROUND_TILE_SIZE = 256
@@ -757,7 +757,99 @@ export function getMazeWallSegments(maze) {
     }
   }
 
+  assignWallSurfaceGroups(walls)
   return walls
+}
+
+function assignWallSurfaceGroups(walls) {
+  const wallLines = new Map()
+
+  for (const wall of walls) {
+    const lineKey = wall.axis === 'x'
+      ? `x:${wall.center.z.toFixed(6)}`
+      : `z:${wall.center.x.toFixed(6)}`
+    const alongCoordinate = wall.axis === 'x'
+      ? wall.center.x
+      : wall.center.z
+    const lineWalls = wallLines.get(lineKey) ?? []
+
+    lineWalls.push({ alongCoordinate, wall })
+    wallLines.set(lineKey, lineWalls)
+  }
+
+  for (const [lineKey, lineWalls] of wallLines) {
+    lineWalls.sort((a, b) => a.alongCoordinate - b.alongCoordinate)
+    let groupIndex = -1
+    let previousAlongCoordinate = null
+
+    for (const entry of lineWalls) {
+      if (
+        previousAlongCoordinate === null ||
+        Math.abs(entry.alongCoordinate - previousAlongCoordinate - MAZE_CELL_SIZE) > 1e-6
+      ) {
+        groupIndex += 1
+      }
+
+      entry.wall.surfaceGroupId = `${lineKey}:${groupIndex}`
+      previousAlongCoordinate = entry.alongCoordinate
+    }
+  }
+}
+
+function getWallSurfaceGroups(walls) {
+  const groups = new Map()
+
+  for (const wall of walls) {
+    const id = wall.surfaceGroupId
+
+    if (!id) {
+      continue
+    }
+
+    const group = groups.get(id) ?? {
+      axis: wall.axis,
+      id,
+      walls: [],
+      yaw: wall.yaw
+    }
+
+    group.walls.push(wall)
+    groups.set(id, group)
+  }
+
+  return Array.from(groups.values()).map((group) => {
+    const walls = group.walls.slice().sort((a, b) => {
+      const aAlong = group.axis === 'x' ? a.center.x : a.center.z
+      const bAlong = group.axis === 'x' ? b.center.x : b.center.z
+
+      return aAlong - bAlong
+    })
+    const firstAlong = group.axis === 'x' ? walls[0].center.x : walls[0].center.z
+    const lastAlong = group.axis === 'x'
+      ? walls[walls.length - 1].center.x
+      : walls[walls.length - 1].center.z
+    const fixedCoordinate = group.axis === 'x'
+      ? walls[0].center.z
+      : walls[0].center.x
+    const centerAlong = (firstAlong + lastAlong) / 2
+    const center = group.axis === 'x'
+      ? { x: centerAlong, z: fixedCoordinate }
+      : { x: fixedCoordinate, z: centerAlong }
+
+    for (let index = 0; index < walls.length; index += 1) {
+      walls[index].surfaceGroupMemberIndex = index
+      walls[index].surfaceGroupMemberCount = walls.length
+    }
+
+    return {
+      axis: group.axis,
+      center,
+      id: group.id,
+      length: walls.length * MAZE_CELL_SIZE,
+      walls,
+      yaw: group.yaw
+    }
+  })
 }
 
 function allocateLightmapRect(state, width, height) {
@@ -853,6 +945,47 @@ function getWallFaceSample(wall, faceKey, u, v) {
   }
 }
 
+function getWallSurfaceFaceSample(surfaceGroup, faceKey, u, v) {
+  const localAlong = (u - 0.5) * surfaceGroup.length
+  const localY = (v - 0.5) * MAZE_WALL_HEIGHT
+  let localZ = 0
+  let normalX = 0
+  let normalZ = 0
+
+  switch (faceKey) {
+    case 'pz':
+      localZ = MAZE_WALL_THICKNESS / 2
+      normalZ = 1
+      break
+    case 'nz':
+      localZ = -(MAZE_WALL_THICKNESS / 2)
+      normalZ = -1
+      break
+    default:
+      throw new Error(`Unsupported wall surface bake key: ${faceKey}`)
+  }
+
+  const rotatedPosition = rotateWallLocalVector(
+    localAlong,
+    localZ,
+    surfaceGroup.yaw
+  )
+  const rotatedNormal = rotateWallLocalVector(normalX, normalZ, surfaceGroup.yaw)
+
+  return {
+    normal: {
+      x: rotatedNormal.x,
+      y: 0,
+      z: rotatedNormal.z
+    },
+    position: {
+      x: surfaceGroup.center.x + rotatedPosition.x,
+      y: GROUND_Y + (MAZE_WALL_HEIGHT / 2) + localY,
+      z: surfaceGroup.center.z + rotatedPosition.z
+    }
+  }
+}
+
 export function getMazeFloorLightmapBounds(
   maze,
   margin = MAZE_LIGHTMAP_GROUND_MARGIN
@@ -927,9 +1060,18 @@ function segmentIntersectsBounds(start, end, bounds) {
   return exit > 0 && entry < 1
 }
 
-function isTorchOccluded(samplePosition, torchPosition, walls, skipWallId) {
+function isTorchOccluded(
+  samplePosition,
+  torchPosition,
+  walls,
+  skipWallId,
+  skipSurfaceGroupId
+) {
   for (const wall of walls) {
-    if (wall.id === skipWallId) {
+    if (
+      wall.id === skipWallId ||
+      wall.surfaceGroupId === skipSurfaceGroupId
+    ) {
       continue
     }
 
@@ -941,7 +1083,14 @@ function isTorchOccluded(samplePosition, torchPosition, walls, skipWallId) {
   return false
 }
 
-function accumulateTorchLighting(samplePosition, sampleNormal, torchPlacements, walls, skipWallId) {
+function accumulateTorchLighting(
+  samplePosition,
+  sampleNormal,
+  torchPlacements,
+  walls,
+  skipWallId,
+  skipSurfaceGroupId
+) {
   let litIntensity = 0
 
   for (const torch of torchPlacements) {
@@ -972,7 +1121,15 @@ function accumulateTorchLighting(samplePosition, sampleNormal, torchPlacements, 
       z: samplePosition.z + (sampleNormal.z * MAZE_LIGHTMAP_SAMPLE_EPSILON)
     }
 
-    if (isTorchOccluded(rayStart, torch.torchPosition, walls, skipWallId)) {
+    if (
+      isTorchOccluded(
+        rayStart,
+        torch.torchPosition,
+        walls,
+        skipWallId,
+        skipSurfaceGroupId
+      )
+    ) {
       continue
     }
 
@@ -987,9 +1144,13 @@ function accumulateTorchLighting(samplePosition, sampleNormal, torchPlacements, 
   return litIntensity
 }
 
-function bakeMazeLightmap(maze, sconceRadius = MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS) {
+export function bakeMazeLightmap(
+  maze,
+  sconceRadius = MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS
+) {
   const bakeStart = performance.now()
   const walls = getMazeWallSegments(maze)
+  const surfaceGroups = getWallSurfaceGroups(walls)
   const torchPlacements = getMazeTorchPlacements(maze, sconceRadius)
   const groundBounds = getMazeFloorLightmapBounds(maze)
   const atlasWidth = getPreferredLightmapAtlasWidth(walls.length)
@@ -1010,19 +1171,45 @@ function bakeMazeLightmap(maze, sconceRadius = MAZE_LIGHTMAP_DEFAULT_SCONCE_RADI
     MAZE_LIGHTMAP_NEUTRAL_TILE_SIZE
   )
   const wallRects = {}
+  const surfaceGroupRects = {}
 
-  for (const wall of walls) {
-    wallRects[wall.id] = {
+  for (const surfaceGroup of surfaceGroups) {
+    const groupWidth = surfaceGroup.walls.length === 1
+      ? MAZE_LIGHTMAP_WALL_TILE_WIDTH
+      : (surfaceGroup.walls.length * (MAZE_LIGHTMAP_WALL_TILE_WIDTH - 1)) + 1
+    const groupRects = {
       nz: allocateLightmapRect(
         packer,
-        MAZE_LIGHTMAP_WALL_TILE_WIDTH,
+        groupWidth,
         MAZE_LIGHTMAP_WALL_TILE_HEIGHT
       ),
       pz: allocateLightmapRect(
         packer,
-        MAZE_LIGHTMAP_WALL_TILE_WIDTH,
+        groupWidth,
         MAZE_LIGHTMAP_WALL_TILE_HEIGHT
       )
+    }
+
+    surfaceGroupRects[surfaceGroup.id] = groupRects
+
+    for (let index = 0; index < surfaceGroup.walls.length; index += 1) {
+      const wall = surfaceGroup.walls[index]
+      const offsetX = index * (MAZE_LIGHTMAP_WALL_TILE_WIDTH - 1)
+
+      wallRects[wall.id] = {
+        nz: {
+          height: MAZE_LIGHTMAP_WALL_TILE_HEIGHT,
+          width: MAZE_LIGHTMAP_WALL_TILE_WIDTH,
+          x: groupRects.nz.x + offsetX,
+          y: groupRects.nz.y
+        },
+        pz: {
+          height: MAZE_LIGHTMAP_WALL_TILE_HEIGHT,
+          width: MAZE_LIGHTMAP_WALL_TILE_WIDTH,
+          x: groupRects.pz.x + offsetX,
+          y: groupRects.pz.y
+        }
+      }
     }
   }
 
@@ -1030,17 +1217,26 @@ function bakeMazeLightmap(maze, sconceRadius = MAZE_LIGHTMAP_DEFAULT_SCONCE_RADI
   const atlasFloatData = new Float32Array(atlasWidth * atlasHeight)
   let peakIntensity = 0
 
-  const writeIntensityRect = (rect, supersampleGrid, sampleIntensity) => {
+  const writeIntensityRect = (
+    rect,
+    supersampleGrid,
+    sampleIntensity,
+    options = {}
+  ) => {
+    const alignUToRectEdges = options.alignUToRectEdges ?? false
+
     for (let row = 0; row < rect.height; row += 1) {
       for (let column = 0; column < rect.width; column += 1) {
         let accumulatedIntensity = 0
 
         for (let sampleRow = 0; sampleRow < supersampleGrid; sampleRow += 1) {
           for (let sampleColumn = 0; sampleColumn < supersampleGrid; sampleColumn += 1) {
-            const u = (
-              column +
-              ((sampleColumn + 0.5) / supersampleGrid)
-            ) / rect.width
+            const u = alignUToRectEdges && rect.width > 1
+              ? column / (rect.width - 1)
+              : (
+                  column +
+                  ((sampleColumn + 0.5) / supersampleGrid)
+                ) / rect.width
             const v = (
               row +
               ((sampleRow + 0.5) / supersampleGrid)
@@ -1076,21 +1272,23 @@ function bakeMazeLightmap(maze, sconceRadius = MAZE_LIGHTMAP_DEFAULT_SCONCE_RADI
     }
   )
 
-  for (const wall of walls) {
+  for (const surfaceGroup of surfaceGroups) {
     for (const faceKey of ['nz', 'pz']) {
       writeIntensityRect(
-        wallRects[wall.id][faceKey],
+        surfaceGroupRects[surfaceGroup.id][faceKey],
         MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID,
         (u, v) => {
-          const sample = getWallFaceSample(wall, faceKey, u, v)
+          const sample = getWallSurfaceFaceSample(surfaceGroup, faceKey, u, v)
           return accumulateTorchLighting(
             sample.position,
             sample.normal,
             torchPlacements,
             walls,
-            wall.id
+            null,
+            surfaceGroup.id
           )
-        }
+        },
+        { alignUToRectEdges: true }
       )
     }
   }

@@ -272,7 +272,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   )
   expect(wallMeshState).not.toBeNull()
   expect(wallMeshState.hasEmissiveMap).toBe(false)
-  expect(wallMeshState.hasLightMap).toBe(false)
+  expect(wallMeshState.hasLightMap).toBe(true)
   expect(wallMeshState.hasMap).toBe(true)
   expect(wallMeshState.hasUv1).toBe(false)
   expect(wallMeshState.hasUv2).toBe(false)
@@ -476,11 +476,29 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   )
   await page.evaluate((position) => {
     const [x, y, z] = position
-    window.__levelsjamDebug.setView(
-      [x - 1.4, y + 0.15, z - 1.35],
-      [x, y, z]
-    )
+    window.__levelsjamDebug.isolateDebugRole('torch-billboard', 0)
+    window.__levelsjamDebug.setView([x - 1.0, y, z], [x, y, z])
   }, debugTorchPosition)
+  await page.waitForTimeout(300)
+  await page.getByRole('combobox', { name: 'Ambient Occlusion' }).selectOption('n8ao')
+  await page.waitForTimeout(300)
+  await page.keyboard.press('F9')
+  await page.keyboard.press('`')
+  await page.waitForTimeout(200)
+  const torchBillboardWithAo = await screenshotCanvasRegion(page, canvas, 320, 240, 0.5, 0.62)
+  await page.evaluate(() => {
+    window.__levelsjamDebug.setDebugVisible('torch-billboard', 0, false)
+  })
+  await page.waitForTimeout(300)
+  const torchBillboardHiddenWithAo = await screenshotCanvasRegion(page, canvas, 320, 240, 0.5, 0.62)
+  expect(measureDifference(torchBillboardWithAo, torchBillboardHiddenWithAo)).toBeGreaterThan(0.05)
+  await page.evaluate(() => {
+    window.__levelsjamDebug.setDebugVisible('torch-billboard', 0, true)
+    window.__levelsjamDebug.clearDebugIsolation()
+  })
+  await page.keyboard.press('F9')
+  await page.keyboard.press('`')
+  await page.getByRole('combobox', { name: 'Ambient Occlusion' }).selectOption('off')
   await page.waitForTimeout(200)
 
   await page.evaluate(() => {

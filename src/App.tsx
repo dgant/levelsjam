@@ -10,16 +10,19 @@ import {
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
 import {
   BasicShadowMap,
+  Camera as ThreeCamera,
   CanvasTexture,
   ClampToEdgeWrapping,
   Color,
   CubeCamera,
+  DepthTexture,
   DoubleSide,
   EquirectangularReflectionMapping,
   Euler,
   Float32BufferAttribute,
   HalfFloatType,
   LinearFilter,
+  NearestFilter,
   ACESFilmicToneMapping,
   AgXToneMapping,
   CineonToneMapping,
@@ -27,24 +30,32 @@ import {
   Group,
   Mesh,
   MeshBasicMaterial,
+  MeshDepthMaterial,
   MeshPhysicalMaterial as ThreeMeshPhysicalMaterial,
   MeshStandardMaterial as ThreeMeshStandardMaterial,
+  NoBlending,
   NoToneMapping,
   NeutralToneMapping,
   PMREMGenerator,
   PlaneGeometry,
   Quaternion,
+  RGBAFormat,
+  RGBADepthPacking,
   ReinhardToneMapping,
   RepeatWrapping,
   SRGBColorSpace,
+  Scene as ThreeScene,
   Shader,
+  ShaderMaterial,
   SphereGeometry,
   Texture,
   TextureLoader,
   Uniform,
+  UnsignedIntType,
   Vector2,
   Vector3,
   Vector4,
+  WebGLRenderTarget,
   WebGLCubeRenderTarget
 } from 'three'
 import {
@@ -61,6 +72,7 @@ import {
   BloomEffect,
   Effect,
   KernelSize,
+  Pass,
   ToneMappingMode as PostToneMappingMode
 } from 'postprocessing'
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js'
@@ -170,6 +182,7 @@ const FIRE_FLIPBOOK_CROP_HEIGHT =
   FIRE_FLIPBOOK_FRAME_CROP.maxY - FIRE_FLIPBOOK_FRAME_CROP.minY
 const FIRE_COLOR = new Color('#ffb168')
 const FIRE_BILLBOARD_INTENSITY_SCALE = 1 / TORCH_BASE_CANDELA
+const TORCH_BILLBOARD_LAYER = 1
 const FLOOR_LIGHTMAP_INTENSITY_SCALE = 1
 const WALL_LIGHTMAP_INTENSITY_SCALE = 1
 const MAZE_GROUND_PATCH_OFFSET_Y = 0.002
@@ -478,6 +491,29 @@ function isAmbientOcclusionActive(settings: VisualSettings) {
   return (
     settings.ambientOcclusionMode !== 'off' &&
     settings.ambientOcclusionIntensity > EFFECT_EPSILON
+  )
+}
+
+function matchesDebugRole(
+  object: {
+    userData?: {
+      debugIndex?: number
+      debugRole?: string
+      debugRoles?: string[]
+    }
+  },
+  role: string,
+  index: number
+) {
+  const userData = object.userData
+
+  if (!userData || userData.debugIndex !== index) {
+    return false
+  }
+
+  return (
+    userData.debugRole === role ||
+    (Array.isArray(userData.debugRoles) && userData.debugRoles.includes(role))
   )
 }
 
@@ -981,7 +1017,7 @@ function createGroundPatchGeometry(
   return geometry
 }
 
-function useWallLightmapFaceTextures(
+function useWallLightmapTextures(
   lightmap: MazeLightmap,
   lightmapBytes: Uint8Array,
   wallId: string
@@ -990,6 +1026,11 @@ function useWallLightmapFaceTextures(
     const rects = lightmap.wallRects[wallId]
 
     return {
+      neutral: createLightmapFaceTexture(
+        lightmapBytes,
+        lightmap.atlasWidth,
+        lightmap.neutralRect
+      ),
       nz: createLightmapFaceTexture(lightmapBytes, lightmap.atlasWidth, rects.nz),
       pz: createLightmapFaceTexture(lightmapBytes, lightmap.atlasWidth, rects.pz)
     }
@@ -997,6 +1038,7 @@ function useWallLightmapFaceTextures(
 
   useEffect(
     () => () => {
+      textures.neutral.dispose()
       textures.nz.dispose()
       textures.pz.dispose()
     },
@@ -1579,19 +1621,29 @@ function TorchBillboard({
 
   return (
     <group
+      onUpdate={(object) => {
+        object.layers.set(TORCH_BILLBOARD_LAYER)
+      }}
       position={position}
       ref={group}
       userData={{ debugIndex: seed - 1, debugRole: 'torch-billboard' }}
     >
       <mesh
+        onUpdate={(object) => {
+          object.layers.set(TORCH_BILLBOARD_LAYER)
+        }}
         ref={material}
-        userData={{ lensflare: 'no-occlusion' }}
+        userData={{
+          debugIndex: seed - 1,
+          debugRole: 'torch-billboard',
+          lensflare: 'no-occlusion'
+        }}
       >
         <planeGeometry args={[TORCH_BILLBOARD_SIZE, TORCH_BILLBOARD_SIZE]} />
         <meshBasicMaterial
           alphaTest={0.005}
           color={new Color(1, 1, 1)}
-          depthWrite={false}
+          depthWrite
           map={texture}
           side={DoubleSide}
           transparent
@@ -1678,6 +1730,178 @@ function WallSconce({
       />
     </>
   )
+}
+
+const BILLBOARD_COMPOSITE_VERTEX_SHADER = `
+varying vec2 vUv;
+
+void main() {
+  vUv = uv;
+  gl_Position = vec4(position.xy, 0.0, 1.0);
+}
+`
+
+const BILLBOARD_COMPOSITE_FRAGMENT_SHADER = `
+uniform sampler2D inputBuffer;
+uniform sampler2D billboardBuffer;
+uniform sampler2D sceneDepthBuffer;
+uniform sampler2D billboardDepthBuffer;
+
+varying vec2 vUv;
+
+void main() {
+  vec4 baseColor = texture2D(inputBuffer, vUv);
+  vec4 billboardColor = texture2D(billboardBuffer, vUv);
+
+  if (billboardColor.a <= 0.0001) {
+    gl_FragColor = baseColor;
+    return;
+  }
+
+  float sceneDepth = texture2D(sceneDepthBuffer, vUv).r;
+  float billboardDepth = texture2D(billboardDepthBuffer, vUv).r;
+
+  if (billboardDepth >= 0.999999 || billboardDepth > sceneDepth + 0.000001) {
+    gl_FragColor = baseColor;
+    return;
+  }
+
+  gl_FragColor = vec4(
+    mix(baseColor.rgb, billboardColor.rgb, billboardColor.a),
+    max(baseColor.a, billboardColor.a)
+  );
+}
+`
+
+class BillboardCompositePassImpl extends Pass {
+  billboardCamera: ThreeCamera
+  depthMaterial: MeshDepthMaterial
+  depthRenderTarget: WebGLRenderTarget
+  billboardRenderTarget: WebGLRenderTarget
+  clearColor: Color
+  opaqueScene: ThreeScene | null
+
+  constructor(billboardCamera: ThreeCamera) {
+    super('BillboardCompositePass')
+    this.billboardCamera = billboardCamera
+    this.clearColor = new Color()
+    this.opaqueScene = null
+    this.depthMaterial = new MeshDepthMaterial({
+      depthPacking: RGBADepthPacking
+    })
+    this.depthMaterial.blending = NoBlending
+
+    const billboardDepthTexture = new DepthTexture(1, 1, UnsignedIntType)
+    this.billboardRenderTarget = new WebGLRenderTarget(1, 1, {
+      depthBuffer: true,
+      depthTexture: billboardDepthTexture,
+      format: RGBAFormat,
+      magFilter: NearestFilter,
+      minFilter: NearestFilter
+    })
+    this.billboardRenderTarget.texture.name = 'TorchBillboardComposite.Target'
+    this.depthRenderTarget = new WebGLRenderTarget(1, 1, {
+      depthBuffer: true,
+      depthTexture: new DepthTexture(1, 1, UnsignedIntType),
+      format: RGBAFormat,
+      magFilter: NearestFilter,
+      minFilter: NearestFilter
+    })
+    this.depthRenderTarget.texture.name = 'TorchBillboardComposite.SceneDepth'
+
+    this.fullscreenMaterial = new ShaderMaterial({
+      depthTest: false,
+      depthWrite: false,
+      fragmentShader: BILLBOARD_COMPOSITE_FRAGMENT_SHADER,
+      uniforms: {
+        billboardBuffer: new Uniform(this.billboardRenderTarget.texture),
+        billboardDepthBuffer: new Uniform(this.billboardRenderTarget.depthTexture),
+        inputBuffer: new Uniform<Texture | null>(null),
+        sceneDepthBuffer: new Uniform(this.depthRenderTarget.depthTexture)
+      },
+      vertexShader: BILLBOARD_COMPOSITE_VERTEX_SHADER
+    })
+  }
+
+  set mainScene(value: ThreeScene) {
+    this.opaqueScene = value
+  }
+
+  set mainCamera(value: ThreeCamera) {
+    this.billboardCamera = value
+  }
+
+  render(renderer: { autoClear: boolean; clear: (color?: boolean, depth?: boolean, stencil?: boolean) => void; getClearAlpha: () => number; getClearColor: (target: Color) => Color; render: (scene: ThreeScene, camera: ThreeCamera) => void; setClearColor: (color: number | Color, alpha?: number) => void; setRenderTarget: (target: WebGLRenderTarget | null) => void; shadowMap: { autoUpdate: boolean } }, inputBuffer: WebGLRenderTarget, outputBuffer: WebGLRenderTarget) {
+    const previousClearAlpha = renderer.getClearAlpha()
+    renderer.getClearColor(this.clearColor)
+    const previousAutoClear = renderer.autoClear
+    const previousShadowAutoUpdate = renderer.shadowMap.autoUpdate
+    const previousBackground = this.opaqueScene?.background ?? null
+    const previousOverrideMaterial = this.opaqueScene?.overrideMaterial ?? null
+    const previousLayerMask = this.billboardCamera.layers.mask
+
+    renderer.autoClear = false
+    renderer.shadowMap.autoUpdate = false
+    if (this.opaqueScene) {
+      this.billboardCamera.layers.set(0)
+      this.opaqueScene.overrideMaterial = this.depthMaterial
+      renderer.setRenderTarget(this.depthRenderTarget)
+      renderer.setClearColor(0x000000, 0)
+      renderer.clear(true, true, true)
+      renderer.render(this.opaqueScene, this.billboardCamera)
+      this.opaqueScene.overrideMaterial = previousOverrideMaterial
+    }
+    this.billboardCamera.layers.set(TORCH_BILLBOARD_LAYER)
+    renderer.setRenderTarget(this.billboardRenderTarget)
+    renderer.setClearColor(0x000000, 0)
+    renderer.clear(true, true, true)
+    if (this.opaqueScene) {
+      this.opaqueScene.background = null
+      renderer.render(this.opaqueScene, this.billboardCamera)
+      this.opaqueScene.background = previousBackground
+    }
+
+    const shaderMaterial = this.fullscreenMaterial as ShaderMaterial
+    shaderMaterial.uniforms.inputBuffer.value = inputBuffer.texture
+
+    renderer.setRenderTarget(this.renderToScreen ? null : outputBuffer)
+    renderer.render(this.scene, this.camera)
+
+    this.billboardCamera.layers.mask = previousLayerMask
+    renderer.setClearColor(this.clearColor, previousClearAlpha)
+    renderer.autoClear = previousAutoClear
+    renderer.shadowMap.autoUpdate = previousShadowAutoUpdate
+  }
+
+  setSize(width: number, height: number) {
+    this.billboardRenderTarget.setSize(width, height)
+    this.depthRenderTarget.setSize(width, height)
+  }
+
+  dispose() {
+    super.dispose()
+    this.billboardRenderTarget.dispose()
+    this.depthRenderTarget.dispose()
+    this.depthMaterial.dispose()
+  }
+}
+
+function BillboardCompositePass() {
+  const camera = useThree((state) => state.camera)
+  const scene = useThree((state) => state.scene)
+  const pass = useMemo(
+    () => new BillboardCompositePassImpl(camera),
+    [camera]
+  )
+
+  useEffect(() => {
+    pass.billboardCamera = camera
+    pass.opaqueScene = scene
+  }, [camera, pass, scene])
+
+  useEffect(() => () => pass.dispose(), [pass])
+
+  return <primitive object={pass} />
 }
 
 function SconceMesh({
@@ -1943,76 +2167,88 @@ function MazeWallMesh({
   wallIndex: number
   wallMaterialMaps: PbrMaps
 }) {
-  const lightmapFaceTextures = useWallLightmapFaceTextures(
+  const lightmapTextures = useWallLightmapTextures(
     lightmap,
     lightmapBytes,
     mazeWall.id
   )
+  const lightMapIntensity =
+    bakedLightmapsEnabled
+      ? torchCandelaMultiplier * WALL_LIGHTMAP_INTENSITY_SCALE
+      : 0
 
   return (
-    <group
+    <mesh
+      castShadow
       position={[
         mazeWall.center.x,
         GROUND_Y + (WALL_HEIGHT / 2),
         mazeWall.center.z
       ]}
+      receiveShadow
       rotation-y={mazeWall.yaw}
+      userData={{
+        debugIndex: wallIndex,
+        debugRole: 'maze-wall',
+        debugRoles: ['maze-wall', 'maze-wall-lightmap']
+      }}
     >
-      <mesh
-        castShadow
-        receiveShadow
-        userData={{ debugIndex: wallIndex, debugRole: 'maze-wall' }}
-      >
-        <boxGeometry args={[WALL_LENGTH, WALL_HEIGHT, WALL_WIDTH]} />
-        <meshStandardMaterial
-          {...wallMaterialMaps}
-          bumpScale={0.05}
-          metalness={0.02}
-          roughness={0.92}
-        />
-      </mesh>
-      <mesh
-        position={[0, 0, (WALL_WIDTH / 2) + 0.002]}
-        receiveShadow
-        renderOrder={1}
-        userData={{ debugIndex: wallIndex, debugRole: 'maze-wall-lightmap' }}
-      >
-        <planeGeometry args={[WALL_LENGTH, WALL_HEIGHT]} />
-        <meshStandardMaterial
-          {...wallMaterialMaps}
-          bumpScale={0.05}
-          lightMap={bakedLightmapsEnabled ? lightmapFaceTextures.pz : undefined}
-          lightMapIntensity={
-            bakedLightmapsEnabled
-              ? torchCandelaMultiplier * WALL_LIGHTMAP_INTENSITY_SCALE
-              : 0
-          }
-          metalness={0.02}
-          roughness={0.92}
-        />
-      </mesh>
-      <mesh
-        position={[0, 0, -((WALL_WIDTH / 2) + 0.002)]}
-        receiveShadow
-        renderOrder={1}
-        rotation-y={Math.PI}
-        userData={{ debugIndex: wallIndex, debugRole: 'maze-wall-lightmap' }}
-      >
-        <planeGeometry args={[WALL_LENGTH, WALL_HEIGHT]} />
-        <meshStandardMaterial
-          {...wallMaterialMaps}
-          bumpScale={0.05}
-          lightMap={bakedLightmapsEnabled ? lightmapFaceTextures.nz : undefined}
-          lightMapIntensity={
-            bakedLightmapsEnabled
-              ? torchCandelaMultiplier * WALL_LIGHTMAP_INTENSITY_SCALE
-              : 0
-          }
-          metalness={0.02}
-          roughness={0.92}
-        />
-      </mesh>
-    </group>
+      <boxGeometry args={[WALL_LENGTH, WALL_HEIGHT, WALL_WIDTH]} />
+      <meshStandardMaterial
+        {...wallMaterialMaps}
+        attach="material-0"
+        bumpScale={0.05}
+        lightMap={bakedLightmapsEnabled ? lightmapTextures.neutral : undefined}
+        lightMapIntensity={lightMapIntensity}
+        metalness={0.02}
+        roughness={0.92}
+      />
+      <meshStandardMaterial
+        {...wallMaterialMaps}
+        attach="material-1"
+        bumpScale={0.05}
+        lightMap={bakedLightmapsEnabled ? lightmapTextures.neutral : undefined}
+        lightMapIntensity={lightMapIntensity}
+        metalness={0.02}
+        roughness={0.92}
+      />
+      <meshStandardMaterial
+        {...wallMaterialMaps}
+        attach="material-2"
+        bumpScale={0.05}
+        lightMap={bakedLightmapsEnabled ? lightmapTextures.neutral : undefined}
+        lightMapIntensity={lightMapIntensity}
+        metalness={0.02}
+        roughness={0.92}
+      />
+      <meshStandardMaterial
+        {...wallMaterialMaps}
+        attach="material-3"
+        bumpScale={0.05}
+        lightMap={bakedLightmapsEnabled ? lightmapTextures.neutral : undefined}
+        lightMapIntensity={lightMapIntensity}
+        metalness={0.02}
+        roughness={0.92}
+      />
+      <meshStandardMaterial
+        {...wallMaterialMaps}
+        attach="material-4"
+        bumpScale={0.05}
+        lightMap={bakedLightmapsEnabled ? lightmapTextures.pz : undefined}
+        lightMapIntensity={lightMapIntensity}
+        metalness={0.02}
+        roughness={0.92}
+      />
+      <meshStandardMaterial
+        {...wallMaterialMaps}
+        attach="material-5"
+        bumpScale={0.05}
+        lightMap={bakedLightmapsEnabled ? lightmapTextures.nz : undefined}
+        lightMapIntensity={lightMapIntensity}
+        metalness={0.02}
+        roughness={0.92}
+      />
+    </mesh>
   )
 }
 
@@ -2490,10 +2726,12 @@ function FlightRig({
           hasMap: boolean
           hasUv1: boolean
           hasUv2: boolean
+          layerMask: number
           lightMapChannel: number | null
           lightMapIntensity: number | null
           mapChannel: number | null
           materialColor: [number, number, number] | null
+          quaternion: [number, number, number, number]
           probeBlend: {
             mode: 'constant' | 'none' | 'world'
             probeTextureCount: number
@@ -2505,6 +2743,10 @@ function FlightRig({
             } | null
             weights: number[] | null
           } | null
+          scale: [number, number, number]
+          visible: boolean
+          worldQuaternion: [number, number, number, number]
+          worldPosition: [number, number, number]
         } | null
         getReflectionProbeState?: () => {
           activeProbeId: string | null
@@ -2519,6 +2761,7 @@ function FlightRig({
     }
     const existing = globalWindow.__levelsjamDebug ?? {}
     const worldPosition = new Vector3()
+    const worldQuaternion = new Quaternion()
     const getDebugRoots = () => [scene]
 
     globalWindow.__levelsjamDebug = {
@@ -2530,8 +2773,7 @@ function FlightRig({
           root.traverse((object) => {
             if (
               match ||
-              object.userData?.debugRole !== role ||
-              object.userData?.debugIndex !== index
+              !matchesDebugRole(object, role, index)
             ) {
               return
             }
@@ -2555,10 +2797,12 @@ function FlightRig({
           hasMap: boolean
           hasUv1: boolean
           hasUv2: boolean
+          layerMask: number
           lightMapChannel: number | null
           lightMapIntensity: number | null
           mapChannel: number | null
           materialColor: [number, number, number] | null
+          quaternion: [number, number, number, number]
           probeBlend: {
             mode: 'constant' | 'none' | 'world'
             probeTextureCount: number
@@ -2570,6 +2814,10 @@ function FlightRig({
             } | null
             weights: number[] | null
           } | null
+          scale: [number, number, number]
+          visible: boolean
+          worldQuaternion: [number, number, number, number]
+          worldPosition: [number, number, number]
         } | null = null
 
         for (const root of getDebugRoots()) {
@@ -2577,13 +2825,16 @@ function FlightRig({
             if (
               match ||
               !(object instanceof Mesh) ||
-              object.userData?.debugRole !== role ||
-              object.userData?.debugIndex !== index
+              !matchesDebugRole(object, role, index)
             ) {
               return
             }
 
-            const material = object.material as {
+            const materials = (
+              Array.isArray(object.material)
+                ? object.material
+                : [object.material]
+            ) as Array<{
               emissive?: Color
               emissiveIntensity?: number
               emissiveMap?: Texture | null
@@ -2593,7 +2844,32 @@ function FlightRig({
               lightMap?: Texture | null
               lightMapIntensity?: number
               map?: Texture | null
-            }
+              userData?: {
+                probeBlendDebug?: {
+                  mode: 'constant' | 'none' | 'world'
+                  probeTextureCount: number
+                  region: {
+                    minX: number
+                    minZ: number
+                    sizeX: number
+                    sizeZ: number
+                  } | null
+                  weights: number[] | null
+                } | null
+              }
+            }>
+            const material =
+              materials.find((candidate) => (
+                candidate.lightMap ||
+                candidate.map ||
+                candidate.envMap ||
+                candidate.emissiveMap
+              )) ??
+              materials[0]
+            const lightMapMaterial = materials.find((candidate) => candidate.lightMap)
+            const mapMaterial = materials.find((candidate) => candidate.map)
+            const envMapMaterial = materials.find((candidate) => candidate.envMap)
+            const emissiveMapMaterial = materials.find((candidate) => candidate.emissiveMap)
 
             match = {
               emissiveColor: material.emissive
@@ -2608,30 +2884,31 @@ function FlightRig({
                   ? material.emissiveIntensity
                   : null,
               emissiveMapChannel:
-                typeof material.emissiveMap?.channel === 'number'
-                  ? material.emissiveMap.channel
+                typeof emissiveMapMaterial?.emissiveMap?.channel === 'number'
+                  ? emissiveMapMaterial.emissiveMap.channel
                   : null,
               envMapIntensity:
-                typeof material.envMapIntensity === 'number'
-                  ? material.envMapIntensity
+                typeof envMapMaterial?.envMapIntensity === 'number'
+                  ? envMapMaterial.envMapIntensity
                   : null,
-              hasEmissiveMap: Boolean(material.emissiveMap),
-              hasEnvMap: Boolean(material.envMap),
-              hasLightMap: Boolean(material.lightMap),
-              hasMap: Boolean(material.map),
+              hasEmissiveMap: materials.some((candidate) => Boolean(candidate.emissiveMap)),
+              hasEnvMap: materials.some((candidate) => Boolean(candidate.envMap)),
+              hasLightMap: materials.some((candidate) => Boolean(candidate.lightMap)),
+              hasMap: materials.some((candidate) => Boolean(candidate.map)),
               hasUv1: Boolean(object.geometry?.getAttribute?.('uv1')),
               hasUv2: Boolean(object.geometry?.getAttribute?.('uv2')),
+              layerMask: object.layers.mask,
               lightMapChannel:
-                typeof material.lightMap?.channel === 'number'
-                  ? material.lightMap.channel
+                typeof lightMapMaterial?.lightMap?.channel === 'number'
+                  ? lightMapMaterial.lightMap.channel
                   : null,
               lightMapIntensity:
-                typeof material.lightMapIntensity === 'number'
-                  ? material.lightMapIntensity
+                typeof lightMapMaterial?.lightMapIntensity === 'number'
+                  ? lightMapMaterial.lightMapIntensity
                   : null,
               mapChannel:
-                typeof material.map?.channel === 'number'
-                  ? material.map.channel
+                typeof mapMaterial?.map?.channel === 'number'
+                  ? mapMaterial.map.channel
                   : null,
               materialColor: material.color
                 ? [
@@ -2640,7 +2917,26 @@ function FlightRig({
                     material.color.b
                   ]
                 : null,
-              probeBlend: material.userData?.probeBlendDebug ?? null
+              probeBlend: material.userData?.probeBlendDebug ?? null,
+              quaternion: [
+                object.quaternion.x,
+                object.quaternion.y,
+                object.quaternion.z,
+                object.quaternion.w
+              ],
+              scale: [object.scale.x, object.scale.y, object.scale.z],
+              visible: object.visible,
+              worldQuaternion: [
+                object.getWorldQuaternion(worldQuaternion).x,
+                worldQuaternion.y,
+                worldQuaternion.z,
+                worldQuaternion.w
+              ],
+              worldPosition: [
+                object.getWorldPosition(worldPosition).x,
+                worldPosition.y,
+                worldPosition.z
+              ]
             }
           })
         }
@@ -2873,10 +3169,7 @@ function Scene({
     const setDebugVisible = (role: string, index: number, visible: boolean) => {
       for (const root of debugRoots) {
         root.traverse((object) => {
-          if (
-            object.userData?.debugRole === role &&
-            object.userData?.debugIndex === index
-          ) {
+          if (matchesDebugRole(object, role, index)) {
             object.visible = visible
           }
         })
@@ -2902,9 +3195,7 @@ function Scene({
       for (const root of debugRoots) {
         root.traverse((object) => {
           savedVisibility.push({ object, visible: object.visible })
-          const match =
-            object.userData?.debugRole === role &&
-            object.userData?.debugIndex === index
+          const match = matchesDebugRole(object, role, index)
 
           if (
             !match &&
@@ -3026,6 +3317,7 @@ function Scene({
         {ssrActive ? (
           <SSREffectPrimitive intensity={visualSettings.ssr.intensity} />
         ) : null}
+        <BillboardCompositePass />
         {bloomActive ? (
           <BloomEffectPrimitive
             intensity={visualSettings.bloom.intensity}

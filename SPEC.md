@@ -43,6 +43,7 @@
 - Each torch billboard uses an unlit material.
 - Each torch billboard brightness is scaled from a 1500 candela torch baseline.
 - Each torch billboard samples the linked atlas so the visible flame fills the specified quad and sits on the sconce instead of floating above it due to transparent frame padding.
+- Each torch billboard is rendered through a dedicated translucent composite path after the opaque AO and SSR inputs have been generated.
 - Each maze includes a baked torch lightmap generated as a late step in maze generation.
 - Each maze lightmap stores the static torch contribution for the maze floor patch and wall faces.
 - Each maze wall face receives baked torch lighting on the side that faces the lit cell rather than on the wall's opposite face.
@@ -53,12 +54,14 @@
 - The infinite background ground outside the maze floor patch remains an unbaked PBR surface.
 - The maze floor patch preserves the same world-space PBR texture scale as the surrounding infinite ground rather than retileing the puddle textures at a different density.
 - The maze floor patch and maze walls integrate the baked torch lightmap directly into their PBR material path rather than drawing it as a separate transparent overlay mesh.
+- The maze walls apply their baked torch lightmap on the actual wall mesh through authored lightmap UVs instead of through duplicate front-face or back-face overlay planes.
 - The baked torch lightmap follows the same exposure and tone-mapping path as the rest of the wall and floor shading.
 - Each baked maze lightmap stores grayscale torch intensity rather than a pre-tonemapped colored overlay.
 - Each baked maze lightmap is normalized to preserve headroom instead of clipping bright torch-adjacent texels to full white during bake generation.
 - Each baked maze lightmap uses supersampled texel evaluation so torch gradients on walls and the maze floor patch are smoother than a single-sample bake.
 - Each baked maze wall-face lightmap uses a higher texel density than the current base wall-material textures require for albedo detail.
 - Each baked maze floor-patch lightmap uses a higher texel density than the previous full-ground bake.
+- Adjacent coplanar wall segments that form one continuous surface receive continuous baked torch lighting without artificial seam darkening or brightening at their shared edge.
 - The current scene does not include realtime torch flicker.
 - The current scene does not include realtime torch point lights.
 - The player collides with the ground plane and the walls.
@@ -161,6 +164,7 @@
 - The torch billboards animate smoothly through the flipbook loop without lighting artifacts from scene lights.
 - The torch billboards are excluded from screen-space reflections.
 - The torch billboards are excluded from SSAO so ambient occlusion only affects the opaque maze geometry.
+- The torch billboards remain correctly depth-occluded by opaque maze geometry even though they are composited after the opaque AO and SSR inputs.
 - Screen-space reflections apply only to the scene's PBR materials rather than to unlit or transparent billboard materials.
 - Screen-space reflections remain visually stable and do not blow out reflections relative to the rest of the lighting stack.
 - The baked torch lighting and the torch billboards read as a matched fire source rather than independent unrelated elements.

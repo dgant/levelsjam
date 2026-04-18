@@ -54,3 +54,4 @@
 - When a late baked-lightmap step makes maze generation slower, keep the under-100ms gate on the maze-topology phase and benchmark the bake separately instead of letting persistence loops wait forever on the old total-time threshold.
 - When verifying baked wall lighting in this project, use a deterministic wall-facing view and a lit-wall crop rather than a broad maze shot that can mostly measure the floor.
 - When verifying a torch-lit wall in this maze, make sure the camera is on the lit-cell side of the wall. An exterior wall's opposite face is correctly dark.
+- When a rendering regression hits a requested feature in this project, do not remove the feature to make the symptom disappear. Preserve the requested behavior and repair the implementation path instead.
