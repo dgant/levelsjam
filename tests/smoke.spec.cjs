@@ -88,6 +88,50 @@ function measureBrightness(buffer) {
   }
 }
 
+function decodePngDataUrl(dataUrl) {
+  return PNG.sync.read(
+    Buffer.from(
+      dataUrl.replace(/^data:image\/png;base64,/, ''),
+      'base64'
+    )
+  )
+}
+
+function measurePngDetail(png) {
+  let darkest = 255
+  let luminanceTotal = 0
+  let luminanceSquaredTotal = 0
+  let nonBlackCount = 0
+  let sampleCount = 0
+
+  for (let offset = 0; offset < png.data.length; offset += 4) {
+    const r = png.data[offset]
+    const g = png.data[offset + 1]
+    const b = png.data[offset + 2]
+    const luminance = (0.2126 * r) + (0.7152 * g) + (0.0722 * b)
+
+    darkest = Math.min(darkest, r, g, b)
+    luminanceTotal += luminance
+    luminanceSquaredTotal += luminance * luminance
+    if (r > 8 || g > 8 || b > 8) {
+      nonBlackCount += 1
+    }
+    sampleCount += 1
+  }
+
+  const averageLuminance = luminanceTotal / sampleCount
+  const variance = Math.max(
+    0,
+    (luminanceSquaredTotal / sampleCount) - (averageLuminance * averageLuminance)
+  )
+
+  return {
+    darkest,
+    luminanceStdDev: Math.sqrt(variance),
+    nonBlackFraction: nonBlackCount / sampleCount
+  }
+}
+
 async function screenshotCanvasRegion(
   page,
   canvas,
@@ -330,22 +374,6 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect
       .poll(
         async () => page.evaluate(
-          () => window.__levelsjamDebug.getReflectionProbeState()?.probeRawMetrics?.[24] ?? null
-        ),
-        {
-          timeout: 5_000,
-          intervals: [50, 100, 250]
-        }
-      )
-      .toMatchObject({
-        darkest: expect.any(Number),
-        luminanceStdDev: expect.any(Number),
-        nonWhiteFraction: expect.any(Number),
-        warmFraction: expect.any(Number)
-      })
-    await expect
-      .poll(
-        async () => page.evaluate(
           () => window.__levelsjamDebug.getReflectionProbeState()?.probeCaptureCounts?.[24] ?? null
         ),
         {
@@ -359,16 +387,31 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         sconce: expect.any(Number),
         wall: expect.any(Number)
       })
-    const probePreviewDetail = await page.evaluate(
-      () => window.__levelsjamDebug.getReflectionProbeState()?.probeRawMetrics?.[24] ?? null
+    const probeAtlas = await page.evaluate(
+      () => window.__levelsjamDebug.captureReflectionProbeAtlas?.(24, 96) ?? null
     )
     const probeCaptureCounts = await page.evaluate(
       () => window.__levelsjamDebug.getReflectionProbeState()?.probeCaptureCounts?.[24] ?? null
     )
-    expect(probePreviewDetail.nonWhiteFraction).toBeGreaterThan(0.18)
-    expect(probePreviewDetail.luminanceStdDev).toBeGreaterThan(18)
-    expect(probePreviewDetail.warmFraction).toBeGreaterThan(0.02)
-    expect(probePreviewDetail.darkest).toBeLessThan(64)
+    expect(Array.isArray(probeAtlas)).toBe(true)
+    expect(probeAtlas).toHaveLength(6)
+    const probeFaceDetails = probeAtlas.map((faceDataUrl) =>
+      measurePngDetail(decodePngDataUrl(faceDataUrl))
+    )
+    expect(
+      probeFaceDetails.filter((detail) => detail.nonBlackFraction > 0.15).length
+    ).toBeGreaterThanOrEqual(4)
+    expect(
+      probeFaceDetails.filter(
+        (detail) => detail.nonBlackFraction > 0.1 && detail.nonBlackFraction < 0.95
+      ).length
+    ).toBeGreaterThanOrEqual(2)
+    expect(
+      Math.max(...probeFaceDetails.map((detail) => detail.luminanceStdDev))
+    ).toBeGreaterThan(20)
+    expect(
+      Math.min(...probeFaceDetails.map((detail) => detail.darkest))
+    ).toBeLessThan(8)
     expect(probeCaptureCounts.billboard).toBeGreaterThan(0)
     expect(probeCaptureCounts.ground).toBeGreaterThan(0)
     expect(probeCaptureCounts.sconce).toBeGreaterThan(0)

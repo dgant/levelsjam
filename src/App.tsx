@@ -22,6 +22,7 @@ import {
   EquirectangularReflectionMapping,
   Euler,
   Float32BufferAttribute,
+  HalfFloatType,
   LinearFilter,
   LinearMipmapLinearFilter,
   MathUtils,
@@ -38,6 +39,7 @@ import {
   NoBlending,
   NoToneMapping,
   NeutralToneMapping,
+  OrthographicCamera,
   PMREMGenerator,
   PlaneGeometry,
   Quaternion,
@@ -1111,6 +1113,10 @@ function computeCubeRenderTargetDebugStats(
   }
 }
 
+function isCubeRenderTargetReadbackSupported(renderTarget: WebGLCubeRenderTarget) {
+  return renderTarget.texture.type === UnsignedByteType
+}
+
 function getReflectionCaptureCountKey(
   object: Mesh
 ): 'billboard' | 'ground' | 'sconce' | 'wall' | null {
@@ -2005,10 +2011,6 @@ function EnvironmentLighting({
       }
 
       const hiddenObjects: Array<{ object: { visible: boolean }; visible: boolean }> = []
-      const captureMaterialOverrides: Array<{
-        mesh: Mesh
-        material: Mesh['material']
-      }> = []
       scene.traverse((object) => {
         if (
           object.userData?.debugRole === 'torch-lens-flare' ||
@@ -2017,39 +2019,6 @@ function EnvironmentLighting({
         ) {
           hiddenObjects.push({ object, visible: object.visible })
           object.visible = false
-        }
-
-        if (
-          object instanceof Mesh &&
-          (
-            object.userData?.debugRole === 'maze-ground-lightmap' ||
-            object.userData?.debugRole === 'maze-wall' ||
-            object.userData?.debugRole === 'sconce-body' ||
-            (
-              Array.isArray(object.userData?.debugRoles) &&
-              object.userData.debugRoles.includes('maze-wall-lightmap')
-            )
-          )
-        ) {
-          const originalMaterials = Array.isArray(object.material)
-            ? object.material
-            : [object.material]
-          const diagnosticMaterials = originalMaterials.map((material) => {
-            const clone = material.clone() as ThreeMeshStandardMaterial
-            clone.onBeforeCompile = () => {}
-            clone.customProgramCacheKey = () => 'reflection-capture-stock'
-            clone.needsUpdate = true
-            return clone
-          })
-
-          captureMaterialOverrides.push({
-            material: object.material,
-            mesh: object
-          })
-          object.material =
-            Array.isArray(object.material)
-              ? diagnosticMaterials
-              : diagnosticMaterials[0]
         }
       })
 
@@ -2108,7 +2077,7 @@ function EnvironmentLighting({
       for (const probe of layout.reflectionProbes) {
         const cubeRenderTarget = new WebGLCubeRenderTarget(
           REFLECTION_PROBE_RENDER_SIZE,
-          { type: UnsignedByteType }
+          { type: HalfFloatType }
         )
         const ambientCubeRenderTarget = new WebGLCubeRenderTarget(
           REFLECTION_PROBE_AMBIENT_RENDER_SIZE,
@@ -2179,13 +2148,18 @@ function EnvironmentLighting({
         let rawProbeDebugStats: ProbeMetric | null = null
         let rawProbeReadbackError: string | null = null
 
-        try {
-          rawProbeDebugStats = computeCubeRenderTargetDebugStats(gl, cubeRenderTarget)
-        } catch (error) {
+        if (isCubeRenderTargetReadbackSupported(cubeRenderTarget)) {
+          try {
+            rawProbeDebugStats = computeCubeRenderTargetDebugStats(gl, cubeRenderTarget)
+          } catch (error) {
+            rawProbeReadbackError =
+              error instanceof Error
+                ? error.message
+                : String(error)
+          }
+        } else {
           rawProbeReadbackError =
-            error instanceof Error
-              ? error.message
-              : String(error)
+            `three.js WebGL readRenderTargetPixels only supports UnsignedByteType targets; raw probe target type ${cubeRenderTarget.texture.type} is not directly readable`
         }
 
         nextProbeAmbientColors.push(probeDebugStats.averageColor)
@@ -2232,16 +2206,6 @@ function EnvironmentLighting({
       for (const captureLight of captureLights) {
         captureLight.dispose()
         captureLight.shadow.map?.dispose()
-      }
-      for (const entry of captureMaterialOverrides) {
-        const activeMaterials = Array.isArray(entry.mesh.material)
-          ? entry.mesh.material
-          : [entry.mesh.material]
-
-        for (const material of activeMaterials) {
-          material.dispose()
-        }
-        entry.mesh.material = entry.material
       }
       for (const entry of hiddenObjects) {
         entry.object.visible = entry.visible
@@ -3292,8 +3256,14 @@ function ReflectionProbeVisualization({
                 varying vec3 vProbeDirection;
 
                 vec3 debugTonemap(vec3 color) {
-                  color = max(color, vec3(0.0));
-                  return color / (color + vec3(1.0));
+                  const float debugExposure = 1.5;
+                  const float debugWhitePoint = 24.0;
+                  color = max(color * debugExposure, vec3(0.0));
+                  return clamp(
+                    log2(vec3(1.0) + color) / log2(vec3(1.0 + debugWhitePoint)),
+                    vec3(0.0),
+                    vec3(1.0)
+                  );
                 }
 
                 void main() {
@@ -3322,6 +3292,61 @@ function ReflectionProbeVisualization({
     </>
   )
 }
+
+const REFLECTION_PROBE_ATLAS_VERTEX_SHADER = `
+varying vec2 vUv;
+
+void main() {
+  vUv = uv;
+  gl_Position = vec4(position.xy, 0.0, 1.0);
+}
+`
+
+const REFLECTION_PROBE_ATLAS_FRAGMENT_SHADER = `
+uniform int faceIndex;
+uniform samplerCube probeCubeMap;
+
+varying vec2 vUv;
+
+vec3 debugTonemap(vec3 color) {
+  const float debugExposure = 1.5;
+  const float debugWhitePoint = 24.0;
+  color = max(color * debugExposure, vec3(0.0));
+  return clamp(
+    log2(vec3(1.0) + color) / log2(vec3(1.0 + debugWhitePoint)),
+    vec3(0.0),
+    vec3(1.0)
+  );
+}
+
+vec3 getFaceDirection(int face, vec2 uv) {
+  vec2 p = (uv * 2.0) - 1.0;
+
+  if (face == 0) {
+    return normalize(vec3(1.0, -p.y, -p.x));
+  }
+  if (face == 1) {
+    return normalize(vec3(-1.0, -p.y, p.x));
+  }
+  if (face == 2) {
+    return normalize(vec3(p.x, 1.0, p.y));
+  }
+  if (face == 3) {
+    return normalize(vec3(p.x, -1.0, -p.y));
+  }
+  if (face == 4) {
+    return normalize(vec3(p.x, -p.y, 1.0));
+  }
+
+  return normalize(vec3(-p.x, -p.y, -1.0));
+}
+
+void main() {
+  vec4 texel = textureCube(probeCubeMap, getFaceDirection(faceIndex, vUv));
+  gl_FragColor = vec4(debugTonemap(texel.rgb), 1.0);
+  #include <colorspace_fragment>
+}
+`
 
 function MazeWalls({
   bakedLightmapsEnabled,
@@ -4671,6 +4696,7 @@ function Scene({
     onAssetsReady()
   }, [onAssetsReady])
 
+  const gl = useThree((state) => state.gl)
   const scene = useThree((state) => state.scene)
   const [environmentTexture, setEnvironmentTexture] = useState<Texture | null>(null)
   const [environmentFogColor, setEnvironmentFogColor] = useState(() => DEFAULT_FOG_IBL_COLOR.clone())
@@ -4702,6 +4728,10 @@ function Scene({
           visible: boolean
         ) => void
         isolateDebugRole?: (role: string, index: number) => void
+        captureReflectionProbeAtlas?: (
+          probeIndex: number,
+          size?: number
+        ) => string[] | null
       }
     }
     const existing = globalWindow.__levelsjamDebug ?? {}
@@ -4863,8 +4893,89 @@ function Scene({
       }
     }
 
+    const captureReflectionProbeAtlas = (probeIndex: number, size = 128) => {
+      const probeTexture = reflectionProbeRawTextures[probeIndex]
+
+      if (!probeTexture || size <= 0) {
+        return null
+      }
+
+      const atlasScene = new ThreeScene()
+      const atlasCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1)
+      const atlasMaterial = new ShaderMaterial({
+        depthTest: false,
+        depthWrite: false,
+        fragmentShader: REFLECTION_PROBE_ATLAS_FRAGMENT_SHADER,
+        uniforms: {
+          faceIndex: { value: 0 },
+          probeCubeMap: { value: probeTexture }
+        },
+        vertexShader: REFLECTION_PROBE_ATLAS_VERTEX_SHADER
+      })
+      const atlasMesh = new Mesh(new PlaneGeometry(2, 2), atlasMaterial)
+      const atlasTarget = new WebGLRenderTarget(size, size, {
+        depthBuffer: false,
+        format: RGBAFormat,
+        magFilter: NearestFilter,
+        minFilter: NearestFilter,
+        stencilBuffer: false,
+        type: UnsignedByteType
+      })
+      const savedAutoClear = gl.autoClear
+      const savedTarget = gl.getRenderTarget()
+      const pixelBuffer = new Uint8Array(size * size * 4)
+      const dataUrls: string[] = []
+
+      atlasScene.add(atlasMesh)
+      gl.autoClear = true
+
+      try {
+        for (let faceIndex = 0; faceIndex < 6; faceIndex += 1) {
+          atlasMaterial.uniforms.faceIndex.value = faceIndex
+          gl.setRenderTarget(atlasTarget)
+          gl.clear(true, true, true)
+          gl.render(atlasScene, atlasCamera)
+          gl.readRenderTargetPixels(atlasTarget, 0, 0, size, size, pixelBuffer)
+
+          const canvas = document.createElement('canvas')
+          const context = canvas.getContext('2d')
+
+          if (!context) {
+            return null
+          }
+
+          canvas.width = size
+          canvas.height = size
+          const imageData = context.createImageData(size, size)
+
+          for (let row = 0; row < size; row += 1) {
+            const sourceRow = size - 1 - row
+            const sourceOffset = sourceRow * size * 4
+            const targetOffset = row * size * 4
+
+            imageData.data.set(
+              pixelBuffer.subarray(sourceOffset, sourceOffset + (size * 4)),
+              targetOffset
+            )
+          }
+
+          context.putImageData(imageData, 0, 0)
+          dataUrls.push(canvas.toDataURL('image/png'))
+        }
+      } finally {
+        gl.setRenderTarget(savedTarget)
+        gl.autoClear = savedAutoClear
+        atlasMesh.geometry.dispose()
+        atlasMaterial.dispose()
+        atlasTarget.dispose()
+      }
+
+      return dataUrls
+    }
+
     globalWindow.__levelsjamDebug = {
       ...existing,
+      captureReflectionProbeAtlas,
       clearDebugIsolation,
       getFogState,
       isolateDebugRole,
@@ -4877,6 +4988,7 @@ function Scene({
       }
 
       clearDebugIsolation()
+      delete globalWindow.__levelsjamDebug.captureReflectionProbeAtlas
       delete globalWindow.__levelsjamDebug.clearDebugIsolation
       delete globalWindow.__levelsjamDebug.getFogState
       delete globalWindow.__levelsjamDebug.setDebugVisible
@@ -4885,7 +4997,7 @@ function Scene({
         delete globalWindow.__levelsjamDebug
       }
     }
-  }, [scene])
+  }, [gl, reflectionProbeRawTextures, scene])
 
   const ambientOcclusionActive = isAmbientOcclusionActive(visualSettings)
   const bloomActive = isEffectActive(visualSettings.bloom)
