@@ -937,7 +937,7 @@ function computeAverageHdrColor(texture: Texture | null, intensity = 1) {
   ).multiplyScalar(intensity)
 }
 
-function computeAverageCubeRenderTargetColor(
+function computeCubeRenderTargetDebugStats(
   renderer: {
     readRenderTargetPixels: (
       renderTarget: WebGLCubeRenderTarget,
@@ -953,6 +953,11 @@ function computeAverageCubeRenderTargetColor(
 ) {
   const buffer = new Uint8Array(renderTarget.width * renderTarget.height * 4)
   let sampleCount = 0
+  let nonWhiteCount = 0
+  let warmCount = 0
+  let darkest = 255
+  let luminanceTotal = 0
+  let luminanceSquaredTotal = 0
   let totalR = 0
   let totalG = 0
   let totalB = 0
@@ -969,22 +974,54 @@ function computeAverageCubeRenderTargetColor(
     )
 
     for (let offset = 0; offset < buffer.length; offset += 4) {
-      totalR += buffer[offset]
-      totalG += buffer[offset + 1]
-      totalB += buffer[offset + 2]
+      const r = buffer[offset]
+      const g = buffer[offset + 1]
+      const b = buffer[offset + 2]
+      const luminance = (0.2126 * r) + (0.7152 * g) + (0.0722 * b)
+
+      totalR += r
+      totalG += g
+      totalB += b
+      luminanceTotal += luminance
+      luminanceSquaredTotal += luminance * luminance
+      darkest = Math.min(darkest, r, g, b)
+      if (r < 235 || g < 235 || b < 235) {
+        nonWhiteCount += 1
+      }
+      if (r > (g + 12) && g > (b + 4)) {
+        warmCount += 1
+      }
       sampleCount += 1
     }
   }
 
   if (sampleCount === 0) {
-    return DEFAULT_FOG_IBL_COLOR.clone()
+    return {
+      averageColor: DEFAULT_FOG_IBL_COLOR.clone(),
+      darkest: 255,
+      luminanceStdDev: 0,
+      nonWhiteFraction: 0,
+      warmFraction: 0
+    }
   }
 
-  return new Color(
-    totalR / (sampleCount * 255),
-    totalG / (sampleCount * 255),
-    totalB / (sampleCount * 255)
+  const averageLuminance = luminanceTotal / sampleCount
+  const variance = Math.max(
+    0,
+    (luminanceSquaredTotal / sampleCount) - (averageLuminance * averageLuminance)
   )
+
+  return {
+    averageColor: new Color(
+      totalR / (sampleCount * 255),
+      totalG / (sampleCount * 255),
+      totalB / (sampleCount * 255)
+    ),
+    darkest,
+    luminanceStdDev: Math.sqrt(variance),
+    nonWhiteFraction: nonWhiteCount / sampleCount,
+    warmFraction: warmCount / sampleCount
+  }
 }
 
 function getProbeVolumeBounds(
@@ -1667,7 +1704,6 @@ function EnvironmentLighting({
   onEnvironmentFogColorChange,
   onEnvironmentTextureChange,
   onReflectionProbeAmbientColorsChange,
-  onReflectionProbeRawTexturesChange,
   onReflectionProbeTexturesChange
 }: {
   layout: MazeLayout
@@ -1675,7 +1711,6 @@ function EnvironmentLighting({
   onEnvironmentFogColorChange: (color: Color) => void
   onEnvironmentTextureChange: (texture: Texture | null) => void
   onReflectionProbeAmbientColorsChange: (colors: Color[]) => void
-  onReflectionProbeRawTexturesChange: (textures: Texture[]) => void
   onReflectionProbeTexturesChange: (textures: Texture[]) => void
 }) {
   const gl = useThree((state) => state.gl)
@@ -1683,7 +1718,6 @@ function EnvironmentLighting({
   const hdrTexture = useLoader(HDRLoader, ENVIRONMENT_URL)
   const pmremGenerator = useMemo(() => new PMREMGenerator(gl), [gl])
   const environmentTarget = useRef<{ dispose: () => void; texture: Texture } | null>(null)
-  const reflectionProbeRawTargets = useRef<Array<{ dispose: () => void; texture: Texture }>>([])
   const reflectionProbeTargets = useRef<Array<{ dispose: () => void; texture: Texture }>>([])
   const calibratedIntensity = getHdrLightingIntensity(iblIntensity)
   const fogAmbientColor = useMemo(
@@ -1697,13 +1731,13 @@ function EnvironmentLighting({
     scene.userData.reflectionProbeState = {
       activeProbeId: null,
       captureSceneState,
+      probeMetrics: [],
       probeCount: layout.reflectionProbes.length,
       ready: false
     }
     onEnvironmentFogColorChange(DEFAULT_FOG_IBL_COLOR.clone())
     onEnvironmentTextureChange(null)
     onReflectionProbeAmbientColorsChange([])
-    onReflectionProbeRawTexturesChange([])
     onReflectionProbeTexturesChange([])
 
     return () => {
@@ -1711,7 +1745,6 @@ function EnvironmentLighting({
       onEnvironmentFogColorChange(DEFAULT_FOG_IBL_COLOR.clone())
       onEnvironmentTextureChange(null)
       onReflectionProbeAmbientColorsChange([])
-      onReflectionProbeRawTexturesChange([])
       onReflectionProbeTexturesChange([])
     }
   }, [
@@ -1719,7 +1752,6 @@ function EnvironmentLighting({
     onEnvironmentFogColorChange,
     onEnvironmentTextureChange,
     onReflectionProbeAmbientColorsChange,
-    onReflectionProbeRawTexturesChange,
     onReflectionProbeTexturesChange,
     scene
   ])
@@ -1773,9 +1805,7 @@ function EnvironmentLighting({
     }
 
     const previousTargets = reflectionProbeTargets.current
-    const previousRawTargets = reflectionProbeRawTargets.current
     reflectionProbeTargets.current = []
-    reflectionProbeRawTargets.current = []
     const previousBackground = scene.background
     const previousBackgroundIntensity = scene.backgroundIntensity
     const previousEnvironment = scene.environment
@@ -1788,13 +1818,19 @@ function EnvironmentLighting({
     scene.userData.reflectionProbeState = {
       activeProbeId: null,
       captureSceneState: getReflectionCaptureSceneState(scene, layout),
+      probeMetrics: [],
       probeCount: layout.reflectionProbes.length,
       ready: false
     }
 
     let nextTargets: Array<{ dispose: () => void; texture: Texture }> = []
-    let nextRawTargets: Array<{ dispose: () => void; texture: Texture }> = []
     let nextProbeAmbientColors: Color[] = []
+    let nextProbeMetrics: Array<{
+      darkest: number
+      luminanceStdDev: number
+      nonWhiteFraction: number
+      warmFraction: number
+    }> = []
     let cancelled = false
     let bakeHandle = 0
     const attemptBake = () => {
@@ -1806,6 +1842,7 @@ function EnvironmentLighting({
       scene.userData.reflectionProbeState = {
         activeProbeId: null,
         captureSceneState,
+        probeMetrics: [],
         probeCount: layout.reflectionProbes.length,
         ready: false
       }
@@ -1890,8 +1927,8 @@ function EnvironmentLighting({
       scene.environmentIntensity = calibratedIntensity
 
       nextTargets = []
-      nextRawTargets = []
       nextProbeAmbientColors = []
+      nextProbeMetrics = []
       for (const probe of layout.reflectionProbes) {
         const cubeRenderTarget = new WebGLCubeRenderTarget(
           REFLECTION_PROBE_RENDER_SIZE,
@@ -1918,10 +1955,15 @@ function EnvironmentLighting({
         scene.remove(ambientCubeCamera)
 
         nextTargets.push(pmremGenerator.fromCubemap(cubeRenderTarget.texture))
-        nextRawTargets.push(cubeRenderTarget)
-        nextProbeAmbientColors.push(
-          computeAverageCubeRenderTargetColor(gl, ambientCubeRenderTarget)
-        )
+        const probeDebugStats = computeCubeRenderTargetDebugStats(gl, ambientCubeRenderTarget)
+        nextProbeAmbientColors.push(probeDebugStats.averageColor)
+        nextProbeMetrics.push({
+          darkest: probeDebugStats.darkest,
+          luminanceStdDev: probeDebugStats.luminanceStdDev,
+          nonWhiteFraction: probeDebugStats.nonWhiteFraction,
+          warmFraction: probeDebugStats.warmFraction
+        })
+        cubeRenderTarget.dispose()
         ambientCubeRenderTarget.dispose()
       }
 
@@ -1945,22 +1987,18 @@ function EnvironmentLighting({
 
       if (cancelled) {
         nextTargets.forEach((target) => target.dispose())
-        nextRawTargets.forEach((target) => target.dispose())
         nextTargets = []
-        nextRawTargets = []
         return
       }
 
       previousTargets.forEach((target) => target.dispose())
-      previousRawTargets.forEach((target) => target.dispose())
       reflectionProbeTargets.current = nextTargets
-      reflectionProbeRawTargets.current = nextRawTargets
       onReflectionProbeAmbientColorsChange(nextProbeAmbientColors.map((color) => color.clone()))
-      onReflectionProbeRawTexturesChange(nextRawTargets.map((target) => target.texture))
       onReflectionProbeTexturesChange(nextTargets.map((target) => target.texture))
       scene.userData.reflectionProbeState = {
         activeProbeId: null,
         captureSceneState: getReflectionCaptureSceneState(scene, layout),
+        probeMetrics: nextProbeMetrics.map((metric) => ({ ...metric })),
         probeCount: layout.reflectionProbes.length,
         ready: nextTargets.length === layout.reflectionProbes.length
       }
@@ -1973,12 +2011,7 @@ function EnvironmentLighting({
       for (const target of nextTargets) {
         target.dispose()
       }
-      for (const target of nextRawTargets) {
-        target.dispose()
-      }
-      previousRawTargets.forEach((target) => target.dispose())
       onReflectionProbeAmbientColorsChange([])
-      onReflectionProbeRawTexturesChange([])
       onReflectionProbeTexturesChange([])
       scene.background = previousBackground
       scene.backgroundIntensity = previousBackgroundIntensity
@@ -1991,6 +2024,7 @@ function EnvironmentLighting({
       scene.userData.reflectionProbeState = {
         activeProbeId: null,
         captureSceneState: getReflectionCaptureSceneState(scene, layout),
+        probeMetrics: [],
         probeCount: layout.reflectionProbes.length,
         ready: false
       }
@@ -2001,7 +2035,6 @@ function EnvironmentLighting({
     layout.lights,
     layout.reflectionProbes,
     onReflectionProbeAmbientColorsChange,
-    onReflectionProbeRawTexturesChange,
     onReflectionProbeTexturesChange,
     pmremGenerator,
     calibratedIntensity,
@@ -2963,31 +2996,11 @@ function ReflectionProbeVisualization({
             userData={{ debugIndex: index, debugRole: 'reflection-probe-visual' }}
           >
             <sphereGeometry args={[0.18, 16, 16]} />
-            <shaderMaterial
-              depthWrite={false}
-              fragmentShader={`
-                uniform samplerCube probeCubeMap;
-                varying vec3 vProbeDirection;
-
-                void main() {
-                  gl_FragColor = textureCube(probeCubeMap, normalize(vProbeDirection));
-                  #include <tonemapping_fragment>
-                  #include <colorspace_fragment>
-                }
-              `}
-              side={DoubleSide}
-              toneMapped
-              uniforms={{
-                probeCubeMap: { value: texture }
-              }}
-              vertexShader={`
-                varying vec3 vProbeDirection;
-
-                void main() {
-                  vProbeDirection = position;
-                  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-                }
-              `}
+            <meshStandardMaterial
+              envMap={texture}
+              envMapIntensity={1}
+              metalness={1}
+              roughness={0}
             />
           </mesh>
         )
@@ -3274,7 +3287,6 @@ function SceneGeometry({
   layout,
   probeIblEnabled,
   reflectionProbeAmbientColors,
-  reflectionProbeRawTextures,
   reflectionCapturesEnabled,
   reflectionProbeTextures,
   showReflectionProbes,
@@ -3289,7 +3301,6 @@ function SceneGeometry({
   layout: MazeLayout
   probeIblEnabled: boolean
   reflectionProbeAmbientColors: Color[]
-  reflectionProbeRawTextures: Texture[]
   reflectionCapturesEnabled: boolean
   reflectionProbeTextures: Texture[]
   showReflectionProbes: boolean
@@ -3326,7 +3337,7 @@ function SceneGeometry({
       />
       <ReflectionProbeVisualization
         layout={layout}
-        reflectionProbeTextures={reflectionProbeRawTextures}
+        reflectionProbeTextures={reflectionProbeTextures}
         visible={showReflectionProbes}
       />
       {isEffectActive(volumetricLighting) ? (
@@ -3928,6 +3939,12 @@ function FlightRig({
             sconceCount: number
             wallCount: number
           }
+          probeMetrics?: Array<{
+            darkest: number
+            luminanceStdDev: number
+            nonWhiteFraction: number
+            warmFraction: number
+          }>
           probeCount: number
           ready: boolean
         } | null
@@ -4324,7 +4341,6 @@ function Scene({
   const [environmentTexture, setEnvironmentTexture] = useState<Texture | null>(null)
   const [environmentFogColor, setEnvironmentFogColor] = useState(() => DEFAULT_FOG_IBL_COLOR.clone())
   const [reflectionProbeAmbientColors, setReflectionProbeAmbientColors] = useState<Color[]>([])
-  const [reflectionProbeRawTextures, setReflectionProbeRawTextures] = useState<Texture[]>([])
   const [reflectionProbeTextures, setReflectionProbeTextures] = useState<Texture[]>([])
   const environmentIntensity = useMemo(
     () => getHdrLightingIntensity(visualSettings.iblIntensity),
@@ -4551,7 +4567,6 @@ function Scene({
         onEnvironmentFogColorChange={setEnvironmentFogColor}
         onEnvironmentTextureChange={setEnvironmentTexture}
         onReflectionProbeAmbientColorsChange={setReflectionProbeAmbientColors}
-        onReflectionProbeRawTexturesChange={setReflectionProbeRawTextures}
         onReflectionProbeTexturesChange={setReflectionProbeTextures}
       />
       <SceneGeometry
@@ -4562,7 +4577,6 @@ function Scene({
         layout={layout}
         probeIblEnabled={visualSettings.probeIblEnabled}
         reflectionProbeAmbientColors={reflectionProbeAmbientColors}
-        reflectionProbeRawTextures={reflectionProbeRawTextures}
         reflectionCapturesEnabled={visualSettings.reflectionCapturesEnabled}
         reflectionProbeTextures={reflectionProbeTextures}
         showReflectionProbes={visualSettings.showReflectionProbes}

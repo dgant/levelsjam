@@ -1,0 +1,55 @@
+{
+  "generatedAt": "2026-04-19T12:11:07.343Z",
+  "results": [
+    {
+      "durationMs": 7970.5469,
+      "error": null,
+      "exitCode": 0,
+      "scriptName": "test:unit",
+      "overThreshold": false,
+      "smokeProfile": null,
+      "thresholdMs": 20000
+    },
+    {
+      "durationMs": 58504.7305,
+      "error": null,
+      "exitCode": 0,
+      "scriptName": "test:smoke:runner",
+      "overThreshold": false,
+      "smokeProfile": {
+        "phases": [
+          {
+            "durationMs": 34223,
+            "label": "startup"
+          },
+          {
+            "durationMs": 8628,
+            "label": "volumetric-fog"
+          },
+          {
+            "durationMs": 7117,
+            "label": "debug-controls"
+          },
+          {
+            "durationMs": 3226,
+            "label": "reflection-captures"
+          }
+        ],
+        "screenshotCount": 1,
+        "screenshotMs": 2864,
+        "startedAt": "2026-04-19T12:11:26.580Z",
+        "totalRunMs": 56077,
+        "finishedAt": "2026-04-19T12:12:22.659Z",
+        "totalPhaseMs": 53194,
+        "wroteAt": "2026-04-19T12:12:22.659Z"
+      },
+      "thresholdMs": 60000
+    }
+  ],
+  "buildPages": {
+    "durationMs": 9047.6778,
+    "error": null,
+    "exitCode": 0,
+    "scriptName": "build:pages"
+  }
+}

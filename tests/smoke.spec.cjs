@@ -277,7 +277,6 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   })
 
   await timedStep(timingProfile, 'reflection-captures', async () => {
-    await setCheckbox(page, 'Reflection Captures', false)
     await expect
       .poll(
         async () => page.evaluate(
@@ -290,7 +289,6 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       )
       .toBe('none')
     await setCheckbox(page, 'Probe IBL', true)
-    await setCheckbox(page, 'Reflection Captures', true)
     await expect
       .poll(
         async () => page.evaluate(
@@ -302,6 +300,29 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         }
       )
       .toBe('world')
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => window.__levelsjamDebug.getReflectionProbeState()?.probeMetrics?.[24] ?? null
+        ),
+        {
+          timeout: 5_000,
+          intervals: [50, 100, 250]
+        }
+      )
+      .toMatchObject({
+        darkest: expect.any(Number),
+        luminanceStdDev: expect.any(Number),
+        nonWhiteFraction: expect.any(Number),
+        warmFraction: expect.any(Number)
+      })
+    const probePreviewDetail = await page.evaluate(
+      () => window.__levelsjamDebug.getReflectionProbeState()?.probeMetrics?.[24] ?? null
+    )
+    expect(probePreviewDetail.nonWhiteFraction).toBeGreaterThan(0.18)
+    expect(probePreviewDetail.luminanceStdDev).toBeGreaterThan(18)
+    expect(probePreviewDetail.warmFraction).toBeGreaterThan(0.02)
+    expect(probePreviewDetail.darkest).toBeLessThan(64)
     await setCheckbox(page, 'Probe IBL', false)
   })
 
