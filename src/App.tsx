@@ -22,6 +22,7 @@ import {
   Float32BufferAttribute,
   HalfFloatType,
   LinearFilter,
+  LinearMipmapLinearFilter,
   MathUtils,
   NearestFilter,
   ACESFilmicToneMapping,
@@ -994,9 +995,9 @@ function createLightmapFaceTexture(
 
   const texture = new CanvasTexture(canvas)
   texture.flipY = options.flipY ?? true
-  texture.generateMipmaps = false
+  texture.generateMipmaps = true
   texture.magFilter = LinearFilter
-  texture.minFilter = LinearFilter
+  texture.minFilter = LinearMipmapLinearFilter
   texture.wrapS = ClampToEdgeWrapping
   texture.wrapT = ClampToEdgeWrapping
   texture.needsUpdate = true
@@ -2033,7 +2034,7 @@ function FogVolume({
     []
   )
 
-  useFrame((state) => {
+  useEffect(() => {
     for (const material of materials.current) {
       const uniforms = material?.uniforms
       if (!uniforms) {
@@ -2044,9 +2045,19 @@ function FogVolume({
       uniforms.noiseFrequency.value = noiseFrequency
       uniforms.torchCount.value = Math.min(FOG_VOLUME_MAX_TORCHES, torchPositions.length)
       uniforms.torchPositions.value = fogTorchPositions
-      uniforms.time.value = state.clock.getElapsedTime()
     }
   }, [fogTorchPositions, noiseFrequency, torchPositions.length, visible, volumeIntensity])
+
+  useFrame((state) => {
+    for (const material of materials.current) {
+      const uniforms = material?.uniforms
+      if (!uniforms) {
+        continue
+      }
+
+      uniforms.time.value = state.clock.getElapsedTime()
+    }
+  })
 
   return (
     <group userData={{ debugRole: 'global-fog-volume' }}>
@@ -2121,15 +2132,16 @@ function FogVolume({
                   torchScatter += torchInfluence * torchInfluence * heightInfluence;
                 }
 
+                float densityGain = max(0.0, density) * (0.35 + (max(0.0, density) * 2.2));
                 float alpha = clamp(
-                  density *
+                  densityGain *
                   verticalFalloff *
                   horizontalFade *
                   baseNoise *
-                  (0.9 / ${FOG_VOLUME_SLICE_COUNT.toFixed(1)}) *
-                  (0.8 + (torchScatter * 0.35)),
+                  0.09 *
+                  (0.7 + (torchScatter * 0.55)),
                   0.0,
-                  0.08
+                  0.14
                 );
                 if (alpha < 0.0005) {
                   discard;
@@ -2609,6 +2621,10 @@ function TorchLensFlareEffectPrimitive({
   )
   const projectedPosition = useMemo(() => new Vector3(), [])
   const raycasterPosition = useMemo(() => new Vector2(), [])
+  const lensRaycasterMask = useMemo(
+    () => ((1 << 0) | (1 << TORCH_BILLBOARD_LAYER)),
+    []
+  )
   const effect = useMemo(
     () =>
       new PostLensFlareEffectImpl({
@@ -2639,12 +2655,20 @@ function TorchLensFlareEffectPrimitive({
     const lensUniform = effect.uniforms.get('lensPosition')
     const opacityUniform = effect.uniforms.get('opacity')
     const colorGainUniform = effect.uniforms.get('colorGain')
+    const glareSizeUniform = effect.uniforms.get('glareSize')
+    const flareSizeUniform = effect.uniforms.get('flareSize')
+    const ghostScaleUniform = effect.uniforms.get('ghostScale')
+    const haloScaleUniform = effect.uniforms.get('haloScale')
     const screenResUniform = effect.uniforms.get('screenRes')
 
     if (
       !lensUniform ||
       !opacityUniform ||
       !colorGainUniform ||
+      !glareSizeUniform ||
+      !flareSizeUniform ||
+      !ghostScaleUniform ||
+      !haloScaleUniform ||
       !screenResUniform
     ) {
       return
@@ -2660,10 +2684,13 @@ function TorchLensFlareEffectPrimitive({
 
     lensUniform.value.set(projectedPosition.x, projectedPosition.y)
     raycasterPosition.set(projectedPosition.x, projectedPosition.y)
+    const previousRaycasterMask = raycaster.layers.mask
+    raycaster.layers.mask = lensRaycasterMask
     raycaster.setFromCamera(raycasterPosition, camera)
 
     let visibility = 1
     const hitObject = raycaster.intersectObjects(scene.children, true)[0]?.object
+    raycaster.layers.mask = previousRaycasterMask
 
     if (hitObject && hitObject !== camera) {
       if (hitObject.userData?.lensflare === 'no-occlusion') {
@@ -2696,8 +2723,12 @@ function TorchLensFlareEffectPrimitive({
       18,
       delta
     )
+    glareSizeUniform.value = 0.28 + (normalizedIntensity * 0.44)
+    flareSizeUniform.value = 0.008 + (normalizedIntensity * 0.018)
+    ghostScaleUniform.value = 0.22 + (normalizedIntensity * 0.34)
+    haloScaleUniform.value = 0.26 + (normalizedIntensity * 0.42)
     colorGainUniform.value.copy(FIRE_COLOR).multiplyScalar(
-      (0.25 + (normalizedIntensity * 0.45)) *
+      (12 + (normalizedIntensity * 28)) *
       Math.sqrt(torchCandelaMultiplier)
     )
   })

@@ -30,7 +30,7 @@ test('generates valid mazes under 100ms', () => {
   assert.equal(maze.height, MAZE_HEIGHT)
   assert.ok(maze.lightmap)
   assert.equal(typeof maze.lightmap.dataBase64, 'string')
-  assert.equal(maze.lightmap.version, 11)
+  assert.equal(maze.lightmap.version, 12)
   assert.deepEqual(
     maze.lightmap.groundBounds,
     getMazeFloorLightmapBounds(maze)

@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
+  bakeMazeLightmap,
   MAZE_LIGHTMAP_VERSION,
   MAZE_HEIGHT,
   MAZE_TARGET_COUNT,
@@ -82,8 +83,7 @@ export async function ensureMazeFiles({
 
     const shouldRewrite = needsMazeRewrite(maze)
     if (shouldRewrite) {
-      maze = generateMaze(maze.seed ?? Date.now())
-      maze.id = path.basename(fileName, '.js')
+      maze.lightmap = bakeMazeLightmap(maze)
       fs.writeFileSync(filePath, serializeMazeModule(maze))
     }
 
