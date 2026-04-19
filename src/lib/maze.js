@@ -4,7 +4,7 @@ export const MAZE_CELL_SIZE = 2
 export const MAZE_WALL_THICKNESS = 0.25
 export const MAZE_WALL_HEIGHT = 2
 export const MAZE_TARGET_COUNT = 5
-export const MAZE_LIGHTMAP_VERSION = 12
+export const MAZE_LIGHTMAP_VERSION = 13
 export const MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS = 0.125
 
 const MAZE_LIGHTMAP_GROUND_TILE_SIZE = 256
@@ -18,12 +18,8 @@ const MAZE_LIGHTMAP_TORCH_STRENGTH = 1
 const MAZE_LIGHTMAP_TARGET_PEAK = 0.45
 const MAZE_LIGHTMAP_GROUND_SUPERSAMPLE_GRID = 1
 const MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID = 2
+const MAZE_LIGHTMAP_WALL_AMBIENT_INTENSITY = 0.0225
 const MAZE_REFLECTION_PROBE_Y = 1.25
-const MAZE_LIGHTMAP_TORCH_TINT = {
-  blue: 104 / 255,
-  green: 177 / 255,
-  red: 1
-}
 
 const CARDINAL_DIRECTIONS = [
   { dx: 0, dy: -1, side: 'north' },
@@ -1344,10 +1340,12 @@ export function bakeMazeLightmap(
   }
 
   const atlasHeight = getLightmapAtlasHeight(packer)
-  const atlasFloatData = new Float32Array(atlasWidth * atlasHeight)
+  const atlasAmbientFloatData = new Float32Array(atlasWidth * atlasHeight)
+  const atlasTorchFloatData = new Float32Array(atlasWidth * atlasHeight)
   let peakIntensity = 0
 
   const writeIntensityRect = (
+    target,
     rect,
     supersampleGrid,
     sampleIntensity,
@@ -1382,13 +1380,14 @@ export function bakeMazeLightmap(
         const pixelOffset =
           ((rect.y + row) * atlasWidth) + rect.x + column
 
-        atlasFloatData[pixelOffset] = intensity
+        target[pixelOffset] = intensity
         peakIntensity = Math.max(peakIntensity, intensity)
       }
     }
   }
 
   writeIntensityRect(
+    atlasTorchFloatData,
     groundRect,
     MAZE_LIGHTMAP_GROUND_SUPERSAMPLE_GRID,
     (u, v) => {
@@ -1408,6 +1407,7 @@ export function bakeMazeLightmap(
   for (const surfaceGroup of surfaceGroups) {
     for (const faceKey of ['nz', 'pz']) {
       writeIntensityRect(
+        atlasTorchFloatData,
         surfaceGroupRects[surfaceGroup.id][faceKey],
         MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID,
         (u, v) => {
@@ -1424,6 +1424,13 @@ export function bakeMazeLightmap(
         },
         { alignUToRectEdges: true }
       )
+      writeIntensityRect(
+        atlasAmbientFloatData,
+        surfaceGroupRects[surfaceGroup.id][faceKey],
+        1,
+        () => MAZE_LIGHTMAP_WALL_AMBIENT_INTENSITY,
+        { alignUToRectEdges: true }
+      )
     }
   }
 
@@ -1433,13 +1440,14 @@ export function bakeMazeLightmap(
       ? MAZE_LIGHTMAP_TARGET_PEAK / peakIntensity
       : 1
 
-  for (let pixelIndex = 0; pixelIndex < atlasFloatData.length; pixelIndex += 1) {
-    const intensity = Math.min(1, atlasFloatData[pixelIndex] * intensityScale)
+  for (let pixelIndex = 0; pixelIndex < atlasTorchFloatData.length; pixelIndex += 1) {
+    const ambientIntensity = Math.min(1, atlasAmbientFloatData[pixelIndex] * intensityScale)
+    const torchIntensity = Math.min(1, atlasTorchFloatData[pixelIndex] * intensityScale)
     const outputOffset = pixelIndex * 3
 
-    atlasData[outputOffset] = Math.round(intensity * MAZE_LIGHTMAP_TORCH_TINT.red * 255)
-    atlasData[outputOffset + 1] = Math.round(intensity * MAZE_LIGHTMAP_TORCH_TINT.green * 255)
-    atlasData[outputOffset + 2] = Math.round(intensity * MAZE_LIGHTMAP_TORCH_TINT.blue * 255)
+    atlasData[outputOffset] = Math.round(torchIntensity * 255)
+    atlasData[outputOffset + 1] = Math.round(ambientIntensity * 255)
+    atlasData[outputOffset + 2] = 0
   }
 
   return {

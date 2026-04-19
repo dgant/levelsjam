@@ -185,7 +185,9 @@ const FIRE_FLIPBOOK_CROP_WIDTH =
 const FIRE_FLIPBOOK_CROP_HEIGHT =
   FIRE_FLIPBOOK_FRAME_CROP.maxY - FIRE_FLIPBOOK_FRAME_CROP.minY
 const FIRE_COLOR = new Color('#ffb168')
+const BLACK_COLOR = new Color(0, 0, 0)
 const FIRE_BILLBOARD_INTENSITY_SCALE = 1 / TORCH_BASE_CANDELA
+const TORCH_LIGHTMAP_TINT = FIRE_COLOR.clone()
 const TORCH_BILLBOARD_LAYER = 1
 const FLOOR_LIGHTMAP_INTENSITY_SCALE = 1
 const WALL_LIGHTMAP_INTENSITY_SCALE = 1
@@ -234,6 +236,7 @@ const TONE_MAPPING_OPTIONS = [
 ] as const
 const cameraEuler = new Euler(0, 0, 0, 'YXZ')
 const defaultMoveDirection = new Vector3(0, 0, -1)
+const WHITE_COLOR = new Color(1, 1, 1)
 const SCONCE_PROFILE_POINTS = (() => {
   const points = [new Vector2(0, 0), new Vector2(SCONCE_RADIUS, 0)]
   const segments = 12
@@ -420,6 +423,8 @@ type ProbeBlendConfig = {
 
 type ProbeBlendShader = Shader & {
   uniforms: Shader['uniforms'] & {
+    lightMapAmbientTint?: Uniform<Color>
+    lightMapTorchTint?: Uniform<Color>
     localProbeEnvMap0?: Uniform<Texture | null>
     localProbeEnvMap1?: Uniform<Texture | null>
     localProbeEnvMap2?: Uniform<Texture | null>
@@ -428,6 +433,11 @@ type ProbeBlendShader = Shader & {
     probeBlendRegion?: Uniform<Vector4>
     probeBlendWeights?: Uniform<Vector4>
   }
+}
+
+type MaterialShaderPatchConfig = {
+  lightMapAmbientTint?: Color
+  lightMapTorchTint?: Color
 }
 
 type MazeLightmap = MazeLayout['maze']['lightmap']
@@ -642,12 +652,19 @@ vec3 getIBLRadiance( const in vec3 viewDir, const in vec3 normal, const in float
 
 function updateProbeBlendShaderUniforms(
   shader: ProbeBlendShader | null,
-  probeBlend: ProbeBlendConfig
+  probeBlend: ProbeBlendConfig,
+  patchConfig: MaterialShaderPatchConfig
 ) {
   if (!shader) {
     return
   }
 
+  shader.uniforms.lightMapAmbientTint?.value.copy(
+    patchConfig.lightMapAmbientTint ?? BLACK_COLOR
+  )
+  shader.uniforms.lightMapTorchTint?.value.copy(
+    patchConfig.lightMapTorchTint ?? WHITE_COLOR
+  )
   shader.uniforms.localProbeEnvMap0!.value = probeBlend.probeTextures[0] ?? null
   shader.uniforms.localProbeEnvMap1!.value = probeBlend.probeTextures[1] ?? null
   shader.uniforms.localProbeEnvMap2!.value = probeBlend.probeTextures[2] ?? null
@@ -692,11 +709,19 @@ function updateProbeBlendMaterialDebugState(
   }
 }
 
+function hasCompleteProbeTextures(textures: Array<Texture | null | undefined>) {
+  return textures.length > 0 && textures.every(Boolean)
+}
+
 function useProbeBlendMaterialShader(
   materialRef: RefObject<ThreeMeshPhysicalMaterial | ThreeMeshStandardMaterial | null>,
-  probeBlend: ProbeBlendConfig
+  probeBlend: ProbeBlendConfig,
+  patchConfig: MaterialShaderPatchConfig = {}
 ) {
   const shaderRef = useRef<ProbeBlendShader | null>(null)
+  const usesTintedLightMap =
+    Boolean(patchConfig.lightMapAmbientTint) ||
+    Boolean(patchConfig.lightMapTorchTint)
 
   useEffect(() => {
     const material = materialRef.current
@@ -705,11 +730,14 @@ function useProbeBlendMaterialShader(
       return
     }
 
-    material.customProgramCacheKey = () => 'probe-blend-v1'
+    material.customProgramCacheKey = () =>
+      `probe-blend-v2-${usesTintedLightMap ? 'lightmap-tint' : 'plain'}`
     updateProbeBlendMaterialDebugState(material, probeBlend)
     material.onBeforeCompile = (shader: Shader) => {
       const probeBlendShader = shader as ProbeBlendShader
 
+      probeBlendShader.uniforms.lightMapAmbientTint = new Uniform(BLACK_COLOR.clone())
+      probeBlendShader.uniforms.lightMapTorchTint = new Uniform(WHITE_COLOR.clone())
       probeBlendShader.uniforms.localProbeEnvMap0 = new Uniform<Texture | null>(null)
       probeBlendShader.uniforms.localProbeEnvMap1 = new Uniform<Texture | null>(null)
       probeBlendShader.uniforms.localProbeEnvMap2 = new Uniform<Texture | null>(null)
@@ -734,14 +762,20 @@ function useProbeBlendMaterialShader(
 \t#include <project_vertex>`
           )
       probeBlendShader.fragmentShader =
-        `varying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
+        `uniform vec3 lightMapAmbientTint;\nuniform vec3 lightMapTorchTint;\nvarying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
           .replace(
             '#include <envmap_physical_pars_fragment>',
             PROBE_BLEND_SHADER_CHUNK
           )
+          .replace(
+            'vec3 lightMapIrradiance = lightMapTexel.rgb * lightMapIntensity;',
+            `vec3 lightMapTorchIrradiance = vec3( lightMapTexel.r ) * lightMapTorchTint * lightMapIntensity;
+\t\tvec3 lightMapAmbientIrradiance = vec3( lightMapTexel.g ) * lightMapAmbientTint;
+\t\tvec3 lightMapIrradiance = lightMapTorchIrradiance + lightMapAmbientIrradiance;`
+          )
 
       shaderRef.current = probeBlendShader
-      updateProbeBlendShaderUniforms(probeBlendShader, probeBlend)
+      updateProbeBlendShaderUniforms(probeBlendShader, probeBlend, patchConfig)
     }
 
     material.needsUpdate = true
@@ -753,12 +787,95 @@ function useProbeBlendMaterialShader(
       }
       shaderRef.current = null
     }
-  }, [materialRef])
+  }, [materialRef, patchConfig, probeBlend, usesTintedLightMap])
 
   useEffect(() => {
     updateProbeBlendMaterialDebugState(materialRef.current, probeBlend)
-    updateProbeBlendShaderUniforms(shaderRef.current, probeBlend)
-  }, [materialRef, probeBlend])
+    updateProbeBlendShaderUniforms(shaderRef.current, probeBlend, patchConfig)
+  }, [materialRef, patchConfig, probeBlend])
+}
+
+function isMeshMaterialReady(
+  mesh: Mesh,
+  requirements: {
+    lightMap?: boolean
+    map?: boolean
+  }
+) {
+  const materials = (
+    Array.isArray(mesh.material)
+      ? mesh.material
+      : [mesh.material]
+  ) as Array<{
+    lightMap?: Texture | null
+    map?: Texture | null
+  }>
+
+  return materials.some((material) => {
+    if (requirements.map && !material.map) {
+      return false
+    }
+    if (requirements.lightMap && !material.lightMap) {
+      return false
+    }
+
+    return true
+  })
+}
+
+function isReflectionCaptureSceneReady(scene: ThreeScene, layout: MazeLayout) {
+  let hasGroundPatch = false
+  let hasReadyGroundPatch = false
+  let hasWall = false
+  let hasReadyWall = false
+  let hasSconce = layout.lights.length === 0
+  let hasReadySconce = layout.lights.length === 0
+
+  scene.traverse((object) => {
+    if (!(object instanceof Mesh)) {
+      return
+    }
+
+    if (object.userData?.debugRole === 'maze-ground-lightmap') {
+      hasGroundPatch = true
+      hasReadyGroundPatch = hasReadyGroundPatch || isMeshMaterialReady(object, {
+        lightMap: true,
+        map: true
+      })
+      return
+    }
+
+    if (
+      object.userData?.debugRole === 'maze-wall' ||
+      (
+        Array.isArray(object.userData?.debugRoles) &&
+        object.userData.debugRoles.includes('maze-wall-lightmap')
+      )
+    ) {
+      hasWall = true
+      hasReadyWall = hasReadyWall || isMeshMaterialReady(object, {
+        lightMap: true,
+        map: true
+      })
+      return
+    }
+
+    if (object.userData?.debugRole === 'sconce-body') {
+      hasSconce = true
+      hasReadySconce = hasReadySconce || isMeshMaterialReady(object, {
+        map: true
+      })
+    }
+  })
+
+  return (
+    hasGroundPatch &&
+    hasReadyGroundPatch &&
+    hasWall &&
+    hasReadyWall &&
+    hasSconce &&
+    hasReadySconce
+  )
 }
 
 function configureRepeatedTexture(
@@ -1288,8 +1405,14 @@ function EnvironmentLighting({
 
     let nextTargets: Array<{ dispose: () => void; texture: Texture }> = []
     let cancelled = false
-    const bakeHandle = window.setTimeout(() => {
+    let bakeHandle = 0
+    const attemptBake = () => {
       if (cancelled) {
+        return
+      }
+
+      if (!isReflectionCaptureSceneReady(scene, layout)) {
+        bakeHandle = window.setTimeout(attemptBake, 50)
         return
       }
 
@@ -1420,7 +1543,8 @@ function EnvironmentLighting({
         probeCount: layout.reflectionProbes.length,
         ready: nextTargets.length === layout.reflectionProbes.length
       }
-    }, 0)
+    }
+    bakeHandle = window.setTimeout(attemptBake, 0)
 
     return () => {
       cancelled = true
@@ -1472,13 +1596,21 @@ function GroundSurfaceMaterial({
   probeBlend?: ProbeBlendConfig
 }) {
   const materialRef = useRef<ThreeMeshPhysicalMaterial>(null)
+  const patchConfig = useMemo(
+    () => ({
+      lightMapAmbientTint: BLACK_COLOR,
+      lightMapTorchTint: TORCH_LIGHTMAP_TINT
+    }),
+    []
+  )
 
   useProbeBlendMaterialShader(
     materialRef,
     probeBlend ?? {
       mode: 'none',
       probeTextures: []
-    }
+    },
+    patchConfig
   )
 
   return (
@@ -1608,13 +1740,20 @@ function Ground({
           groundLightmapTexture={groundLightmapTexture}
           key={rect.id}
           maps={puddle}
-          probeBlend={{
-            mode: reflectionCapturesEnabled ? 'world' : 'none',
-            probeTextures: rect.probeIndices.map(
+          probeBlend={(() => {
+            const probeTextures = rect.probeIndices.map(
               (probeIndex) => reflectionProbeTextures[probeIndex] ?? null
-            ),
-            region: rect.region
-          }}
+            )
+
+            return {
+              mode:
+                reflectionCapturesEnabled && hasCompleteProbeTextures(probeTextures)
+                  ? 'world'
+                  : 'none',
+              probeTextures,
+              region: rect.region
+            } satisfies ProbeBlendConfig
+          })()}
           rect={rect}
           torchCandelaMultiplier={torchCandelaMultiplier}
         />
@@ -1736,6 +1875,13 @@ function WallSconce({
 }) {
   const metal = useStandardPbrTextures(METAL_TEXTURE_URLS, METAL_TEXTURE_REPEAT)
   const materialRef = useRef<ThreeMeshStandardMaterial>(null)
+  const patchConfig = useMemo(
+    () => ({
+      lightMapAmbientTint: BLACK_COLOR,
+      lightMapTorchTint: TORCH_LIGHTMAP_TINT
+    }),
+    []
+  )
   const position: [number, number, number] = [
     mazeLight.sconcePosition.x,
     mazeLight.sconcePosition.y,
@@ -1754,14 +1900,22 @@ function WallSconce({
       }),
     [layout, mazeLight.sconcePosition.x, mazeLight.sconcePosition.y, mazeLight.sconcePosition.z, reflectionProbeTextures]
   )
+  const probeTextures = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeTextures[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeTextures]
+  )
 
   useProbeBlendMaterialShader(materialRef, {
-    mode: reflectionCapturesEnabled ? 'constant' : 'none',
-    probeTextures: reflectionProbeBlend.probeIndices.map(
-      (probeIndex) => reflectionProbeTextures[probeIndex] ?? null
-    ),
+    mode:
+      reflectionCapturesEnabled && hasCompleteProbeTextures(probeTextures)
+        ? 'constant'
+        : 'none',
+    probeTextures,
     weights: reflectionProbeBlend.weights as [number, number, number, number]
-  })
+  }, patchConfig)
 
   return (
     <>
@@ -2278,6 +2432,45 @@ function MazeWalls({
   )
 }
 
+function WallFaceMaterial({
+  attach,
+  lightMap,
+  lightMapIntensity,
+  maps,
+  patchConfig
+}: {
+  attach: string
+  lightMap?: Texture
+  lightMapIntensity: number
+  maps: PbrMaps
+  patchConfig: MaterialShaderPatchConfig
+}) {
+  const materialRef = useRef<ThreeMeshStandardMaterial>(null)
+
+  useProbeBlendMaterialShader(
+    materialRef,
+    {
+      mode: 'none',
+      probeTextures: []
+    },
+    patchConfig
+  )
+
+  return (
+    <meshStandardMaterial
+      {...maps}
+      attach={attach}
+      bumpScale={0.05}
+      envMapIntensity={0}
+      lightMap={lightMap}
+      lightMapIntensity={lightMapIntensity}
+      metalness={0.02}
+      ref={materialRef}
+      roughness={0.92}
+    />
+  )
+}
+
 function MazeWallMesh({
   bakedLightmapsEnabled,
   lightmap,
@@ -2299,6 +2492,13 @@ function MazeWallMesh({
     lightmap,
     lightmapBytes,
     mazeWall.id
+  )
+  const faceMaterialPatchConfig = useMemo(
+    () => ({
+      lightMapAmbientTint: WHITE_COLOR,
+      lightMapTorchTint: TORCH_LIGHTMAP_TINT
+    }),
+    []
   )
   const lightMapIntensity =
     bakedLightmapsEnabled
@@ -2322,59 +2522,47 @@ function MazeWallMesh({
       }}
     >
       <boxGeometry args={[WALL_LENGTH, WALL_HEIGHT, WALL_WIDTH]} />
-      <meshStandardMaterial
-        {...wallMaterialMaps}
+      <WallFaceMaterial
         attach="material-0"
-        bumpScale={0.05}
         lightMap={bakedLightmapsEnabled ? lightmapTextures.neutral : undefined}
         lightMapIntensity={lightMapIntensity}
-        metalness={0.02}
-        roughness={0.92}
+        maps={wallMaterialMaps}
+        patchConfig={faceMaterialPatchConfig}
       />
-      <meshStandardMaterial
-        {...wallMaterialMaps}
+      <WallFaceMaterial
         attach="material-1"
-        bumpScale={0.05}
         lightMap={bakedLightmapsEnabled ? lightmapTextures.neutral : undefined}
         lightMapIntensity={lightMapIntensity}
-        metalness={0.02}
-        roughness={0.92}
+        maps={wallMaterialMaps}
+        patchConfig={faceMaterialPatchConfig}
       />
-      <meshStandardMaterial
-        {...wallMaterialMaps}
+      <WallFaceMaterial
         attach="material-2"
-        bumpScale={0.05}
         lightMap={bakedLightmapsEnabled ? lightmapTextures.neutral : undefined}
         lightMapIntensity={lightMapIntensity}
-        metalness={0.02}
-        roughness={0.92}
+        maps={wallMaterialMaps}
+        patchConfig={faceMaterialPatchConfig}
       />
-      <meshStandardMaterial
-        {...wallMaterialMaps}
+      <WallFaceMaterial
         attach="material-3"
-        bumpScale={0.05}
         lightMap={bakedLightmapsEnabled ? lightmapTextures.neutral : undefined}
         lightMapIntensity={lightMapIntensity}
-        metalness={0.02}
-        roughness={0.92}
+        maps={wallMaterialMaps}
+        patchConfig={faceMaterialPatchConfig}
       />
-      <meshStandardMaterial
-        {...wallMaterialMaps}
+      <WallFaceMaterial
         attach="material-4"
-        bumpScale={0.05}
         lightMap={bakedLightmapsEnabled ? lightmapTextures.pz : undefined}
         lightMapIntensity={lightMapIntensity}
-        metalness={0.02}
-        roughness={0.92}
+        maps={wallMaterialMaps}
+        patchConfig={faceMaterialPatchConfig}
       />
-      <meshStandardMaterial
-        {...wallMaterialMaps}
+      <WallFaceMaterial
         attach="material-5"
-        bumpScale={0.05}
         lightMap={bakedLightmapsEnabled ? lightmapTextures.nz : undefined}
         lightMapIntensity={lightMapIntensity}
-        metalness={0.02}
-        roughness={0.92}
+        maps={wallMaterialMaps}
+        patchConfig={faceMaterialPatchConfig}
       />
     </mesh>
   )
@@ -2595,31 +2783,31 @@ function ExposureEffectPrimitive({
 
 function TorchLensFlareEffectPrimitive({
   intensity,
-  mazeLight,
+  mazeLights,
   torchCandelaMultiplier
 }: {
   intensity: number
-  mazeLight: MazeLayout['lights'][number]
+  mazeLights: MazeLayout['lights']
   torchCandelaMultiplier: number
 }) {
   const camera = useThree((state) => state.camera)
   const raycaster = useThree((state) => state.raycaster)
   const scene = useThree((state) => state.scene)
-  const viewport = useThree((state) => state.viewport)
-  const lensPosition = useMemo(
+  const size = useThree((state) => state.size)
+  const lensPositions = useMemo(
     () =>
-      new Vector3(
-        mazeLight.torchPosition.x,
-        mazeLight.torchPosition.y,
-        mazeLight.torchPosition.z
+      mazeLights.map(
+        (mazeLight) =>
+          new Vector3(
+            mazeLight.torchPosition.x,
+            mazeLight.torchPosition.y,
+            mazeLight.torchPosition.z
+          )
       ),
-    [
-      mazeLight.torchPosition.x,
-      mazeLight.torchPosition.y,
-      mazeLight.torchPosition.z
-    ]
+    [mazeLights]
   )
   const projectedPosition = useMemo(() => new Vector3(), [])
+  const selectedProjectedPosition = useMemo(() => new Vector3(), [])
   const raycasterPosition = useMemo(() => new Vector2(), [])
   const lensRaycasterMask = useMemo(
     () => ((1 << 0) | (1 << TORCH_BILLBOARD_LAYER)),
@@ -2643,12 +2831,12 @@ function TorchLensFlareEffectPrimitive({
         lensDirtTexture: null,
         lensPosition: new Vector3(),
         opacity: 1,
-        screenRes: new Vector2(viewport.width, viewport.height),
+        screenRes: new Vector2(size.width, size.height),
         secondaryGhosts: true,
         starBurst: false,
         starPoints: 6
       }),
-    [viewport.height, viewport.width]
+    [size.height, size.width]
   )
 
   useFrame((_, delta) => {
@@ -2674,16 +2862,40 @@ function TorchLensFlareEffectPrimitive({
       return
     }
 
-    screenResUniform.value.set(viewport.width, viewport.height)
-    projectedPosition.copy(lensPosition).project(camera)
+    screenResUniform.value.set(size.width, size.height)
+    let bestLensScore = Number.POSITIVE_INFINITY
 
-    if (projectedPosition.z >= 1) {
-      opacityUniform.value = 1
+    for (const lensPosition of lensPositions) {
+      projectedPosition.copy(lensPosition).project(camera)
+
+      if (
+        projectedPosition.z >= 1 ||
+        projectedPosition.z <= -1 ||
+        Math.abs(projectedPosition.x) > 1.15 ||
+        Math.abs(projectedPosition.y) > 1.15
+      ) {
+        continue
+      }
+
+      const lensScore =
+        (projectedPosition.x * projectedPosition.x) +
+        (projectedPosition.y * projectedPosition.y)
+
+      if (lensScore >= bestLensScore) {
+        continue
+      }
+
+      bestLensScore = lensScore
+      selectedProjectedPosition.copy(projectedPosition)
+    }
+
+    if (!Number.isFinite(bestLensScore)) {
+      opacityUniform.value = MathUtils.damp(opacityUniform.value, 1, 18, delta)
       return
     }
 
-    lensUniform.value.set(projectedPosition.x, projectedPosition.y)
-    raycasterPosition.set(projectedPosition.x, projectedPosition.y)
+    lensUniform.value.set(selectedProjectedPosition.x, selectedProjectedPosition.y)
+    raycasterPosition.set(selectedProjectedPosition.x, selectedProjectedPosition.y)
     const previousRaycasterMask = raycaster.layers.mask
     raycaster.layers.mask = lensRaycasterMask
     raycaster.setFromCamera(raycasterPosition, camera)
@@ -2747,16 +2959,14 @@ function TorchLensFlare({
   layout: MazeLayout
   torchCandelaMultiplier: number
 }) {
-  const activeLight = layout.lights[0] ?? null
-
-  if (!activeLight) {
+  if (layout.lights.length === 0) {
     return null
   }
 
   return (
     <TorchLensFlareEffectPrimitive
       intensity={intensity}
-      mazeLight={activeLight}
+      mazeLights={layout.lights}
       torchCandelaMultiplier={torchCandelaMultiplier}
     />
   )

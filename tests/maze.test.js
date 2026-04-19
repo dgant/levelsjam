@@ -30,7 +30,7 @@ test('generates valid mazes under 100ms', () => {
   assert.equal(maze.height, MAZE_HEIGHT)
   assert.ok(maze.lightmap)
   assert.equal(typeof maze.lightmap.dataBase64, 'string')
-  assert.equal(maze.lightmap.version, 12)
+  assert.equal(maze.lightmap.version, 13)
   assert.deepEqual(
     maze.lightmap.groundBounds,
     getMazeFloorLightmapBounds(maze)
@@ -222,6 +222,35 @@ test('keeps mid-wall torch lighting visible below the sconce top', () => {
   assert.ok(
     midWallAverage > 0,
     `expected visible baked torch contribution below the sconce top, got row-72 average ${midWallAverage}`
+  )
+})
+
+test('stores baked wall ambient in the lightmap ambient channel', () => {
+  const wallMaze = {
+    height: 1,
+    id: 'wall-ambient-test',
+    lights: [{ cell: { x: 0, y: 0 }, side: 'north' }],
+    openEdges: [],
+    opening: { cell: { x: 0, y: 0 }, side: 'south' },
+    width: 1
+  }
+  const lightmap = bakeMazeLightmap(wallMaze)
+  const bytes = Buffer.from(lightmap.dataBase64, 'base64')
+  const rect = lightmap.wallRects['0,0:north:exterior'].pz
+  let sum = 0
+
+  for (let row = 0; row < rect.height; row += 1) {
+    for (let column = 0; column < rect.width; column += 1) {
+      const atlasOffset =
+        ((((rect.y + row) * lightmap.atlasWidth) + rect.x + column) * 3)
+
+      sum += bytes[atlasOffset + 1]
+    }
+  }
+
+  assert.ok(
+    sum > 0,
+    'expected the wall-face ambient lightmap channel to contain baked environment contribution'
   )
 })
 

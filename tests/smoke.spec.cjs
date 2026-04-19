@@ -608,6 +608,26 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   const zeroLensFlareRegion = await screenshotCanvasRegion(page, canvas, 220, 160, 0.72, 0.52)
   expect(measureDifference(zeroLensFlareBaseline, zeroLensFlareRegion)).toBeLessThan(0.02)
   await setCheckboxByLabelText(page, 'Lens Flares', false)
+  await page.evaluate(() => {
+    window.__levelsjamDebug.setDebugVisible('torch-billboard', 0, true)
+  })
+  await page.evaluate((position) => {
+    const [x, y, z] = position
+    window.__levelsjamDebug.isolateDebugRole('torch-billboard', 0)
+    window.__levelsjamDebug.setView([x - 1.0, y, z], [x, y, z])
+  }, debugTorchPosition)
+  await page.waitForTimeout(300)
+  const isolatedLensFlareOff = await screenshotCanvasRegion(page, canvas, 220, 160, 0.5, 0.5)
+  await setCheckboxByLabelText(page, 'Lens Flares', true)
+  await setSlider(page, 'Lens Flares Intensity', 0.01)
+  await page.waitForTimeout(300)
+  const isolatedLensFlareOn = await screenshotCanvasRegion(page, canvas, 220, 160, 0.5, 0.5)
+  expect(measureDifference(isolatedLensFlareOff, isolatedLensFlareOn)).toBeGreaterThan(0.02)
+  await setCheckboxByLabelText(page, 'Lens Flares', false)
+  await page.evaluate(() => {
+    window.__levelsjamDebug.clearDebugIsolation()
+  })
+  await page.waitForTimeout(200)
 
   await page.evaluate(() => {
     for (let index = 0; index < 32; index += 1) {
