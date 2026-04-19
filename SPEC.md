@@ -72,8 +72,9 @@
 - The current scene does not include realtime torch flicker.
 - The current scene does not include realtime torch point lights.
 - Reflection probe captures include temporary shadow-casting torch lights so captured specular reflections can include torch-lit shadowing.
-- Reflection probe captures wait until the opaque maze walls, floor patch, and sconces are present before baking.
+- Reflection probe captures wait until every expected opaque maze wall, baked floor patch, and sconce is present with its capture-ready material state before baking.
 - Reflection probe captures include the visible static maze geometry and its baked lighting instead of collapsing to only the HDRI and temporary torch emitters.
+- Reflection probe debug visualization displays the raw captured probe contents rather than a chrome proxy interpretation of the processed environment map.
 - The top of each wall sconce aligns to the bottom of its torch billboard by default so the flame billboard does not appear to float above the fixture.
 - Screen-space ambient occlusion controls visibly affect the scene when enabled.
 - Lens flares, SSR, and volumetric fog remain visually stable as their intensity controls increase and must not black out the scene.
@@ -123,7 +124,9 @@
 - The Bloom kernel-size control updates the configured bloom kernel preset.
 - The debug panel exposes a checkbox that disables baked maze lightmaps while leaving the underlying maze geometry visible.
 - The debug panel exposes a checkbox that disables local maze reflection captures while leaving the global HDRI environment active.
+- The debug panel exposes a checkbox that enables or disables using local reflection captures as the volumetric fog's image-based-lighting source.
 - The debug panel exposes a checkbox, disabled by default, that draws a sphere at each maze reflection-probe position using that probe's captured reflection texture.
+- Double-clicking any debug-panel label resets that control to its authored default value.
 - The debug panel does not expose obsolete atmosphere or sun-direction controls.
 - The page shows an FPS counter in the top-right corner together with the current Git revision and revision timestamp.
 - The top-right overlay also shows the active maze ID.
@@ -175,6 +178,7 @@
 - Local reflection probes do not make baked lighting or image-based lighting appear to flicker as the camera moves between maze cells.
 - Local reflection probes capture the baked maze lighting state so reflected maze surfaces remain consistent with the torch-lightmap shadows.
 - Local reflection probes also capture the authored HDRI sky where it is locally visible so disabling reflection captures does not reveal a completely different sky contribution.
+- Local reflection-probe captures preserve wall and sconce occlusion of torch emitters instead of showing torches through opaque maze walls.
 - The torch billboards face the camera continuously.
 - The torch billboards animate smoothly through the flipbook loop without lighting artifacts from scene lights.
 - The torch billboards are excluded from screen-space reflections.
@@ -204,8 +208,11 @@
 - Enabling lens flares at a small nonzero value does not black out the frame.
 - Enabling lens flares with an intensity of `0` behaves as a visual no-op.
 - Lens flares apply to the set of visible torch lights rather than jumping between arbitrary lights frame to frame.
+- Lens-flare bokeh and ghosts remain translucent and additive rather than appearing as opaque black or opaque solid sprites.
 - Increasing or decreasing volumetric fog or smoke parameters produces a visible corresponding change in the full-scene fog volume.
 - Enabling volumetric fog with an intensity of `0` behaves as a visual no-op.
+- Volumetric fog samples image-based lighting from the nearest available local reflection probes inside the maze and falls back to the authored HDRI outside probe coverage.
+- Disabling probe-fed volumetric fog IBL reverts the fog volume to HDRI-only lighting without disabling reflection captures for the rest of the scene.
 - Enabling Depth of Field with a `0` bokeh scale behaves as a visual no-op.
 - The page does not show speculative branding captions, launcher buttons, or click-to-enter copy.
 
@@ -232,6 +239,9 @@
 - The frame rate remains stable during ordinary movement and camera motion.
 - The automated browser performance test is temporarily disabled while the static baked-lightmap torch-lighting evaluation is under way.
 - The project documents startup-time and test-duration benchmarks and treats regressions in those measurements as actionable.
+- The prepared browser smoke runner remains under 60 seconds after a prepared `build:pages`.
+- Automated test-duration enforcement fails the run when the smoke runner or unit suite exceeds its documented budget.
+- Automated test-duration measurement records a per-run timing breakdown so excessive time can be attributed to specific scripts or smoke-test phases rather than guessed.
 - Maze topology generation for one valid maze must complete in under 100 milliseconds before the later baked-lightmap step runs.
 
 ## Testing Expectations
@@ -246,6 +256,9 @@
 - The debug controls panel is checked in the browser and verified to expose the new IBL and torch controls while omitting removed atmosphere controls.
 - The automated browser performance test remains disabled until the temporary static baked-lightmap torch-lighting evaluation ends.
 - Automated browser smoke coverage verifies that the baked maze lightmap is present and contributes visible lighting.
+- Automated browser smoke coverage verifies that the volumetric-fog probe-IBL toggle changes the fog lighting path without breaking fog visibility.
+- Automated browser smoke coverage verifies that double-clicking a debug-panel label resets the associated control to its authored default.
+- Automated browser smoke coverage verifies that reflection-probe debug visualization shows captured maze walls and respects wall occlusion of torch emitters.
 - Maze-generation logic is covered by automated tests that validate every persisted maze against the maze rules.
 - Maze-generation tests delete any generated maze files that fail validation.
 - Automated tests guarantee that the repository contains at least five valid persisted maze files by generating additional mazes when required.

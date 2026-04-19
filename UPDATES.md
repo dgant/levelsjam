@@ -55,3 +55,5 @@
 - When verifying baked wall lighting in this project, use a deterministic wall-facing view and a lit-wall crop rather than a broad maze shot that can mostly measure the floor.
 - When verifying a torch-lit wall in this maze, make sure the camera is on the lit-cell side of the wall. An exterior wall's opposite face is correctly dark.
 - When a rendering regression hits a requested feature in this project, do not remove the feature to make the symptom disappear. Preserve the requested behavior and repair the implementation path instead.
+- When enforcing the smoke-test duration budget in this repository, keep the benchmark harness writing `logs/latest-test-benchmark.json` and `logs/latest-smoke-profile.json` and cut the largest measured phase first instead of guessing where the time went.
+- When baking one-shot local reflection probes in this scene, require the full expected set of baked ground patches, maze walls, and sconces to be ready before capturing. Waiting for only one ready mesh can permanently bake missing occluders into the probes.

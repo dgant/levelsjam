@@ -65,6 +65,7 @@ function needsMazeRewrite(maze) {
 
 export async function ensureMazeFiles({
   directory,
+  mazeFactory = generateMaze,
   targetCount = MAZE_TARGET_COUNT
 }) {
   fs.mkdirSync(directory, { recursive: true })
@@ -105,10 +106,15 @@ export async function ensureMazeFiles({
   }
 
   let nextIndex = getNextMazeIndex(getMazeFiles(directory))
+  let generationAttempt = 0
 
   while (validMazes.length < targetCount) {
-    const seed = Date.now() + (nextIndex * 97)
-    const maze = generateMaze(seed)
+    const seed =
+      Date.now() +
+      (nextIndex * 97) +
+      (generationAttempt * 8191)
+    generationAttempt += 1
+    const maze = mazeFactory(seed)
     const validation = validateMaze(maze)
 
     if (!validation.valid || maze.generationMs > 100) {

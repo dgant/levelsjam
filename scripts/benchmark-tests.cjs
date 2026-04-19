@@ -1,3 +1,4 @@
+const fs = require('node:fs')
 const path = require('node:path')
 const net = require('node:net')
 const { spawnSync } = require('node:child_process')
@@ -9,7 +10,8 @@ const thresholdsMs = {
   'test:unit': 20_000,
   'test:smoke:runner': 60_000
 }
-const requiredScripts = ['test:perf:runner']
+const smokeProfilePath = path.join(rootDir, 'logs', 'latest-smoke-profile.json')
+const benchmarkReportPath = path.join(rootDir, 'logs', 'latest-test-benchmark.json')
 
 function usesPlaywrightWebServer(scriptName) {
   return scriptName.includes('smoke') || scriptName.includes('perf')
@@ -19,28 +21,31 @@ function formatMilliseconds(value) {
   return `${value.toFixed(0)}ms`
 }
 
+function readJsonIfPresent(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return null
+  }
+
+  return JSON.parse(fs.readFileSync(filePath, 'utf8'))
+}
+
 function runTimedScript(scriptName) {
   const start = process.hrtime.bigint()
   const result = spawnSync(npmCommand, ['run', scriptName], {
     cwd: rootDir,
-    stdio: 'inherit'
+    stdio: 'inherit',
+    env: { ...process.env }
   })
   const durationMs = Number(process.hrtime.bigint() - start) / 1e6
 
-  if (result.status !== 0) {
-    throw new Error(`${scriptName} failed after ${formatMilliseconds(durationMs)}`)
-  }
-
-  return durationMs
-}
-
-function assertThreshold(scriptName, durationMs) {
-  const thresholdMs = thresholdsMs[scriptName]
-
-  console.log(`${scriptName}: ${formatMilliseconds(durationMs)} (threshold ${formatMilliseconds(thresholdMs)})`)
-
-  if (durationMs > thresholdMs) {
-    throw new Error(`${scriptName} exceeded its threshold`)
+  return {
+    durationMs,
+    error:
+      result.status === 0
+        ? null
+        : `${scriptName} exited with code ${result.status} after ${formatMilliseconds(durationMs)}`,
+    exitCode: result.status ?? 1,
+    scriptName
   }
 }
 
@@ -74,16 +79,25 @@ async function waitForPortToBeFree(port, timeoutMs) {
   throw new Error(`Port ${port} remained busy for ${formatMilliseconds(timeoutMs)}`)
 }
 
+function writeBenchmarkReport(report) {
+  fs.mkdirSync(path.dirname(benchmarkReportPath), { recursive: true })
+  fs.writeFileSync(benchmarkReportPath, JSON.stringify(report, null, 2))
+}
+
 async function main() {
+  const report = {
+    generatedAt: new Date().toISOString(),
+    results: []
+  }
+  const failures = []
+
   console.log('Preparing the published build once before the smoke benchmark')
-  runTimedScript('build:pages')
-
-  for (const scriptName of requiredScripts) {
-    if (usesPlaywrightWebServer(scriptName)) {
-      await waitForPortToBeFree(smokePort, 10_000)
-    }
-
-    runTimedScript(scriptName)
+  const buildResult = runTimedScript('build:pages')
+  report.buildPages = buildResult
+  if (buildResult.error) {
+    failures.push(buildResult.error)
+    writeBenchmarkReport(report)
+    throw new Error(buildResult.error)
   }
 
   for (const scriptName of Object.keys(thresholdsMs)) {
@@ -91,8 +105,50 @@ async function main() {
       await waitForPortToBeFree(smokePort, 10_000)
     }
 
-    const durationMs = runTimedScript(scriptName)
-    assertThreshold(scriptName, durationMs)
+    const result = runTimedScript(scriptName)
+    const thresholdMs = thresholdsMs[scriptName]
+    const overThreshold = result.durationMs > thresholdMs
+    const smokeProfile =
+      scriptName === 'test:smoke:runner'
+        ? readJsonIfPresent(smokeProfilePath)
+        : null
+
+    const record = {
+      ...result,
+      overThreshold,
+      smokeProfile,
+      thresholdMs
+    }
+
+    report.results.push(record)
+    console.log(
+      `${scriptName}: ${formatMilliseconds(result.durationMs)} (threshold ${formatMilliseconds(thresholdMs)})`
+    )
+
+    if (smokeProfile?.phases?.length) {
+      console.log('Top smoke phases:')
+      for (const phase of smokeProfile.phases.slice(0, 5)) {
+        console.log(`- ${formatMilliseconds(phase.durationMs)} ${phase.label}`)
+      }
+      console.log(
+        `Smoke screenshots: ${smokeProfile.screenshotCount} in ${formatMilliseconds(smokeProfile.screenshotMs)}`
+      )
+    }
+
+    if (result.error) {
+      failures.push(result.error)
+      continue
+    }
+
+    if (overThreshold) {
+      failures.push(`${scriptName} exceeded its threshold`)
+    }
+  }
+
+  writeBenchmarkReport(report)
+
+  if (failures.length > 0) {
+    throw new Error(failures.join('\n'))
   }
 }
 

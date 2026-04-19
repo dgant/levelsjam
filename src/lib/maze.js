@@ -505,7 +505,10 @@ function hasValidMazeLightmap(maze) {
   })
 }
 
-export function validateMaze(maze) {
+export function validateMaze(maze, options = {}) {
+  const {
+    requireLightmap = true
+  } = options
   const core = validateMazeCore(maze)
   if (!core.valid) {
     return core
@@ -527,9 +530,9 @@ export function validateMaze(maze) {
   }
 
   const lightValidation = validateMazeLights(maze)
-  const lightmapErrors = hasValidMazeLightmap(maze)
-    ? []
-    : ['Maze must include a valid baked lightmap']
+  const lightmapErrors = requireLightmap && !hasValidMazeLightmap(maze)
+    ? ['Maze must include a valid baked lightmap']
+    : []
 
   return {
     errors: [...minimalityErrors, ...lightValidation.errors, ...lightmapErrors],
@@ -575,7 +578,10 @@ function generateMazeLights(maze, random) {
   return lights
 }
 
-export function generateMaze(seed = Date.now()) {
+export function generateMaze(seed = Date.now(), options = {}) {
+  const {
+    bakeLightmap = true
+  } = options
   const startTime = performance.now()
   const random = createRandom(seed)
   const transforms = [
@@ -626,7 +632,9 @@ export function generateMaze(seed = Date.now()) {
 
   maze.lights = generateMazeLights(maze, random)
   maze.generationMs = performance.now() - startTime
-  maze.lightmap = bakeMazeLightmap(maze)
+  if (bakeLightmap) {
+    maze.lightmap = bakeMazeLightmap(maze)
+  }
   maze.totalGenerationMs = performance.now() - startTime
 
   return maze
@@ -1466,6 +1474,8 @@ export function bakeMazeLightmap(
 export function getMazeTorchPlacements(maze, sconceRadius) {
   return maze.lights.map((light, index) => {
     const descriptor = getWallDescriptorFromCellSide(maze, light.cell, light.side)
+    const torchBillboardHalfSize =
+      ((MAZE_WALL_THICKNESS / 2) + sconceRadius) / 2
     const sconcePosition = {
       x:
         descriptor.center.x +
@@ -1477,7 +1487,7 @@ export function getMazeTorchPlacements(maze, sconceRadius) {
     }
     const torchPosition = {
       x: sconcePosition.x,
-      y: sconcePosition.y + 0.25,
+      y: sconcePosition.y + torchBillboardHalfSize,
       z: sconcePosition.z
     }
 

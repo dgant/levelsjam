@@ -113,11 +113,12 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the loaded scene uses one of the persisted maze files instead of the previous random wall field.
 - Verify the repository contains at least five valid maze files, that each maze file includes baked lightmap data, and that maze topology generation remains under 100ms before the later bake step.
 - Benchmark startup with `npm run bench:startup` and test duration with `npm run bench:tests` before handoff.
+- Inspect `logs/latest-test-benchmark.json` and `logs/latest-smoke-profile.json` after `npm run bench:tests` so the slowest scripts and smoke phases are identified from measurements rather than guessed.
 - Treat duration regressions as blocking issues.
 - Treat the temporary `test:perf` disablement as intentional until the static baked-lightmap torch-lighting evaluation ends.
 - Keep `npm run test:unit` under 20 seconds.
 - Keep the prepared smoke runner `npm run test:smoke:runner` under 1 minute after a single `npm run build:pages`.
-- Latest measured benchmark on April 18, 2026: `npm run bench:startup` on the dev server reached the first rendered frame in about `4.59s`; `npm run build` took about `6.2s`; `npm run test:unit` took about `13.56m` and still badly missed the `20s` target; `npm run test:perf:runner` remains intentionally skipped during the static baked-lightmap evaluation; `npm run bench:tests` currently aborts on the unit-test threshold failure before reporting smoke timing; and a direct prepared `npm run test:smoke:runner` took about `2.8m` after a prepared `build:pages`, which still misses the `1m` target.
+- Latest measured benchmark on April 19, 2026: `npm run build` took about `5.9s`; `npm run build:pages` took about `8.4s`; `npm run test:unit` took about `7.5s`; `npm run test:smoke:runner` took about `59.1s` after a prepared `build:pages`; the current smoke hot spots are `startup` at about `34.0s`, `volumetric-fog` at about `10.9s`, `debug-controls` at about `6.4s`, and `reflection-captures` at about `2.8s`; and `npm run test:perf:runner` remains intentionally skipped during the static baked-lightmap evaluation.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.
