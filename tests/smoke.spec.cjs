@@ -330,7 +330,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect
       .poll(
         async () => page.evaluate(
-          () => window.__levelsjamDebug.getReflectionProbeState()?.probeMetrics?.[24] ?? null
+          () => window.__levelsjamDebug.getReflectionProbeState()?.probeRawMetrics?.[24] ?? null
         ),
         {
           timeout: 5_000,
@@ -360,7 +360,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         wall: expect.any(Number)
       })
     const probePreviewDetail = await page.evaluate(
-      () => window.__levelsjamDebug.getReflectionProbeState()?.probeMetrics?.[24] ?? null
+      () => window.__levelsjamDebug.getReflectionProbeState()?.probeRawMetrics?.[24] ?? null
     )
     const probeCaptureCounts = await page.evaluate(
       () => window.__levelsjamDebug.getReflectionProbeState()?.probeCaptureCounts?.[24] ?? null

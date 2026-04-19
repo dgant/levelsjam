@@ -22,7 +22,6 @@ import {
   EquirectangularReflectionMapping,
   Euler,
   Float32BufferAttribute,
-  HalfFloatType,
   LinearFilter,
   LinearMipmapLinearFilter,
   MathUtils,
@@ -394,6 +393,34 @@ type BenchmarkResult = {
   maxFrameMs: number
   minFrameMs: number
   samples: number
+}
+
+type ProbeMetric = {
+  darkest: number
+  faceCenterColors: Array<{
+    b: number
+    g: number
+    r: number
+  }>
+  faceGridColors: Array<Array<{
+    b: number
+    g: number
+    r: number
+    x: number
+    y: number
+  }>>
+  luminanceStdDev: number
+  nonWhiteFraction: number
+  warmFraction: number
+}
+
+type ProbeTextureSummary = {
+  colorSpace: string | null
+  generateMipmaps: boolean
+  magFilter: number
+  mapping: number
+  minFilter: number
+  type: number
 }
 
 type MazeLayout = ReturnType<typeof getRandomMazeLayout>
@@ -1836,6 +1863,9 @@ function EnvironmentLighting({
       captureSceneState,
       probeCaptureCounts: [],
       probeMetrics: [],
+      probeRawMetrics: [],
+      probeRawReadbackErrors: [],
+      probeRawTextureSummaries: [],
       probeCount: layout.reflectionProbes.length,
       ready: false
     }
@@ -1929,6 +1959,9 @@ function EnvironmentLighting({
       captureSceneState: getReflectionCaptureSceneState(scene, layout),
       probeCaptureCounts: [],
       probeMetrics: [],
+      probeRawMetrics: [],
+      probeRawReadbackErrors: [],
+      probeRawTextureSummaries: [],
       probeCount: layout.reflectionProbes.length,
       ready: false
     }
@@ -1942,24 +1975,10 @@ function EnvironmentLighting({
       wall: number
     }> = []
     let nextProbeAmbientColors: Color[] = []
-    let nextProbeMetrics: Array<{
-      darkest: number
-      faceCenterColors: Array<{
-        b: number
-        g: number
-        r: number
-      }>
-      faceGridColors: Array<Array<{
-        b: number
-        g: number
-        r: number
-        x: number
-        y: number
-      }>>
-      luminanceStdDev: number
-      nonWhiteFraction: number
-      warmFraction: number
-    }> = []
+    let nextProbeMetrics: ProbeMetric[] = []
+    let nextProbeRawMetrics: Array<ProbeMetric | null> = []
+    let nextProbeRawReadbackErrors: Array<string | null> = []
+    let nextProbeRawTextureSummaries: ProbeTextureSummary[] = []
     let cancelled = false
     let bakeHandle = 0
     const attemptBake = () => {
@@ -1973,6 +1992,9 @@ function EnvironmentLighting({
         captureSceneState,
         probeCaptureCounts: [],
         probeMetrics: [],
+        probeRawMetrics: [],
+        probeRawReadbackErrors: [],
+        probeRawTextureSummaries: [],
         probeCount: layout.reflectionProbes.length,
         ready: false
       }
@@ -2086,7 +2108,7 @@ function EnvironmentLighting({
       for (const probe of layout.reflectionProbes) {
         const cubeRenderTarget = new WebGLCubeRenderTarget(
           REFLECTION_PROBE_RENDER_SIZE,
-          { type: HalfFloatType }
+          { type: UnsignedByteType }
         )
         const ambientCubeRenderTarget = new WebGLCubeRenderTarget(
           REFLECTION_PROBE_AMBIENT_RENDER_SIZE,
@@ -2154,6 +2176,18 @@ function EnvironmentLighting({
         nextRawTargets.push(cubeRenderTarget)
         nextProbeCaptureCounts.push({ ...captureCounts })
         const probeDebugStats = computeCubeRenderTargetDebugStats(gl, ambientCubeRenderTarget)
+        let rawProbeDebugStats: ProbeMetric | null = null
+        let rawProbeReadbackError: string | null = null
+
+        try {
+          rawProbeDebugStats = computeCubeRenderTargetDebugStats(gl, cubeRenderTarget)
+        } catch (error) {
+          rawProbeReadbackError =
+            error instanceof Error
+              ? error.message
+              : String(error)
+        }
+
         nextProbeAmbientColors.push(probeDebugStats.averageColor)
         nextProbeMetrics.push({
           darkest: probeDebugStats.darkest,
@@ -2164,6 +2198,32 @@ function EnvironmentLighting({
           luminanceStdDev: probeDebugStats.luminanceStdDev,
           nonWhiteFraction: probeDebugStats.nonWhiteFraction,
           warmFraction: probeDebugStats.warmFraction
+        })
+        nextProbeRawMetrics.push(
+          rawProbeDebugStats
+            ? {
+                darkest: rawProbeDebugStats.darkest,
+                faceCenterColors: rawProbeDebugStats.faceCenterColors.map((color) => ({ ...color })),
+                faceGridColors: rawProbeDebugStats.faceGridColors.map((face) =>
+                  face.map((color) => ({ ...color }))
+                ),
+                luminanceStdDev: rawProbeDebugStats.luminanceStdDev,
+                nonWhiteFraction: rawProbeDebugStats.nonWhiteFraction,
+                warmFraction: rawProbeDebugStats.warmFraction
+              }
+            : null
+        )
+        nextProbeRawReadbackErrors.push(rawProbeReadbackError)
+        nextProbeRawTextureSummaries.push({
+          colorSpace:
+            typeof cubeRenderTarget.texture.colorSpace === 'string'
+              ? cubeRenderTarget.texture.colorSpace
+              : null,
+          generateMipmaps: cubeRenderTarget.texture.generateMipmaps,
+          magFilter: cubeRenderTarget.texture.magFilter,
+          mapping: cubeRenderTarget.texture.mapping,
+          minFilter: cubeRenderTarget.texture.minFilter,
+          type: cubeRenderTarget.texture.type
         })
         ambientCubeRenderTarget.dispose()
       }
@@ -2179,7 +2239,7 @@ function EnvironmentLighting({
           : [entry.mesh.material]
 
         for (const material of activeMaterials) {
-          ;(material as ThreeMeshStandardMaterial).dispose()
+          material.dispose()
         }
         entry.mesh.material = entry.material
       }
@@ -2211,6 +2271,13 @@ function EnvironmentLighting({
         captureSceneState: getReflectionCaptureSceneState(scene, layout),
         probeCaptureCounts: nextProbeCaptureCounts.map((counts) => ({ ...counts })),
         probeMetrics: nextProbeMetrics.map((metric) => ({ ...metric })),
+        probeRawMetrics: nextProbeRawMetrics.map((metric) => (
+          metric
+            ? { ...metric }
+            : null
+        )),
+        probeRawReadbackErrors: [...nextProbeRawReadbackErrors],
+        probeRawTextureSummaries: nextProbeRawTextureSummaries.map((summary) => ({ ...summary })),
         probeCount: layout.reflectionProbes.length,
         ready: nextTargets.length === layout.reflectionProbes.length
       }
@@ -2243,6 +2310,9 @@ function EnvironmentLighting({
         captureSceneState: getReflectionCaptureSceneState(scene, layout),
         probeCaptureCounts: [],
         probeMetrics: [],
+        probeRawMetrics: [],
+        probeRawReadbackErrors: [],
+        probeRawTextureSummaries: [],
         probeCount: layout.reflectionProbes.length,
         ready: false
       }
@@ -4205,24 +4275,10 @@ function FlightRig({
             sconce: number
             wall: number
           }>
-          probeMetrics?: Array<{
-            darkest: number
-            faceCenterColors: Array<{
-              b: number
-              g: number
-              r: number
-            }>
-            faceGridColors: Array<Array<{
-              b: number
-              g: number
-              r: number
-              x: number
-              y: number
-            }>>
-            luminanceStdDev: number
-            nonWhiteFraction: number
-            warmFraction: number
-          }>
+          probeMetrics?: ProbeMetric[]
+          probeRawMetrics?: Array<ProbeMetric | null>
+          probeRawReadbackErrors?: Array<string | null>
+          probeRawTextureSummaries?: ProbeTextureSummary[]
           probeCount: number
           ready: boolean
         } | null

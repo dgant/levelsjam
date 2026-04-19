@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-04-19T12:47:07.696Z",
+  "generatedAt": "2026-04-19T16:43:50.819Z",
   "results": [
     {
-      "durationMs": 7491.7129,
+      "durationMs": 7507.6575,
       "error": null,
       "exitCode": 0,
       "scriptName": "test:unit",
@@ -11,7 +11,7 @@
       "thresholdMs": 20000
     },
     {
-      "durationMs": 56498.1812,
+      "durationMs": 53234.2466,
       "error": null,
       "exitCode": 0,
       "scriptName": "test:smoke:runner",
@@ -19,35 +19,35 @@
       "smokeProfile": {
         "phases": [
           {
-            "durationMs": 33166,
+            "durationMs": 29317,
             "label": "startup"
           },
           {
-            "durationMs": 8090,
+            "durationMs": 8121,
             "label": "volumetric-fog"
           },
           {
-            "durationMs": 6837,
+            "durationMs": 6904,
             "label": "debug-controls"
           },
           {
-            "durationMs": 3494,
+            "durationMs": 3879,
             "label": "reflection-captures"
           }
         ],
         "screenshotCount": 1,
-        "screenshotMs": 2753,
-        "startedAt": "2026-04-19T12:47:25.634Z",
-        "totalRunMs": 54359,
-        "finishedAt": "2026-04-19T12:48:19.994Z",
-        "totalPhaseMs": 51587,
-        "wroteAt": "2026-04-19T12:48:19.994Z"
+        "screenshotMs": 2713,
+        "startedAt": "2026-04-19T16:44:09.348Z",
+        "totalRunMs": 50953,
+        "finishedAt": "2026-04-19T16:45:00.302Z",
+        "totalPhaseMs": 48221,
+        "wroteAt": "2026-04-19T16:45:00.302Z"
       },
       "thresholdMs": 60000
     }
   ],
   "buildPages": {
-    "durationMs": 8462.21,
+    "durationMs": 8923.8375,
     "error": null,
     "exitCode": 0,
     "scriptName": "build:pages"
