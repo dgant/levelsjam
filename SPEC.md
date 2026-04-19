@@ -76,6 +76,7 @@
 - Reflection probe captures include the visible static maze geometry and its baked lighting instead of collapsing to only the HDRI and temporary torch emitters.
 - Reflection probe debug visualization displays the raw captured probe cubemap contents directly on the debug spheres so a human can inspect what each reflection or IBL source actually contains.
 - Reflection probe debug visualization uses a fixed neutral preview tone map rather than the gameplay exposure control so bright captured sources do not wash out the diagnostic view.
+- Reflection probe debugging exposes an on-demand geometry-only cubemap capture against a black background so capture-stage maze visibility can be verified independently from later probe filtering or beauty-pass shading.
 - The top of each wall sconce aligns to the bottom of its torch billboard by default so the flame billboard does not appear to float above the fixture.
 - Screen-space ambient occlusion controls visibly affect the scene when enabled.
 - Lens flares, SSR, and volumetric fog remain visually stable as their intensity controls increase and must not black out the scene.
@@ -262,6 +263,7 @@
 - Automated browser smoke coverage verifies that the volumetric-fog probe-IBL toggle changes the fog lighting path without breaking fog visibility.
 - Automated browser smoke coverage verifies that double-clicking a debug-panel label resets the associated control to its authored default.
 - Automated browser smoke coverage verifies that reflection-probe debug visualization shows captured maze walls and respects wall occlusion of torch emitters.
+- Automated browser smoke coverage verifies that a geometry-only reflection-probe capture contains maze geometry, so the cube-camera capture path itself is proven before beauty-pass probe behavior is judged.
 - Maze-generation logic is covered by automated tests that validate every persisted maze against the maze rules.
 - Maze-generation tests delete any generated maze files that fail validation.
 - Automated tests guarantee that the repository contains at least five valid persisted maze files by generating additional mazes when required.

@@ -33,6 +33,7 @@ import {
   LinearToneMapping,
   Group,
   Mesh,
+  MeshBasicMaterial,
   MeshDepthMaterial,
   MeshPhysicalMaterial as ThreeMeshPhysicalMaterial,
   MeshStandardMaterial as ThreeMeshStandardMaterial,
@@ -65,7 +66,6 @@ import {
   WebGLCubeRenderTarget
 } from 'three'
 import {
-  startTransition,
   Suspense,
   useEffect,
   useMemo,
@@ -1336,11 +1336,87 @@ function useProbeBlendMaterialShader(
   }, [materialRef, patchConfig, probeBlend])
 }
 
+function isTextureRenderable(texture: Texture | null | undefined) {
+  if (!texture) {
+    return false
+  }
+
+  const renderTargetTexture = texture as Texture & {
+    isRenderTargetTexture?: boolean
+    source?: {
+      data?: unknown
+    }
+  }
+
+  if (renderTargetTexture.isRenderTargetTexture) {
+    return true
+  }
+
+  const image = texture.image ?? renderTargetTexture.source?.data
+
+  if (!image) {
+    return false
+  }
+
+  if (
+    typeof HTMLImageElement !== 'undefined' &&
+    image instanceof HTMLImageElement
+  ) {
+    return image.complete && image.naturalWidth > 0 && image.naturalHeight > 0
+  }
+
+  if (
+    typeof HTMLCanvasElement !== 'undefined' &&
+    image instanceof HTMLCanvasElement
+  ) {
+    return image.width > 0 && image.height > 0
+  }
+
+  if (
+    typeof ImageBitmap !== 'undefined' &&
+    image instanceof ImageBitmap
+  ) {
+    return image.width > 0 && image.height > 0
+  }
+
+  if (
+    typeof OffscreenCanvas !== 'undefined' &&
+    image instanceof OffscreenCanvas
+  ) {
+    return image.width > 0 && image.height > 0
+  }
+
+  if (ArrayBuffer.isView(image)) {
+    return image.byteLength > 0
+  }
+
+  if (
+    typeof image === 'object' &&
+    image !== null &&
+    'width' in image &&
+    'height' in image
+  ) {
+    return (
+      typeof image.width === 'number' &&
+      typeof image.height === 'number' &&
+      image.width > 0 &&
+      image.height > 0
+    )
+  }
+
+  return true
+}
+
 function isMeshMaterialReady(
   mesh: Mesh,
   requirements: {
+    aoMap?: boolean
+    bumpMap?: boolean
     lightMap?: boolean
     map?: boolean
+    metalnessMap?: boolean
+    normalMap?: boolean
+    roughnessMap?: boolean
   }
 ) {
   const materials = (
@@ -1348,15 +1424,35 @@ function isMeshMaterialReady(
       ? mesh.material
       : [mesh.material]
   ) as Array<{
+    aoMap?: Texture | null
+    bumpMap?: Texture | null
     lightMap?: Texture | null
     map?: Texture | null
+    metalnessMap?: Texture | null
+    normalMap?: Texture | null
+    roughnessMap?: Texture | null
   }>
 
-  return materials.some((material) => {
-    if (requirements.map && !material.map) {
+  return materials.every((material) => {
+    if (requirements.map && !isTextureRenderable(material.map)) {
       return false
     }
-    if (requirements.lightMap && !material.lightMap) {
+    if (requirements.lightMap && !isTextureRenderable(material.lightMap)) {
+      return false
+    }
+    if (requirements.aoMap && !isTextureRenderable(material.aoMap)) {
+      return false
+    }
+    if (requirements.bumpMap && !isTextureRenderable(material.bumpMap)) {
+      return false
+    }
+    if (requirements.metalnessMap && !isTextureRenderable(material.metalnessMap)) {
+      return false
+    }
+    if (requirements.normalMap && !isTextureRenderable(material.normalMap)) {
+      return false
+    }
+    if (requirements.roughnessMap && !isTextureRenderable(material.roughnessMap)) {
       return false
     }
 
@@ -1380,7 +1476,14 @@ function getReflectionCaptureSceneState(scene: ThreeScene, layout: MazeLayout) {
 
     if (object.userData?.debugRole === 'maze-ground-lightmap') {
       groundPatchCount += 1
-      if (isMeshMaterialReady(object, { lightMap: true, map: true })) {
+      if (isMeshMaterialReady(object, {
+        aoMap: true,
+        bumpMap: true,
+        lightMap: true,
+        map: true,
+        normalMap: true,
+        roughnessMap: true
+      })) {
         readyGroundPatchCount += 1
       }
       return
@@ -1394,7 +1497,14 @@ function getReflectionCaptureSceneState(scene: ThreeScene, layout: MazeLayout) {
       )
     ) {
       wallCount += 1
-      if (isMeshMaterialReady(object, { lightMap: true, map: true })) {
+      if (isMeshMaterialReady(object, {
+        aoMap: true,
+        bumpMap: true,
+        lightMap: true,
+        map: true,
+        normalMap: true,
+        roughnessMap: true
+      })) {
         readyWallCount += 1
       }
       return
@@ -1402,7 +1512,13 @@ function getReflectionCaptureSceneState(scene: ThreeScene, layout: MazeLayout) {
 
     if (object.userData?.debugRole === 'sconce-body') {
       sconceCount += 1
-      if (isMeshMaterialReady(object, { map: true })) {
+      if (isMeshMaterialReady(object, {
+        bumpMap: true,
+        map: true,
+        metalnessMap: true,
+        normalMap: true,
+        roughnessMap: true
+      })) {
         readySconceCount += 1
       }
     }
@@ -3404,6 +3520,129 @@ void main() {
 }
 `
 
+const REFLECTION_PROBE_ATLAS_RAW_FRAGMENT_SHADER = `
+uniform int faceIndex;
+uniform samplerCube probeCubeMap;
+
+varying vec2 vUv;
+
+vec3 getFaceDirection(int face, vec2 uv) {
+  vec2 p = (uv * 2.0) - 1.0;
+
+  if (face == 0) {
+    return normalize(vec3(1.0, -p.y, -p.x));
+  }
+  if (face == 1) {
+    return normalize(vec3(-1.0, -p.y, p.x));
+  }
+  if (face == 2) {
+    return normalize(vec3(p.x, 1.0, p.y));
+  }
+  if (face == 3) {
+    return normalize(vec3(p.x, -1.0, -p.y));
+  }
+  if (face == 4) {
+    return normalize(vec3(p.x, -p.y, 1.0));
+  }
+
+  return normalize(vec3(-p.x, -p.y, -1.0));
+}
+
+void main() {
+  vec4 texel = textureCube(probeCubeMap, getFaceDirection(faceIndex, vUv));
+  gl_FragColor = vec4(texel.rgb, 1.0);
+  #include <colorspace_fragment>
+}
+`
+
+function captureCubeTextureAtlasDataUrls(
+  gl: WebGLRenderer,
+  probeTexture: Texture,
+  size: number,
+  options: {
+    toneMap?: boolean
+  } = {}
+) {
+  if (size <= 0) {
+    return null
+  }
+
+  const atlasScene = new ThreeScene()
+  const atlasCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1)
+  const atlasMaterial = new ShaderMaterial({
+    depthTest: false,
+    depthWrite: false,
+    fragmentShader:
+      options.toneMap === false
+        ? REFLECTION_PROBE_ATLAS_RAW_FRAGMENT_SHADER
+        : REFLECTION_PROBE_ATLAS_FRAGMENT_SHADER,
+    uniforms: {
+      faceIndex: { value: 0 },
+      probeCubeMap: { value: probeTexture }
+    },
+    vertexShader: REFLECTION_PROBE_ATLAS_VERTEX_SHADER
+  })
+  const atlasMesh = new Mesh(new PlaneGeometry(2, 2), atlasMaterial)
+  const atlasTarget = new WebGLRenderTarget(size, size, {
+    depthBuffer: false,
+    format: RGBAFormat,
+    magFilter: NearestFilter,
+    minFilter: NearestFilter,
+    stencilBuffer: false,
+    type: UnsignedByteType
+  })
+  const savedAutoClear = gl.autoClear
+  const savedTarget = gl.getRenderTarget()
+  const pixelBuffer = new Uint8Array(size * size * 4)
+  const dataUrls: string[] = []
+
+  atlasScene.add(atlasMesh)
+  gl.autoClear = true
+
+  try {
+    for (let faceIndex = 0; faceIndex < 6; faceIndex += 1) {
+      atlasMaterial.uniforms.faceIndex.value = faceIndex
+      gl.setRenderTarget(atlasTarget)
+      gl.clear(true, true, true)
+      gl.render(atlasScene, atlasCamera)
+      gl.readRenderTargetPixels(atlasTarget, 0, 0, size, size, pixelBuffer)
+
+      const canvas = document.createElement('canvas')
+      const context = canvas.getContext('2d')
+
+      if (!context) {
+        return null
+      }
+
+      canvas.width = size
+      canvas.height = size
+      const imageData = context.createImageData(size, size)
+
+      for (let row = 0; row < size; row += 1) {
+        const sourceRow = size - 1 - row
+        const sourceOffset = sourceRow * size * 4
+        const targetOffset = row * size * 4
+
+        imageData.data.set(
+          pixelBuffer.subarray(sourceOffset, sourceOffset + (size * 4)),
+          targetOffset
+        )
+      }
+
+      context.putImageData(imageData, 0, 0)
+      dataUrls.push(canvas.toDataURL('image/png'))
+    }
+  } finally {
+    gl.setRenderTarget(savedTarget)
+    gl.autoClear = savedAutoClear
+    atlasMesh.geometry.dispose()
+    atlasMaterial.dispose()
+    atlasTarget.dispose()
+  }
+
+  return dataUrls
+}
+
 function MazeWalls({
   bakedLightmapsEnabled,
   environmentTexture,
@@ -4831,6 +5070,10 @@ function Scene({
           probeIndex: number,
           size?: number
         ) => string[] | null
+        captureReflectionProbeGeometryAtlas?: (
+          probeIndex: number,
+          size?: number
+        ) => string[] | null
       }
     }
     const existing = globalWindow.__levelsjamDebug ?? {}
@@ -4999,82 +5242,75 @@ function Scene({
         return null
       }
 
-      const atlasScene = new ThreeScene()
-      const atlasCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1)
-      const atlasMaterial = new ShaderMaterial({
-        depthTest: false,
-        depthWrite: false,
-        fragmentShader: REFLECTION_PROBE_ATLAS_FRAGMENT_SHADER,
-        uniforms: {
-          faceIndex: { value: 0 },
-          probeCubeMap: { value: probeTexture }
-        },
-        vertexShader: REFLECTION_PROBE_ATLAS_VERTEX_SHADER
-      })
-      const atlasMesh = new Mesh(new PlaneGeometry(2, 2), atlasMaterial)
-      const atlasTarget = new WebGLRenderTarget(size, size, {
-        depthBuffer: false,
-        format: RGBAFormat,
-        magFilter: NearestFilter,
-        minFilter: NearestFilter,
-        stencilBuffer: false,
-        type: UnsignedByteType
-      })
-      const savedAutoClear = gl.autoClear
-      const savedTarget = gl.getRenderTarget()
-      const pixelBuffer = new Uint8Array(size * size * 4)
-      const dataUrls: string[] = []
+      return captureCubeTextureAtlasDataUrls(gl, probeTexture, size)
+    }
 
-      atlasScene.add(atlasMesh)
-      gl.autoClear = true
+    const captureReflectionProbeGeometryAtlas = (probeIndex: number, size = 128) => {
+      const probe = layout.reflectionProbes[probeIndex]
 
-      try {
-        for (let faceIndex = 0; faceIndex < 6; faceIndex += 1) {
-          atlasMaterial.uniforms.faceIndex.value = faceIndex
-          gl.setRenderTarget(atlasTarget)
-          gl.clear(true, true, true)
-          gl.render(atlasScene, atlasCamera)
-          gl.readRenderTargetPixels(atlasTarget, 0, 0, size, size, pixelBuffer)
-
-          const canvas = document.createElement('canvas')
-          const context = canvas.getContext('2d')
-
-          if (!context) {
-            return null
-          }
-
-          canvas.width = size
-          canvas.height = size
-          const imageData = context.createImageData(size, size)
-
-          for (let row = 0; row < size; row += 1) {
-            const sourceRow = size - 1 - row
-            const sourceOffset = sourceRow * size * 4
-            const targetOffset = row * size * 4
-
-            imageData.data.set(
-              pixelBuffer.subarray(sourceOffset, sourceOffset + (size * 4)),
-              targetOffset
-            )
-          }
-
-          context.putImageData(imageData, 0, 0)
-          dataUrls.push(canvas.toDataURL('image/png'))
-        }
-      } finally {
-        gl.setRenderTarget(savedTarget)
-        gl.autoClear = savedAutoClear
-        atlasMesh.geometry.dispose()
-        atlasMaterial.dispose()
-        atlasTarget.dispose()
+      if (!probe || size <= 0) {
+        return null
       }
 
-      return dataUrls
+      const hiddenObjects: Array<{ object: { visible: boolean }, visible: boolean }> = []
+      const savedBackground = scene.background
+      const savedEnvironment = scene.environment
+      const savedOverrideMaterial = scene.overrideMaterial
+      const geometryOverrideMaterial = new MeshBasicMaterial({
+        color: 'white',
+        side: DoubleSide
+      })
+      const geometryTarget = new WebGLCubeRenderTarget(size, {
+        type: UnsignedByteType
+      })
+      const geometryCamera = new CubeCamera(0.1, REFLECTION_PROBE_FAR, geometryTarget)
+
+      scene.traverse((object) => {
+        if (
+          object.userData?.debugRole === 'torch-lens-flare' ||
+          object.userData?.debugRole === 'global-fog-volume' ||
+          object.userData?.debugRole === 'reflection-probe-visual' ||
+          object.userData?.debugRole === 'torch-billboard'
+        ) {
+          hiddenObjects.push({ object, visible: object.visible })
+          object.visible = false
+        }
+      })
+
+      scene.background = new Color('black')
+      scene.environment = null
+      scene.overrideMaterial = geometryOverrideMaterial
+      geometryCamera.position.set(
+        probe.position.x,
+        probe.position.y,
+        probe.position.z
+      )
+
+      try {
+        scene.add(geometryCamera)
+        geometryCamera.update(gl, scene)
+        scene.remove(geometryCamera)
+
+        return captureCubeTextureAtlasDataUrls(gl, geometryTarget.texture, size, {
+          toneMap: false
+        })
+      } finally {
+        scene.background = savedBackground
+        scene.environment = savedEnvironment
+        scene.overrideMaterial = savedOverrideMaterial
+        geometryOverrideMaterial.dispose()
+        geometryTarget.dispose()
+        scene.remove(geometryCamera)
+        for (const entry of hiddenObjects) {
+          entry.object.visible = entry.visible
+        }
+      }
     }
 
     globalWindow.__levelsjamDebug = {
       ...existing,
       captureReflectionProbeAtlas,
+      captureReflectionProbeGeometryAtlas,
       clearDebugIsolation,
       getFogState,
       isolateDebugRole,
@@ -5088,6 +5324,7 @@ function Scene({
 
       clearDebugIsolation()
       delete globalWindow.__levelsjamDebug.captureReflectionProbeAtlas
+      delete globalWindow.__levelsjamDebug.captureReflectionProbeGeometryAtlas
       delete globalWindow.__levelsjamDebug.clearDebugIsolation
       delete globalWindow.__levelsjamDebug.getFogState
       delete globalWindow.__levelsjamDebug.setDebugVisible
@@ -5996,9 +6233,7 @@ export default function App() {
   }
 
   const onAssetsReady = () => {
-    startTransition(() => {
-      setSceneLoaded(true)
-    })
+    setSceneLoaded(true)
   }
 
   return (
