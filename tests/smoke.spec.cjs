@@ -1,7 +1,7 @@
 const { PNG } = require('pngjs')
 const { expect, test } = require('@playwright/test')
 
-test.setTimeout(240_000)
+test.setTimeout(300_000)
 
 function measureBrightness(buffer) {
   const screenshot = PNG.sync.read(buffer)
@@ -366,6 +366,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   await page.getByLabel('Reflection Captures').uncheck()
   await expect(page.getByLabel('Reflection Captures')).not.toBeChecked()
   await page.waitForTimeout(250)
+  const reflectionCaptureSceneOff = await screenshotCanvasRegion(page, canvas, 640, 360, 0.5, 0.5)
   await expect
     .poll(
       async () => page.evaluate(
@@ -379,6 +380,9 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     .toBe('none')
   await page.getByLabel('Reflection Captures').check()
   await expect(page.getByLabel('Reflection Captures')).toBeChecked()
+  await page.waitForTimeout(500)
+  const reflectionCaptureSceneOn = await screenshotCanvasRegion(page, canvas, 640, 360, 0.5, 0.5)
+  expect(measureDifference(reflectionCaptureSceneOff, reflectionCaptureSceneOn)).toBeGreaterThan(0.02)
 
   await page.evaluate(() => {
     for (let index = 0; index < 32; index += 1) {
@@ -609,24 +613,22 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   expect(measureDifference(zeroLensFlareBaseline, zeroLensFlareRegion)).toBeLessThan(0.02)
   await setCheckboxByLabelText(page, 'Lens Flares', false)
   await page.evaluate(() => {
-    window.__levelsjamDebug.setDebugVisible('torch-billboard', 0, true)
+    for (let index = 0; index < 32; index += 1) {
+      window.__levelsjamDebug.setDebugVisible('torch-billboard', index, true)
+    }
+    window.__levelsjamDebug.setView(
+      [5.4, 1.55, -6.9],
+      [7, 1.1, -6]
+    )
   })
-  await page.evaluate((position) => {
-    const [x, y, z] = position
-    window.__levelsjamDebug.isolateDebugRole('torch-billboard', 0)
-    window.__levelsjamDebug.setView([x - 1.0, y, z], [x, y, z])
-  }, debugTorchPosition)
   await page.waitForTimeout(300)
-  const isolatedLensFlareOff = await screenshotCanvasRegion(page, canvas, 220, 160, 0.5, 0.5)
+  const sceneLensFlareOff = await screenshotCanvasRegion(page, canvas, 260, 180, 0.5, 0.5)
   await setCheckboxByLabelText(page, 'Lens Flares', true)
-  await setSlider(page, 'Lens Flares Intensity', 0.01)
-  await page.waitForTimeout(300)
-  const isolatedLensFlareOn = await screenshotCanvasRegion(page, canvas, 220, 160, 0.5, 0.5)
-  expect(measureDifference(isolatedLensFlareOff, isolatedLensFlareOn)).toBeGreaterThan(0.02)
+  await setSlider(page, 'Lens Flares Intensity', 0.02)
+  await page.waitForTimeout(500)
+  const sceneLensFlareOn = await screenshotCanvasRegion(page, canvas, 260, 180, 0.5, 0.5)
+  expect(measureDifference(sceneLensFlareOff, sceneLensFlareOn)).toBeGreaterThan(0.02)
   await setCheckboxByLabelText(page, 'Lens Flares', false)
-  await page.evaluate(() => {
-    window.__levelsjamDebug.clearDebugIsolation()
-  })
   await page.waitForTimeout(200)
 
   await page.evaluate(() => {

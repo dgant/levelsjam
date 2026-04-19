@@ -205,6 +205,9 @@ const FOG_VOLUME_MAX_TORCHES = 16
 const EFFECT_EPSILON = 0.0001
 const MAX_PHYSICS_SUBSTEPS = 10
 const MIN_LOADING_OVERLAY_MS = 300
+const DEFAULT_PROBE_BOX_MAX = new Vector3(0.5, WALL_HEIGHT, 0.5)
+const DEFAULT_PROBE_BOX_MIN = new Vector3(-0.5, GROUND_Y, -0.5)
+const DEFAULT_PROBE_POSITION = new Vector3(0, 1, 0)
 const AMBIENT_OCCLUSION_OPTIONS = [
   { key: 'off', label: 'Off' },
   { key: 'n8ao', label: 'N8AO' },
@@ -411,6 +414,11 @@ type ProbeBlendMode = 'none' | 'constant' | 'world'
 
 type ProbeBlendConfig = {
   mode: ProbeBlendMode
+  probeBoxes?: Array<{
+    max: { x: number, y: number, z: number } | null
+    min: { x: number, y: number, z: number } | null
+  }>
+  probePositions?: Array<{ x: number, y: number, z: number } | null>
   probeTextures: Array<Texture | null>
   region?: {
     minX: number
@@ -425,10 +433,22 @@ type ProbeBlendShader = Shader & {
   uniforms: Shader['uniforms'] & {
     lightMapAmbientTint?: Uniform<Color>
     lightMapTorchTint?: Uniform<Color>
+    localProbeBoxMax0?: Uniform<Vector3>
+    localProbeBoxMax1?: Uniform<Vector3>
+    localProbeBoxMax2?: Uniform<Vector3>
+    localProbeBoxMax3?: Uniform<Vector3>
+    localProbeBoxMin0?: Uniform<Vector3>
+    localProbeBoxMin1?: Uniform<Vector3>
+    localProbeBoxMin2?: Uniform<Vector3>
+    localProbeBoxMin3?: Uniform<Vector3>
     localProbeEnvMap0?: Uniform<Texture | null>
     localProbeEnvMap1?: Uniform<Texture | null>
     localProbeEnvMap2?: Uniform<Texture | null>
     localProbeEnvMap3?: Uniform<Texture | null>
+    localProbePosition0?: Uniform<Vector3>
+    localProbePosition1?: Uniform<Vector3>
+    localProbePosition2?: Uniform<Vector3>
+    localProbePosition3?: Uniform<Vector3>
     probeBlendMode?: Uniform<number>
     probeBlendRegion?: Uniform<Vector4>
     probeBlendWeights?: Uniform<Vector4>
@@ -546,15 +566,109 @@ uniform int probeBlendMode;
 uniform vec4 probeBlendWeights;
 uniform vec4 probeBlendRegion;
 
-vec4 sampleProbeBlendTexture( sampler2D probeMap, vec3 direction, float roughness ) {
-  return textureCubeUV( probeMap, envMapRotation * direction, roughness );
+uniform vec3 localProbePosition0;
+uniform vec3 localProbePosition1;
+uniform vec3 localProbePosition2;
+uniform vec3 localProbePosition3;
+uniform vec3 localProbeBoxMin0;
+uniform vec3 localProbeBoxMin1;
+uniform vec3 localProbeBoxMin2;
+uniform vec3 localProbeBoxMin3;
+uniform vec3 localProbeBoxMax0;
+uniform vec3 localProbeBoxMax1;
+uniform vec3 localProbeBoxMax2;
+uniform vec3 localProbeBoxMax3;
+
+float probeBlendSafeComponent( float value ) {
+  if ( abs( value ) < 0.0001 ) {
+    return value < 0.0 ? -0.0001 : 0.0001;
+  }
+
+  return value;
 }
 
-vec4 sampleProbeBlendLocalMaps( vec3 direction, float roughness, vec4 weights ) {
-  vec4 color0 = sampleProbeBlendTexture( localProbeEnvMap0, direction, roughness );
-  vec4 color1 = sampleProbeBlendTexture( localProbeEnvMap1, direction, roughness );
-  vec4 color2 = sampleProbeBlendTexture( localProbeEnvMap2, direction, roughness );
-  vec4 color3 = sampleProbeBlendTexture( localProbeEnvMap3, direction, roughness );
+vec3 applyProbeBoxProjection(
+  vec3 worldPosition,
+  vec3 direction,
+  vec3 probePosition,
+  vec3 boxMin,
+  vec3 boxMax
+) {
+  vec3 safeDirection = vec3(
+    probeBlendSafeComponent( direction.x ),
+    probeBlendSafeComponent( direction.y ),
+    probeBlendSafeComponent( direction.z )
+  );
+  vec3 distancesToMin = ( boxMin - worldPosition ) / safeDirection;
+  vec3 distancesToMax = ( boxMax - worldPosition ) / safeDirection;
+  vec3 travel = vec3(
+    safeDirection.x > 0.0 ? distancesToMax.x : distancesToMin.x,
+    safeDirection.y > 0.0 ? distancesToMax.y : distancesToMin.y,
+    safeDirection.z > 0.0 ? distancesToMax.z : distancesToMin.z
+  );
+  float distanceToBox = min( min( travel.x, travel.y ), travel.z );
+  vec3 projectedWorldPosition = worldPosition + ( direction * distanceToBox );
+
+  return projectedWorldPosition - probePosition;
+}
+
+vec4 sampleProbeBlendTexture(
+  sampler2D probeMap,
+  vec3 worldPosition,
+  vec3 direction,
+  float roughness,
+  vec3 probePosition,
+  vec3 boxMin,
+  vec3 boxMax
+) {
+  vec3 projectedDirection = applyProbeBoxProjection(
+    worldPosition,
+    direction,
+    probePosition,
+    boxMin,
+    boxMax
+  );
+
+  return textureCubeUV( probeMap, envMapRotation * projectedDirection, roughness );
+}
+
+vec4 sampleProbeBlendLocalMaps( vec3 worldPosition, vec3 direction, float roughness, vec4 weights ) {
+  vec4 color0 = sampleProbeBlendTexture(
+    localProbeEnvMap0,
+    worldPosition,
+    direction,
+    roughness,
+    localProbePosition0,
+    localProbeBoxMin0,
+    localProbeBoxMax0
+  );
+  vec4 color1 = sampleProbeBlendTexture(
+    localProbeEnvMap1,
+    worldPosition,
+    direction,
+    roughness,
+    localProbePosition1,
+    localProbeBoxMin1,
+    localProbeBoxMax1
+  );
+  vec4 color2 = sampleProbeBlendTexture(
+    localProbeEnvMap2,
+    worldPosition,
+    direction,
+    roughness,
+    localProbePosition2,
+    localProbeBoxMin2,
+    localProbeBoxMax2
+  );
+  vec4 color3 = sampleProbeBlendTexture(
+    localProbeEnvMap3,
+    worldPosition,
+    direction,
+    roughness,
+    localProbePosition3,
+    localProbeBoxMin3,
+    localProbeBoxMax3
+  );
 
   return
     ( color0 * weights.x ) +
@@ -578,11 +692,11 @@ vec4 sampleProbeBlendEnvMap( vec3 direction, float roughness ) {
       tx * tz
     );
 
-    return sampleProbeBlendLocalMaps( direction, roughness, weights );
+    return sampleProbeBlendLocalMaps( vProbeBlendWorldPosition, direction, roughness, weights );
   }
 
   if ( probeBlendMode == 2 ) {
-    return sampleProbeBlendLocalMaps( direction, roughness, probeBlendWeights );
+    return sampleProbeBlendLocalMaps( vProbeBlendWorldPosition, direction, roughness, probeBlendWeights );
   }
 
   return textureCubeUV( envMap, envMapRotation * direction, roughness ) * envMapIntensity;
@@ -665,6 +779,59 @@ function updateProbeBlendShaderUniforms(
   shader.uniforms.lightMapTorchTint?.value.copy(
     patchConfig.lightMapTorchTint ?? WHITE_COLOR
   )
+
+  const probePositions = probeBlend.probePositions ?? []
+  const probeBoxes = probeBlend.probeBoxes ?? []
+  const defaultProbePosition = DEFAULT_PROBE_POSITION
+  const defaultProbeBoxMin = DEFAULT_PROBE_BOX_MIN
+  const defaultProbeBoxMax = DEFAULT_PROBE_BOX_MAX
+  const applyProbeUniforms = (
+    index: number,
+    positionUniform: Uniform<Vector3> | undefined,
+    boxMinUniform: Uniform<Vector3> | undefined,
+    boxMaxUniform: Uniform<Vector3> | undefined
+  ) => {
+    positionUniform?.value.set(
+      probePositions[index]?.x ?? defaultProbePosition.x,
+      probePositions[index]?.y ?? defaultProbePosition.y,
+      probePositions[index]?.z ?? defaultProbePosition.z
+    )
+    boxMinUniform?.value.set(
+      probeBoxes[index]?.min?.x ?? defaultProbeBoxMin.x,
+      probeBoxes[index]?.min?.y ?? defaultProbeBoxMin.y,
+      probeBoxes[index]?.min?.z ?? defaultProbeBoxMin.z
+    )
+    boxMaxUniform?.value.set(
+      probeBoxes[index]?.max?.x ?? defaultProbeBoxMax.x,
+      probeBoxes[index]?.max?.y ?? defaultProbeBoxMax.y,
+      probeBoxes[index]?.max?.z ?? defaultProbeBoxMax.z
+    )
+  }
+
+  applyProbeUniforms(
+    0,
+    shader.uniforms.localProbePosition0,
+    shader.uniforms.localProbeBoxMin0,
+    shader.uniforms.localProbeBoxMax0
+  )
+  applyProbeUniforms(
+    1,
+    shader.uniforms.localProbePosition1,
+    shader.uniforms.localProbeBoxMin1,
+    shader.uniforms.localProbeBoxMax1
+  )
+  applyProbeUniforms(
+    2,
+    shader.uniforms.localProbePosition2,
+    shader.uniforms.localProbeBoxMin2,
+    shader.uniforms.localProbeBoxMax2
+  )
+  applyProbeUniforms(
+    3,
+    shader.uniforms.localProbePosition3,
+    shader.uniforms.localProbeBoxMin3,
+    shader.uniforms.localProbeBoxMax3
+  )
   shader.uniforms.localProbeEnvMap0!.value = probeBlend.probeTextures[0] ?? null
   shader.uniforms.localProbeEnvMap1!.value = probeBlend.probeTextures[1] ?? null
   shader.uniforms.localProbeEnvMap2!.value = probeBlend.probeTextures[2] ?? null
@@ -713,6 +880,59 @@ function hasCompleteProbeTextures(textures: Array<Texture | null | undefined>) {
   return textures.length > 0 && textures.every(Boolean)
 }
 
+function getProbeVolumeBounds(
+  probePosition: { x: number, y: number, z: number } | null | undefined
+) {
+  if (!probePosition) {
+    return {
+      max: DEFAULT_PROBE_BOX_MAX,
+      min: DEFAULT_PROBE_BOX_MIN
+    }
+  }
+
+  return {
+    max: {
+      x: probePosition.x + (MAZE_CELL_SIZE / 2),
+      y: GROUND_Y + WALL_HEIGHT,
+      z: probePosition.z + (MAZE_CELL_SIZE / 2)
+    },
+    min: {
+      x: probePosition.x - (MAZE_CELL_SIZE / 2),
+      y: GROUND_Y,
+      z: probePosition.z - (MAZE_CELL_SIZE / 2)
+    }
+  }
+}
+
+function buildProbeBlendConfig(
+  layout: MazeLayout,
+  probeIndices: [number, number, number, number],
+  probeTextures: Array<Texture | null>,
+  mode: ProbeBlendMode,
+  options: {
+    region?: {
+      minX: number
+      minZ: number
+      sizeX: number
+      sizeZ: number
+    }
+    weights?: [number, number, number, number]
+  } = {}
+) {
+  return {
+    mode,
+    probeBoxes: probeIndices.map((probeIndex) =>
+      getProbeVolumeBounds(layout.reflectionProbes[probeIndex]?.position)
+    ),
+    probePositions: probeIndices.map(
+      (probeIndex) => layout.reflectionProbes[probeIndex]?.position ?? null
+    ),
+    probeTextures,
+    region: options.region,
+    weights: options.weights
+  } satisfies ProbeBlendConfig
+}
+
 function useProbeBlendMaterialShader(
   materialRef: RefObject<ThreeMeshPhysicalMaterial | ThreeMeshStandardMaterial | null>,
   probeBlend: ProbeBlendConfig,
@@ -738,6 +958,18 @@ function useProbeBlendMaterialShader(
 
       probeBlendShader.uniforms.lightMapAmbientTint = new Uniform(BLACK_COLOR.clone())
       probeBlendShader.uniforms.lightMapTorchTint = new Uniform(WHITE_COLOR.clone())
+      probeBlendShader.uniforms.localProbePosition0 = new Uniform(DEFAULT_PROBE_POSITION.clone())
+      probeBlendShader.uniforms.localProbePosition1 = new Uniform(DEFAULT_PROBE_POSITION.clone())
+      probeBlendShader.uniforms.localProbePosition2 = new Uniform(DEFAULT_PROBE_POSITION.clone())
+      probeBlendShader.uniforms.localProbePosition3 = new Uniform(DEFAULT_PROBE_POSITION.clone())
+      probeBlendShader.uniforms.localProbeBoxMin0 = new Uniform(DEFAULT_PROBE_BOX_MIN.clone())
+      probeBlendShader.uniforms.localProbeBoxMin1 = new Uniform(DEFAULT_PROBE_BOX_MIN.clone())
+      probeBlendShader.uniforms.localProbeBoxMin2 = new Uniform(DEFAULT_PROBE_BOX_MIN.clone())
+      probeBlendShader.uniforms.localProbeBoxMin3 = new Uniform(DEFAULT_PROBE_BOX_MIN.clone())
+      probeBlendShader.uniforms.localProbeBoxMax0 = new Uniform(DEFAULT_PROBE_BOX_MAX.clone())
+      probeBlendShader.uniforms.localProbeBoxMax1 = new Uniform(DEFAULT_PROBE_BOX_MAX.clone())
+      probeBlendShader.uniforms.localProbeBoxMax2 = new Uniform(DEFAULT_PROBE_BOX_MAX.clone())
+      probeBlendShader.uniforms.localProbeBoxMax3 = new Uniform(DEFAULT_PROBE_BOX_MAX.clone())
       probeBlendShader.uniforms.localProbeEnvMap0 = new Uniform<Texture | null>(null)
       probeBlendShader.uniforms.localProbeEnvMap1 = new Uniform<Texture | null>(null)
       probeBlendShader.uniforms.localProbeEnvMap2 = new Uniform<Texture | null>(null)
@@ -1745,14 +1977,15 @@ function Ground({
               (probeIndex) => reflectionProbeTextures[probeIndex] ?? null
             )
 
-            return {
-              mode:
-                reflectionCapturesEnabled && hasCompleteProbeTextures(probeTextures)
-                  ? 'world'
-                  : 'none',
+            return buildProbeBlendConfig(
+              layout,
+              rect.probeIndices,
               probeTextures,
-              region: rect.region
-            } satisfies ProbeBlendConfig
+              reflectionCapturesEnabled && hasCompleteProbeTextures(probeTextures)
+                ? 'world'
+                : 'none',
+              { region: rect.region }
+            )
           })()}
           rect={rect}
           torchCandelaMultiplier={torchCandelaMultiplier}
@@ -1909,12 +2142,17 @@ function WallSconce({
   )
 
   useProbeBlendMaterialShader(materialRef, {
-    mode:
+    ...buildProbeBlendConfig(
+      layout,
+      reflectionProbeBlend.probeIndices,
+      probeTextures,
       reflectionCapturesEnabled && hasCompleteProbeTextures(probeTextures)
         ? 'constant'
         : 'none',
-    probeTextures,
-    weights: reflectionProbeBlend.weights as [number, number, number, number]
+      {
+        weights: reflectionProbeBlend.weights as [number, number, number, number]
+      }
+    )
   }, patchConfig)
 
   return (
@@ -2927,7 +3165,7 @@ function TorchLensFlareEffectPrimitive({
     }
 
     const normalizedIntensity = Math.min(1, intensity / 0.02)
-    const targetOpacity = 1 - (Math.sqrt(normalizedIntensity) * visibility)
+    const targetOpacity = 1 - (normalizedIntensity * visibility * 0.3)
 
     opacityUniform.value = MathUtils.damp(
       opacityUniform.value,
@@ -2935,12 +3173,12 @@ function TorchLensFlareEffectPrimitive({
       18,
       delta
     )
-    glareSizeUniform.value = 0.28 + (normalizedIntensity * 0.44)
-    flareSizeUniform.value = 0.008 + (normalizedIntensity * 0.018)
-    ghostScaleUniform.value = 0.22 + (normalizedIntensity * 0.34)
-    haloScaleUniform.value = 0.26 + (normalizedIntensity * 0.42)
+    glareSizeUniform.value = 0.03 + (normalizedIntensity * 0.08)
+    flareSizeUniform.value = 0.002 + (normalizedIntensity * 0.005)
+    ghostScaleUniform.value = 0.14 + (normalizedIntensity * 0.08)
+    haloScaleUniform.value = 0.16 + (normalizedIntensity * 0.08)
     colorGainUniform.value.copy(FIRE_COLOR).multiplyScalar(
-      (12 + (normalizedIntensity * 28)) *
+      (0.05 + (normalizedIntensity * 0.25)) *
       Math.sqrt(torchCandelaMultiplier)
     )
   })

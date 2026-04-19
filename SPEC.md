@@ -171,6 +171,7 @@
 - The reflective maze floor patch uses local reflection probes so puddled areas can reflect nearby torch sources rather than only the global HDRI.
 - The reflective maze floor patch blends nearby local reflection probes with weighted interpolation rather than switching between one nearest probe per region.
 - Reflective maze sconces blend nearby local reflection probes with weighted interpolation rather than switching between one nearest probe at the object position.
+- Local reflection probes apply parallax-corrected local projection so nearby walls, sconces, and torches do not behave like infinitely distant reflections.
 - Local reflection probes do not make baked lighting or image-based lighting appear to flicker as the camera moves between maze cells.
 - Local reflection probes capture the baked maze lighting state so reflected maze surfaces remain consistent with the torch-lightmap shadows.
 - Local reflection probes also capture the authored HDRI sky where it is locally visible so disabling reflection captures does not reveal a completely different sky contribution.
