@@ -10,6 +10,7 @@ import {
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
 import {
   BasicShadowMap,
+  BoxGeometry,
   Camera as ThreeCamera,
   CanvasTexture,
   ClampToEdgeWrapping,
@@ -32,7 +33,6 @@ import {
   LinearToneMapping,
   Group,
   Mesh,
-  MeshBasicMaterial,
   MeshDepthMaterial,
   MeshPhysicalMaterial as ThreeMeshPhysicalMaterial,
   MeshStandardMaterial as ThreeMeshStandardMaterial,
@@ -952,6 +952,7 @@ function computeCubeRenderTargetDebugStats(
   renderTarget: WebGLCubeRenderTarget
 ) {
   const buffer = new Uint8Array(renderTarget.width * renderTarget.height * 4)
+  const centerBuffer = new Uint8Array(4)
   let sampleCount = 0
   let nonWhiteCount = 0
   let warmCount = 0
@@ -961,6 +962,18 @@ function computeCubeRenderTargetDebugStats(
   let totalR = 0
   let totalG = 0
   let totalB = 0
+  const faceCenterColors: Array<{
+    b: number
+    g: number
+    r: number
+  }> = []
+  const faceGridColors: Array<Array<{
+    b: number
+    g: number
+    r: number
+    x: number
+    y: number
+  }>> = []
 
   for (let faceIndex = 0; faceIndex < 6; faceIndex += 1) {
     renderer.readRenderTargetPixels(
@@ -972,6 +985,49 @@ function computeCubeRenderTargetDebugStats(
       buffer,
       faceIndex
     )
+    renderer.readRenderTargetPixels(
+      renderTarget,
+      Math.floor(renderTarget.width / 2),
+      Math.floor(renderTarget.height / 2),
+      1,
+      1,
+      centerBuffer,
+      faceIndex
+    )
+    faceCenterColors.push({
+      b: centerBuffer[2],
+      g: centerBuffer[1],
+      r: centerBuffer[0]
+    })
+    const faceSamples: Array<{
+      b: number
+      g: number
+      r: number
+      x: number
+      y: number
+    }> = []
+
+    for (const sampleY of [0.25, 0.5, 0.75]) {
+      for (const sampleX of [0.25, 0.5, 0.75]) {
+        renderer.readRenderTargetPixels(
+          renderTarget,
+          Math.min(renderTarget.width - 1, Math.max(0, Math.floor((renderTarget.width - 1) * sampleX))),
+          Math.min(renderTarget.height - 1, Math.max(0, Math.floor((renderTarget.height - 1) * sampleY))),
+          1,
+          1,
+          centerBuffer,
+          faceIndex
+        )
+        faceSamples.push({
+          b: centerBuffer[2],
+          g: centerBuffer[1],
+          r: centerBuffer[0],
+          x: sampleX,
+          y: sampleY
+        })
+      }
+    }
+    faceGridColors.push(faceSamples)
 
     for (let offset = 0; offset < buffer.length; offset += 4) {
       const r = buffer[offset]
@@ -999,6 +1055,8 @@ function computeCubeRenderTargetDebugStats(
     return {
       averageColor: DEFAULT_FOG_IBL_COLOR.clone(),
       darkest: 255,
+      faceCenterColors,
+      faceGridColors,
       luminanceStdDev: 0,
       nonWhiteFraction: 0,
       warmFraction: 0
@@ -1018,6 +1076,8 @@ function computeCubeRenderTargetDebugStats(
       totalB / (sampleCount * 255)
     ),
     darkest,
+    faceCenterColors,
+    faceGridColors,
     luminanceStdDev: Math.sqrt(variance),
     nonWhiteFraction: nonWhiteCount / sampleCount,
     warmFraction: warmCount / sampleCount
@@ -1562,6 +1622,14 @@ function createGroundPatchGeometry(
   return geometry
 }
 
+function createWallGeometry() {
+  const geometry = new BoxGeometry(WALL_LENGTH, WALL_HEIGHT, WALL_WIDTH)
+  const uv = geometry.getAttribute('uv')
+
+  geometry.setAttribute('uv1', uv.clone())
+  return geometry
+}
+
 function useWallLightmapTextures(
   lightmap: MazeLightmap,
   lightmapBytes: Uint8Array,
@@ -1586,6 +1654,10 @@ function useWallLightmapTextures(
       })
     }
   }, [lightmap, lightmapBytes, wallId])
+
+  textures.neutral.channel = 1
+  textures.nz.channel = 1
+  textures.pz.channel = 1
 
   useEffect(
     () => () => {
@@ -1872,6 +1944,18 @@ function EnvironmentLighting({
     let nextProbeAmbientColors: Color[] = []
     let nextProbeMetrics: Array<{
       darkest: number
+      faceCenterColors: Array<{
+        b: number
+        g: number
+        r: number
+      }>
+      faceGridColors: Array<Array<{
+        b: number
+        g: number
+        r: number
+        x: number
+        y: number
+      }>>
       luminanceStdDev: number
       nonWhiteFraction: number
       warmFraction: number
@@ -1899,6 +1983,10 @@ function EnvironmentLighting({
       }
 
       const hiddenObjects: Array<{ object: { visible: boolean }; visible: boolean }> = []
+      const captureMaterialOverrides: Array<{
+        mesh: Mesh
+        material: Mesh['material']
+      }> = []
       scene.traverse((object) => {
         if (
           object.userData?.debugRole === 'torch-lens-flare' ||
@@ -1907,6 +1995,39 @@ function EnvironmentLighting({
         ) {
           hiddenObjects.push({ object, visible: object.visible })
           object.visible = false
+        }
+
+        if (
+          object instanceof Mesh &&
+          (
+            object.userData?.debugRole === 'maze-ground-lightmap' ||
+            object.userData?.debugRole === 'maze-wall' ||
+            object.userData?.debugRole === 'sconce-body' ||
+            (
+              Array.isArray(object.userData?.debugRoles) &&
+              object.userData.debugRoles.includes('maze-wall-lightmap')
+            )
+          )
+        ) {
+          const originalMaterials = Array.isArray(object.material)
+            ? object.material
+            : [object.material]
+          const diagnosticMaterials = originalMaterials.map((material) => {
+            const clone = material.clone() as ThreeMeshStandardMaterial
+            clone.onBeforeCompile = () => {}
+            clone.customProgramCacheKey = () => 'reflection-capture-stock'
+            clone.needsUpdate = true
+            return clone
+          })
+
+          captureMaterialOverrides.push({
+            material: object.material,
+            mesh: object
+          })
+          object.material =
+            Array.isArray(object.material)
+              ? diagnosticMaterials
+              : diagnosticMaterials[0]
         }
       })
 
@@ -2036,6 +2157,10 @@ function EnvironmentLighting({
         nextProbeAmbientColors.push(probeDebugStats.averageColor)
         nextProbeMetrics.push({
           darkest: probeDebugStats.darkest,
+          faceCenterColors: probeDebugStats.faceCenterColors.map((color) => ({ ...color })),
+          faceGridColors: probeDebugStats.faceGridColors.map((face) =>
+            face.map((color) => ({ ...color }))
+          ),
           luminanceStdDev: probeDebugStats.luminanceStdDev,
           nonWhiteFraction: probeDebugStats.nonWhiteFraction,
           warmFraction: probeDebugStats.warmFraction
@@ -2047,6 +2172,16 @@ function EnvironmentLighting({
       for (const captureLight of captureLights) {
         captureLight.dispose()
         captureLight.shadow.map?.dispose()
+      }
+      for (const entry of captureMaterialOverrides) {
+        const activeMaterials = Array.isArray(entry.mesh.material)
+          ? entry.mesh.material
+          : [entry.mesh.material]
+
+        for (const material of activeMaterials) {
+          ;(material as ThreeMeshStandardMaterial).dispose()
+        }
+        entry.mesh.material = entry.material
       }
       for (const entry of hiddenObjects) {
         entry.object.visible = entry.visible
@@ -2369,7 +2504,7 @@ function TorchBillboard({
         color: Color
       }
 
-      billboardMaterial.color.setScalar(
+      billboardMaterial.color.copy(FIRE_COLOR).multiplyScalar(
         brightness * FIRE_BILLBOARD_INTENSITY_SCALE
       )
     }
@@ -3255,6 +3390,10 @@ function MazeWallMesh({
     lightmapBytes,
     mazeWall.id
   )
+  const geometry = useMemo(
+    () => createWallGeometry(),
+    []
+  )
   const faceMaterialPatchConfig = useMemo(
     () => ({
       lightMapAmbientTint: WHITE_COLOR,
@@ -3307,6 +3446,13 @@ function MazeWallMesh({
   )
   const envMapIntensity = probeIblEnabled ? environmentIntensity : 0
 
+  useEffect(
+    () => () => {
+      geometry.dispose()
+    },
+    [geometry]
+  )
+
   return (
     <mesh
       castShadow
@@ -3323,7 +3469,10 @@ function MazeWallMesh({
         debugRoles: ['maze-wall', 'maze-wall-lightmap']
       }}
     >
-      <boxGeometry args={[WALL_LENGTH, WALL_HEIGHT, WALL_WIDTH]} />
+      <primitive
+        attach="geometry"
+        object={geometry}
+      />
       <WallFaceMaterial
         attach="material-0"
         environmentIntensity={envMapIntensity}
@@ -4058,6 +4207,18 @@ function FlightRig({
           }>
           probeMetrics?: Array<{
             darkest: number
+            faceCenterColors: Array<{
+              b: number
+              g: number
+              r: number
+            }>
+            faceGridColors: Array<Array<{
+              b: number
+              g: number
+              r: number
+              x: number
+              y: number
+            }>>
             luminanceStdDev: number
             nonWhiteFraction: number
             warmFraction: number

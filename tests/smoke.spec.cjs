@@ -280,6 +280,33 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect
       .poll(
         async () => page.evaluate(
+          () => window.__levelsjamDebug.getReflectionProbeState()?.ready ?? false
+        ),
+        {
+          timeout: 60_000,
+          intervals: [100, 250, 500, 1_000]
+        }
+      )
+      .toBe(true)
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => window.__levelsjamDebug.getDebugMeshState('maze-wall', 24)
+        ),
+        {
+          timeout: 5_000,
+          intervals: [100, 250, 500]
+        }
+      )
+      .toMatchObject({
+        hasLightMap: true,
+        hasMap: true,
+        hasUv1: true,
+        lightMapChannel: 1
+      })
+    await expect
+      .poll(
+        async () => page.evaluate(
           () => window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 36)?.probeBlend?.mode
         ),
         {
