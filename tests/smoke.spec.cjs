@@ -3,7 +3,7 @@ const path = require('node:path')
 const { PNG } = require('pngjs')
 const { expect, test } = require('@playwright/test')
 
-test.setTimeout(60_000)
+test.setTimeout(90_000)
 
 const SMOKE_TIMING_LOG_PATH = path.resolve(
   __dirname,
@@ -132,6 +132,33 @@ function measurePngDetail(png) {
   }
 }
 
+function measureBufferDiff(leftBuffer, rightBuffer) {
+  const left = PNG.sync.read(leftBuffer)
+  const right = PNG.sync.read(rightBuffer)
+
+  if (left.width !== right.width || left.height !== right.height) {
+    throw new Error('Cannot diff screenshots with different dimensions')
+  }
+
+  let total = 0
+  let max = 0
+
+  for (let offset = 0; offset < left.data.length; offset += 4) {
+    const difference =
+      Math.abs(left.data[offset] - right.data[offset]) +
+      Math.abs(left.data[offset + 1] - right.data[offset + 1]) +
+      Math.abs(left.data[offset + 2] - right.data[offset + 2])
+
+    total += difference
+    max = Math.max(max, difference)
+  }
+
+  return {
+    averagePerChannel: total / (left.width * left.height * 3),
+    maxCombinedDifference: max
+  }
+}
+
 async function screenshotCanvasRegion(
   page,
   canvas,
@@ -229,11 +256,14 @@ async function setSlider(page, label, value) {
 }
 
 async function setCheckbox(page, label, enabled) {
-  await page.getByRole('checkbox', { name: label }).evaluate((element, nextValue) => {
-    if (element.checked !== Boolean(nextValue)) {
-      element.click()
-    }
-  }, enabled)
+  const checkbox = page.getByRole('checkbox', { name: label })
+
+  if (enabled) {
+    await checkbox.check()
+    return
+  }
+
+  await checkbox.uncheck()
 }
 
 test('loads the maze scene and exposes working debug/render controls', async ({ page }) => {
@@ -359,11 +389,63 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         }
       )
       .toBe('none')
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 36)?.probeBlend?.radianceMode
+        ),
+        {
+          timeout: 5_000,
+          intervals: [100, 250, 500]
+        }
+      )
+      .toBe('world')
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 36)?.probeBlendUniforms ?? null
+        ),
+        {
+          timeout: 5_000,
+          intervals: [100, 250, 500]
+        }
+      )
+      .toMatchObject({
+        localProbeTextureBoundCount: 4,
+        probeBlendMode: 0,
+        probeBlendRadianceMode: 1
+      })
     await setCheckbox(page, 'Probe IBL', true)
     await expect
       .poll(
         async () => page.evaluate(
           () => window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 36)?.probeBlend?.mode
+        ),
+        {
+          timeout: 5_000,
+          intervals: [100, 250, 500]
+        }
+      )
+      .toBe('world')
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => window.__levelsjamDebug.getDebugMeshState('maze-wall', 24)?.probeBlendUniforms ?? null
+        ),
+        {
+          timeout: 5_000,
+          intervals: [100, 250, 500]
+        }
+      )
+      .toMatchObject({
+        localProbeTextureBoundCount: 4,
+        probeBlendMode: 2,
+        probeBlendRadianceMode: 2
+      })
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 36)?.probeBlend?.radianceMode
         ),
         {
           timeout: 5_000,
@@ -416,6 +498,50 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     expect(probeCaptureCounts.ground).toBeGreaterThan(0)
     expect(probeCaptureCounts.sconce).toBeGreaterThan(0)
     expect(probeCaptureCounts.wall).toBeGreaterThan(0)
+
+    await setCheckbox(page, 'Probe IBL', false)
+    await page.evaluate(() => {
+      window.__levelsjamDebug.setView(
+        [5.4, 1.55, -6.9],
+        [7, 1.1, -6]
+      )
+      for (let index = 0; index < 20; index += 1) {
+        window.__levelsjamDebug.setDebugVisible?.('torch-billboard', index, false)
+      }
+    })
+    await page.waitForTimeout(250)
+    await page.keyboard.press('Backquote')
+    const reflectionCaptureOnFrame = await screenshotCanvasRegion(
+      page,
+      canvas,
+      260,
+      180,
+      0.72,
+      0.74,
+      timingProfile
+    )
+    await page.keyboard.press('Backquote')
+    await setCheckbox(page, 'Reflection Captures', false)
+    await page.keyboard.press('Backquote')
+    await page.waitForTimeout(250)
+    const reflectionCaptureOffFrame = await screenshotCanvasRegion(
+      page,
+      canvas,
+      260,
+      180,
+      0.72,
+      0.74,
+      timingProfile
+    )
+    const reflectionCaptureDiff = measureBufferDiff(
+      reflectionCaptureOnFrame,
+      reflectionCaptureOffFrame
+    )
+
+    expect(reflectionCaptureDiff.averagePerChannel).toBeGreaterThan(1)
+    expect(reflectionCaptureDiff.maxCombinedDifference).toBeGreaterThan(50)
+    await page.keyboard.press('Backquote')
+    await setCheckbox(page, 'Reflection Captures', true)
     await setCheckbox(page, 'Probe IBL', false)
   })
 

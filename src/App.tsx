@@ -453,6 +453,7 @@ type ProbeBlendMode = 'none' | 'constant' | 'world'
 
 type ProbeBlendConfig = {
   mode: ProbeBlendMode
+  radianceMode?: ProbeBlendMode
   probeBoxes?: Array<{
     max: { x: number, y: number, z: number } | null
     min: { x: number, y: number, z: number } | null
@@ -489,6 +490,7 @@ type ProbeBlendShader = Shader & {
     localProbePosition2?: Uniform<Vector3>
     localProbePosition3?: Uniform<Vector3>
     probeBlendMode?: Uniform<number>
+    probeBlendRadianceMode?: Uniform<number>
     probeBlendRegion?: Uniform<Vector4>
     probeBlendWeights?: Uniform<Vector4>
   }
@@ -603,6 +605,7 @@ uniform sampler2D localProbeEnvMap1;
 uniform sampler2D localProbeEnvMap2;
 uniform sampler2D localProbeEnvMap3;
 uniform int probeBlendMode;
+uniform int probeBlendRadianceMode;
 uniform vec4 probeBlendWeights;
 uniform vec4 probeBlendRegion;
 
@@ -717,8 +720,8 @@ vec4 sampleProbeBlendLocalMaps( vec3 worldPosition, vec3 direction, float roughn
     ( color3 * weights.w );
 }
 
-vec4 sampleProbeBlendEnvMap( vec3 direction, float roughness ) {
-  if ( probeBlendMode == 1 ) {
+vec4 sampleProbeBlendEnvMapWithMode( vec3 direction, float roughness, int mode ) {
+  if ( mode == 1 ) {
     float tx = probeBlendRegion.z > 0.0
       ? clamp( ( vProbeBlendWorldPosition.x - probeBlendRegion.x ) / probeBlendRegion.z, 0.0, 1.0 )
       : 0.0;
@@ -735,7 +738,7 @@ vec4 sampleProbeBlendEnvMap( vec3 direction, float roughness ) {
     return sampleProbeBlendLocalMaps( vProbeBlendWorldPosition, direction, roughness, weights );
   }
 
-  if ( probeBlendMode == 2 ) {
+  if ( mode == 2 ) {
     return sampleProbeBlendLocalMaps( vProbeBlendWorldPosition, direction, roughness, probeBlendWeights );
   }
 
@@ -747,7 +750,7 @@ vec3 getIBLIrradiance( const in vec3 normal ) {
   #ifdef ENVMAP_TYPE_CUBE_UV
 
     vec3 worldNormal = inverseTransformDirection( normal, viewMatrix );
-    vec4 envMapColor = sampleProbeBlendEnvMap( worldNormal, 1.0 );
+    vec4 envMapColor = sampleProbeBlendEnvMapWithMode( worldNormal, 1.0, probeBlendMode );
 
     return PI * envMapColor.rgb;
 
@@ -767,7 +770,7 @@ vec3 getIBLRadiance( const in vec3 viewDir, const in vec3 normal, const in float
     reflectVec = normalize( mix( reflectVec, normal, pow4( roughness ) ) );
     reflectVec = inverseTransformDirection( reflectVec, viewMatrix );
 
-    vec4 envMapColor = sampleProbeBlendEnvMap( reflectVec, roughness );
+    vec4 envMapColor = sampleProbeBlendEnvMapWithMode( reflectVec, roughness, probeBlendRadianceMode );
 
     return envMapColor.rgb;
 
@@ -882,6 +885,12 @@ function updateProbeBlendShaderUniforms(
       : probeBlend.mode === 'constant'
         ? 2
         : 0
+  shader.uniforms.probeBlendRadianceMode!.value =
+    (probeBlend.radianceMode ?? probeBlend.mode) === 'world'
+      ? 1
+      : (probeBlend.radianceMode ?? probeBlend.mode) === 'constant'
+        ? 2
+        : 0
   shader.uniforms.probeBlendWeights!.value.set(
     ...(probeBlend.weights ?? [1, 0, 0, 0])
   )
@@ -903,6 +912,7 @@ function updateProbeBlendMaterialDebugState(
 
   material.userData.probeBlendDebug = {
     mode: probeBlend.mode,
+    radianceMode: probeBlend.radianceMode ?? probeBlend.mode,
     probeTextureCount: probeBlend.probeTextures.filter(Boolean).length,
     region: probeBlend.region
       ? {
@@ -913,6 +923,26 @@ function updateProbeBlendMaterialDebugState(
         }
       : null,
     weights: probeBlend.weights ? [...probeBlend.weights] : null
+  }
+}
+
+function updateProbeBlendUniformDebugState(
+  material: ThreeMeshPhysicalMaterial | ThreeMeshStandardMaterial | null,
+  shader: ProbeBlendShader | null
+) {
+  if (!material || !shader) {
+    return
+  }
+
+  material.userData.probeBlendUniformDebug = {
+    localProbeTextureBoundCount: [
+      shader.uniforms.localProbeEnvMap0?.value,
+      shader.uniforms.localProbeEnvMap1?.value,
+      shader.uniforms.localProbeEnvMap2?.value,
+      shader.uniforms.localProbeEnvMap3?.value
+    ].filter(Boolean).length,
+    probeBlendMode: shader.uniforms.probeBlendMode?.value ?? null,
+    probeBlendRadianceMode: shader.uniforms.probeBlendRadianceMode?.value ?? null
   }
 }
 
@@ -1175,6 +1205,7 @@ function buildProbeBlendConfig(
   probeTextures: Array<Texture | null>,
   mode: ProbeBlendMode,
   options: {
+    radianceMode?: ProbeBlendMode
     region?: {
       minX: number
       minZ: number
@@ -1186,6 +1217,7 @@ function buildProbeBlendConfig(
 ) {
   return {
     mode,
+    radianceMode: options.radianceMode ?? mode,
     probeBoxes: probeIndices.map((probeIndex) =>
       getProbeVolumeBounds(layout.reflectionProbes[probeIndex]?.position)
     ),
@@ -1240,6 +1272,7 @@ function useProbeBlendMaterialShader(
       probeBlendShader.uniforms.localProbeEnvMap2 = new Uniform<Texture | null>(null)
       probeBlendShader.uniforms.localProbeEnvMap3 = new Uniform<Texture | null>(null)
       probeBlendShader.uniforms.probeBlendMode = new Uniform(0)
+      probeBlendShader.uniforms.probeBlendRadianceMode = new Uniform(0)
       probeBlendShader.uniforms.probeBlendWeights = new Uniform(new Vector4(1, 0, 0, 0))
       probeBlendShader.uniforms.probeBlendRegion = new Uniform(new Vector4(0, 0, 0, 0))
 
@@ -1271,8 +1304,19 @@ function useProbeBlendMaterialShader(
 \t\tvec3 lightMapIrradiance = lightMapTorchIrradiance + lightMapAmbientIrradiance;`
           )
 
+      material.userData.probeBlendShaderDebug = {
+        fragmentHasProbeRadianceMode: probeBlendShader.fragmentShader.includes('probeBlendRadianceMode'),
+        fragmentHasSampleProbeBlendEnvMapWithMode: probeBlendShader.fragmentShader.includes('sampleProbeBlendEnvMapWithMode'),
+        fragmentHasGetIBLRadianceOverride: probeBlendShader.fragmentShader.includes(
+          'vec3 getIBLRadiance( const in vec3 viewDir, const in vec3 normal, const in float roughness )'
+        ),
+        fragmentHasGetIBLIrradianceOverride: probeBlendShader.fragmentShader.includes(
+          'vec3 getIBLIrradiance( const in vec3 normal )'
+        )
+      }
       shaderRef.current = probeBlendShader
       updateProbeBlendShaderUniforms(probeBlendShader, probeBlend, patchConfig)
+      updateProbeBlendUniformDebugState(material, probeBlendShader)
     }
 
     material.needsUpdate = true
@@ -1282,13 +1326,13 @@ function useProbeBlendMaterialShader(
         material.onBeforeCompile = () => {}
         material.needsUpdate = true
       }
-      shaderRef.current = null
     }
   }, [materialRef, patchConfig, probeBlend, usesTintedLightMap])
 
   useEffect(() => {
     updateProbeBlendMaterialDebugState(materialRef.current, probeBlend)
     updateProbeBlendShaderUniforms(shaderRef.current, probeBlend, patchConfig)
+    updateProbeBlendUniformDebugState(materialRef.current, shaderRef.current)
   }, [materialRef, patchConfig, probeBlend])
 }
 
@@ -2473,7 +2517,14 @@ function Ground({
                 hasCompleteProbeTextures(probeTextures)
                 ? 'world'
                 : 'none',
-              { region: rect.region }
+              {
+                radianceMode:
+                  reflectionCapturesEnabled &&
+                  hasCompleteProbeTextures(probeTextures)
+                    ? 'world'
+                    : 'none',
+                region: rect.region
+              }
             )
           })()}
           rect={rect}
@@ -2643,6 +2694,11 @@ function WallSconce({
         ? 'constant'
         : 'none',
       {
+        radianceMode:
+          reflectionCapturesEnabled &&
+          hasCompleteProbeTextures(probeTextures)
+            ? 'constant'
+            : 'none',
         weights: reflectionProbeBlend.weights as [number, number, number, number]
       }
     )
@@ -3527,6 +3583,11 @@ function MazeWallMesh({
           ? 'constant'
           : 'none',
         {
+          radianceMode:
+            reflectionCapturesEnabled &&
+            hasCompleteProbeTextures(probeTextures)
+              ? 'constant'
+              : 'none',
           weights: reflectionProbeBlend.weights as [number, number, number, number]
         }
       ),
@@ -4268,6 +4329,7 @@ function FlightRig({
           quaternion: [number, number, number, number]
           probeBlend: {
             mode: 'constant' | 'none' | 'world'
+            radianceMode: 'constant' | 'none' | 'world'
             probeTextureCount: number
             region: {
               minX: number
@@ -4276,6 +4338,17 @@ function FlightRig({
               sizeZ: number
             } | null
             weights: number[] | null
+          } | null
+          probeBlendShader: {
+            fragmentHasGetIBLIrradianceOverride: boolean
+            fragmentHasGetIBLRadianceOverride: boolean
+            fragmentHasProbeRadianceMode: boolean
+            fragmentHasSampleProbeBlendEnvMapWithMode: boolean
+          } | null
+          probeBlendUniforms: {
+            localProbeTextureBoundCount: number
+            probeBlendMode: number | null
+            probeBlendRadianceMode: number | null
           } | null
           scale: [number, number, number]
           visible: boolean
@@ -4359,6 +4432,7 @@ function FlightRig({
           quaternion: [number, number, number, number]
           probeBlend: {
             mode: 'constant' | 'none' | 'world'
+            radianceMode: 'constant' | 'none' | 'world'
             probeTextureCount: number
             region: {
               minX: number
@@ -4367,6 +4441,17 @@ function FlightRig({
               sizeZ: number
             } | null
             weights: number[] | null
+          } | null
+          probeBlendShader: {
+            fragmentHasGetIBLIrradianceOverride: boolean
+            fragmentHasGetIBLRadianceOverride: boolean
+            fragmentHasProbeRadianceMode: boolean
+            fragmentHasSampleProbeBlendEnvMapWithMode: boolean
+          } | null
+          probeBlendUniforms: {
+            localProbeTextureBoundCount: number
+            probeBlendMode: number | null
+            probeBlendRadianceMode: number | null
           } | null
           scale: [number, number, number]
           visible: boolean
@@ -4401,6 +4486,7 @@ function FlightRig({
               userData?: {
                 probeBlendDebug?: {
                   mode: 'constant' | 'none' | 'world'
+                  radianceMode: 'constant' | 'none' | 'world'
                   probeTextureCount: number
                   region: {
                     minX: number
@@ -4409,6 +4495,17 @@ function FlightRig({
                     sizeZ: number
                   } | null
                   weights: number[] | null
+                } | null
+                probeBlendShaderDebug?: {
+                  fragmentHasGetIBLIrradianceOverride: boolean
+                  fragmentHasGetIBLRadianceOverride: boolean
+                  fragmentHasProbeRadianceMode: boolean
+                  fragmentHasSampleProbeBlendEnvMapWithMode: boolean
+                } | null
+                probeBlendUniformDebug?: {
+                  localProbeTextureBoundCount: number
+                  probeBlendMode: number | null
+                  probeBlendRadianceMode: number | null
                 } | null
               }
             }>
@@ -4472,6 +4569,8 @@ function FlightRig({
                   ]
                 : null,
               probeBlend: material.userData?.probeBlendDebug ?? null,
+              probeBlendShader: material.userData?.probeBlendShaderDebug ?? null,
+              probeBlendUniforms: material.userData?.probeBlendUniformDebug ?? null,
               quaternion: [
                 object.quaternion.x,
                 object.quaternion.y,
