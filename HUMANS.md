@@ -17,6 +17,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Create a production build with `npm run build`.
 - Verify the root-published production build with `npm run preview`.
 - Refresh the legacy GitHub Pages publishable files with `npm run build:pages`.
+- Treat `public/textures/` as the canonical texture source tree. `npm run build:pages` now copies built JS and CSS from `dist/assets` but syncs root `textures/` directly from `public/textures` so runtime assets do not round-trip through the Vite output folder.
 
 ## Testing
 - Run the production build before handoff.
@@ -126,4 +127,5 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - The project is intended for GitHub Pages hosting.
 - The current GitHub Pages setup publishes directly from the repository root on `main`.
 - Run `npm run build:pages` before pushing when the live site needs updated production assets.
+- Expect repo-root `assets/` and `textures/` to be generated publish artifacts. Source edits belong under `src/` and `public/`.
 - After deployment, open the published URL and confirm that the scene loads and responds to input.
