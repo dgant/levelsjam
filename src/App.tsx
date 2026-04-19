@@ -195,10 +195,10 @@ const FLOOR_LIGHTMAP_INTENSITY_SCALE = 1
 const WALL_LIGHTMAP_INTENSITY_SCALE = 1
 const MAZE_GROUND_PATCH_OFFSET_Y = 0.002
 const REFLECTION_PROBE_RENDER_SIZE = 64
-const REFLECTION_PROBE_RAW_RENDER_SIZE = 24
+const REFLECTION_PROBE_AMBIENT_RENDER_SIZE = 24
 const REFLECTION_PROBE_FAR = 48
 const REFLECTION_PROBE_EMISSIVE_RADIUS = 0.16
-const REFLECTION_PROBE_EMISSIVE_SCALE = 64
+const REFLECTION_PROBE_EMISSIVE_SCALE = 2
 const REFLECTION_PROBE_LIGHT_DISTANCE = 16
 const REFLECTION_PROBE_LIGHT_ANGLE = 1.05
 const REFLECTION_PROBE_SHADOW_MAP_SIZE = 256
@@ -342,8 +342,8 @@ type VisualSettings = {
   ambientOcclusionRadius: number
   bakedLightmapsEnabled: boolean
   exposureStops: number
-  fogProbeIblEnabled: boolean
   iblIntensity: number
+  probeIblEnabled: boolean
   reflectionCapturesEnabled: boolean
   showReflectionProbes: boolean
   torchCandelaMultiplier: number
@@ -365,7 +365,7 @@ type GenericEffectSettingKey =
   'volumetricLighting'
 type BooleanSettingKey =
   | 'bakedLightmapsEnabled'
-  | 'fogProbeIblEnabled'
+  | 'probeIblEnabled'
   | 'reflectionCapturesEnabled'
   | 'showReflectionProbes'
 type ScalarSettingKey =
@@ -500,8 +500,8 @@ function createDefaultVisualSettings(): VisualSettings {
     ambientOcclusionMode: 'off',
     bakedLightmapsEnabled: true,
     exposureStops: DEFAULT_EXPOSURE_STOPS,
-    fogProbeIblEnabled: true,
     iblIntensity: DEFAULT_IBL_INTENSITY_MULTIPLIER,
+    probeIblEnabled: true,
     reflectionCapturesEnabled: true,
     showReflectionProbes: false,
     torchCandelaMultiplier: DEFAULT_TORCH_CANDELA_MULTIPLIER,
@@ -1897,32 +1897,32 @@ function EnvironmentLighting({
           REFLECTION_PROBE_RENDER_SIZE,
           { type: HalfFloatType }
         )
-        const rawCubeRenderTarget = new WebGLCubeRenderTarget(
-          REFLECTION_PROBE_RAW_RENDER_SIZE,
+        const ambientCubeRenderTarget = new WebGLCubeRenderTarget(
+          REFLECTION_PROBE_AMBIENT_RENDER_SIZE,
           { type: UnsignedByteType }
         )
         const cubeCamera = new CubeCamera(0.1, REFLECTION_PROBE_FAR, cubeRenderTarget)
-        const rawCubeCamera = new CubeCamera(0.1, REFLECTION_PROBE_FAR, rawCubeRenderTarget)
+        const ambientCubeCamera = new CubeCamera(0.1, REFLECTION_PROBE_FAR, ambientCubeRenderTarget)
 
         cubeCamera.position.set(
           probe.position.x,
           probe.position.y,
           probe.position.z
         )
-        rawCubeCamera.position.copy(cubeCamera.position)
+        ambientCubeCamera.position.copy(cubeCamera.position)
         scene.add(cubeCamera)
         cubeCamera.update(gl, scene)
         scene.remove(cubeCamera)
-        scene.add(rawCubeCamera)
-        rawCubeCamera.update(gl, scene)
-        scene.remove(rawCubeCamera)
+        scene.add(ambientCubeCamera)
+        ambientCubeCamera.update(gl, scene)
+        scene.remove(ambientCubeCamera)
 
         nextTargets.push(pmremGenerator.fromCubemap(cubeRenderTarget.texture))
-        nextRawTargets.push(rawCubeRenderTarget)
+        nextRawTargets.push(cubeRenderTarget)
         nextProbeAmbientColors.push(
-          computeAverageCubeRenderTargetColor(gl, rawCubeRenderTarget)
+          computeAverageCubeRenderTargetColor(gl, ambientCubeRenderTarget)
         )
-        cubeRenderTarget.dispose()
+        ambientCubeRenderTarget.dispose()
       }
 
       scene.remove(emissiveGroup)
@@ -2127,6 +2127,7 @@ function Ground({
   environmentIntensity,
   layout,
   groundLightmapTexture,
+  probeIblEnabled,
   reflectionCapturesEnabled,
   reflectionProbeTextures,
   torchCandelaMultiplier
@@ -2136,6 +2137,7 @@ function Ground({
   environmentIntensity: number
   layout: MazeLayout
   groundLightmapTexture: Texture
+  probeIblEnabled: boolean
   reflectionCapturesEnabled: boolean
   reflectionProbeTextures: Texture[]
   torchCandelaMultiplier: number
@@ -2180,7 +2182,9 @@ function Ground({
               layout,
               rect.probeIndices,
               probeTextures,
-              reflectionCapturesEnabled && hasCompleteProbeTextures(probeTextures)
+              probeIblEnabled &&
+                reflectionCapturesEnabled &&
+                hasCompleteProbeTextures(probeTextures)
                 ? 'world'
                 : 'none',
               { region: rect.region }
@@ -2293,6 +2297,7 @@ function WallSconce({
   environmentIntensity,
   layout,
   mazeLight,
+  probeIblEnabled,
   reflectionCapturesEnabled,
   reflectionProbeTextures,
   torchCandelaMultiplier
@@ -2301,6 +2306,7 @@ function WallSconce({
   environmentIntensity: number
   layout: MazeLayout
   mazeLight: MazeLayout['lights'][number]
+  probeIblEnabled: boolean
   reflectionCapturesEnabled: boolean
   reflectionProbeTextures: Texture[]
   torchCandelaMultiplier: number
@@ -2345,7 +2351,9 @@ function WallSconce({
       layout,
       reflectionProbeBlend.probeIndices,
       probeTextures,
-      reflectionCapturesEnabled && hasCompleteProbeTextures(probeTextures)
+      probeIblEnabled &&
+        reflectionCapturesEnabled &&
+        hasCompleteProbeTextures(probeTextures)
         ? 'constant'
         : 'none',
       {
@@ -2585,7 +2593,6 @@ function SconceMesh({
 
 function FogVolume({
   environmentFogColor,
-  fogProbeIblEnabled,
   layout,
   noiseFrequency,
   reflectionCapturesEnabled,
@@ -2595,7 +2602,6 @@ function FogVolume({
   volumeIntensity
 }: {
   environmentFogColor: Color
-  fogProbeIblEnabled: boolean
   layout: MazeLayout
   noiseFrequency: number
   reflectionCapturesEnabled: boolean
@@ -2712,7 +2718,6 @@ function FogVolume({
       uniforms.torchCount.value = Math.min(FOG_VOLUME_MAX_TORCHES, torchPositions.length)
       uniforms.torchPositions.value = fogTorchPositions
       uniforms.useProbeAmbientTexture.value =
-        fogProbeIblEnabled &&
         reflectionCapturesEnabled &&
         Boolean(probeAmbientTexture)
           ? 1
@@ -2720,7 +2725,6 @@ function FogVolume({
     }
   }, [
     environmentFogColor,
-    fogProbeIblEnabled,
     fogTorchPositions,
     noiseFrequency,
     probeAmbientTexture,
@@ -2908,7 +2912,6 @@ function FogVolume({
               time: { value: 0 },
               useProbeAmbientTexture: {
                 value:
-                  fogProbeIblEnabled &&
                   reflectionCapturesEnabled &&
                   Boolean(probeAmbientTexture)
                     ? 1
@@ -2999,6 +3002,7 @@ function MazeWalls({
   environmentIntensity,
   layout,
   lightmapBytes,
+  probeIblEnabled,
   reflectionCapturesEnabled,
   reflectionProbeTextures,
   torchCandelaMultiplier
@@ -3008,6 +3012,7 @@ function MazeWalls({
   environmentIntensity: number
   layout: MazeLayout
   lightmapBytes: Uint8Array
+  probeIblEnabled: boolean
   reflectionCapturesEnabled: boolean
   reflectionProbeTextures: Texture[]
   torchCandelaMultiplier: number
@@ -3035,6 +3040,7 @@ function MazeWalls({
           key={mazeLight.id}
           layout={layout}
           mazeLight={mazeLight}
+          probeIblEnabled={probeIblEnabled}
           reflectionCapturesEnabled={reflectionCapturesEnabled}
           reflectionProbeTextures={reflectionProbeTextures}
           torchCandelaMultiplier={torchCandelaMultiplier}
@@ -3185,8 +3191,8 @@ function SceneGeometry({
   environmentTexture,
   environmentIntensity,
   environmentFogColor,
-  fogProbeIblEnabled,
   layout,
+  probeIblEnabled,
   reflectionProbeAmbientColors,
   reflectionProbeRawTextures,
   reflectionCapturesEnabled,
@@ -3200,8 +3206,8 @@ function SceneGeometry({
   environmentTexture: Texture | null
   environmentIntensity: number
   environmentFogColor: Color
-  fogProbeIblEnabled: boolean
   layout: MazeLayout
+  probeIblEnabled: boolean
   reflectionProbeAmbientColors: Color[]
   reflectionProbeRawTextures: Texture[]
   reflectionCapturesEnabled: boolean
@@ -3222,6 +3228,7 @@ function SceneGeometry({
         environmentIntensity={environmentIntensity}
         layout={layout}
         groundLightmapTexture={groundLightmapTexture}
+        probeIblEnabled={probeIblEnabled}
         reflectionCapturesEnabled={reflectionCapturesEnabled}
         reflectionProbeTextures={reflectionProbeTextures}
         torchCandelaMultiplier={torchCandelaMultiplier}
@@ -3232,6 +3239,7 @@ function SceneGeometry({
         environmentIntensity={environmentIntensity}
         layout={layout}
         lightmapBytes={lightmapBytes}
+        probeIblEnabled={probeIblEnabled}
         reflectionCapturesEnabled={reflectionCapturesEnabled}
         reflectionProbeTextures={reflectionProbeTextures}
         torchCandelaMultiplier={torchCandelaMultiplier}
@@ -3244,7 +3252,6 @@ function SceneGeometry({
       {isEffectActive(volumetricLighting) ? (
         <FogVolume
           environmentFogColor={environmentFogColor}
-          fogProbeIblEnabled={fogProbeIblEnabled}
           layout={layout}
           noiseFrequency={volumetricNoiseFrequency}
           reflectionCapturesEnabled={reflectionCapturesEnabled}
@@ -4472,8 +4479,8 @@ function Scene({
         environmentTexture={environmentTexture}
         environmentIntensity={environmentIntensity}
         environmentFogColor={environmentFogColor}
-        fogProbeIblEnabled={visualSettings.fogProbeIblEnabled}
         layout={layout}
+        probeIblEnabled={visualSettings.probeIblEnabled}
         reflectionProbeAmbientColors={reflectionProbeAmbientColors}
         reflectionProbeRawTextures={reflectionProbeRawTextures}
         reflectionCapturesEnabled={visualSettings.reflectionCapturesEnabled}
@@ -4766,15 +4773,15 @@ function VisualControls({
       </div>
 
       <div className="visual-control-row">
-        <output>{visualSettings.fogProbeIblEnabled ? 'on' : 'off'}</output>
-        <ResettableLabel onReset={() => onResetBooleanSetting('fogProbeIblEnabled')}>
-          Fog Probe IBL
+        <output>{visualSettings.probeIblEnabled ? 'on' : 'off'}</output>
+        <ResettableLabel onReset={() => onResetBooleanSetting('probeIblEnabled')}>
+          Probe IBL
         </ResettableLabel>
         <input
-          aria-label="Fog Probe IBL"
-          checked={visualSettings.fogProbeIblEnabled}
+          aria-label="Probe IBL"
+          checked={visualSettings.probeIblEnabled}
           onChange={(event) => {
-            onBooleanSettingChange('fogProbeIblEnabled', event.target.checked)
+            onBooleanSettingChange('probeIblEnabled', event.target.checked)
           }}
           type="checkbox"
         />

@@ -118,7 +118,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Treat the temporary `test:perf` disablement as intentional until the static baked-lightmap torch-lighting evaluation ends.
 - Keep `npm run test:unit` under 20 seconds.
 - Keep the prepared smoke runner `npm run test:smoke:runner` under 1 minute after a single `npm run build:pages`.
-- Latest measured benchmark on April 19, 2026: `npm run build` took about `5.9s`; `npm run build:pages` took about `8.4s`; `npm run test:unit` took about `7.5s`; `npm run test:smoke:runner` took about `59.1s` after a prepared `build:pages`; the current smoke hot spots are `startup` at about `34.0s`, `volumetric-fog` at about `10.9s`, `debug-controls` at about `6.4s`, and `reflection-captures` at about `2.8s`; and `npm run test:perf:runner` remains intentionally skipped during the static baked-lightmap evaluation.
+- Latest measured benchmark on April 19, 2026: `npm run build` took about `6.2s`; `npm run build:pages` took about `8.5s`; `npm run test:unit` took about `7.8s`; `npm run test:smoke:runner` took about `56.3s` after a prepared `build:pages`; the current smoke hot spots are `startup` at about `33.3s`, `volumetric-fog` at about `8.4s`, `debug-controls` at about `6.7s`, and `reflection-captures` at about `2.8s`; and `npm run test:perf:runner` remains intentionally skipped during the static baked-lightmap evaluation.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.

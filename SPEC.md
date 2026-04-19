@@ -124,7 +124,7 @@
 - The Bloom kernel-size control updates the configured bloom kernel preset.
 - The debug panel exposes a checkbox that disables baked maze lightmaps while leaving the underlying maze geometry visible.
 - The debug panel exposes a checkbox that disables local maze reflection captures while leaving the global HDRI environment active.
-- The debug panel exposes a checkbox that enables or disables using local reflection captures as the volumetric fog's image-based-lighting source.
+- The debug panel exposes a checkbox that enables or disables using local reflection captures as a local image-based-lighting source for scene materials outside the baked-lightmap path.
 - The debug panel exposes a checkbox, disabled by default, that draws a sphere at each maze reflection-probe position using that probe's captured reflection texture.
 - Double-clicking any debug-panel label resets that control to its authored default value.
 - The debug panel does not expose obsolete atmosphere or sun-direction controls.
@@ -211,8 +211,8 @@
 - Lens-flare bokeh and ghosts remain translucent and additive rather than appearing as opaque black or opaque solid sprites.
 - Increasing or decreasing volumetric fog or smoke parameters produces a visible corresponding change in the full-scene fog volume.
 - Enabling volumetric fog with an intensity of `0` behaves as a visual no-op.
-- Volumetric fog samples image-based lighting from the nearest available local reflection probes inside the maze and falls back to the authored HDRI outside probe coverage.
-- Disabling probe-fed volumetric fog IBL reverts the fog volume to HDRI-only lighting without disabling reflection captures for the rest of the scene.
+- Volumetric fog samples image-based lighting from the nearest available local reflection probes whenever reflection captures are enabled and falls back to the authored HDRI outside probe coverage.
+- Disabling local probe IBL on scene materials does not disable volumetric fog's probe-fed lighting path.
 - Enabling Depth of Field with a `0` bokeh scale behaves as a visual no-op.
 - The page does not show speculative branding captions, launcher buttons, or click-to-enter copy.
 

@@ -262,7 +262,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     })
 
     await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveValue('-4.5')
-    await expect(page.getByLabel('Fog Probe IBL')).toBeVisible()
+    await expect(page.getByLabel('Probe IBL')).toBeVisible()
     await expect(page.getByLabel('Reflection Captures')).toBeVisible()
     await expect(page.getByRole('slider', { name: 'Move Speed' })).toBeVisible()
 
@@ -354,7 +354,6 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       })
 
     await setCheckbox(page, 'Reflection Captures', true)
-    await setCheckbox(page, 'Fog Probe IBL', false)
     await expect
       .poll(
         async () => page.evaluate(() => window.__levelsjamDebug.getFogState?.()?.useProbeAmbientTexture ?? null),
@@ -363,21 +362,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
           intervals: [50, 100, 250]
         }
       )
-      .toBe(0)
-
-    await setCheckbox(page, 'Fog Probe IBL', true)
-    await expect
-      .poll(
-        async () => page.evaluate(() => window.__levelsjamDebug.getFogState?.()),
-        {
-          timeout: 5_000,
-          intervals: [50, 100, 250]
-        }
-      )
-      .toMatchObject({
-        hasProbeAmbientTexture: true,
-        useProbeAmbientTexture: 1
-      })
+      .toBe(1)
   })
 
   expect(consoleErrors).toEqual([])
