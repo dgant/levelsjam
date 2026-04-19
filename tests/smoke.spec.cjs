@@ -263,6 +263,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
 
     await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveValue('-4.5')
     await expect(page.getByLabel('Probe IBL')).toBeVisible()
+    await expect(page.getByLabel('Probe IBL')).not.toBeChecked()
     await expect(page.getByLabel('Reflection Captures')).toBeVisible()
     await expect(page.getByRole('slider', { name: 'Move Speed' })).toBeVisible()
 
@@ -288,6 +289,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         }
       )
       .toBe('none')
+    await setCheckbox(page, 'Probe IBL', true)
     await setCheckbox(page, 'Reflection Captures', true)
     await expect
       .poll(
@@ -300,6 +302,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         }
       )
       .toBe('world')
+    await setCheckbox(page, 'Probe IBL', false)
   })
 
   await timedStep(timingProfile, 'volumetric-fog', async () => {

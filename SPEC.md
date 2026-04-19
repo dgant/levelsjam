@@ -124,8 +124,9 @@
 - The Bloom kernel-size control updates the configured bloom kernel preset.
 - The debug panel exposes a checkbox that disables baked maze lightmaps while leaving the underlying maze geometry visible.
 - The debug panel exposes a checkbox that disables local maze reflection captures while leaving the global HDRI environment active.
-- The debug panel exposes a checkbox that enables or disables using local reflection captures as a local image-based-lighting source for scene materials outside the baked-lightmap path.
+- The debug panel exposes a `Probe IBL` checkbox that enables or disables using local reflection captures as a local image-based-lighting source for all lit PBR scene geometry.
 - The debug panel exposes a checkbox, disabled by default, that draws a sphere at each maze reflection-probe position using that probe's captured reflection texture.
+- The debug panel `Probe IBL` checkbox defaults to `off`.
 - Double-clicking any debug-panel label resets that control to its authored default value.
 - The debug panel does not expose obsolete atmosphere or sun-direction controls.
 - The page shows an FPS counter in the top-right corner together with the current Git revision and revision timestamp.
@@ -171,6 +172,7 @@
 - The ground and walls use extracted PBR texture packs with tiling based on a 1 meter world scale unless a source specifies otherwise.
 - Maze wall materials do not add direct runtime scene-environment IBL on top of their baked diffuse lightmaps.
 - Reflective and semi-reflective materials read from the shared environment consistently, with the nearest local maze reflection probe taking precedence over the global HDRI for in-maze specular.
+- Enabling `Probe IBL` allows lit PBR maze geometry, including walls, to receive probe-driven local image-based lighting instead of relying only on the global HDRI fallback.
 - The reflective maze floor patch uses local reflection probes so puddled areas can reflect nearby torch sources rather than only the global HDRI.
 - The reflective maze floor patch blends nearby local reflection probes with weighted interpolation rather than switching between one nearest probe per region.
 - Reflective maze sconces blend nearby local reflection probes with weighted interpolation rather than switching between one nearest probe at the object position.

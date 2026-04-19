@@ -501,7 +501,7 @@ function createDefaultVisualSettings(): VisualSettings {
     bakedLightmapsEnabled: true,
     exposureStops: DEFAULT_EXPOSURE_STOPS,
     iblIntensity: DEFAULT_IBL_INTENSITY_MULTIPLIER,
-    probeIblEnabled: true,
+    probeIblEnabled: false,
     reflectionCapturesEnabled: true,
     showReflectionProbes: false,
     torchCandelaMultiplier: DEFAULT_TORCH_CANDELA_MULTIPLIER,
@@ -3024,10 +3024,16 @@ function MazeWalls({
       {layout.walls.map((mazeWall, wallIndex) => (
         <MazeWallMesh
           bakedLightmapsEnabled={bakedLightmapsEnabled}
+          environmentTexture={environmentTexture}
+          environmentIntensity={environmentIntensity}
           key={mazeWall.id}
           lightmap={layout.maze.lightmap}
           lightmapBytes={lightmapBytes}
+          layout={layout}
           mazeWall={mazeWall}
+          probeIblEnabled={probeIblEnabled}
+          reflectionCapturesEnabled={reflectionCapturesEnabled}
+          reflectionProbeTextures={reflectionProbeTextures}
           torchCandelaMultiplier={torchCandelaMultiplier}
           wallIndex={wallIndex}
           wallMaterialMaps={wall}
@@ -3052,25 +3058,28 @@ function MazeWalls({
 
 function WallFaceMaterial({
   attach,
+  environmentTexture,
+  environmentIntensity,
   lightMap,
   lightMapIntensity,
   maps,
-  patchConfig
+  patchConfig,
+  probeBlend
 }: {
   attach: string
+  environmentTexture: Texture | null
+  environmentIntensity: number
   lightMap?: Texture
   lightMapIntensity: number
   maps: PbrMaps
   patchConfig: MaterialShaderPatchConfig
+  probeBlend: ProbeBlendConfig
 }) {
   const materialRef = useRef<ThreeMeshStandardMaterial>(null)
 
   useProbeBlendMaterialShader(
     materialRef,
-    {
-      mode: 'none',
-      probeTextures: []
-    },
+    probeBlend,
     patchConfig
   )
 
@@ -3079,7 +3088,8 @@ function WallFaceMaterial({
       {...maps}
       attach={attach}
       bumpScale={0.05}
-      envMapIntensity={0}
+      envMap={environmentTexture ?? null}
+      envMapIntensity={environmentIntensity}
       lightMap={lightMap}
       lightMapIntensity={lightMapIntensity}
       metalness={0.02}
@@ -3091,17 +3101,29 @@ function WallFaceMaterial({
 
 function MazeWallMesh({
   bakedLightmapsEnabled,
+  environmentTexture,
+  environmentIntensity,
   lightmap,
   lightmapBytes,
+  layout,
   mazeWall,
+  probeIblEnabled,
+  reflectionCapturesEnabled,
+  reflectionProbeTextures,
   torchCandelaMultiplier,
   wallIndex,
   wallMaterialMaps
 }: {
   bakedLightmapsEnabled: boolean
+  environmentTexture: Texture | null
+  environmentIntensity: number
   lightmap: MazeLightmap
   lightmapBytes: Uint8Array
+  layout: MazeLayout
   mazeWall: MazeLayout['walls'][number]
+  probeIblEnabled: boolean
+  reflectionCapturesEnabled: boolean
+  reflectionProbeTextures: Texture[]
   torchCandelaMultiplier: number
   wallIndex: number
   wallMaterialMaps: PbrMaps
@@ -3122,6 +3144,46 @@ function MazeWallMesh({
     bakedLightmapsEnabled
       ? torchCandelaMultiplier * WALL_LIGHTMAP_INTENSITY_SCALE
       : 0
+  const reflectionProbeBlend = useMemo(
+    () =>
+      getReflectionProbeBlendForPosition(layout, {
+        x: mazeWall.center.x,
+        z: mazeWall.center.z
+      }),
+    [layout, mazeWall.center.x, mazeWall.center.z]
+  )
+  const probeTextures = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeTextures[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeTextures]
+  )
+  const probeBlend = useMemo(
+    () =>
+      buildProbeBlendConfig(
+        layout,
+        reflectionProbeBlend.probeIndices,
+        probeTextures,
+        probeIblEnabled &&
+          reflectionCapturesEnabled &&
+          hasCompleteProbeTextures(probeTextures)
+          ? 'constant'
+          : 'none',
+        {
+          weights: reflectionProbeBlend.weights as [number, number, number, number]
+        }
+      ),
+    [
+      layout,
+      probeIblEnabled,
+      probeTextures,
+      reflectionCapturesEnabled,
+      reflectionProbeBlend.probeIndices,
+      reflectionProbeBlend.weights
+    ]
+  )
+  const envMapIntensity = probeIblEnabled ? environmentIntensity : 0
 
   return (
     <mesh
@@ -3142,45 +3204,63 @@ function MazeWallMesh({
       <boxGeometry args={[WALL_LENGTH, WALL_HEIGHT, WALL_WIDTH]} />
       <WallFaceMaterial
         attach="material-0"
+        environmentIntensity={envMapIntensity}
+        environmentTexture={environmentTexture}
         lightMap={bakedLightmapsEnabled ? lightmapTextures.neutral : undefined}
         lightMapIntensity={lightMapIntensity}
         maps={wallMaterialMaps}
         patchConfig={faceMaterialPatchConfig}
+        probeBlend={probeBlend}
       />
       <WallFaceMaterial
         attach="material-1"
+        environmentIntensity={envMapIntensity}
+        environmentTexture={environmentTexture}
         lightMap={bakedLightmapsEnabled ? lightmapTextures.neutral : undefined}
         lightMapIntensity={lightMapIntensity}
         maps={wallMaterialMaps}
         patchConfig={faceMaterialPatchConfig}
+        probeBlend={probeBlend}
       />
       <WallFaceMaterial
         attach="material-2"
+        environmentIntensity={envMapIntensity}
+        environmentTexture={environmentTexture}
         lightMap={bakedLightmapsEnabled ? lightmapTextures.neutral : undefined}
         lightMapIntensity={lightMapIntensity}
         maps={wallMaterialMaps}
         patchConfig={faceMaterialPatchConfig}
+        probeBlend={probeBlend}
       />
       <WallFaceMaterial
         attach="material-3"
+        environmentIntensity={envMapIntensity}
+        environmentTexture={environmentTexture}
         lightMap={bakedLightmapsEnabled ? lightmapTextures.neutral : undefined}
         lightMapIntensity={lightMapIntensity}
         maps={wallMaterialMaps}
         patchConfig={faceMaterialPatchConfig}
+        probeBlend={probeBlend}
       />
       <WallFaceMaterial
         attach="material-4"
+        environmentIntensity={envMapIntensity}
+        environmentTexture={environmentTexture}
         lightMap={bakedLightmapsEnabled ? lightmapTextures.pz : undefined}
         lightMapIntensity={lightMapIntensity}
         maps={wallMaterialMaps}
         patchConfig={faceMaterialPatchConfig}
+        probeBlend={probeBlend}
       />
       <WallFaceMaterial
         attach="material-5"
+        environmentIntensity={envMapIntensity}
+        environmentTexture={environmentTexture}
         lightMap={bakedLightmapsEnabled ? lightmapTextures.nz : undefined}
         lightMapIntensity={lightMapIntensity}
         maps={wallMaterialMaps}
         patchConfig={faceMaterialPatchConfig}
+        probeBlend={probeBlend}
       />
     </mesh>
   )
