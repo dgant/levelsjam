@@ -65,6 +65,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify toggling `Reflection Captures` produces a visible change on an in-maze reflective floor patch.
 - Verify enabling `Show Reflection Probes` draws a probe sphere at each maze probe position.
 - Verify the reflection-probe spheres directly display the raw captured cubemap contents and visibly show nearby maze geometry and torch reflections rather than a filtered approximation, a black sphere, an empty sphere, or a nearly all-sky capture.
+- Verify the reflection-probe spheres remain readable regardless of the gameplay exposure slider because their preview uses a fixed neutral diagnostic tone map.
 - Verify `window.__levelsjamDebug.getReflectionProbeState()` reports a nonzero probe count and becomes `ready: true` after load.
 - Verify moving the camera between maze cells does not change `window.__levelsjamDebug.getReflectionProbeState().activeProbeId` from `null` or make the scene lighting flicker.
 - Verify the fire flipbook runs at the updated faster rate.

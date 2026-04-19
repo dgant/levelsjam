@@ -1024,6 +1024,34 @@ function computeCubeRenderTargetDebugStats(
   }
 }
 
+function getReflectionCaptureCountKey(
+  object: Mesh
+): 'billboard' | 'ground' | 'sconce' | 'wall' | null {
+  if (object.userData?.debugRole === 'maze-ground-lightmap') {
+    return 'ground'
+  }
+
+  if (
+    object.userData?.debugRole === 'maze-wall' ||
+    (
+      Array.isArray(object.userData?.debugRoles) &&
+      object.userData.debugRoles.includes('maze-wall-lightmap')
+    )
+  ) {
+    return 'wall'
+  }
+
+  if (object.userData?.debugRole === 'sconce-body') {
+    return 'sconce'
+  }
+
+  if (object.userData?.debugRole === 'torch-billboard') {
+    return 'billboard'
+  }
+
+  return null
+}
+
 function getProbeVolumeBounds(
   probePosition: { x: number, y: number, z: number } | null | undefined
 ) {
@@ -1734,6 +1762,7 @@ function EnvironmentLighting({
     scene.userData.reflectionProbeState = {
       activeProbeId: null,
       captureSceneState,
+      probeCaptureCounts: [],
       probeMetrics: [],
       probeCount: layout.reflectionProbes.length,
       ready: false
@@ -1826,6 +1855,7 @@ function EnvironmentLighting({
     scene.userData.reflectionProbeState = {
       activeProbeId: null,
       captureSceneState: getReflectionCaptureSceneState(scene, layout),
+      probeCaptureCounts: [],
       probeMetrics: [],
       probeCount: layout.reflectionProbes.length,
       ready: false
@@ -1833,6 +1863,12 @@ function EnvironmentLighting({
 
     let nextTargets: Array<{ dispose: () => void; texture: Texture }> = []
     let nextRawTargets: Array<{ dispose: () => void; texture: Texture }> = []
+    let nextProbeCaptureCounts: Array<{
+      billboard: number
+      ground: number
+      sconce: number
+      wall: number
+    }> = []
     let nextProbeAmbientColors: Color[] = []
     let nextProbeMetrics: Array<{
       darkest: number
@@ -1851,6 +1887,7 @@ function EnvironmentLighting({
       scene.userData.reflectionProbeState = {
         activeProbeId: null,
         captureSceneState,
+        probeCaptureCounts: [],
         probeMetrics: [],
         probeCount: layout.reflectionProbes.length,
         ready: false
@@ -1864,7 +1901,6 @@ function EnvironmentLighting({
       const hiddenObjects: Array<{ object: { visible: boolean }; visible: boolean }> = []
       scene.traverse((object) => {
         if (
-          object.userData?.debugRole === 'torch-billboard' ||
           object.userData?.debugRole === 'torch-lens-flare' ||
           object.userData?.debugRole === 'global-fog-volume' ||
           object.userData?.debugRole === 'reflection-probe-visual'
@@ -1874,9 +1910,6 @@ function EnvironmentLighting({
         }
       })
 
-      const emissiveGeometry = new SphereGeometry(REFLECTION_PROBE_EMISSIVE_RADIUS, 12, 12)
-      const emissiveGroup = new Group()
-      const emissiveMeshes: Mesh[] = []
       const captureLightGroup = new Group()
       const captureLights: SpotLight[] = []
       const inwardDirectionBySide = {
@@ -1887,20 +1920,6 @@ function EnvironmentLighting({
       } as const
 
       for (const mazeLight of layout.lights) {
-        const emissiveMaterial = new MeshBasicMaterial({
-          color: FIRE_COLOR.clone().multiplyScalar(
-            REFLECTION_PROBE_EMISSIVE_SCALE
-          )
-        })
-        const emissiveMesh = new Mesh(emissiveGeometry, emissiveMaterial)
-        emissiveMesh.position.set(
-          mazeLight.torchPosition.x,
-          mazeLight.torchPosition.y,
-          mazeLight.torchPosition.z
-        )
-        emissiveGroup.add(emissiveMesh)
-        emissiveMeshes.push(emissiveMesh)
-
         const captureLight = new SpotLight(
           FIRE_COLOR,
           TORCH_BASE_CANDELA,
@@ -1913,7 +1932,11 @@ function EnvironmentLighting({
         const inwardDirection = inwardDirectionBySide[mazeLight.side]
 
         captureLight.castShadow = true
-        captureLight.position.copy(emissiveMesh.position)
+        captureLight.position.set(
+          mazeLight.torchPosition.x,
+          mazeLight.torchPosition.y,
+          mazeLight.torchPosition.z
+        )
         captureLight.shadow.bias = -0.001
         captureLight.shadow.mapSize.set(
           REFLECTION_PROBE_SHADOW_MAP_SIZE,
@@ -1930,13 +1953,13 @@ function EnvironmentLighting({
         captureLights.push(captureLight)
       }
 
-      scene.add(emissiveGroup)
       scene.add(captureLightGroup)
       scene.environment = baseEnvironment.texture
       scene.environmentIntensity = calibratedIntensity
 
       nextTargets = []
       nextRawTargets = []
+      nextProbeCaptureCounts = []
       nextProbeAmbientColors = []
       nextProbeMetrics = []
       for (const probe of layout.reflectionProbes) {
@@ -1950,22 +1973,65 @@ function EnvironmentLighting({
         )
         const cubeCamera = new CubeCamera(0.1, REFLECTION_PROBE_FAR, cubeRenderTarget)
         const ambientCubeCamera = new CubeCamera(0.1, REFLECTION_PROBE_FAR, ambientCubeRenderTarget)
+        const captureCounts = {
+          billboard: 0,
+          ground: 0,
+          sconce: 0,
+          wall: 0
+        }
+        const originalMeshCallbacks: Array<{
+          mesh: Mesh
+          onBeforeRender: Mesh['onBeforeRender']
+        }> = []
 
         cubeCamera.position.set(
           probe.position.x,
           probe.position.y,
           probe.position.z
         )
+        cubeCamera.layers.enable(TORCH_BILLBOARD_LAYER)
         ambientCubeCamera.position.copy(cubeCamera.position)
+        ambientCubeCamera.layers.enable(TORCH_BILLBOARD_LAYER)
+        scene.traverse((object) => {
+          if (!(object instanceof Mesh)) {
+            return
+          }
+
+          const countKey = getReflectionCaptureCountKey(object)
+
+          if (!countKey) {
+            return
+          }
+
+          const originalOnBeforeRender = object.onBeforeRender
+
+          originalMeshCallbacks.push({
+            mesh: object,
+            onBeforeRender: originalOnBeforeRender
+          })
+          object.onBeforeRender = function (...args) {
+            const activeCamera = args[2] as ThreeCamera
+
+            if (activeCamera.parent === cubeCamera) {
+              captureCounts[countKey] += 1
+            }
+
+            originalOnBeforeRender.apply(this, args)
+          }
+        })
         scene.add(cubeCamera)
         cubeCamera.update(gl, scene)
         scene.remove(cubeCamera)
         scene.add(ambientCubeCamera)
         ambientCubeCamera.update(gl, scene)
         scene.remove(ambientCubeCamera)
+        for (const entry of originalMeshCallbacks) {
+          entry.mesh.onBeforeRender = entry.onBeforeRender
+        }
 
         nextTargets.push(pmremGenerator.fromCubemap(cubeRenderTarget.texture))
         nextRawTargets.push(cubeRenderTarget)
+        nextProbeCaptureCounts.push({ ...captureCounts })
         const probeDebugStats = computeCubeRenderTargetDebugStats(gl, ambientCubeRenderTarget)
         nextProbeAmbientColors.push(probeDebugStats.averageColor)
         nextProbeMetrics.push({
@@ -1977,12 +2043,7 @@ function EnvironmentLighting({
         ambientCubeRenderTarget.dispose()
       }
 
-      scene.remove(emissiveGroup)
       scene.remove(captureLightGroup)
-      emissiveGeometry.dispose()
-      for (const emissiveMesh of emissiveMeshes) {
-        ;(emissiveMesh.material as MeshBasicMaterial).dispose()
-      }
       for (const captureLight of captureLights) {
         captureLight.dispose()
         captureLight.shadow.map?.dispose()
@@ -2013,6 +2074,7 @@ function EnvironmentLighting({
       scene.userData.reflectionProbeState = {
         activeProbeId: null,
         captureSceneState: getReflectionCaptureSceneState(scene, layout),
+        probeCaptureCounts: nextProbeCaptureCounts.map((counts) => ({ ...counts })),
         probeMetrics: nextProbeMetrics.map((metric) => ({ ...metric })),
         probeCount: layout.reflectionProbes.length,
         ready: nextTargets.length === layout.reflectionProbes.length
@@ -2044,6 +2106,7 @@ function EnvironmentLighting({
       scene.userData.reflectionProbeState = {
         activeProbeId: null,
         captureSceneState: getReflectionCaptureSceneState(scene, layout),
+        probeCaptureCounts: [],
         probeMetrics: [],
         probeCount: layout.reflectionProbes.length,
         ready: false
@@ -3023,14 +3086,19 @@ function ReflectionProbeVisualization({
                 uniform samplerCube probeCubeMap;
                 varying vec3 vProbeDirection;
 
+                vec3 debugTonemap(vec3 color) {
+                  color = max(color, vec3(0.0));
+                  return color / (color + vec3(1.0));
+                }
+
                 void main() {
-                  gl_FragColor = textureCube(probeCubeMap, normalize(vProbeDirection));
-                  #include <tonemapping_fragment>
+                  vec4 texel = textureCube(probeCubeMap, normalize(vProbeDirection));
+                  gl_FragColor = vec4(debugTonemap(texel.rgb), texel.a);
                   #include <colorspace_fragment>
                 }
               `}
               side={DoubleSide}
-              toneMapped
+              toneMapped={false}
               uniforms={{
                 probeCubeMap: { value: texture }
               }}
@@ -3982,6 +4050,12 @@ function FlightRig({
             sconceCount: number
             wallCount: number
           }
+          probeCaptureCounts?: Array<{
+            billboard: number
+            ground: number
+            sconce: number
+            wall: number
+          }>
           probeMetrics?: Array<{
             darkest: number
             luminanceStdDev: number

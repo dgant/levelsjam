@@ -316,13 +316,36 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         nonWhiteFraction: expect.any(Number),
         warmFraction: expect.any(Number)
       })
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => window.__levelsjamDebug.getReflectionProbeState()?.probeCaptureCounts?.[24] ?? null
+        ),
+        {
+          timeout: 10_000,
+          intervals: [100, 250, 500]
+        }
+      )
+      .toMatchObject({
+        billboard: expect.any(Number),
+        ground: expect.any(Number),
+        sconce: expect.any(Number),
+        wall: expect.any(Number)
+      })
     const probePreviewDetail = await page.evaluate(
       () => window.__levelsjamDebug.getReflectionProbeState()?.probeMetrics?.[24] ?? null
+    )
+    const probeCaptureCounts = await page.evaluate(
+      () => window.__levelsjamDebug.getReflectionProbeState()?.probeCaptureCounts?.[24] ?? null
     )
     expect(probePreviewDetail.nonWhiteFraction).toBeGreaterThan(0.18)
     expect(probePreviewDetail.luminanceStdDev).toBeGreaterThan(18)
     expect(probePreviewDetail.warmFraction).toBeGreaterThan(0.02)
     expect(probePreviewDetail.darkest).toBeLessThan(64)
+    expect(probeCaptureCounts.billboard).toBeGreaterThan(0)
+    expect(probeCaptureCounts.ground).toBeGreaterThan(0)
+    expect(probeCaptureCounts.sconce).toBeGreaterThan(0)
+    expect(probeCaptureCounts.wall).toBeGreaterThan(0)
     await setCheckbox(page, 'Probe IBL', false)
   })
 

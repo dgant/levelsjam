@@ -75,6 +75,7 @@
 - Reflection probe captures wait until every expected opaque maze wall, baked floor patch, and sconce is present with its capture-ready material state before baking.
 - Reflection probe captures include the visible static maze geometry and its baked lighting instead of collapsing to only the HDRI and temporary torch emitters.
 - Reflection probe debug visualization displays the raw captured probe cubemap contents directly on the debug spheres so a human can inspect what each reflection or IBL source actually contains.
+- Reflection probe debug visualization uses a fixed neutral preview tone map rather than the gameplay exposure control so bright captured sources do not wash out the diagnostic view.
 - The top of each wall sconce aligns to the bottom of its torch billboard by default so the flame billboard does not appear to float above the fixture.
 - Screen-space ambient occlusion controls visibly affect the scene when enabled.
 - Lens flares, SSR, and volumetric fog remain visually stable as their intensity controls increase and must not black out the scene.
