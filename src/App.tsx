@@ -7,7 +7,7 @@ import {
   ToneMapping,
   Vignette
 } from '@react-three/postprocessing'
-import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
+import { Canvas, createPortal, useFrame, useLoader, useThree } from '@react-three/fiber'
 import {
   BasicShadowMap,
   BoxGeometry,
@@ -504,6 +504,17 @@ type MaterialShaderPatchConfig = {
   lightMapTorchTint?: Color
 }
 
+type WallMaterialContinuumStepKey =
+  | 'basic-white'
+  | 'basic-albedo'
+  | 'standard-white'
+  | 'standard-albedo'
+  | 'standard-surface'
+  | 'standard-surface-ao'
+  | 'standard-surface-lightmap'
+  | 'standard-surface-lightmap-patch'
+  | 'runtime-original'
+
 type MazeLightmap = MazeLayout['maze']['lightmap']
 
 type StandardPbrTextureUrls = {
@@ -949,6 +960,93 @@ function updateProbeBlendUniformDebugState(
   }
 }
 
+function attachProbeBlendMaterialShader(
+  material: ThreeMeshPhysicalMaterial | ThreeMeshStandardMaterial,
+  probeBlend: ProbeBlendConfig,
+  patchConfig: MaterialShaderPatchConfig,
+  shaderRef: { current: ProbeBlendShader | null }
+) {
+  const usesTintedLightMap =
+    Boolean(patchConfig.lightMapAmbientTint) ||
+    Boolean(patchConfig.lightMapTorchTint)
+
+  material.customProgramCacheKey = () =>
+    `probe-blend-v2-${usesTintedLightMap ? 'lightmap-tint' : 'plain'}`
+  updateProbeBlendMaterialDebugState(material, probeBlend)
+  material.onBeforeCompile = (shader: Shader) => {
+    const probeBlendShader = shader as ProbeBlendShader
+
+    probeBlendShader.uniforms.lightMapAmbientTint = new Uniform(BLACK_COLOR.clone())
+    probeBlendShader.uniforms.lightMapTorchTint = new Uniform(WHITE_COLOR.clone())
+    probeBlendShader.uniforms.localProbePosition0 = new Uniform(DEFAULT_PROBE_POSITION.clone())
+    probeBlendShader.uniforms.localProbePosition1 = new Uniform(DEFAULT_PROBE_POSITION.clone())
+    probeBlendShader.uniforms.localProbePosition2 = new Uniform(DEFAULT_PROBE_POSITION.clone())
+    probeBlendShader.uniforms.localProbePosition3 = new Uniform(DEFAULT_PROBE_POSITION.clone())
+    probeBlendShader.uniforms.localProbeBoxMin0 = new Uniform(DEFAULT_PROBE_BOX_MIN.clone())
+    probeBlendShader.uniforms.localProbeBoxMin1 = new Uniform(DEFAULT_PROBE_BOX_MIN.clone())
+    probeBlendShader.uniforms.localProbeBoxMin2 = new Uniform(DEFAULT_PROBE_BOX_MIN.clone())
+    probeBlendShader.uniforms.localProbeBoxMin3 = new Uniform(DEFAULT_PROBE_BOX_MIN.clone())
+    probeBlendShader.uniforms.localProbeBoxMax0 = new Uniform(DEFAULT_PROBE_BOX_MAX.clone())
+    probeBlendShader.uniforms.localProbeBoxMax1 = new Uniform(DEFAULT_PROBE_BOX_MAX.clone())
+    probeBlendShader.uniforms.localProbeBoxMax2 = new Uniform(DEFAULT_PROBE_BOX_MAX.clone())
+    probeBlendShader.uniforms.localProbeBoxMax3 = new Uniform(DEFAULT_PROBE_BOX_MAX.clone())
+    probeBlendShader.uniforms.localProbeEnvMap0 = new Uniform<Texture | null>(null)
+    probeBlendShader.uniforms.localProbeEnvMap1 = new Uniform<Texture | null>(null)
+    probeBlendShader.uniforms.localProbeEnvMap2 = new Uniform<Texture | null>(null)
+    probeBlendShader.uniforms.localProbeEnvMap3 = new Uniform<Texture | null>(null)
+    probeBlendShader.uniforms.probeBlendMode = new Uniform(0)
+    probeBlendShader.uniforms.probeBlendRadianceMode = new Uniform(0)
+    probeBlendShader.uniforms.probeBlendWeights = new Uniform(new Vector4(1, 0, 0, 0))
+    probeBlendShader.uniforms.probeBlendRegion = new Uniform(new Vector4(0, 0, 0, 0))
+
+    probeBlendShader.vertexShader =
+      `varying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.vertexShader}`
+        .replace(
+          '#include <project_vertex>',
+          `vec4 probeBlendWorldPosition = vec4( transformed, 1.0 );
+\t#ifdef USE_BATCHING
+\t\tprobeBlendWorldPosition = batchingMatrix * probeBlendWorldPosition;
+\t#endif
+\t#ifdef USE_INSTANCING
+\t\tprobeBlendWorldPosition = instanceMatrix * probeBlendWorldPosition;
+\t#endif
+\tprobeBlendWorldPosition = modelMatrix * probeBlendWorldPosition;
+\tvProbeBlendWorldPosition = probeBlendWorldPosition.xyz;
+\t#include <project_vertex>`
+        )
+    probeBlendShader.fragmentShader =
+      `uniform vec3 lightMapAmbientTint;\nuniform vec3 lightMapTorchTint;\nvarying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
+        .replace(
+          '#include <envmap_physical_pars_fragment>',
+          PROBE_BLEND_SHADER_CHUNK
+        )
+        .replace(
+          'vec3 lightMapIrradiance = lightMapTexel.rgb * lightMapIntensity;',
+          `vec3 lightMapTorchIrradiance = vec3( lightMapTexel.r ) * lightMapTorchTint * lightMapIntensity;
+\t\tvec3 lightMapAmbientIrradiance = vec3( lightMapTexel.g ) * lightMapAmbientTint;
+\t\tvec3 lightMapIrradiance = lightMapTorchIrradiance + lightMapAmbientIrradiance;`
+        )
+
+    material.userData.probeBlendShaderDebug = {
+      fragmentHasProbeRadianceMode: probeBlendShader.fragmentShader.includes('probeBlendRadianceMode'),
+      fragmentHasSampleProbeBlendEnvMapWithMode: probeBlendShader.fragmentShader.includes(
+        'sampleProbeBlendEnvMapWithMode'
+      ),
+      fragmentHasGetIBLRadianceOverride: probeBlendShader.fragmentShader.includes(
+        'vec3 getIBLRadiance( const in vec3 viewDir, const in vec3 normal, const in float roughness )'
+      ),
+      fragmentHasGetIBLIrradianceOverride: probeBlendShader.fragmentShader.includes(
+        'vec3 getIBLIrradiance( const in vec3 normal )'
+      )
+    }
+    shaderRef.current = probeBlendShader
+    updateProbeBlendShaderUniforms(probeBlendShader, probeBlend, patchConfig)
+    updateProbeBlendUniformDebugState(material, probeBlendShader)
+  }
+
+  material.needsUpdate = true
+}
+
 function hasCompleteProbeTextures(textures: Array<Texture | null | undefined>) {
   return textures.length > 0 && textures.every(Boolean)
 }
@@ -1233,6 +1331,68 @@ function getReflectionCaptureCountKey(
   return null
 }
 
+function createReflectionProbeCaptureLights(layout: MazeLayout) {
+  const captureLightGroup = new Group()
+  const captureLights: SpotLight[] = []
+  const inwardDirectionBySide = {
+    east: new Vector3(-1, -0.1, 0),
+    north: new Vector3(0, -0.1, 1),
+    south: new Vector3(0, -0.1, -1),
+    west: new Vector3(1, -0.1, 0)
+  } as const
+
+  for (const mazeLight of layout.lights) {
+    const captureLight = new SpotLight(
+      FIRE_COLOR,
+      TORCH_BASE_CANDELA,
+      REFLECTION_PROBE_LIGHT_DISTANCE,
+      REFLECTION_PROBE_LIGHT_ANGLE,
+      0.45,
+      2
+    )
+    const captureTarget = new Group()
+    const inwardDirection = inwardDirectionBySide[mazeLight.side]
+
+    captureLight.castShadow = true
+    captureLight.position.set(
+      mazeLight.torchPosition.x,
+      mazeLight.torchPosition.y,
+      mazeLight.torchPosition.z
+    )
+    captureLight.shadow.bias = -0.001
+    captureLight.shadow.mapSize.set(
+      REFLECTION_PROBE_SHADOW_MAP_SIZE,
+      REFLECTION_PROBE_SHADOW_MAP_SIZE
+    )
+    captureTarget.position.set(
+      mazeLight.torchPosition.x + (inwardDirection.x * 2),
+      mazeLight.torchPosition.y + (inwardDirection.y * 2),
+      mazeLight.torchPosition.z + (inwardDirection.z * 2)
+    )
+    captureLight.target = captureTarget
+    captureLightGroup.add(captureTarget)
+    captureLightGroup.add(captureLight)
+    captureLights.push(captureLight)
+  }
+
+  return {
+    captureLightGroup,
+    captureLights
+  }
+}
+
+function disposeReflectionProbeCaptureLights(
+  scene: ThreeScene,
+  captureLightGroup: Group,
+  captureLights: SpotLight[]
+) {
+  scene.remove(captureLightGroup)
+  for (const captureLight of captureLights) {
+    captureLight.dispose()
+    captureLight.shadow.map?.dispose()
+  }
+}
+
 function getProbeVolumeBounds(
   probePosition: { x: number, y: number, z: number } | null | undefined
 ) {
@@ -1294,9 +1454,6 @@ function useProbeBlendMaterialShader(
   patchConfig: MaterialShaderPatchConfig = {}
 ) {
   const shaderRef = useRef<ProbeBlendShader | null>(null)
-  const usesTintedLightMap =
-    Boolean(patchConfig.lightMapAmbientTint) ||
-    Boolean(patchConfig.lightMapTorchTint)
 
   useEffect(() => {
     const material = materialRef.current
@@ -1305,87 +1462,16 @@ function useProbeBlendMaterialShader(
       return
     }
 
-    material.customProgramCacheKey = () =>
-      `probe-blend-v2-${usesTintedLightMap ? 'lightmap-tint' : 'plain'}`
-    updateProbeBlendMaterialDebugState(material, probeBlend)
-    material.onBeforeCompile = (shader: Shader) => {
-      const probeBlendShader = shader as ProbeBlendShader
-
-      probeBlendShader.uniforms.lightMapAmbientTint = new Uniform(BLACK_COLOR.clone())
-      probeBlendShader.uniforms.lightMapTorchTint = new Uniform(WHITE_COLOR.clone())
-      probeBlendShader.uniforms.localProbePosition0 = new Uniform(DEFAULT_PROBE_POSITION.clone())
-      probeBlendShader.uniforms.localProbePosition1 = new Uniform(DEFAULT_PROBE_POSITION.clone())
-      probeBlendShader.uniforms.localProbePosition2 = new Uniform(DEFAULT_PROBE_POSITION.clone())
-      probeBlendShader.uniforms.localProbePosition3 = new Uniform(DEFAULT_PROBE_POSITION.clone())
-      probeBlendShader.uniforms.localProbeBoxMin0 = new Uniform(DEFAULT_PROBE_BOX_MIN.clone())
-      probeBlendShader.uniforms.localProbeBoxMin1 = new Uniform(DEFAULT_PROBE_BOX_MIN.clone())
-      probeBlendShader.uniforms.localProbeBoxMin2 = new Uniform(DEFAULT_PROBE_BOX_MIN.clone())
-      probeBlendShader.uniforms.localProbeBoxMin3 = new Uniform(DEFAULT_PROBE_BOX_MIN.clone())
-      probeBlendShader.uniforms.localProbeBoxMax0 = new Uniform(DEFAULT_PROBE_BOX_MAX.clone())
-      probeBlendShader.uniforms.localProbeBoxMax1 = new Uniform(DEFAULT_PROBE_BOX_MAX.clone())
-      probeBlendShader.uniforms.localProbeBoxMax2 = new Uniform(DEFAULT_PROBE_BOX_MAX.clone())
-      probeBlendShader.uniforms.localProbeBoxMax3 = new Uniform(DEFAULT_PROBE_BOX_MAX.clone())
-      probeBlendShader.uniforms.localProbeEnvMap0 = new Uniform<Texture | null>(null)
-      probeBlendShader.uniforms.localProbeEnvMap1 = new Uniform<Texture | null>(null)
-      probeBlendShader.uniforms.localProbeEnvMap2 = new Uniform<Texture | null>(null)
-      probeBlendShader.uniforms.localProbeEnvMap3 = new Uniform<Texture | null>(null)
-      probeBlendShader.uniforms.probeBlendMode = new Uniform(0)
-      probeBlendShader.uniforms.probeBlendRadianceMode = new Uniform(0)
-      probeBlendShader.uniforms.probeBlendWeights = new Uniform(new Vector4(1, 0, 0, 0))
-      probeBlendShader.uniforms.probeBlendRegion = new Uniform(new Vector4(0, 0, 0, 0))
-
-      probeBlendShader.vertexShader =
-        `varying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.vertexShader}`
-          .replace(
-            '#include <project_vertex>',
-            `vec4 probeBlendWorldPosition = vec4( transformed, 1.0 );
-\t#ifdef USE_BATCHING
-\t\tprobeBlendWorldPosition = batchingMatrix * probeBlendWorldPosition;
-\t#endif
-\t#ifdef USE_INSTANCING
-\t\tprobeBlendWorldPosition = instanceMatrix * probeBlendWorldPosition;
-\t#endif
-\tprobeBlendWorldPosition = modelMatrix * probeBlendWorldPosition;
-\tvProbeBlendWorldPosition = probeBlendWorldPosition.xyz;
-\t#include <project_vertex>`
-          )
-      probeBlendShader.fragmentShader =
-        `uniform vec3 lightMapAmbientTint;\nuniform vec3 lightMapTorchTint;\nvarying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
-          .replace(
-            '#include <envmap_physical_pars_fragment>',
-            PROBE_BLEND_SHADER_CHUNK
-          )
-          .replace(
-            'vec3 lightMapIrradiance = lightMapTexel.rgb * lightMapIntensity;',
-            `vec3 lightMapTorchIrradiance = vec3( lightMapTexel.r ) * lightMapTorchTint * lightMapIntensity;
-\t\tvec3 lightMapAmbientIrradiance = vec3( lightMapTexel.g ) * lightMapAmbientTint;
-\t\tvec3 lightMapIrradiance = lightMapTorchIrradiance + lightMapAmbientIrradiance;`
-          )
-
-      material.userData.probeBlendShaderDebug = {
-        fragmentHasProbeRadianceMode: probeBlendShader.fragmentShader.includes('probeBlendRadianceMode'),
-        fragmentHasSampleProbeBlendEnvMapWithMode: probeBlendShader.fragmentShader.includes('sampleProbeBlendEnvMapWithMode'),
-        fragmentHasGetIBLRadianceOverride: probeBlendShader.fragmentShader.includes(
-          'vec3 getIBLRadiance( const in vec3 viewDir, const in vec3 normal, const in float roughness )'
-        ),
-        fragmentHasGetIBLIrradianceOverride: probeBlendShader.fragmentShader.includes(
-          'vec3 getIBLIrradiance( const in vec3 normal )'
-        )
-      }
-      shaderRef.current = probeBlendShader
-      updateProbeBlendShaderUniforms(probeBlendShader, probeBlend, patchConfig)
-      updateProbeBlendUniformDebugState(material, probeBlendShader)
-    }
-
-    material.needsUpdate = true
+    attachProbeBlendMaterialShader(material, probeBlend, patchConfig, shaderRef)
 
     return () => {
       if (materialRef.current === material) {
+        shaderRef.current = null
         material.onBeforeCompile = () => {}
         material.needsUpdate = true
       }
     }
-  }, [materialRef, patchConfig, probeBlend, usesTintedLightMap])
+  }, [materialRef, patchConfig, probeBlend])
 
   useEffect(() => {
     updateProbeBlendMaterialDebugState(materialRef.current, probeBlend)
@@ -1922,6 +2008,130 @@ function useWallLightmapTextures(
   return textures
 }
 
+function createWallMaterialContinuumStepMaterial(
+  sourceMaterial: ThreeMeshStandardMaterial,
+  step: WallMaterialContinuumStepKey
+) {
+  if (step === 'basic-white') {
+    return new MeshBasicMaterial({
+      color: 'white',
+      side: sourceMaterial.side
+    })
+  }
+
+  if (step === 'basic-albedo') {
+    return new MeshBasicMaterial({
+      color: 'white',
+      map: sourceMaterial.map ?? null,
+      side: sourceMaterial.side
+    })
+  }
+
+  const material = new ThreeMeshStandardMaterial({
+    color:
+      step === 'standard-white'
+        ? WHITE_COLOR.clone()
+        : sourceMaterial.color.clone(),
+    envMap:
+      step === 'standard-white' ||
+      step === 'standard-albedo' ||
+      step === 'standard-surface' ||
+      step === 'standard-surface-ao' ||
+      step === 'standard-surface-lightmap' ||
+      step === 'standard-surface-lightmap-patch'
+        ? sourceMaterial.envMap ?? null
+        : null,
+    envMapIntensity:
+      step === 'standard-white' ||
+      step === 'standard-albedo' ||
+      step === 'standard-surface' ||
+      step === 'standard-surface-ao' ||
+      step === 'standard-surface-lightmap' ||
+      step === 'standard-surface-lightmap-patch'
+        ? sourceMaterial.envMapIntensity
+        : 0,
+    metalness: sourceMaterial.metalness,
+    roughness: sourceMaterial.roughness,
+    side: sourceMaterial.side
+  })
+
+  if (
+    step === 'standard-albedo' ||
+    step === 'standard-surface' ||
+    step === 'standard-surface-ao' ||
+    step === 'standard-surface-lightmap' ||
+    step === 'standard-surface-lightmap-patch'
+  ) {
+    material.map = sourceMaterial.map ?? null
+  }
+
+  if (
+    step === 'standard-surface' ||
+    step === 'standard-surface-ao' ||
+    step === 'standard-surface-lightmap' ||
+    step === 'standard-surface-lightmap-patch'
+  ) {
+    material.bumpMap = sourceMaterial.bumpMap ?? null
+    material.bumpScale = sourceMaterial.bumpScale
+    material.metalnessMap = sourceMaterial.metalnessMap ?? null
+    material.normalMap = sourceMaterial.normalMap ?? null
+    material.normalScale.copy(sourceMaterial.normalScale)
+    material.roughnessMap = sourceMaterial.roughnessMap ?? null
+  }
+
+  if (
+    step === 'standard-surface-ao' ||
+    step === 'standard-surface-lightmap' ||
+    step === 'standard-surface-lightmap-patch'
+  ) {
+    material.aoMap = sourceMaterial.aoMap ?? null
+    material.aoMapIntensity = sourceMaterial.aoMapIntensity
+  }
+
+  if (
+    step === 'standard-surface-lightmap' ||
+    step === 'standard-surface-lightmap-patch'
+  ) {
+    material.lightMap = sourceMaterial.lightMap ?? null
+    material.lightMapIntensity = sourceMaterial.lightMapIntensity
+  }
+
+  if (step === 'standard-surface-lightmap-patch') {
+    attachProbeBlendMaterialShader(
+      material,
+      {
+        mode: 'none',
+        probeTextures: [null, null, null, null],
+        radianceMode: 'none'
+      },
+      {
+        lightMapAmbientTint: WHITE_COLOR,
+        lightMapTorchTint: TORCH_LIGHTMAP_TINT
+      },
+      { current: null }
+    )
+  }
+
+  return material
+}
+
+function getWallMaterialContinuumSteps() {
+  return [
+    { key: 'basic-white', label: '01-basic-white' },
+    { key: 'basic-albedo', label: '02-basic-albedo' },
+    { key: 'standard-white', label: '03-standard-white' },
+    { key: 'standard-albedo', label: '04-standard-albedo' },
+    { key: 'standard-surface', label: '05-standard-surface' },
+    { key: 'standard-surface-ao', label: '06-standard-surface-ao' },
+    { key: 'standard-surface-lightmap', label: '07-standard-surface-lightmap' },
+    { key: 'standard-surface-lightmap-patch', label: '08-standard-surface-lightmap-patch' },
+    { key: 'runtime-original', label: '09-runtime-original' }
+  ] satisfies Array<{
+    key: WallMaterialContinuumStepKey
+    label: string
+  }>
+}
+
 function LoadingOverlay({
   complete
 }: {
@@ -2240,48 +2450,7 @@ function EnvironmentLighting({
         }
       })
 
-      const captureLightGroup = new Group()
-      const captureLights: SpotLight[] = []
-      const inwardDirectionBySide = {
-        east: new Vector3(-1, -0.1, 0),
-        north: new Vector3(0, -0.1, 1),
-        south: new Vector3(0, -0.1, -1),
-        west: new Vector3(1, -0.1, 0)
-      } as const
-
-      for (const mazeLight of layout.lights) {
-        const captureLight = new SpotLight(
-          FIRE_COLOR,
-          TORCH_BASE_CANDELA,
-          REFLECTION_PROBE_LIGHT_DISTANCE,
-          REFLECTION_PROBE_LIGHT_ANGLE,
-          0.45,
-          2
-        )
-        const captureTarget = new Group()
-        const inwardDirection = inwardDirectionBySide[mazeLight.side]
-
-        captureLight.castShadow = true
-        captureLight.position.set(
-          mazeLight.torchPosition.x,
-          mazeLight.torchPosition.y,
-          mazeLight.torchPosition.z
-        )
-        captureLight.shadow.bias = -0.001
-        captureLight.shadow.mapSize.set(
-          REFLECTION_PROBE_SHADOW_MAP_SIZE,
-          REFLECTION_PROBE_SHADOW_MAP_SIZE
-        )
-        captureTarget.position.set(
-          mazeLight.torchPosition.x + (inwardDirection.x * 2),
-          mazeLight.torchPosition.y + (inwardDirection.y * 2),
-          mazeLight.torchPosition.z + (inwardDirection.z * 2)
-        )
-        captureLight.target = captureTarget
-        captureLightGroup.add(captureTarget)
-        captureLightGroup.add(captureLight)
-        captureLights.push(captureLight)
-      }
+      const { captureLightGroup, captureLights } = createReflectionProbeCaptureLights(layout)
 
       scene.add(captureLightGroup)
       scene.environment = baseEnvironment.texture
@@ -2423,11 +2592,7 @@ function EnvironmentLighting({
         ambientCubeRenderTarget.dispose()
       }
 
-      scene.remove(captureLightGroup)
-      for (const captureLight of captureLights) {
-        captureLight.dispose()
-        captureLight.shadow.map?.dispose()
-      }
+      disposeReflectionProbeCaptureLights(scene, captureLightGroup, captureLights)
       for (const entry of hiddenObjects) {
         entry.object.visible = entry.visible
       }
@@ -3483,20 +3648,16 @@ function ReflectionProbeVisualization({
           >
             <sphereGeometry args={[0.18, 16, 16]} />
             <shaderMaterial
+              depthTest={false}
               depthWrite={false}
               fragmentShader={`
                 uniform samplerCube probeCubeMap;
                 varying vec3 vProbeDirection;
 
                 vec3 debugTonemap(vec3 color) {
-                  const float debugExposure = 1.5;
-                  const float debugWhitePoint = 24.0;
+                  const float debugExposure = 4.0;
                   color = max(color * debugExposure, vec3(0.0));
-                  return clamp(
-                    log2(vec3(1.0) + color) / log2(vec3(1.0 + debugWhitePoint)),
-                    vec3(0.0),
-                    vec3(1.0)
-                  );
+                  return color / (vec3(1.0) + color);
                 }
 
                 void main() {
@@ -3522,6 +3683,68 @@ function ReflectionProbeVisualization({
           </mesh>
         )
       })}
+    </>
+  )
+}
+
+function DebugOverlayRenderer({
+  overlayScene,
+  visible
+}: {
+  overlayScene: ThreeScene
+  visible: boolean
+}) {
+  const camera = useThree((state) => state.camera)
+  const gl = useThree((state) => state.gl)
+
+  useFrame(() => {
+    if (!visible || overlayScene.children.length === 0) {
+      return
+    }
+
+    const savedAutoClear = gl.autoClear
+
+    gl.autoClear = false
+    gl.clearDepth()
+    gl.render(overlayScene, camera)
+    gl.autoClear = savedAutoClear
+  }, 1000)
+
+  return null
+}
+
+function ReflectionProbeDebugOverlay({
+  layout,
+  reflectionProbeTextures,
+  visible
+}: {
+  layout: MazeLayout
+  reflectionProbeTextures: Texture[]
+  visible: boolean
+}) {
+  const overlayScene = useMemo(() => new ThreeScene(), [])
+
+  useEffect(
+    () => () => {
+      overlayScene.clear()
+    },
+    [overlayScene]
+  )
+
+  return (
+    <>
+      {createPortal(
+        <ReflectionProbeVisualization
+          layout={layout}
+          reflectionProbeTextures={reflectionProbeTextures}
+          visible={visible}
+        />,
+        overlayScene
+      )}
+      <DebugOverlayRenderer
+        overlayScene={overlayScene}
+        visible={visible}
+      />
     </>
   )
 }
@@ -3877,30 +4100,20 @@ function MazeWallMesh({
         layout,
         reflectionProbeBlend.probeIndices,
         probeTextures,
-        probeIblEnabled &&
-          reflectionCapturesEnabled &&
-          hasCompleteProbeTextures(probeTextures)
-          ? 'constant'
-          : 'none',
+        'none',
         {
-          radianceMode:
-            reflectionCapturesEnabled &&
-            hasCompleteProbeTextures(probeTextures)
-              ? 'constant'
-              : 'none',
+          radianceMode: 'none',
           weights: reflectionProbeBlend.weights as [number, number, number, number]
         }
       ),
     [
       layout,
-      probeIblEnabled,
       probeTextures,
-      reflectionCapturesEnabled,
       reflectionProbeBlend.probeIndices,
       reflectionProbeBlend.weights
     ]
   )
-  const envMapIntensity = probeIblEnabled ? environmentIntensity : 0
+  const envMapIntensity = environmentIntensity
 
   useEffect(
     () => () => {
@@ -4051,7 +4264,7 @@ function SceneGeometry({
         reflectionProbeTextures={reflectionProbeTextures}
         torchCandelaMultiplier={torchCandelaMultiplier}
       />
-      <ReflectionProbeVisualization
+      <ReflectionProbeDebugOverlay
         layout={layout}
         reflectionProbeTextures={reflectionProbeRawTextures}
         visible={showReflectionProbes}
@@ -5135,6 +5348,15 @@ function Scene({
           probeIndex: number,
           size?: number
         ) => string[] | null
+        captureReflectionProbeWallMaterialContinuum?: (
+          probeIndex: number,
+          wallIndex: number,
+          size?: number
+        ) => Array<{
+          atlasUrls: string[] | null
+          key: WallMaterialContinuumStepKey
+          label: string
+        }> | null
       }
     }
     const existing = globalWindow.__levelsjamDebug ?? {}
@@ -5368,10 +5590,135 @@ function Scene({
       }
     }
 
+    const captureReflectionProbeWallMaterialContinuum = (
+      probeIndex: number,
+      wallIndex: number,
+      size = 128
+    ) => {
+      const probe = layout.reflectionProbes[probeIndex]
+
+      if (!probe || size <= 0 || !environmentTexture) {
+        return null
+      }
+
+      let targetWall: Mesh | null = null
+      scene.traverse((object) => {
+        if (
+          !targetWall &&
+          object instanceof Mesh &&
+          matchesDebugRole(object, 'maze-wall', wallIndex)
+        ) {
+          targetWall = object
+        }
+      })
+
+      if (!targetWall) {
+        return null
+      }
+
+      const sourceMaterials = (
+        Array.isArray(targetWall.material)
+          ? targetWall.material
+          : [targetWall.material]
+      )
+
+      if (!sourceMaterials.every((material) => material instanceof ThreeMeshStandardMaterial)) {
+        return null
+      }
+
+      const originalMaterials = [...sourceMaterials] as ThreeMeshStandardMaterial[]
+      const savedVisibility: Array<{ object: { visible: boolean }, visible: boolean }> = []
+      const savedBackground = scene.background
+      const savedBackgroundIntensity = scene.backgroundIntensity
+      const savedEnvironment = scene.environment
+      const savedEnvironmentIntensity = scene.environmentIntensity
+      const { captureLightGroup, captureLights } = createReflectionProbeCaptureLights(layout)
+      const captureTarget = new WebGLCubeRenderTarget(size, { type: HalfFloatType })
+      const captureCamera = new CubeCamera(0.1, REFLECTION_PROBE_FAR, captureTarget)
+      const continuumSteps = getWallMaterialContinuumSteps()
+      const results: Array<{
+        atlasUrls: string[] | null
+        key: WallMaterialContinuumStepKey
+        label: string
+      }> = []
+
+      captureCamera.position.set(
+        probe.position.x,
+        probe.position.y,
+        probe.position.z
+      )
+      captureCamera.layers.enable(TORCH_BILLBOARD_LAYER)
+
+      scene.traverse((object) => {
+        savedVisibility.push({ object, visible: object.visible })
+        if (object === targetWall) {
+          return
+        }
+        if (
+          object instanceof Mesh ||
+          'isLight' in object
+        ) {
+          object.visible = false
+        }
+      })
+
+      scene.background = new Color('black')
+      scene.backgroundIntensity = 1
+      scene.environment = environmentTexture
+      scene.environmentIntensity = environmentIntensity
+      scene.add(captureLightGroup)
+
+      try {
+        for (const step of continuumSteps) {
+          let replacementMaterials: Array<MeshBasicMaterial | ThreeMeshStandardMaterial> | null = null
+
+          if (step.key !== 'runtime-original') {
+            replacementMaterials = originalMaterials.map((material) =>
+              createWallMaterialContinuumStepMaterial(material, step.key)
+            )
+            targetWall.material = replacementMaterials
+          } else {
+            targetWall.material = originalMaterials
+          }
+
+          scene.add(captureCamera)
+          captureCamera.update(gl, scene)
+          scene.remove(captureCamera)
+          results.push({
+            atlasUrls: captureCubeTextureAtlasDataUrls(gl, captureTarget.texture, size),
+            key: step.key,
+            label: step.label
+          })
+
+          if (replacementMaterials) {
+            targetWall.material = originalMaterials
+            for (const material of replacementMaterials) {
+              material.dispose()
+            }
+          }
+        }
+      } finally {
+        targetWall.material = originalMaterials
+        scene.remove(captureCamera)
+        captureTarget.dispose()
+        disposeReflectionProbeCaptureLights(scene, captureLightGroup, captureLights)
+        scene.background = savedBackground
+        scene.backgroundIntensity = savedBackgroundIntensity
+        scene.environment = savedEnvironment
+        scene.environmentIntensity = savedEnvironmentIntensity
+        for (const entry of savedVisibility) {
+          entry.object.visible = entry.visible
+        }
+      }
+
+      return results
+    }
+
     globalWindow.__levelsjamDebug = {
       ...existing,
       captureReflectionProbeAtlas,
       captureReflectionProbeGeometryAtlas,
+      captureReflectionProbeWallMaterialContinuum,
       clearDebugIsolation,
       getFogState,
       isolateDebugRole,
@@ -5386,6 +5733,7 @@ function Scene({
       clearDebugIsolation()
       delete globalWindow.__levelsjamDebug.captureReflectionProbeAtlas
       delete globalWindow.__levelsjamDebug.captureReflectionProbeGeometryAtlas
+      delete globalWindow.__levelsjamDebug.captureReflectionProbeWallMaterialContinuum
       delete globalWindow.__levelsjamDebug.clearDebugIsolation
       delete globalWindow.__levelsjamDebug.getFogState
       delete globalWindow.__levelsjamDebug.setDebugVisible
@@ -5394,7 +5742,7 @@ function Scene({
         delete globalWindow.__levelsjamDebug
       }
     }
-  }, [gl, reflectionProbeRawTextures, scene])
+  }, [environmentIntensity, environmentTexture, gl, layout, reflectionProbeRawTextures, scene])
 
   const ambientOcclusionActive = isAmbientOcclusionActive(visualSettings)
   const bloomActive = isEffectActive(visualSettings.bloom)
