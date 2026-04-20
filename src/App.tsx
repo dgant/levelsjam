@@ -2693,7 +2693,6 @@ function EnvironmentLighting({
       nextEnvironment.dispose()
       environmentTarget.current = null
       pmremGenerator.dispose()
-      hdrTexture.dispose()
       onEnvironmentFogColorChange(DEFAULT_FOG_IBL_COLOR.clone())
       onEnvironmentTextureChange(null)
     }
