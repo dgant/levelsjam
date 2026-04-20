@@ -72,6 +72,8 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify `window.__levelsjamDebug.getReflectionProbeState()` reports a nonzero probe count and becomes `ready: true` after load.
 - For deeper probe debugging, call `window.__levelsjamDebug.captureReflectionProbeAtlas(probeIndex, size)` in the browser console to get six PNG data URLs for the exact raw captured cubemap faces after the fixed diagnostic tone map.
 - For deeper runtime-reflection debugging, call `window.__levelsjamDebug.captureReflectionProbeProcessedAtlas(probeIndex, size)` in the browser console to get six PNG data URLs for the processed probe texture that reflective materials actually sample in-game.
+- For direct source-binding debugging, call `window.__levelsjamDebug.getReflectionProbeTextureState(probeIndex)` to inspect the exact runtime raw and processed probe texture UUIDs bound for that probe.
+- For debug-sphere binding checks, enable `Show Reflection Probes` and call `window.__levelsjamDebug.getReflectionProbeVisualizationState(probeIndex)` to confirm the overlay sphere is using the same processed probe texture UUID.
 - Verify moving the camera between maze cells does not change `window.__levelsjamDebug.getReflectionProbeState().activeProbeId` from `null` or make the scene lighting flicker.
 - Verify the fire flipbook runs at the updated faster rate.
 - Verify the tone mapper is `AgX` by default.

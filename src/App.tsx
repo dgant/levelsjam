@@ -1182,6 +1182,12 @@ function updateProbeBlendUniformDebugState(
   }
 
   material.userData.probeBlendUniformDebug = {
+    localProbeTextureUUIDs: [
+      shader.uniforms.localProbeEnvMap0?.value?.uuid ?? null,
+      shader.uniforms.localProbeEnvMap1?.value?.uuid ?? null,
+      shader.uniforms.localProbeEnvMap2?.value?.uuid ?? null,
+      shader.uniforms.localProbeEnvMap3?.value?.uuid ?? null
+    ],
     localProbeTextureInfo: [0, 1, 2, 3].map((index) => ({
       maxMip:
         shader.uniforms[
@@ -2906,6 +2912,8 @@ function EnvironmentLighting({
         )),
         probeRawReadbackErrors: [...nextProbeRawReadbackErrors],
         probeRawTextureSummaries: nextProbeRawTextureSummaries.map((summary) => ({ ...summary })),
+        probeRawTextureUUIDs: nextRawTargets.map((target) => target.texture.uuid),
+        probeTextureUUIDs: nextTargets.map((target) => target.texture.uuid),
         probeCount: layout.reflectionProbes.length,
         ready: nextTargets.length === layout.reflectionProbes.length
       }
@@ -3997,6 +4005,63 @@ function ReflectionProbeDebugOverlay({
     },
     [overlayScene]
   )
+
+  useEffect(() => {
+    const globalWindow = window as Window & {
+      __levelsjamDebug?: {
+        getReflectionProbeVisualizationState?: (probeIndex: number) => {
+          uniformTextureUUID: string | null
+          visible: boolean | null
+        } | null
+      }
+    }
+    const existing = globalWindow.__levelsjamDebug ?? {}
+
+    globalWindow.__levelsjamDebug = {
+      ...existing,
+      getReflectionProbeVisualizationState: (probeIndex: number) => {
+        let match: {
+          uniformTextureUUID: string | null
+          visible: boolean | null
+        } | null = null
+
+        overlayScene.traverse((object) => {
+          if (
+            match ||
+            !(object instanceof Mesh) ||
+            !matchesDebugRole(object, 'reflection-probe-visual', probeIndex)
+          ) {
+            return
+          }
+
+          const material = object.material as {
+            uniforms?: {
+              probeCubeUvMap?: { value?: Texture | null }
+            }
+          }
+
+          match = {
+            uniformTextureUUID:
+              material.uniforms?.probeCubeUvMap?.value?.uuid ?? null,
+            visible: object.visible
+          }
+        })
+
+        return match
+      }
+    }
+
+    return () => {
+      if (!globalWindow.__levelsjamDebug) {
+        return
+      }
+
+      delete globalWindow.__levelsjamDebug.getReflectionProbeVisualizationState
+      if (Object.keys(globalWindow.__levelsjamDebug).length === 0) {
+        delete globalWindow.__levelsjamDebug
+      }
+    }
+  }, [overlayScene])
 
   return (
     <>
@@ -5309,6 +5374,7 @@ function FlightRig({
             fragmentHasSampleProbeBlendEnvMapWithMode: boolean
           } | null
           probeBlendUniforms: {
+            localProbeTextureUUIDs: Array<string | null>
             localProbeTextureInfo: Array<{
               maxMip: number | null
               texelHeight: number | null
@@ -5345,8 +5411,14 @@ function FlightRig({
           probeRawMetrics?: Array<ProbeMetric | null>
           probeRawReadbackErrors?: Array<string | null>
           probeRawTextureSummaries?: ProbeTextureSummary[]
+          probeRawTextureUUIDs?: string[]
+          probeTextureUUIDs?: string[]
           probeCount: number
           ready: boolean
+        } | null
+        getReflectionProbeTextureState?: (probeIndex: number) => {
+          processedTextureUUID: string | null
+          rawTextureUUID: string | null
         } | null
         setView?: (
           cameraPosition: [number, number, number],
@@ -5417,6 +5489,7 @@ function FlightRig({
             fragmentHasSampleProbeBlendEnvMapWithMode: boolean
           } | null
           probeBlendUniforms: {
+            localProbeTextureUUIDs: Array<string | null>
             localProbeTextureInfo: Array<{
               maxMip: number | null
               texelHeight: number | null
@@ -5476,6 +5549,7 @@ function FlightRig({
                   fragmentHasSampleProbeBlendEnvMapWithMode: boolean
                 } | null
                 probeBlendUniformDebug?: {
+                  localProbeTextureUUIDs: Array<string | null>
                   localProbeTextureInfo: Array<{
                     maxMip: number | null
                     texelHeight: number | null
@@ -6007,6 +6081,11 @@ function Scene({
       return captureCubeUvTextureAtlasDataUrls(gl, probeTexture, size)
     }
 
+    const getReflectionProbeTextureState = (probeIndex: number) => ({
+      processedTextureUUID: reflectionProbeTextures[probeIndex]?.uuid ?? null,
+      rawTextureUUID: reflectionProbeRawTextures[probeIndex]?.uuid ?? null
+    })
+
     const captureReflectionProbeGeometryAtlas = (probeIndex: number, size = 128) => {
       const probe = layout.reflectionProbes[probeIndex]
 
@@ -6201,6 +6280,7 @@ function Scene({
       captureReflectionProbeWallMaterialContinuum,
       clearDebugIsolation,
       getFogState,
+      getReflectionProbeTextureState,
       isolateDebugRole,
       setDebugVisible
     }
@@ -6217,6 +6297,7 @@ function Scene({
       delete globalWindow.__levelsjamDebug.captureReflectionProbeWallMaterialContinuum
       delete globalWindow.__levelsjamDebug.clearDebugIsolation
       delete globalWindow.__levelsjamDebug.getFogState
+      delete globalWindow.__levelsjamDebug.getReflectionProbeTextureState
       delete globalWindow.__levelsjamDebug.setDebugVisible
       delete globalWindow.__levelsjamDebug.isolateDebugRole
       if (Object.keys(globalWindow.__levelsjamDebug).length === 0) {
