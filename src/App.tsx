@@ -1122,31 +1122,93 @@ function updateProbeBlendShaderUniforms(
     shader.uniforms.localProbeTexelHeight3,
     shader.uniforms.localProbeMaxMip3
   )
-  shader.uniforms.localProbeEnvMap0!.value = probeBlend.probeTextures[0] ?? null
-  shader.uniforms.localProbeEnvMap1!.value = probeBlend.probeTextures[1] ?? null
-  shader.uniforms.localProbeEnvMap2!.value = probeBlend.probeTextures[2] ?? null
-  shader.uniforms.localProbeEnvMap3!.value = probeBlend.probeTextures[3] ?? null
-  shader.uniforms.probeBlendMode!.value =
-    probeBlend.mode === 'world'
-      ? 1
-      : probeBlend.mode === 'constant'
-        ? 2
-        : 0
-  shader.uniforms.probeBlendRadianceMode!.value =
-    (probeBlend.radianceMode ?? probeBlend.mode) === 'world'
-      ? 1
-      : (probeBlend.radianceMode ?? probeBlend.mode) === 'constant'
-        ? 2
-        : 0
-  shader.uniforms.probeBlendWeights!.value.set(
+  if (shader.uniforms.localProbeEnvMap0) {
+    shader.uniforms.localProbeEnvMap0.value = probeBlend.probeTextures[0] ?? null
+  }
+  if (shader.uniforms.localProbeEnvMap1) {
+    shader.uniforms.localProbeEnvMap1.value = probeBlend.probeTextures[1] ?? null
+  }
+  if (shader.uniforms.localProbeEnvMap2) {
+    shader.uniforms.localProbeEnvMap2.value = probeBlend.probeTextures[2] ?? null
+  }
+  if (shader.uniforms.localProbeEnvMap3) {
+    shader.uniforms.localProbeEnvMap3.value = probeBlend.probeTextures[3] ?? null
+  }
+  if (shader.uniforms.probeBlendMode) {
+    shader.uniforms.probeBlendMode.value =
+      probeBlend.mode === 'world'
+        ? 1
+        : probeBlend.mode === 'constant'
+          ? 2
+          : 0
+  }
+  if (shader.uniforms.probeBlendRadianceMode) {
+    shader.uniforms.probeBlendRadianceMode.value =
+      (probeBlend.radianceMode ?? probeBlend.mode) === 'world'
+        ? 1
+        : (probeBlend.radianceMode ?? probeBlend.mode) === 'constant'
+          ? 2
+          : 0
+  }
+  shader.uniforms.probeBlendWeights?.value.set(
     ...(probeBlend.weights ?? [1, 0, 0, 0])
   )
-  shader.uniforms.probeBlendRegion!.value.set(
+  shader.uniforms.probeBlendRegion?.value.set(
     probeBlend.region?.minX ?? 0,
     probeBlend.region?.minZ ?? 0,
     probeBlend.region?.sizeX ?? 0,
     probeBlend.region?.sizeZ ?? 0
   )
+}
+
+function getProbeBlendUpdateKey(
+  probeBlend: ProbeBlendConfig,
+  patchConfig: MaterialShaderPatchConfig
+) {
+  return JSON.stringify({
+    lightMapAmbientTint: patchConfig.lightMapAmbientTint
+      ? [
+          patchConfig.lightMapAmbientTint.r,
+          patchConfig.lightMapAmbientTint.g,
+          patchConfig.lightMapAmbientTint.b
+        ]
+      : null,
+    lightMapTorchTint: patchConfig.lightMapTorchTint
+      ? [
+          patchConfig.lightMapTorchTint.r,
+          patchConfig.lightMapTorchTint.g,
+          patchConfig.lightMapTorchTint.b
+        ]
+      : null,
+    mode: probeBlend.mode,
+    probeBoxes: (probeBlend.probeBoxes ?? []).map((box) => box
+      ? {
+          max: [box.max.x, box.max.y, box.max.z],
+          min: [box.min.x, box.min.y, box.min.z]
+        }
+      : null),
+    probePositions: (probeBlend.probePositions ?? []).map((position) =>
+      position
+        ? [position.x, position.y, position.z]
+        : null
+    ),
+    probeTextureInfos: (probeBlend.probeTextureInfos ?? []).map((textureInfo) =>
+      textureInfo
+        ? [textureInfo.texelWidth, textureInfo.texelHeight, textureInfo.maxMip]
+        : null
+    ),
+    probeTextureUUIDs: probeBlend.probeTextures.map((texture) => texture?.uuid ?? null),
+    radianceMode: probeBlend.radianceMode ?? probeBlend.mode,
+    region: probeBlend.region
+      ? [
+          probeBlend.region.minX,
+          probeBlend.region.minZ,
+          probeBlend.region.sizeX,
+          probeBlend.region.sizeZ
+        ]
+      : null,
+    weights: probeBlend.weights ?? null
+  })
 }
 
 function updateProbeBlendMaterialDebugState(
@@ -1215,19 +1277,32 @@ function updateProbeBlendUniformDebugState(
 
 function attachProbeBlendMaterialShader(
   material: ThreeMeshPhysicalMaterial | ThreeMeshStandardMaterial,
-  probeBlend: ProbeBlendConfig,
-  patchConfig: MaterialShaderPatchConfig,
+  probeBlendRef: { current: ProbeBlendConfig },
+  patchConfigRef: { current: MaterialShaderPatchConfig },
   shaderRef: { current: ProbeBlendShader | null }
 ) {
-  const usesTintedLightMap =
-    Boolean(patchConfig.lightMapAmbientTint) ||
-    Boolean(patchConfig.lightMapTorchTint)
+  const probeBlend = probeBlendRef.current
+  const patchConfig = patchConfigRef.current
 
-  material.customProgramCacheKey = () =>
-    `probe-blend-v2-${usesTintedLightMap ? 'lightmap-tint' : 'plain'}`
+  material.customProgramCacheKey = () => {
+    const currentPatchConfig = patchConfigRef.current
+    const currentProbeBlend = probeBlendRef.current
+    const usesTintedLightMap =
+      Boolean(currentPatchConfig.lightMapAmbientTint) ||
+      Boolean(currentPatchConfig.lightMapTorchTint)
+
+    return [
+      'probe-blend-v3',
+      usesTintedLightMap ? 'lightmap-tint' : 'plain',
+      currentProbeBlend.mode,
+      currentProbeBlend.radianceMode ?? currentProbeBlend.mode
+    ].join('-')
+  }
   updateProbeBlendMaterialDebugState(material, probeBlend)
   material.onBeforeCompile = (shader: Shader) => {
     const probeBlendShader = shader as ProbeBlendShader
+    const currentProbeBlend = probeBlendRef.current
+    const currentPatchConfig = patchConfigRef.current
 
     probeBlendShader.uniforms.lightMapAmbientTint = new Uniform(BLACK_COLOR.clone())
     probeBlendShader.uniforms.lightMapTorchTint = new Uniform(WHITE_COLOR.clone())
@@ -1305,7 +1380,7 @@ function attachProbeBlendMaterialShader(
       )
     }
     shaderRef.current = probeBlendShader
-    updateProbeBlendShaderUniforms(probeBlendShader, probeBlend, patchConfig)
+    updateProbeBlendShaderUniforms(probeBlendShader, currentProbeBlend, currentPatchConfig)
     updateProbeBlendUniformDebugState(material, probeBlendShader)
   }
 
@@ -1733,9 +1808,16 @@ function useProbeBlendMaterialShader(
   probeBlend: ProbeBlendConfig,
   patchConfig: MaterialShaderPatchConfig = {}
 ) {
+  const gl = useThree((state) => state.gl)
   const shaderRef = useRef<ProbeBlendShader | null>(null)
+  const probeBlendRef = useRef(probeBlend)
+  const patchConfigRef = useRef(patchConfig)
+  const lastUniformUpdateKeyRef = useRef<string | null>(null)
   const attachedMaterialRef =
     useRef<ThreeMeshPhysicalMaterial | ThreeMeshStandardMaterial | null>(null)
+
+  probeBlendRef.current = probeBlend
+  patchConfigRef.current = patchConfig
 
   useEffect(() => {
     const material = materialRef.current
@@ -1744,14 +1826,16 @@ function useProbeBlendMaterialShader(
       return
     }
 
-    attachProbeBlendMaterialShader(material, probeBlend, patchConfig, shaderRef)
+    const previousOnBeforeCompile = material.onBeforeCompile
+
+    attachProbeBlendMaterialShader(material, probeBlendRef, patchConfigRef, shaderRef)
     attachedMaterialRef.current = material
 
     return () => {
       if (attachedMaterialRef.current === material) {
         attachedMaterialRef.current = null
         shaderRef.current = null
-        material.onBeforeCompile = () => {}
+        material.onBeforeCompile = previousOnBeforeCompile
         material.needsUpdate = true
       }
     }
@@ -1761,7 +1845,30 @@ function useProbeBlendMaterialShader(
     updateProbeBlendMaterialDebugState(materialRef.current, probeBlend)
     updateProbeBlendShaderUniforms(shaderRef.current, probeBlend, patchConfig)
     updateProbeBlendUniformDebugState(materialRef.current, shaderRef.current)
-  }, [materialRef, patchConfig, probeBlend])
+    const material = materialRef.current
+    const uniformUpdateKey = getProbeBlendUpdateKey(probeBlend, patchConfig)
+
+    if (!material) {
+      return
+    }
+
+    if (lastUniformUpdateKeyRef.current === uniformUpdateKey) {
+      return
+    }
+
+    const materialUniforms = gl.properties.get(material).uniforms
+
+    if (materialUniforms) {
+      updateProbeBlendShaderUniforms(
+        { uniforms: materialUniforms } as ProbeBlendShader,
+        probeBlend,
+        patchConfig
+      )
+    }
+
+    material.needsUpdate = true
+    lastUniformUpdateKeyRef.current = uniformUpdateKey
+  }, [gl, materialRef, patchConfig, probeBlend])
 }
 
 function isTextureRenderable(texture: Texture | null | undefined) {
@@ -3997,6 +4104,7 @@ function ReflectionProbeDebugOverlay({
   reflectionProbeTextures: Texture[]
   visible: boolean
 }) {
+  const gl = useThree((state) => state.gl)
   const overlayScene = useMemo(() => new ThreeScene(), [])
 
   useEffect(
@@ -4012,6 +4120,13 @@ function ReflectionProbeDebugOverlay({
         getReflectionProbeVisualizationState?: (probeIndex: number) => {
           uniformTextureUUID: string | null
           visible: boolean | null
+        } | null
+        getReflectionProbeVisualizationProgramState?: (probeIndex: number) => {
+          uniforms: Record<string, {
+            cacheValue: number | null
+            glValue: number | number[] | null
+            textureUUID: string | null
+          }>
         } | null
       }
     }
@@ -4048,6 +4163,66 @@ function ReflectionProbeDebugOverlay({
         })
 
         return match
+      },
+      getReflectionProbeVisualizationProgramState: (probeIndex: number) => {
+        let match: {
+          uniforms: Record<string, {
+            cacheValue: number | null
+            glValue: number | number[] | null
+            textureUUID: string | null
+          }>
+        } | null = null
+
+        overlayScene.traverse((object) => {
+          if (
+            match ||
+            !(object instanceof Mesh) ||
+            !matchesDebugRole(object, 'reflection-probe-visual', probeIndex)
+          ) {
+            return
+          }
+
+          const material = object.material as ShaderMaterial
+          const materialProperties = gl.properties.get(material)
+          const currentProgram = materialProperties.currentProgram
+          const rawGl = gl.getContext()
+          const uniformMap = currentProgram?.getUniforms?.().map ?? {}
+
+          match = {
+            uniforms: Object.fromEntries(
+              ['probeCubeUvMap'].map((name) => {
+                const uniform = uniformMap[name]
+                const glValue =
+                  currentProgram?.program && uniform?.addr
+                    ? rawGl.getUniform(currentProgram.program, uniform.addr)
+                    : null
+
+                return [
+                  name,
+                  {
+                    cacheValue:
+                      Array.isArray(uniform?.cache) && uniform.cache.length > 0
+                        ? uniform.cache[0]
+                        : null,
+                    glValue: ArrayBuffer.isView(glValue)
+                      ? Array.from(glValue as ArrayLike<number>)
+                      : typeof glValue === 'number'
+                        ? glValue
+                        : null,
+                    textureUUID:
+                      material.uniforms?.probeCubeUvMap?.value?.uuid ?? null
+                  }
+                ]
+              })
+            ) as Record<string, {
+              cacheValue: number | null
+              glValue: number | number[] | null
+              textureUUID: string | null
+            }>
+          }
+        })
+
+        return match
       }
     }
 
@@ -4057,11 +4232,12 @@ function ReflectionProbeDebugOverlay({
       }
 
       delete globalWindow.__levelsjamDebug.getReflectionProbeVisualizationState
+      delete globalWindow.__levelsjamDebug.getReflectionProbeVisualizationProgramState
       if (Object.keys(globalWindow.__levelsjamDebug).length === 0) {
         delete globalWindow.__levelsjamDebug
       }
     }
-  }, [overlayScene])
+  }, [gl, overlayScene])
 
   return (
     <>
@@ -5166,6 +5342,7 @@ function FlightRig({
   wallBounds: ReturnType<typeof getWallBounds>
 }) {
   const camera = useThree((state) => state.camera)
+  const gl = useThree((state) => state.gl)
   const canvas = useThree((state) => state.gl.domElement)
   const scene = useThree((state) => state.scene)
   const keys = useRef<Record<string, boolean>>({})
@@ -5420,6 +5597,17 @@ function FlightRig({
           processedTextureUUID: string | null
           rawTextureUUID: string | null
         } | null
+        getDebugProgramUniformState?: (
+          role: string,
+          index: number
+        ) => {
+          materialEnvMapUUID: string | null
+          uniforms: Record<string, {
+            cacheValue: number | null
+            glValue: number | number[] | null
+            textureUUID: string | null
+          }>
+        } | null
         setView?: (
           cameraPosition: [number, number, number],
           target: [number, number, number]
@@ -5648,6 +5836,103 @@ function FlightRig({
 
         return match
       },
+      getDebugProgramUniformState: (role, index) => {
+        let match: Mesh | null = null
+
+        for (const root of getDebugRoots()) {
+          root.traverse((object) => {
+            if (
+              match ||
+              !(object instanceof Mesh) ||
+              !matchesDebugRole(object, role, index)
+            ) {
+              return
+            }
+
+            match = object
+          })
+        }
+
+        if (!match) {
+          return null
+        }
+
+        const materials = Array.isArray(match.material)
+          ? match.material
+          : [match.material]
+        const material = materials[0] as {
+          envMap?: Texture | null
+          userData?: {
+            probeBlendUniformDebug?: {
+              localProbeTextureUUIDs?: Array<string | null>
+            }
+          }
+        }
+        const materialProperties = gl.properties.get(material)
+        const currentProgram = materialProperties.currentProgram
+        const rawGl = gl.getContext()
+        const uniformMap = currentProgram?.getUniforms?.().map ?? {}
+        const uniformsListIds = (materialProperties.uniformsList ?? []).map(
+          (entry: { id?: string }) => entry.id ?? null
+        )
+        const localProbeTextureUUIDs =
+          material.userData?.probeBlendUniformDebug?.localProbeTextureUUIDs ?? []
+        const textureUUIDByUniformName: Record<string, string | null> = {
+          envMap: material.envMap?.uuid ?? null,
+          localProbeEnvMap0: localProbeTextureUUIDs[0] ?? null,
+          localProbeEnvMap1: localProbeTextureUUIDs[1] ?? null,
+          localProbeEnvMap2: localProbeTextureUUIDs[2] ?? null,
+          localProbeEnvMap3: localProbeTextureUUIDs[3] ?? null,
+          probeBlendMode: null,
+          probeBlendRadianceMode: null
+        }
+
+        const uniforms = Object.fromEntries(
+          Object.keys(textureUUIDByUniformName).map((name) => {
+            const uniform = uniformMap[name]
+            const glValue =
+              currentProgram?.program && uniform?.addr
+                ? rawGl.getUniform(currentProgram.program, uniform.addr)
+                : null
+
+            return [
+              name,
+              {
+                cacheValue:
+                  Array.isArray(uniform?.cache) && uniform.cache.length > 0
+                    ? uniform.cache[0]
+                    : null,
+                glValue: ArrayBuffer.isView(glValue)
+                  ? Array.from(glValue as ArrayLike<number>)
+                  : typeof glValue === 'number'
+                    ? glValue
+                    : null,
+                textureUUID: textureUUIDByUniformName[name] ?? null
+              }
+            ]
+          })
+        ) as Record<string, {
+          cacheValue: number | null
+          glValue: number | number[] | null
+          textureUUID: string | null
+        }>
+
+        return {
+          materialEnvMapUUID: material.envMap?.uuid ?? null,
+          materialUniformValues: {
+            probeBlendMode:
+              typeof materialProperties.uniforms?.probeBlendMode?.value === 'number'
+                ? materialProperties.uniforms.probeBlendMode.value
+                : null,
+            probeBlendRadianceMode:
+              typeof materialProperties.uniforms?.probeBlendRadianceMode?.value === 'number'
+                ? materialProperties.uniforms.probeBlendRadianceMode.value
+                : null
+          },
+          uniformsListIds,
+          uniforms
+        }
+      },
       getReflectionProbeState: () => {
         return scene.userData.reflectionProbeState ?? null
       },
@@ -5675,13 +5960,14 @@ function FlightRig({
 
       delete globalWindow.__levelsjamDebug.getDebugPosition
       delete globalWindow.__levelsjamDebug.getDebugMeshState
+      delete globalWindow.__levelsjamDebug.getDebugProgramUniformState
       delete globalWindow.__levelsjamDebug.getReflectionProbeState
       delete globalWindow.__levelsjamDebug.setView
       if (Object.keys(globalWindow.__levelsjamDebug).length === 0) {
         delete globalWindow.__levelsjamDebug
       }
     }
-  }, [camera, scene])
+  }, [camera, gl, scene])
 
   useFrame((_, delta) => {
     camera.getWorldDirection(forward.current)
