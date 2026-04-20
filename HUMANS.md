@@ -25,6 +25,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Run `npm run test:smoke` to exercise the built page through Playwright.
 - Run `npm run test:smoke:runner` when `npm run build:pages` has already prepared the root-published bundle.
 - Run `npm run test:probe-occlusion` to dump the synthetic `3x3` probe-capture artifacts under `logs/probe-occlusion-artifacts/` and verify that the sealed center probe does not see any torch signature beyond the no-lights skybox baseline.
+- Run `npm run ensure:mazes` to refresh persisted mazes, baked lightmap artifacts, and per-maze reflection-probe dumps under `logs/lightmap-artifacts/<maze-id>/reflection-probes/`.
 - Treat a scene that shows only the HDRI skybox and flame billboards as a render failure; the smoke test now checks that a real maze wall writes visible beauty-pass color.
 - `npm run test:perf` is temporarily disabled while the static baked-lightmap torch-lighting evaluation is under way.
 - Run the maze-generation validation script or its test entrypoint whenever maze files or maze rules change so persisted mazes keep their baked lightmaps in sync.

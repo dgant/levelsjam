@@ -75,6 +75,8 @@
 - Reflection probe captures wait until every expected opaque maze wall, baked floor patch, and sconce is present with its capture-ready material state before baking.
 - Reflection probe captures include the visible static maze geometry and its baked lighting instead of collapsing to only the HDRI and temporary torch emitters.
 - Maze generation writes lightmap diagnostic artifact textures to a non-source-controlled inspection directory so a human can review the baked wall and floor outputs.
+- Maze artifact generation also writes per-maze reflection-probe capture dumps into the same non-source-controlled inspection directory so a human can inspect the exact runtime cubemap faces used by local reflections.
+- Each maze artifact directory includes raw and geometry-only reflection-probe face PNGs for every probe rather than storing those probe diagnostics in a separate unrelated artifact tree.
 - The repository includes a source-controlled synthetic `3x3` reflection diagnostic maze for probe-occlusion tests.
 - The synthetic `3x3` reflection diagnostic mazes place their torches on outer-facing cell walls so the sealed center probe has no direct view of any torch-lit wall face.
 - Reflection probe debug visualization displays the raw captured probe cubemap contents directly on the debug spheres so a human can inspect what each reflection or IBL source actually contains.
@@ -275,3 +277,4 @@
 - Automated tests guarantee that the repository contains at least five valid persisted maze files by generating additional mazes when required.
 - Automated tests verify that the dumped synthetic `3x3` reflection-diagnostic artifacts do not contain visible torch sources beyond the skybox-only baseline.
 - The scene-instantiation path is checked in the browser and verified to load one of the persisted mazes, build the correct wall meshes, and place sconces and torches only at the maze-defined light positions.
+- The maze-artifact generation path is checked end to end so the dumped per-maze artifact directory contains reflection-probe capture images as well as baked lightmap images.
