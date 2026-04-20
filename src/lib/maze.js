@@ -91,6 +91,26 @@ const BASE_EAR = [
   { x: 3, y: 4 }
 ]
 
+function encodeBytesToBase64(bytes) {
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(bytes).toString('base64')
+  }
+
+  if (typeof btoa !== 'undefined') {
+    const chunkSize = 0x8000
+    let binary = ''
+
+    for (let index = 0; index < bytes.length; index += chunkSize) {
+      const chunk = bytes.subarray(index, index + chunkSize)
+      binary += String.fromCharCode(...chunk)
+    }
+
+    return btoa(binary)
+  }
+
+  throw new Error('No base64 encoder is available in this environment')
+}
+
 function createRandom(seed) {
   let state = seed >>> 0
 
@@ -1462,7 +1482,7 @@ export function bakeMazeLightmap(
     atlasHeight,
     atlasWidth,
     bakeMs: performance.now() - bakeStart,
-    dataBase64: Buffer.from(atlasData).toString('base64'),
+    dataBase64: encodeBytesToBase64(atlasData),
     groundBounds,
     groundRect,
     neutralRect,

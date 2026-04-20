@@ -12,10 +12,28 @@ import {
   WALL_HEIGHT,
   WALL_LENGTH,
   WALL_WIDTH,
+  getDebugMazeLayoutById,
   getRandomMazeLayout,
   getWallBounds
 } from '../src/lib/sceneLayout.js'
 import { MAZE_CELL_SIZE, MAZE_HEIGHT, MAZE_WIDTH } from '../src/lib/maze.js'
+
+function decodeBase64Bytes(base64) {
+  return Uint8Array.from(Buffer.from(base64, 'base64'))
+}
+
+function averageTorchLightmapChannel(bytes, atlasWidth, rect) {
+  let sum = 0
+
+  for (let row = 0; row < rect.height; row += 1) {
+    for (let column = 0; column < rect.width; column += 1) {
+      const atlasIndex = ((((rect.y + row) * atlasWidth) + rect.x + column) * 3)
+      sum += bytes[atlasIndex]
+    }
+  }
+
+  return sum / (rect.width * rect.height * 255)
+}
 
 test('keeps at least five persisted mazes available to the runtime', () => {
   assert.ok(AVAILABLE_MAZES.length >= MAZE_COUNT)
@@ -90,4 +108,73 @@ test('exposes wall bounds for collision checks', () => {
 
 test('keeps the player spawn one meter above the ground', () => {
   assert.deepEqual(PLAYER_SPAWN_POSITION, { x: 0, y: 1, z: 0 })
+})
+
+test('provides synthetic 3x3 probe-occlusion layouts for diagnostics', () => {
+  const noLights = getDebugMazeLayoutById('debug-probe-occlusion-3x3-no-lights')
+  const sealed = getDebugMazeLayoutById('debug-probe-occlusion-3x3-sealed')
+  const openNorth = getDebugMazeLayoutById('debug-probe-occlusion-3x3-open-north')
+
+  assert.ok(noLights)
+  assert.ok(sealed)
+  assert.ok(openNorth)
+  assert.equal(noLights.maze.width, 3)
+  assert.equal(noLights.maze.height, 3)
+  assert.equal(noLights.lights.length, 0)
+  assert.equal(sealed.maze.width, 3)
+  assert.equal(sealed.maze.height, 3)
+  assert.equal(sealed.reflectionProbes.length, 9)
+  assert.equal(sealed.lights.length, 8)
+  assert.equal(sealed.maze.openEdges.length, 0)
+  assert.ok(sealed.maze.lightmap)
+  assert.equal(openNorth.maze.openEdges.length, 1)
+  assert.deepEqual(openNorth.maze.openEdges[0], {
+    from: { x: 1, y: 0 },
+    to: { x: 1, y: 1 }
+  })
+})
+
+test('keeps the sealed 3x3 center-facing wall lightmap faces dark', () => {
+  const sealed = getDebugMazeLayoutById('debug-probe-occlusion-3x3-sealed')
+
+  assert.ok(sealed)
+
+  const bytes = decodeBase64Bytes(sealed.maze.lightmap.dataBase64)
+  const centerWallExpectations = [
+    { center: { x: 0, z: -1 }, litFace: 'nz', darkFace: 'pz' },
+    { center: { x: -1, z: 0 }, litFace: 'nz', darkFace: 'pz' },
+    { center: { x: 1, z: 0 }, litFace: 'pz', darkFace: 'nz' },
+    { center: { x: 0, z: 1 }, litFace: 'pz', darkFace: 'nz' }
+  ]
+
+  for (const expectation of centerWallExpectations) {
+    const wall = sealed.walls.find(
+      (candidate) =>
+        candidate.center.x === expectation.center.x &&
+        candidate.center.z === expectation.center.z
+    )
+
+    assert.ok(wall, `missing debug wall at ${JSON.stringify(expectation.center)}`)
+
+    const rects = sealed.maze.lightmap.wallRects[wall.id]
+    const litAverage = averageTorchLightmapChannel(
+      bytes,
+      sealed.maze.lightmap.atlasWidth,
+      rects[expectation.litFace]
+    )
+    const darkAverage = averageTorchLightmapChannel(
+      bytes,
+      sealed.maze.lightmap.atlasWidth,
+      rects[expectation.darkFace]
+    )
+
+    assert.ok(
+      litAverage > 0.04,
+      `expected ${wall.id} ${expectation.litFace} to contain baked torch light, got ${litAverage}`
+    )
+    assert.ok(
+      darkAverage < 0.005,
+      `expected ${wall.id} ${expectation.darkFace} to stay dark toward the sealed center cell, got ${darkAverage}`
+    )
+  }
 })

@@ -94,4 +94,5 @@ export declare const MAZE_COUNT: number
 
 export declare function getRandomMazeLayout(random?: () => number): MazeLayout
 export declare function getMazeLayoutById(id: string): MazeLayout | null
+export declare function getDebugMazeLayoutById(id: string): MazeLayout | null
 export declare function getWallBounds(layout?: MazeLayout): WallBounds[]

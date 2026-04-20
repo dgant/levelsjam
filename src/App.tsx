@@ -110,6 +110,7 @@ import {
   MAZE_CELL_SIZE,
   GROUND_SIZE,
   GROUND_Y,
+  getDebugMazeLayoutById,
   getMazeLayoutById,
   getRandomMazeLayout,
   getWallBounds,
@@ -6443,7 +6444,7 @@ export default function App() {
     const mazeId = new URLSearchParams(window.location.search).get('maze')
 
     return (
-      (mazeId ? getMazeLayoutById(mazeId) : null) ??
+      (mazeId ? (getDebugMazeLayoutById(mazeId) ?? getMazeLayoutById(mazeId)) : null) ??
       getRandomMazeLayout()
     )
   })
