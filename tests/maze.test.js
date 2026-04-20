@@ -6,7 +6,6 @@ import test from 'node:test'
 import { pathToFileURL } from 'node:url'
 import { BoxGeometry } from 'three'
 
-import { MAZES } from '../src/data/mazes/index.js'
 import {
   MAZE_HEIGHT,
   MAZE_TARGET_COUNT,
@@ -17,7 +16,11 @@ import {
   getMazeSceneLayout,
   validateMaze
 } from '../src/lib/maze.js'
-import { ensureMazeFiles } from '../src/lib/mazePersistence.js'
+import {
+  DEFAULT_LIGHTMAP_ARTIFACT_DIRECTORY,
+  dumpMazeLightmapArtifacts,
+  ensureMazeFiles
+} from '../src/lib/mazePersistence.js'
 import { SCONCE_RADIUS } from '../src/lib/sceneLayout.js'
 
 test('generates valid mazes under 100ms', () => {
@@ -48,6 +51,17 @@ test('persists at least five valid mazes', async () => {
   }
 })
 
+test('dumps persisted maze lightmap artifacts into the gitignored logs directory', () => {
+  const maze = generateMaze(123456)
+  const artifactDirectory = dumpMazeLightmapArtifacts({ maze })
+
+  assert.equal(artifactDirectory, path.join(DEFAULT_LIGHTMAP_ARTIFACT_DIRECTORY, maze.id))
+  assert.equal(fs.existsSync(path.join(artifactDirectory, 'lightmap-atlas.png')), true)
+  assert.equal(fs.existsSync(path.join(artifactDirectory, 'lightmap-torch.png')), true)
+  assert.equal(fs.existsSync(path.join(artifactDirectory, 'lightmap-ambient.png')), true)
+  assert.equal(fs.existsSync(path.join(artifactDirectory, 'lightmap-metadata.json')), true)
+})
+
 test('deletes invalid maze files and regenerates replacements', async () => {
   const temporaryDirectory = fs.mkdtempSync(
     path.join(os.tmpdir(), 'levelsjam-maze-test-')
@@ -65,7 +79,7 @@ test('deletes invalid maze files and regenerates replacements', async () => {
 
     const files = await ensureMazeFiles({
       directory: temporaryDirectory,
-      mazeFactory: () => structuredClone(MAZES[0]),
+      mazeFactory: () => generateMaze(123456),
       targetCount: 1
     })
 
@@ -83,7 +97,7 @@ test('deletes invalid maze files and regenerates replacements', async () => {
 })
 
 test('converts persisted mazes into wall segments and torch placements', () => {
-  const layout = getMazeSceneLayout(MAZES[0], SCONCE_RADIUS)
+  const layout = getMazeSceneLayout(generateMaze(123456), SCONCE_RADIUS)
 
   assert.ok(layout.walls.length > 0)
   assert.ok(layout.lights.length > 0)

@@ -44,6 +44,7 @@ import {
   OrthographicCamera,
   PMREMGenerator,
   PlaneGeometry,
+  PointLight,
   Quaternion,
   RGBAFormat,
   RGBADepthPacking,
@@ -54,7 +55,6 @@ import {
   Shader,
   ShaderMaterial,
   SphereGeometry,
-  SpotLight,
   Texture,
   TextureLoader,
   Uniform,
@@ -202,8 +202,8 @@ const REFLECTION_PROBE_AMBIENT_RENDER_SIZE = 24
 const REFLECTION_PROBE_FAR = 48
 const REFLECTION_PROBE_EMISSIVE_RADIUS = 0.16
 const REFLECTION_PROBE_EMISSIVE_SCALE = 2
-const REFLECTION_PROBE_LIGHT_DISTANCE = 16
-const REFLECTION_PROBE_LIGHT_ANGLE = 1.05
+const REFLECTION_PROBE_LIGHT_DECAY = 2
+const REFLECTION_PROBE_LIGHT_DISTANCE = 10
 const REFLECTION_PROBE_SHADOW_MAP_SIZE = 256
 const FOG_VOLUME_HEIGHT = 6
 const FOG_VOLUME_SLICE_COUNT = 24
@@ -1334,25 +1334,15 @@ function getReflectionCaptureCountKey(
 
 function createReflectionProbeCaptureLights(layout: MazeLayout) {
   const captureLightGroup = new Group()
-  const captureLights: SpotLight[] = []
-  const inwardDirectionBySide = {
-    east: new Vector3(-1, -0.1, 0),
-    north: new Vector3(0, -0.1, 1),
-    south: new Vector3(0, -0.1, -1),
-    west: new Vector3(1, -0.1, 0)
-  } as const
+  const captureLights: PointLight[] = []
 
   for (const mazeLight of layout.lights) {
-    const captureLight = new SpotLight(
+    const captureLight = new PointLight(
       FIRE_COLOR,
       TORCH_BASE_CANDELA,
       REFLECTION_PROBE_LIGHT_DISTANCE,
-      REFLECTION_PROBE_LIGHT_ANGLE,
-      0.45,
-      2
+      REFLECTION_PROBE_LIGHT_DECAY
     )
-    const captureTarget = new Group()
-    const inwardDirection = inwardDirectionBySide[mazeLight.side]
 
     captureLight.castShadow = true
     captureLight.position.set(
@@ -1365,13 +1355,6 @@ function createReflectionProbeCaptureLights(layout: MazeLayout) {
       REFLECTION_PROBE_SHADOW_MAP_SIZE,
       REFLECTION_PROBE_SHADOW_MAP_SIZE
     )
-    captureTarget.position.set(
-      mazeLight.torchPosition.x + (inwardDirection.x * 2),
-      mazeLight.torchPosition.y + (inwardDirection.y * 2),
-      mazeLight.torchPosition.z + (inwardDirection.z * 2)
-    )
-    captureLight.target = captureTarget
-    captureLightGroup.add(captureTarget)
     captureLightGroup.add(captureLight)
     captureLights.push(captureLight)
   }
@@ -1385,7 +1368,7 @@ function createReflectionProbeCaptureLights(layout: MazeLayout) {
 function disposeReflectionProbeCaptureLights(
   scene: ThreeScene,
   captureLightGroup: Group,
-  captureLights: SpotLight[]
+  captureLights: PointLight[]
 ) {
   scene.remove(captureLightGroup)
   for (const captureLight of captureLights) {
@@ -1455,24 +1438,28 @@ function useProbeBlendMaterialShader(
   patchConfig: MaterialShaderPatchConfig = {}
 ) {
   const shaderRef = useRef<ProbeBlendShader | null>(null)
+  const attachedMaterialRef =
+    useRef<ThreeMeshPhysicalMaterial | ThreeMeshStandardMaterial | null>(null)
 
   useEffect(() => {
     const material = materialRef.current
 
-    if (!material) {
+    if (!material || attachedMaterialRef.current === material) {
       return
     }
 
     attachProbeBlendMaterialShader(material, probeBlend, patchConfig, shaderRef)
+    attachedMaterialRef.current = material
 
     return () => {
-      if (materialRef.current === material) {
+      if (attachedMaterialRef.current === material) {
+        attachedMaterialRef.current = null
         shaderRef.current = null
         material.onBeforeCompile = () => {}
         material.needsUpdate = true
       }
     }
-  }, [materialRef, patchConfig, probeBlend])
+  }, [materialRef, patchConfig])
 
   useEffect(() => {
     updateProbeBlendMaterialDebugState(materialRef.current, probeBlend)
@@ -3655,11 +3642,7 @@ function ReflectionProbeVisualization({
                 uniform samplerCube probeCubeMap;
                 varying vec3 vProbeDirection;
 
-                vec3 debugTonemap(vec3 color) {
-                  const float debugExposure = 4.0;
-                  color = max(color * debugExposure, vec3(0.0));
-                  return color / (vec3(1.0) + color);
-                }
+                ${REFLECTION_PROBE_DEBUG_TONEMAP_GLSL}
 
                 void main() {
                   vec4 texel = textureCube(probeCubeMap, normalize(vProbeDirection));
@@ -3759,12 +3742,7 @@ void main() {
 }
 `
 
-const REFLECTION_PROBE_ATLAS_FRAGMENT_SHADER = `
-uniform int faceIndex;
-uniform samplerCube probeCubeMap;
-
-varying vec2 vUv;
-
+const REFLECTION_PROBE_DEBUG_TONEMAP_GLSL = `
 vec3 debugTonemap(vec3 color) {
   const float debugExposure = 1.5;
   const float debugWhitePoint = 24.0;
@@ -3775,6 +3753,15 @@ vec3 debugTonemap(vec3 color) {
     vec3(1.0)
   );
 }
+`
+
+const REFLECTION_PROBE_ATLAS_FRAGMENT_SHADER = `
+uniform int faceIndex;
+uniform samplerCube probeCubeMap;
+
+varying vec2 vUv;
+
+${REFLECTION_PROBE_DEBUG_TONEMAP_GLSL}
 
 vec3 getFaceDirection(int face, vec2 uv) {
   vec2 p = (uv * 2.0) - 1.0;
@@ -4101,14 +4088,24 @@ function MazeWallMesh({
         layout,
         reflectionProbeBlend.probeIndices,
         probeTextures,
-        'none',
+        probeIblEnabled &&
+          reflectionCapturesEnabled &&
+          hasCompleteProbeTextures(probeTextures)
+          ? 'constant'
+          : 'none',
         {
-          radianceMode: 'none',
+          radianceMode:
+            reflectionCapturesEnabled &&
+            hasCompleteProbeTextures(probeTextures)
+              ? 'constant'
+              : 'none',
           weights: reflectionProbeBlend.weights as [number, number, number, number]
         }
       ),
     [
       layout,
+      probeIblEnabled,
+      reflectionCapturesEnabled,
       probeTextures,
       reflectionProbeBlend.probeIndices,
       reflectionProbeBlend.weights

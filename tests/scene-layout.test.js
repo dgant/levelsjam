@@ -127,6 +127,19 @@ test('provides synthetic 3x3 probe-occlusion layouts for diagnostics', () => {
   assert.equal(sealed.lights.length, 8)
   assert.equal(sealed.maze.openEdges.length, 0)
   assert.ok(sealed.maze.lightmap)
+  assert.deepEqual(
+    sealed.lights.map((light) => `${light.cell.x},${light.cell.y}:${light.side}`).sort(),
+    [
+      '0,0:west',
+      '0,1:west',
+      '0,2:west',
+      '1,0:north',
+      '1,2:south',
+      '2,0:east',
+      '2,1:east',
+      '2,2:east'
+    ]
+  )
   assert.equal(openNorth.maze.openEdges.length, 1)
   assert.deepEqual(openNorth.maze.openEdges[0], {
     from: { x: 1, y: 0 },

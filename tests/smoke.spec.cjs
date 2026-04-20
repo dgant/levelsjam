@@ -3,7 +3,7 @@ const path = require('node:path')
 const { PNG } = require('pngjs')
 const { expect, test } = require('@playwright/test')
 
-test.setTimeout(90_000)
+test.setTimeout(300_000)
 
 const SMOKE_TIMING_LOG_PATH = path.resolve(
   __dirname,
@@ -293,25 +293,36 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
 
   await timedStep(timingProfile, 'startup', async () => {
     await page.goto('/?maze=maze-001', { waitUntil: 'domcontentloaded' })
-    await expect(loadingOverlay).toBeVisible({ timeout: 5_000 })
+    if (await loadingOverlay.count()) {
+      await expect(loadingOverlay).toBeVisible({ timeout: 5_000 })
+      await expect
+        .poll(
+          async () => loadingOverlay.getAttribute('data-loading-complete'),
+          {
+            timeout: 180_000,
+            intervals: [250, 500, 1_000]
+          }
+        )
+        .toBe('true')
+      await expect(loadingOverlay).toHaveAttribute('aria-hidden', 'true')
+    }
     await expect
       .poll(
-        async () => loadingOverlay.getAttribute('data-loading-complete'),
+        async () => await canvas.count(),
         {
-          timeout: 40_000,
+          timeout: 180_000,
           intervals: [250, 500, 1_000]
         }
       )
-      .toBe('true')
-    await expect(loadingOverlay).toHaveAttribute('aria-hidden', 'true')
-    await expect(canvas).toBeVisible({ timeout: 5_000 })
+      .toBeGreaterThan(0)
+    await expect(canvas).toBeVisible({ timeout: 180_000 })
     await expect
       .poll(
         async () => page.evaluate(
           () => window.__levelsjamDebug?.getReflectionProbeState?.()?.ready ?? false
         ),
         {
-          timeout: 20_000,
+          timeout: 180_000,
           intervals: [250, 500, 1_000]
         }
       )

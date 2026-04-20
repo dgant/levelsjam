@@ -28,9 +28,7 @@ export const PLAYER_SPAWN_POSITION = Object.freeze({
   z: 0
 })
 
-export const AVAILABLE_MAZES = Object.freeze(
-  MAZES.map((maze) => Object.freeze(structuredClone(maze)))
-)
+export const AVAILABLE_MAZES = Object.freeze(MAZES.slice())
 
 export const DEFAULT_MAZE_LAYOUT = Object.freeze(
   getMazeSceneLayout(AVAILABLE_MAZES[0], SCONCE_RADIUS)
@@ -64,14 +62,16 @@ function buildDebugProbeOcclusionMaze(id, options = {}) {
 
             let side = 'north'
 
+            // Keep the sealed center-cell probe honest by mounting each torch
+            // on an exterior-facing wall, never on the wall facing the center.
             if (x < centerCell.x) {
-              side = 'east'
-            } else if (x > centerCell.x) {
               side = 'west'
+            } else if (x > centerCell.x) {
+              side = 'east'
             } else if (y < centerCell.y) {
-              side = 'south'
-            } else {
               side = 'north'
+            } else {
+              side = 'south'
             }
 
             placements.push({

@@ -71,9 +71,12 @@
 - The baked wall lightmap also includes the wall's baseline ambient environment contribution, so maze walls do not rely on direct runtime scene IBL for their diffuse lighting.
 - The current scene does not include realtime torch flicker.
 - The current scene does not include realtime torch point lights.
-- Reflection probe captures include temporary shadow-casting torch lights so captured specular reflections can include torch-lit shadowing.
+- Reflection probe captures include temporary shadow-casting torch point lights that match the original authored torch-light characteristics except for flicker.
 - Reflection probe captures wait until every expected opaque maze wall, baked floor patch, and sconce is present with its capture-ready material state before baking.
 - Reflection probe captures include the visible static maze geometry and its baked lighting instead of collapsing to only the HDRI and temporary torch emitters.
+- Maze generation writes lightmap diagnostic artifact textures to a non-source-controlled inspection directory so a human can review the baked wall and floor outputs.
+- The repository includes a source-controlled synthetic `3x3` reflection diagnostic maze for probe-occlusion tests.
+- The synthetic `3x3` reflection diagnostic mazes place their torches on outer-facing cell walls so the sealed center probe has no direct view of any torch-lit wall face.
 - Reflection probe debug visualization displays the raw captured probe cubemap contents directly on the debug spheres so a human can inspect what each reflection or IBL source actually contains.
 - Reflection probe debug visualization uses a fixed neutral preview tone map rather than the gameplay exposure control so bright captured sources do not wash out the diagnostic view.
 - Reflection probe debugging exposes an on-demand geometry-only cubemap capture against a black background so capture-stage maze visibility can be verified independently from later probe filtering or beauty-pass shading.
@@ -127,6 +130,8 @@
 - The debug panel exposes a checkbox that disables baked maze lightmaps while leaving the underlying maze geometry visible.
 - The debug panel exposes a checkbox that disables local maze reflection captures while leaving the global HDRI environment active.
 - The debug panel exposes a `Probe IBL` checkbox that enables or disables using local reflection captures as a local image-based-lighting source for all lit PBR scene geometry.
+- The `Reflection Captures` checkbox visibly removes or restores local probe-driven reflections on materials that are otherwise using them.
+- The `Probe IBL` checkbox visibly removes or restores local probe-driven diffuse or irradiance contribution on the lit PBR geometry that participates in probe IBL testing.
 - The debug panel exposes a checkbox, disabled by default, that draws a sphere at each maze reflection-probe position using that probe's captured reflection texture.
 - The debug panel `Probe IBL` checkbox defaults to `off`.
 - Double-clicking any debug-panel label resets that control to its authored default value.
@@ -175,6 +180,7 @@
 - Maze wall materials do not add direct runtime scene-environment IBL on top of their baked diffuse lightmaps.
 - Reflective and semi-reflective materials read from the shared environment consistently, with the nearest local maze reflection probe taking precedence over the global HDRI for in-maze specular.
 - Enabling `Probe IBL` allows lit PBR maze geometry, including walls, to receive probe-driven local image-based lighting instead of relying only on the global HDRI fallback.
+- Disabling `Reflection Captures` makes the scene fall back to the global HDRI-only reflection path for materials that otherwise use local probe reflections.
 - The reflective maze floor patch uses local reflection probes so puddled areas can reflect nearby torch sources rather than only the global HDRI.
 - The reflective maze floor patch blends nearby local reflection probes with weighted interpolation rather than switching between one nearest probe per region.
 - Reflective maze sconces blend nearby local reflection probes with weighted interpolation rather than switching between one nearest probe at the object position.
@@ -267,4 +273,5 @@
 - Maze-generation logic is covered by automated tests that validate every persisted maze against the maze rules.
 - Maze-generation tests delete any generated maze files that fail validation.
 - Automated tests guarantee that the repository contains at least five valid persisted maze files by generating additional mazes when required.
+- Automated tests verify that the dumped synthetic `3x3` reflection-diagnostic artifacts do not contain visible torch sources beyond the skybox-only baseline.
 - The scene-instantiation path is checked in the browser and verified to load one of the persisted mazes, build the correct wall meshes, and place sconces and torches only at the maze-defined light positions.
