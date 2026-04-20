@@ -483,6 +483,9 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     const probeAtlas = await page.evaluate(
       () => window.__levelsjamDebug.captureReflectionProbeAtlas?.(24, 96) ?? null
     )
+    const probeProcessedAtlas = await page.evaluate(
+      () => window.__levelsjamDebug.captureReflectionProbeProcessedAtlas?.(24, 96) ?? null
+    )
     const probeGeometryAtlas = await page.evaluate(
       () => window.__levelsjamDebug.captureReflectionProbeGeometryAtlas?.(24, 96) ?? null
     )
@@ -491,9 +494,14 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     )
     expect(Array.isArray(probeAtlas)).toBe(true)
     expect(probeAtlas).toHaveLength(6)
+    expect(Array.isArray(probeProcessedAtlas)).toBe(true)
+    expect(probeProcessedAtlas).toHaveLength(6)
     expect(Array.isArray(probeGeometryAtlas)).toBe(true)
     expect(probeGeometryAtlas).toHaveLength(6)
     const probeFaceDetails = probeAtlas.map((faceDataUrl) =>
+      measurePngDetail(decodePngDataUrl(faceDataUrl))
+    )
+    const probeProcessedFaceDetails = probeProcessedAtlas.map((faceDataUrl) =>
       measurePngDetail(decodePngDataUrl(faceDataUrl))
     )
     const probeGeometryFaceDetails = probeGeometryAtlas.map((faceDataUrl) =>
@@ -513,6 +521,12 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     expect(
       Math.min(...probeFaceDetails.map((detail) => detail.darkest))
     ).toBeLessThan(8)
+    expect(
+      probeProcessedFaceDetails.filter((detail) => detail.nonBlackFraction > 0.15).length
+    ).toBeGreaterThanOrEqual(4)
+    expect(
+      Math.max(...probeProcessedFaceDetails.map((detail) => detail.luminanceStdDev))
+    ).toBeGreaterThan(20)
     expect(
       probeGeometryFaceDetails.filter((detail) => detail.nonBlackFraction > 0.2).length
     ).toBeGreaterThanOrEqual(4)

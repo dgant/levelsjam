@@ -77,15 +77,21 @@ async function captureProbeArtifacts(page, mazeId) {
 
   const capture = await page.evaluate(async () => ({
     geometryAtlas: await window.__levelsjamDebug.captureReflectionProbeGeometryAtlas?.(4, 128),
+    processedAtlas: await window.__levelsjamDebug.captureReflectionProbeProcessedAtlas?.(4, 128),
     probeState: window.__levelsjamDebug.getReflectionProbeState?.() ?? null,
     rawAtlas: await window.__levelsjamDebug.captureReflectionProbeAtlas?.(4, 128)
   }))
 
-  if (!Array.isArray(capture.rawAtlas) || !Array.isArray(capture.geometryAtlas)) {
+  if (
+    !Array.isArray(capture.rawAtlas) ||
+    !Array.isArray(capture.processedAtlas) ||
+    !Array.isArray(capture.geometryAtlas)
+  ) {
     throw new Error(`Expected probe atlases for ${mazeId}`)
   }
 
   writeAtlasArtifacts(mazeId, 'raw', capture.rawAtlas)
+  writeAtlasArtifacts(mazeId, 'processed', capture.processedAtlas)
   writeAtlasArtifacts(mazeId, 'geometry', capture.geometryAtlas)
   fs.writeFileSync(
     path.join(ARTIFACT_ROOT, mazeId, 'summary.json'),
@@ -98,6 +104,7 @@ async function captureProbeArtifacts(page, mazeId) {
   return {
     geometryAtlas: capture.geometryAtlas,
     metrics: measureAtlasTorchSignature(capture.rawAtlas),
+    processedAtlas: capture.processedAtlas,
     rawAtlas: capture.rawAtlas
   }
 }

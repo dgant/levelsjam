@@ -455,6 +455,12 @@ type GroundPatchRect = {
 
 type ProbeBlendMode = 'none' | 'constant' | 'world'
 
+type ProbeTextureInfo = {
+  maxMip: number
+  texelHeight: number
+  texelWidth: number
+}
+
 type ProbeBlendConfig = {
   mode: ProbeBlendMode
   radianceMode?: ProbeBlendMode
@@ -463,6 +469,7 @@ type ProbeBlendConfig = {
     min: { x: number, y: number, z: number } | null
   }>
   probePositions?: Array<{ x: number, y: number, z: number } | null>
+  probeTextureInfos?: Array<ProbeTextureInfo | null>
   probeTextures: Array<Texture | null>
   region?: {
     minX: number
@@ -489,10 +496,22 @@ type ProbeBlendShader = Shader & {
     localProbeEnvMap1?: Uniform<Texture | null>
     localProbeEnvMap2?: Uniform<Texture | null>
     localProbeEnvMap3?: Uniform<Texture | null>
+    localProbeMaxMip0?: Uniform<number>
+    localProbeMaxMip1?: Uniform<number>
+    localProbeMaxMip2?: Uniform<number>
+    localProbeMaxMip3?: Uniform<number>
     localProbePosition0?: Uniform<Vector3>
     localProbePosition1?: Uniform<Vector3>
     localProbePosition2?: Uniform<Vector3>
     localProbePosition3?: Uniform<Vector3>
+    localProbeTexelHeight0?: Uniform<number>
+    localProbeTexelHeight1?: Uniform<number>
+    localProbeTexelHeight2?: Uniform<number>
+    localProbeTexelHeight3?: Uniform<number>
+    localProbeTexelWidth0?: Uniform<number>
+    localProbeTexelWidth1?: Uniform<number>
+    localProbeTexelWidth2?: Uniform<number>
+    localProbeTexelWidth3?: Uniform<number>
     probeBlendMode?: Uniform<number>
     probeBlendRadianceMode?: Uniform<number>
     probeBlendRegion?: Uniform<Vector4>
@@ -612,6 +631,138 @@ function matchesDebugRole(
   )
 }
 
+const PROBE_CUBEUV_SAMPLING_GLSL = `
+const float probeBlend_cubeUV_minMipLevel = 4.0;
+const float probeBlend_cubeUV_minTileSize = 16.0;
+
+float probeBlendGetFace( vec3 direction ) {
+  vec3 absDirection = abs( direction );
+  float face = -1.0;
+
+  if ( absDirection.x > absDirection.z ) {
+    if ( absDirection.x > absDirection.y ) {
+      face = direction.x > 0.0 ? 0.0 : 3.0;
+    } else {
+      face = direction.y > 0.0 ? 1.0 : 4.0;
+    }
+  } else {
+    if ( absDirection.z > absDirection.y ) {
+      face = direction.z > 0.0 ? 2.0 : 5.0;
+    } else {
+      face = direction.y > 0.0 ? 1.0 : 4.0;
+    }
+  }
+
+  return face;
+}
+
+vec2 probeBlendGetUV( vec3 direction, float face ) {
+  vec2 uv;
+
+  if ( face == 0.0 ) {
+    uv = vec2( direction.z, direction.y ) / abs( direction.x );
+  } else if ( face == 1.0 ) {
+    uv = vec2( -direction.x, -direction.z ) / abs( direction.y );
+  } else if ( face == 2.0 ) {
+    uv = vec2( -direction.x, direction.y ) / abs( direction.z );
+  } else if ( face == 3.0 ) {
+    uv = vec2( -direction.z, direction.y ) / abs( direction.x );
+  } else if ( face == 4.0 ) {
+    uv = vec2( -direction.x, direction.z ) / abs( direction.y );
+  } else {
+    uv = vec2( direction.x, direction.y ) / abs( direction.z );
+  }
+
+  return 0.5 * ( uv + 1.0 );
+}
+
+vec3 probeBlendBilinearCubeUV(
+  sampler2D envMap,
+  vec3 direction,
+  float mipInt,
+  float texelWidth,
+  float texelHeight,
+  float maxMip
+) {
+  float face = probeBlendGetFace( direction );
+  float filterInt = max( probeBlend_cubeUV_minMipLevel - mipInt, 0.0 );
+  mipInt = max( mipInt, probeBlend_cubeUV_minMipLevel );
+  float faceSize = exp2( mipInt );
+  highp vec2 uv = probeBlendGetUV( direction, face ) * ( faceSize - 2.0 ) + 1.0;
+
+  if ( face > 2.0 ) {
+    uv.y += faceSize;
+    face -= 3.0;
+  }
+
+  uv.x += face * faceSize;
+  uv.x += filterInt * 3.0 * probeBlend_cubeUV_minTileSize;
+  uv.y += 4.0 * ( exp2( maxMip ) - faceSize );
+  uv.x *= texelWidth;
+  uv.y *= texelHeight;
+
+  #ifdef texture2DGradEXT
+    return texture2DGradEXT( envMap, uv, vec2( 0.0 ), vec2( 0.0 ) ).rgb;
+  #else
+    return texture2D( envMap, uv ).rgb;
+  #endif
+}
+
+float probeBlendRoughnessToMip( float roughness ) {
+  float mip = 0.0;
+
+  if ( roughness >= 0.8 ) {
+    mip = ( 1.0 - roughness ) * 5.0 - 2.0;
+  } else if ( roughness >= 0.4 ) {
+    mip = ( 0.8 - roughness ) * 7.5 - 1.0;
+  } else if ( roughness >= 0.305 ) {
+    mip = ( 0.4 - roughness ) * 10.526315789473685 + 2.0;
+  } else if ( roughness >= 0.21 ) {
+    mip = ( 0.305 - roughness ) * 10.526315789473683 + 3.0;
+  } else {
+    mip = -2.0 * log2( 1.16 * roughness );
+  }
+
+  return mip;
+}
+
+vec4 probeBlendTextureCubeUV(
+  sampler2D envMap,
+  vec3 sampleDir,
+  float roughness,
+  float texelWidth,
+  float texelHeight,
+  float maxMip
+) {
+  float mip = clamp( probeBlendRoughnessToMip( roughness ), -2.0, maxMip );
+  float mipF = fract( mip );
+  float mipInt = floor( mip );
+  vec3 color0 = probeBlendBilinearCubeUV(
+    envMap,
+    sampleDir,
+    mipInt,
+    texelWidth,
+    texelHeight,
+    maxMip
+  );
+
+  if ( mipF == 0.0 ) {
+    return vec4( color0, 1.0 );
+  }
+
+  vec3 color1 = probeBlendBilinearCubeUV(
+    envMap,
+    sampleDir,
+    mipInt + 1.0,
+    texelWidth,
+    texelHeight,
+    maxMip
+  );
+
+  return vec4( mix( color0, color1, mipF ), 1.0 );
+}
+`
+
 const PROBE_BLEND_SHADER_CHUNK = `
 #ifdef USE_ENVMAP
 
@@ -619,6 +770,18 @@ uniform sampler2D localProbeEnvMap0;
 uniform sampler2D localProbeEnvMap1;
 uniform sampler2D localProbeEnvMap2;
 uniform sampler2D localProbeEnvMap3;
+uniform float localProbeTexelWidth0;
+uniform float localProbeTexelWidth1;
+uniform float localProbeTexelWidth2;
+uniform float localProbeTexelWidth3;
+uniform float localProbeTexelHeight0;
+uniform float localProbeTexelHeight1;
+uniform float localProbeTexelHeight2;
+uniform float localProbeTexelHeight3;
+uniform float localProbeMaxMip0;
+uniform float localProbeMaxMip1;
+uniform float localProbeMaxMip2;
+uniform float localProbeMaxMip3;
 uniform int probeBlendMode;
 uniform int probeBlendRadianceMode;
 uniform vec4 probeBlendWeights;
@@ -636,6 +799,8 @@ uniform vec3 localProbeBoxMax0;
 uniform vec3 localProbeBoxMax1;
 uniform vec3 localProbeBoxMax2;
 uniform vec3 localProbeBoxMax3;
+
+${PROBE_CUBEUV_SAMPLING_GLSL}
 
 float probeBlendSafeComponent( float value ) {
   if ( abs( value ) < 0.0001 ) {
@@ -677,7 +842,10 @@ vec4 sampleProbeBlendTexture(
   float roughness,
   vec3 probePosition,
   vec3 boxMin,
-  vec3 boxMax
+  vec3 boxMax,
+  float texelWidth,
+  float texelHeight,
+  float maxMip
 ) {
   vec3 projectedDirection = applyProbeBoxProjection(
     worldPosition,
@@ -687,7 +855,14 @@ vec4 sampleProbeBlendTexture(
     boxMax
   );
 
-  return textureCubeUV( probeMap, envMapRotation * projectedDirection, roughness );
+  return probeBlendTextureCubeUV(
+    probeMap,
+    envMapRotation * projectedDirection,
+    roughness,
+    texelWidth,
+    texelHeight,
+    maxMip
+  );
 }
 
 vec4 sampleProbeBlendLocalMaps( vec3 worldPosition, vec3 direction, float roughness, vec4 weights ) {
@@ -698,7 +873,10 @@ vec4 sampleProbeBlendLocalMaps( vec3 worldPosition, vec3 direction, float roughn
     roughness,
     localProbePosition0,
     localProbeBoxMin0,
-    localProbeBoxMax0
+    localProbeBoxMax0,
+    localProbeTexelWidth0,
+    localProbeTexelHeight0,
+    localProbeMaxMip0
   );
   vec4 color1 = sampleProbeBlendTexture(
     localProbeEnvMap1,
@@ -707,7 +885,10 @@ vec4 sampleProbeBlendLocalMaps( vec3 worldPosition, vec3 direction, float roughn
     roughness,
     localProbePosition1,
     localProbeBoxMin1,
-    localProbeBoxMax1
+    localProbeBoxMax1,
+    localProbeTexelWidth1,
+    localProbeTexelHeight1,
+    localProbeMaxMip1
   );
   vec4 color2 = sampleProbeBlendTexture(
     localProbeEnvMap2,
@@ -716,7 +897,10 @@ vec4 sampleProbeBlendLocalMaps( vec3 worldPosition, vec3 direction, float roughn
     roughness,
     localProbePosition2,
     localProbeBoxMin2,
-    localProbeBoxMax2
+    localProbeBoxMax2,
+    localProbeTexelWidth2,
+    localProbeTexelHeight2,
+    localProbeMaxMip2
   );
   vec4 color3 = sampleProbeBlendTexture(
     localProbeEnvMap3,
@@ -725,7 +909,10 @@ vec4 sampleProbeBlendLocalMaps( vec3 worldPosition, vec3 direction, float roughn
     roughness,
     localProbePosition3,
     localProbeBoxMin3,
-    localProbeBoxMax3
+    localProbeBoxMax3,
+    localProbeTexelWidth3,
+    localProbeTexelHeight3,
+    localProbeMaxMip3
   );
 
   return
@@ -840,9 +1027,11 @@ function updateProbeBlendShaderUniforms(
 
   const probePositions = probeBlend.probePositions ?? []
   const probeBoxes = probeBlend.probeBoxes ?? []
+  const probeTextureInfos = probeBlend.probeTextureInfos ?? []
   const defaultProbePosition = DEFAULT_PROBE_POSITION
   const defaultProbeBoxMin = DEFAULT_PROBE_BOX_MIN
   const defaultProbeBoxMax = DEFAULT_PROBE_BOX_MAX
+  const defaultProbeTextureInfo = DEFAULT_PROBE_TEXTURE_INFO
   const applyProbeUniforms = (
     index: number,
     positionUniform: Uniform<Vector3> | undefined,
@@ -864,6 +1053,25 @@ function updateProbeBlendShaderUniforms(
       probeBoxes[index]?.max?.y ?? defaultProbeBoxMax.y,
       probeBoxes[index]?.max?.z ?? defaultProbeBoxMax.z
     )
+  }
+  const applyProbeTextureInfoUniforms = (
+    index: number,
+    texelWidthUniform: Uniform<number> | undefined,
+    texelHeightUniform: Uniform<number> | undefined,
+    maxMipUniform: Uniform<number> | undefined
+  ) => {
+    if (texelWidthUniform) {
+      texelWidthUniform.value =
+        probeTextureInfos[index]?.texelWidth ?? defaultProbeTextureInfo.texelWidth
+    }
+    if (texelHeightUniform) {
+      texelHeightUniform.value =
+        probeTextureInfos[index]?.texelHeight ?? defaultProbeTextureInfo.texelHeight
+    }
+    if (maxMipUniform) {
+      maxMipUniform.value =
+        probeTextureInfos[index]?.maxMip ?? defaultProbeTextureInfo.maxMip
+    }
   }
 
   applyProbeUniforms(
@@ -889,6 +1097,30 @@ function updateProbeBlendShaderUniforms(
     shader.uniforms.localProbePosition3,
     shader.uniforms.localProbeBoxMin3,
     shader.uniforms.localProbeBoxMax3
+  )
+  applyProbeTextureInfoUniforms(
+    0,
+    shader.uniforms.localProbeTexelWidth0,
+    shader.uniforms.localProbeTexelHeight0,
+    shader.uniforms.localProbeMaxMip0
+  )
+  applyProbeTextureInfoUniforms(
+    1,
+    shader.uniforms.localProbeTexelWidth1,
+    shader.uniforms.localProbeTexelHeight1,
+    shader.uniforms.localProbeMaxMip1
+  )
+  applyProbeTextureInfoUniforms(
+    2,
+    shader.uniforms.localProbeTexelWidth2,
+    shader.uniforms.localProbeTexelHeight2,
+    shader.uniforms.localProbeMaxMip2
+  )
+  applyProbeTextureInfoUniforms(
+    3,
+    shader.uniforms.localProbeTexelWidth3,
+    shader.uniforms.localProbeTexelHeight3,
+    shader.uniforms.localProbeMaxMip3
   )
   shader.uniforms.localProbeEnvMap0!.value = probeBlend.probeTextures[0] ?? null
   shader.uniforms.localProbeEnvMap1!.value = probeBlend.probeTextures[1] ?? null
@@ -950,6 +1182,20 @@ function updateProbeBlendUniformDebugState(
   }
 
   material.userData.probeBlendUniformDebug = {
+    localProbeTextureInfo: [0, 1, 2, 3].map((index) => ({
+      maxMip:
+        shader.uniforms[
+          `localProbeMaxMip${index}` as keyof ProbeBlendShader['uniforms']
+        ]?.value ?? null,
+      texelHeight:
+        shader.uniforms[
+          `localProbeTexelHeight${index}` as keyof ProbeBlendShader['uniforms']
+        ]?.value ?? null,
+      texelWidth:
+        shader.uniforms[
+          `localProbeTexelWidth${index}` as keyof ProbeBlendShader['uniforms']
+        ]?.value ?? null
+    })),
     localProbeTextureBoundCount: [
       shader.uniforms.localProbeEnvMap0?.value,
       shader.uniforms.localProbeEnvMap1?.value,
@@ -995,10 +1241,22 @@ function attachProbeBlendMaterialShader(
     probeBlendShader.uniforms.localProbeEnvMap1 = new Uniform<Texture | null>(null)
     probeBlendShader.uniforms.localProbeEnvMap2 = new Uniform<Texture | null>(null)
     probeBlendShader.uniforms.localProbeEnvMap3 = new Uniform<Texture | null>(null)
+    probeBlendShader.uniforms.localProbeMaxMip0 = new Uniform(0)
+    probeBlendShader.uniforms.localProbeMaxMip1 = new Uniform(0)
+    probeBlendShader.uniforms.localProbeMaxMip2 = new Uniform(0)
+    probeBlendShader.uniforms.localProbeMaxMip3 = new Uniform(0)
     probeBlendShader.uniforms.probeBlendMode = new Uniform(0)
     probeBlendShader.uniforms.probeBlendRadianceMode = new Uniform(0)
     probeBlendShader.uniforms.probeBlendWeights = new Uniform(new Vector4(1, 0, 0, 0))
     probeBlendShader.uniforms.probeBlendRegion = new Uniform(new Vector4(0, 0, 0, 0))
+    probeBlendShader.uniforms.localProbeTexelHeight0 = new Uniform(1)
+    probeBlendShader.uniforms.localProbeTexelHeight1 = new Uniform(1)
+    probeBlendShader.uniforms.localProbeTexelHeight2 = new Uniform(1)
+    probeBlendShader.uniforms.localProbeTexelHeight3 = new Uniform(1)
+    probeBlendShader.uniforms.localProbeTexelWidth0 = new Uniform(1)
+    probeBlendShader.uniforms.localProbeTexelWidth1 = new Uniform(1)
+    probeBlendShader.uniforms.localProbeTexelWidth2 = new Uniform(1)
+    probeBlendShader.uniforms.localProbeTexelWidth3 = new Uniform(1)
 
     probeBlendShader.vertexShader =
       `varying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.vertexShader}`
@@ -1114,6 +1372,37 @@ function getPmremCubeSize(texture: Texture | null | undefined) {
   }
 
   return REFLECTION_PROBE_RENDER_SIZE
+}
+
+const DEFAULT_PROBE_TEXTURE_INFO: ProbeTextureInfo = {
+  maxMip: 0,
+  texelHeight: 1,
+  texelWidth: 1
+}
+
+function getCubeUvTextureInfo(texture: Texture | null | undefined): ProbeTextureInfo | null {
+  const image = texture?.image as
+    | {
+      height?: number
+      width?: number
+    }
+    | undefined
+
+  if (
+    texture?.mapping !== CubeUVReflectionMapping ||
+    typeof image?.width !== 'number' ||
+    typeof image?.height !== 'number' ||
+    image.width <= 0 ||
+    image.height <= 0
+  ) {
+    return null
+  }
+
+  return {
+    maxMip: Math.max(0, Math.round(Math.log2(image.height) - 2)),
+    texelHeight: 1 / image.height,
+    texelWidth: 1 / image.width
+  }
 }
 
 function getCubeTextureFaceSize(texture: Texture | null | undefined) {
@@ -1426,6 +1715,7 @@ function buildProbeBlendConfig(
     probePositions: probeIndices.map(
       (probeIndex) => layout.reflectionProbes[probeIndex]?.position ?? null
     ),
+    probeTextureInfos: probeTextures.map((texture) => getCubeUvTextureInfo(texture)),
     probeTextures,
     region: options.region,
     weights: options.weights
@@ -3623,8 +3913,9 @@ function ReflectionProbeVisualization({
     <>
       {layout.reflectionProbes.map((probe, index) => {
         const texture = reflectionProbeTextures[index]
+        const textureInfo = getCubeUvTextureInfo(texture)
 
-        if (!texture) {
+        if (!texture || !textureInfo) {
           return null
         }
 
@@ -3638,22 +3929,14 @@ function ReflectionProbeVisualization({
             <shaderMaterial
               depthTest={false}
               depthWrite={false}
-              fragmentShader={`
-                uniform samplerCube probeCubeMap;
-                varying vec3 vProbeDirection;
-
-                ${REFLECTION_PROBE_DEBUG_TONEMAP_GLSL}
-
-                void main() {
-                  vec4 texel = textureCube(probeCubeMap, normalize(vProbeDirection));
-                  gl_FragColor = vec4(debugTonemap(texel.rgb), texel.a);
-                  #include <colorspace_fragment>
-                }
-              `}
+              fragmentShader={createProcessedReflectionProbeSphereFragmentShader()
+                .replaceAll('PROBE_CUBEUV_TEXEL_WIDTH', textureInfo.texelWidth.toFixed(12))
+                .replaceAll('PROBE_CUBEUV_TEXEL_HEIGHT', textureInfo.texelHeight.toFixed(12))
+                .replaceAll('PROBE_CUBEUV_MAX_MIP', textureInfo.maxMip.toFixed(1))}
               side={DoubleSide}
               toneMapped={false}
               uniforms={{
-                probeCubeMap: { value: texture }
+                probeCubeUvMap: { value: texture }
               }}
               vertexShader={`
                 varying vec3 vProbeDirection;
@@ -3755,6 +4038,83 @@ vec3 debugTonemap(vec3 color) {
 }
 `
 
+function createProcessedReflectionProbeFragmentShader(options: {
+  toneMap?: boolean
+}) {
+  return `
+uniform int faceIndex;
+uniform sampler2D probeCubeUvMap;
+
+varying vec2 vUv;
+
+${PROBE_CUBEUV_SAMPLING_GLSL}
+${options.toneMap === false ? '' : REFLECTION_PROBE_DEBUG_TONEMAP_GLSL}
+
+vec3 getFaceDirection(int face, vec2 uv) {
+  vec2 p = (uv * 2.0) - 1.0;
+
+  if (face == 0) {
+    return normalize(vec3(1.0, -p.y, -p.x));
+  }
+  if (face == 1) {
+    return normalize(vec3(-1.0, -p.y, p.x));
+  }
+  if (face == 2) {
+    return normalize(vec3(p.x, 1.0, p.y));
+  }
+  if (face == 3) {
+    return normalize(vec3(p.x, -1.0, -p.y));
+  }
+  if (face == 4) {
+    return normalize(vec3(p.x, -p.y, 1.0));
+  }
+
+  return normalize(vec3(-p.x, -p.y, -1.0));
+}
+
+void main() {
+  vec4 texel = probeBlendTextureCubeUV(
+    probeCubeUvMap,
+    getFaceDirection(faceIndex, vUv),
+    0.0,
+    PROBE_CUBEUV_TEXEL_WIDTH,
+    PROBE_CUBEUV_TEXEL_HEIGHT,
+    PROBE_CUBEUV_MAX_MIP
+  );
+  ${
+    options.toneMap === false
+      ? 'gl_FragColor = vec4(texel.rgb, 1.0);'
+      : 'gl_FragColor = vec4(debugTonemap(texel.rgb), 1.0);'
+  }
+  #include <colorspace_fragment>
+}
+`
+}
+
+function createProcessedReflectionProbeSphereFragmentShader() {
+  return `
+uniform sampler2D probeCubeUvMap;
+
+varying vec3 vProbeDirection;
+
+${PROBE_CUBEUV_SAMPLING_GLSL}
+${REFLECTION_PROBE_DEBUG_TONEMAP_GLSL}
+
+void main() {
+  vec4 texel = probeBlendTextureCubeUV(
+    probeCubeUvMap,
+    normalize(vProbeDirection),
+    0.0,
+    PROBE_CUBEUV_TEXEL_WIDTH,
+    PROBE_CUBEUV_TEXEL_HEIGHT,
+    PROBE_CUBEUV_MAX_MIP
+  );
+  gl_FragColor = vec4(debugTonemap(texel.rgb), 1.0);
+  #include <colorspace_fragment>
+}
+`
+}
+
 const REFLECTION_PROBE_ATLAS_FRAGMENT_SHADER = `
 uniform int faceIndex;
 uniform samplerCube probeCubeMap;
@@ -3851,6 +4211,100 @@ function captureCubeTextureAtlasDataUrls(
     uniforms: {
       faceIndex: { value: 0 },
       probeCubeMap: { value: probeTexture }
+    },
+    vertexShader: REFLECTION_PROBE_ATLAS_VERTEX_SHADER
+  })
+  const atlasMesh = new Mesh(new PlaneGeometry(2, 2), atlasMaterial)
+  const atlasTarget = new WebGLRenderTarget(size, size, {
+    depthBuffer: false,
+    format: RGBAFormat,
+    magFilter: NearestFilter,
+    minFilter: NearestFilter,
+    stencilBuffer: false,
+    type: UnsignedByteType
+  })
+  const savedAutoClear = gl.autoClear
+  const savedTarget = gl.getRenderTarget()
+  const pixelBuffer = new Uint8Array(size * size * 4)
+  const dataUrls: string[] = []
+
+  atlasScene.add(atlasMesh)
+  gl.autoClear = true
+
+  try {
+    for (let faceIndex = 0; faceIndex < 6; faceIndex += 1) {
+      atlasMaterial.uniforms.faceIndex.value = faceIndex
+      gl.setRenderTarget(atlasTarget)
+      gl.clear(true, true, true)
+      gl.render(atlasScene, atlasCamera)
+      gl.readRenderTargetPixels(atlasTarget, 0, 0, size, size, pixelBuffer)
+
+      const canvas = document.createElement('canvas')
+      const context = canvas.getContext('2d')
+
+      if (!context) {
+        return null
+      }
+
+      canvas.width = size
+      canvas.height = size
+      const imageData = context.createImageData(size, size)
+
+      for (let row = 0; row < size; row += 1) {
+        const sourceRow = size - 1 - row
+        const sourceOffset = sourceRow * size * 4
+        const targetOffset = row * size * 4
+
+        imageData.data.set(
+          pixelBuffer.subarray(sourceOffset, sourceOffset + (size * 4)),
+          targetOffset
+        )
+      }
+
+      context.putImageData(imageData, 0, 0)
+      dataUrls.push(canvas.toDataURL('image/png'))
+    }
+  } finally {
+    gl.setRenderTarget(savedTarget)
+    gl.autoClear = savedAutoClear
+    atlasMesh.geometry.dispose()
+    atlasMaterial.dispose()
+    atlasTarget.dispose()
+  }
+
+  return dataUrls
+}
+
+function captureCubeUvTextureAtlasDataUrls(
+  gl: WebGLRenderer,
+  probeTexture: Texture,
+  size: number,
+  options: {
+    toneMap?: boolean
+  } = {}
+) {
+  if (size <= 0) {
+    return null
+  }
+
+  const textureInfo = getCubeUvTextureInfo(probeTexture)
+
+  if (!textureInfo) {
+    return null
+  }
+
+  const atlasScene = new ThreeScene()
+  const atlasCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1)
+  const atlasMaterial = new ShaderMaterial({
+    depthTest: false,
+    depthWrite: false,
+    fragmentShader: createProcessedReflectionProbeFragmentShader(options)
+      .replaceAll('PROBE_CUBEUV_TEXEL_WIDTH', textureInfo.texelWidth.toFixed(12))
+      .replaceAll('PROBE_CUBEUV_TEXEL_HEIGHT', textureInfo.texelHeight.toFixed(12))
+      .replaceAll('PROBE_CUBEUV_MAX_MIP', textureInfo.maxMip.toFixed(1)),
+    uniforms: {
+      faceIndex: { value: 0 },
+      probeCubeUvMap: { value: probeTexture }
     },
     vertexShader: REFLECTION_PROBE_ATLAS_VERTEX_SHADER
   })
@@ -4212,7 +4666,6 @@ function SceneGeometry({
   layout,
   probeIblEnabled,
   reflectionProbeAmbientColors,
-  reflectionProbeRawTextures,
   reflectionCapturesEnabled,
   reflectionProbeTextures,
   showReflectionProbes,
@@ -4227,7 +4680,6 @@ function SceneGeometry({
   layout: MazeLayout
   probeIblEnabled: boolean
   reflectionProbeAmbientColors: Color[]
-  reflectionProbeRawTextures: Texture[]
   reflectionCapturesEnabled: boolean
   reflectionProbeTextures: Texture[]
   showReflectionProbes: boolean
@@ -4264,7 +4716,7 @@ function SceneGeometry({
       />
       <ReflectionProbeDebugOverlay
         layout={layout}
-        reflectionProbeTextures={reflectionProbeRawTextures}
+        reflectionProbeTextures={reflectionProbeTextures}
         visible={showReflectionProbes}
       />
       {isEffectActive(volumetricLighting) ? (
@@ -4857,6 +5309,11 @@ function FlightRig({
             fragmentHasSampleProbeBlendEnvMapWithMode: boolean
           } | null
           probeBlendUniforms: {
+            localProbeTextureInfo: Array<{
+              maxMip: number | null
+              texelHeight: number | null
+              texelWidth: number | null
+            }>
             localProbeTextureBoundCount: number
             probeBlendMode: number | null
             probeBlendRadianceMode: number | null
@@ -4960,6 +5417,11 @@ function FlightRig({
             fragmentHasSampleProbeBlendEnvMapWithMode: boolean
           } | null
           probeBlendUniforms: {
+            localProbeTextureInfo: Array<{
+              maxMip: number | null
+              texelHeight: number | null
+              texelWidth: number | null
+            }>
             localProbeTextureBoundCount: number
             probeBlendMode: number | null
             probeBlendRadianceMode: number | null
@@ -5014,6 +5476,11 @@ function FlightRig({
                   fragmentHasSampleProbeBlendEnvMapWithMode: boolean
                 } | null
                 probeBlendUniformDebug?: {
+                  localProbeTextureInfo: Array<{
+                    maxMip: number | null
+                    texelHeight: number | null
+                    texelWidth: number | null
+                  }>
                   localProbeTextureBoundCount: number
                   probeBlendMode: number | null
                   probeBlendRadianceMode: number | null
@@ -5342,6 +5809,10 @@ function Scene({
           probeIndex: number,
           size?: number
         ) => string[] | null
+        captureReflectionProbeProcessedAtlas?: (
+          probeIndex: number,
+          size?: number
+        ) => string[] | null
         captureReflectionProbeGeometryAtlas?: (
           probeIndex: number,
           size?: number
@@ -5524,6 +5995,16 @@ function Scene({
       }
 
       return captureCubeTextureAtlasDataUrls(gl, probeTexture, size)
+    }
+
+    const captureReflectionProbeProcessedAtlas = (probeIndex: number, size = 128) => {
+      const probeTexture = reflectionProbeTextures[probeIndex]
+
+      if (!probeTexture || size <= 0) {
+        return null
+      }
+
+      return captureCubeUvTextureAtlasDataUrls(gl, probeTexture, size)
     }
 
     const captureReflectionProbeGeometryAtlas = (probeIndex: number, size = 128) => {
@@ -5715,6 +6196,7 @@ function Scene({
     globalWindow.__levelsjamDebug = {
       ...existing,
       captureReflectionProbeAtlas,
+      captureReflectionProbeProcessedAtlas,
       captureReflectionProbeGeometryAtlas,
       captureReflectionProbeWallMaterialContinuum,
       clearDebugIsolation,
@@ -5730,6 +6212,7 @@ function Scene({
 
       clearDebugIsolation()
       delete globalWindow.__levelsjamDebug.captureReflectionProbeAtlas
+      delete globalWindow.__levelsjamDebug.captureReflectionProbeProcessedAtlas
       delete globalWindow.__levelsjamDebug.captureReflectionProbeGeometryAtlas
       delete globalWindow.__levelsjamDebug.captureReflectionProbeWallMaterialContinuum
       delete globalWindow.__levelsjamDebug.clearDebugIsolation
@@ -5740,7 +6223,7 @@ function Scene({
         delete globalWindow.__levelsjamDebug
       }
     }
-  }, [environmentIntensity, environmentTexture, gl, layout, reflectionProbeRawTextures, scene])
+  }, [environmentIntensity, environmentTexture, gl, layout, reflectionProbeRawTextures, reflectionProbeTextures, scene])
 
   const ambientOcclusionActive = isAmbientOcclusionActive(visualSettings)
   const bloomActive = isEffectActive(visualSettings.bloom)
@@ -5768,7 +6251,6 @@ function Scene({
         layout={layout}
         probeIblEnabled={visualSettings.probeIblEnabled}
         reflectionProbeAmbientColors={reflectionProbeAmbientColors}
-        reflectionProbeRawTextures={reflectionProbeRawTextures}
         reflectionCapturesEnabled={visualSettings.reflectionCapturesEnabled}
         reflectionProbeTextures={reflectionProbeTextures}
         showReflectionProbes={visualSettings.showReflectionProbes}

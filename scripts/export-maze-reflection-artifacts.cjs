@@ -122,6 +122,11 @@ async function captureMazeReflectionArtifacts(page, maze, artifactRoot) {
             probeIndex,
             size
           ),
+        processedAtlas:
+          await window.__levelsjamDebug?.captureReflectionProbeProcessedAtlas?.(
+            probeIndex,
+            size
+          ),
         rawAtlas:
           await window.__levelsjamDebug?.captureReflectionProbeAtlas?.(
             probeIndex,
@@ -131,8 +136,14 @@ async function captureMazeReflectionArtifacts(page, maze, artifactRoot) {
       { probeIndex, size: faceSize }
     )
 
-    if (!Array.isArray(capture.rawAtlas) || !Array.isArray(capture.geometryAtlas)) {
-      throw new Error(`Expected raw and geometry probe atlases for maze ${maze.id} probe ${probeIndex}`)
+    if (
+      !Array.isArray(capture.rawAtlas) ||
+      !Array.isArray(capture.processedAtlas) ||
+      !Array.isArray(capture.geometryAtlas)
+    ) {
+      throw new Error(
+        `Expected raw, processed, and geometry probe atlases for maze ${maze.id} probe ${probeIndex}`
+      )
     }
 
     const probeDirectory = path.join(
@@ -141,10 +152,12 @@ async function captureMazeReflectionArtifacts(page, maze, artifactRoot) {
     )
 
     writeAtlasArtifacts(probeDirectory, 'raw', capture.rawAtlas)
+    writeAtlasArtifacts(probeDirectory, 'processed', capture.processedAtlas)
     writeAtlasArtifacts(probeDirectory, 'geometry', capture.geometryAtlas)
     summary.probes.push({
       geometryFaceCount: capture.geometryAtlas.length,
       index: probeIndex,
+      processedFaceCount: capture.processedAtlas.length,
       rawFaceCount: capture.rawAtlas.length
     })
   }

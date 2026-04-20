@@ -67,10 +67,11 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify disabling `Reflection Captures` removes the local probe contribution from the puddled maze floor while leaving the global HDRI environment intact.
 - Verify toggling `Reflection Captures` produces a visible change on an in-maze reflective floor patch.
 - Verify enabling `Show Reflection Probes` draws a probe sphere at each maze probe position.
-- Verify the reflection-probe spheres directly display the raw captured cubemap contents and visibly show nearby maze geometry and torch reflections rather than a filtered approximation, a black sphere, an empty sphere, or a nearly all-sky capture.
+- Verify the reflection-probe spheres directly display the processed local reflection source used by in-game materials and visibly show nearby maze geometry and torch reflections rather than a black sphere, an empty sphere, or a nearly all-sky capture.
 - Verify the reflection-probe spheres remain readable regardless of the gameplay exposure slider because their preview uses a fixed neutral diagnostic tone map.
 - Verify `window.__levelsjamDebug.getReflectionProbeState()` reports a nonzero probe count and becomes `ready: true` after load.
-- For deeper probe debugging, call `window.__levelsjamDebug.captureReflectionProbeAtlas(probeIndex, size)` in the browser console to get six PNG data URLs for the exact raw cubemap faces after the fixed diagnostic tone map.
+- For deeper probe debugging, call `window.__levelsjamDebug.captureReflectionProbeAtlas(probeIndex, size)` in the browser console to get six PNG data URLs for the exact raw captured cubemap faces after the fixed diagnostic tone map.
+- For deeper runtime-reflection debugging, call `window.__levelsjamDebug.captureReflectionProbeProcessedAtlas(probeIndex, size)` in the browser console to get six PNG data URLs for the processed probe texture that reflective materials actually sample in-game.
 - Verify moving the camera between maze cells does not change `window.__levelsjamDebug.getReflectionProbeState().activeProbeId` from `null` or make the scene lighting flicker.
 - Verify the fire flipbook runs at the updated faster rate.
 - Verify the tone mapper is `AgX` by default.
