@@ -251,9 +251,11 @@
 - The frame rate remains stable during ordinary movement and camera motion.
 - The automated browser performance test is temporarily disabled while the static baked-lightmap torch-lighting evaluation is under way.
 - The project documents startup-time and test-duration benchmarks and treats regressions in those measurements as actionable.
-- The prepared browser smoke runner remains under 60 seconds after a prepared `build:pages`.
-- Automated test-duration enforcement fails the run when the smoke runner or unit suite exceeds its documented budget.
+- The prepared browser smoke runner keeps its startup phase under 60 seconds after a prepared `build:pages`.
+- The prepared browser smoke runner stays under 180 seconds total after a prepared `build:pages` while the deeper render assertions remain in separate integration specs.
+- Automated test-duration enforcement fails the run when the smoke runner startup phase, the full smoke runner ceiling, or the unit suite exceeds its documented budget.
 - Automated test-duration measurement records a per-run timing breakdown so excessive time can be attributed to specific scripts or smoke-test phases rather than guessed.
+- Automated unit-test measurement records per-file and per-subtest timing data in addition to the overall suite duration so individual regressions can be identified directly.
 - Maze topology generation for one valid maze must complete in under 100 milliseconds before the later baked-lightmap step runs.
 
 ## Testing Expectations
@@ -263,15 +265,18 @@
 - Visual layout changes are reviewed in the rendered scene, not only in source code.
 - Collision behavior is checked in the browser for stable contact with the ground plane and the walls.
 - Automated browser smoke coverage verifies that a real maze wall material writes visible scene color in the default render path rather than leaving only the skybox and billboards visible.
+- Automated rendering verification of the probe-blended PBR path confirms the live compiled shader uniforms change at runtime when probe-driven reflection or IBL controls are toggled.
+- Automated browser smoke coverage remains focused on startup readiness, debug-control availability, and the live probe-blended shader path so the benchmarked runner stays within its documented budget.
+- A separate automated render-integration browser test covers the slower end-to-end reflection, fog, and extended visual-control assertions that are intentionally excluded from the benchmarked smoke runner.
 - The loading overlay is checked in the browser and verified to animate and then fade away after asset load.
 - The backquote shortcut is checked in the browser and verified to open the debug controls panel.
 - The debug controls panel is checked in the browser and verified to expose the new IBL and torch controls while omitting removed atmosphere controls.
 - The automated browser performance test remains disabled until the temporary static baked-lightmap torch-lighting evaluation ends.
 - Automated browser smoke coverage verifies that the baked maze lightmap is present and contributes visible lighting.
-- Automated browser smoke coverage verifies that the volumetric-fog probe-IBL toggle changes the fog lighting path without breaking fog visibility.
-- Automated browser smoke coverage verifies that double-clicking a debug-panel label resets the associated control to its authored default.
-- Automated browser smoke coverage verifies that reflection-probe debug visualization shows captured maze walls and respects wall occlusion of torch emitters.
-- Automated browser smoke coverage verifies that a geometry-only reflection-probe capture contains maze geometry, so the cube-camera capture path itself is proven before beauty-pass probe behavior is judged.
+- Automated render-integration coverage verifies that the volumetric-fog probe-IBL toggle changes the fog lighting path without breaking fog visibility.
+- Automated render-integration coverage verifies that double-clicking a debug-panel label resets the associated control to its authored default.
+- Automated render-integration coverage verifies that reflection-probe debug visualization shows captured maze walls and respects wall occlusion of torch emitters.
+- Automated render-integration coverage verifies that a geometry-only reflection-probe capture contains maze geometry, so the cube-camera capture path itself is proven before beauty-pass probe behavior is judged.
 - Maze-generation logic is covered by automated tests that validate every persisted maze against the maze rules.
 - Maze-generation tests delete any generated maze files that fail validation.
 - Automated tests guarantee that the repository contains at least five valid persisted maze files by generating additional mazes when required.

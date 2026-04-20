@@ -23,6 +23,7 @@ import {
   EquirectangularReflectionMapping,
   Euler,
   Float32BufferAttribute,
+  Group,
   HalfFloatType,
   LinearFilter,
   LinearMipmapLinearFilter,
@@ -32,7 +33,6 @@ import {
   AgXToneMapping,
   CineonToneMapping,
   LinearToneMapping,
-  Group,
   Mesh,
   MeshBasicMaterial,
   MeshDepthMaterial,
@@ -44,7 +44,6 @@ import {
   OrthographicCamera,
   PMREMGenerator,
   PlaneGeometry,
-  PointLight,
   Quaternion,
   RGBAFormat,
   RGBADepthPacking,
@@ -202,9 +201,6 @@ const REFLECTION_PROBE_AMBIENT_RENDER_SIZE = 24
 const REFLECTION_PROBE_FAR = 48
 const REFLECTION_PROBE_EMISSIVE_RADIUS = 0.16
 const REFLECTION_PROBE_EMISSIVE_SCALE = 2
-const REFLECTION_PROBE_LIGHT_DECAY = 2
-const REFLECTION_PROBE_LIGHT_DISTANCE = 10
-const REFLECTION_PROBE_SHADOW_MAP_SIZE = 256
 const FOG_VOLUME_HEIGHT = 6
 const FOG_VOLUME_SLICE_COUNT = 24
 const FOG_VOLUME_MAX_TORCHES = 16
@@ -1211,6 +1207,14 @@ function getProbeBlendUpdateKey(
   })
 }
 
+function getProbeBlendMaterialKey(
+  role: string,
+  probeBlend: ProbeBlendConfig,
+  patchConfig: MaterialShaderPatchConfig
+) {
+  return `${role}:${getProbeBlendUpdateKey(probeBlend, patchConfig)}`
+}
+
 function updateProbeBlendMaterialDebugState(
   material: ThreeMeshPhysicalMaterial | ThreeMeshStandardMaterial | null,
   probeBlend: ProbeBlendConfig
@@ -1275,75 +1279,57 @@ function updateProbeBlendUniformDebugState(
   }
 }
 
-function attachProbeBlendMaterialShader(
+function patchProbeBlendMaterialShader(
   material: ThreeMeshPhysicalMaterial | ThreeMeshStandardMaterial,
+  shader: Shader,
   probeBlendRef: { current: ProbeBlendConfig },
   patchConfigRef: { current: MaterialShaderPatchConfig },
   shaderRef: { current: ProbeBlendShader | null }
 ) {
-  const probeBlend = probeBlendRef.current
-  const patchConfig = patchConfigRef.current
+  const probeBlendShader = shader as ProbeBlendShader
+  const currentProbeBlend = probeBlendRef.current
+  const currentPatchConfig = patchConfigRef.current
 
-  material.customProgramCacheKey = () => {
-    const currentPatchConfig = patchConfigRef.current
-    const currentProbeBlend = probeBlendRef.current
-    const usesTintedLightMap =
-      Boolean(currentPatchConfig.lightMapAmbientTint) ||
-      Boolean(currentPatchConfig.lightMapTorchTint)
+  probeBlendShader.uniforms.lightMapAmbientTint = new Uniform(BLACK_COLOR.clone())
+  probeBlendShader.uniforms.lightMapTorchTint = new Uniform(WHITE_COLOR.clone())
+  probeBlendShader.uniforms.localProbePosition0 = new Uniform(DEFAULT_PROBE_POSITION.clone())
+  probeBlendShader.uniforms.localProbePosition1 = new Uniform(DEFAULT_PROBE_POSITION.clone())
+  probeBlendShader.uniforms.localProbePosition2 = new Uniform(DEFAULT_PROBE_POSITION.clone())
+  probeBlendShader.uniforms.localProbePosition3 = new Uniform(DEFAULT_PROBE_POSITION.clone())
+  probeBlendShader.uniforms.localProbeBoxMin0 = new Uniform(DEFAULT_PROBE_BOX_MIN.clone())
+  probeBlendShader.uniforms.localProbeBoxMin1 = new Uniform(DEFAULT_PROBE_BOX_MIN.clone())
+  probeBlendShader.uniforms.localProbeBoxMin2 = new Uniform(DEFAULT_PROBE_BOX_MIN.clone())
+  probeBlendShader.uniforms.localProbeBoxMin3 = new Uniform(DEFAULT_PROBE_BOX_MIN.clone())
+  probeBlendShader.uniforms.localProbeBoxMax0 = new Uniform(DEFAULT_PROBE_BOX_MAX.clone())
+  probeBlendShader.uniforms.localProbeBoxMax1 = new Uniform(DEFAULT_PROBE_BOX_MAX.clone())
+  probeBlendShader.uniforms.localProbeBoxMax2 = new Uniform(DEFAULT_PROBE_BOX_MAX.clone())
+  probeBlendShader.uniforms.localProbeBoxMax3 = new Uniform(DEFAULT_PROBE_BOX_MAX.clone())
+  probeBlendShader.uniforms.localProbeEnvMap0 = new Uniform<Texture | null>(null)
+  probeBlendShader.uniforms.localProbeEnvMap1 = new Uniform<Texture | null>(null)
+  probeBlendShader.uniforms.localProbeEnvMap2 = new Uniform<Texture | null>(null)
+  probeBlendShader.uniforms.localProbeEnvMap3 = new Uniform<Texture | null>(null)
+  probeBlendShader.uniforms.localProbeMaxMip0 = new Uniform(0)
+  probeBlendShader.uniforms.localProbeMaxMip1 = new Uniform(0)
+  probeBlendShader.uniforms.localProbeMaxMip2 = new Uniform(0)
+  probeBlendShader.uniforms.localProbeMaxMip3 = new Uniform(0)
+  probeBlendShader.uniforms.probeBlendMode = new Uniform(0)
+  probeBlendShader.uniforms.probeBlendRadianceMode = new Uniform(0)
+  probeBlendShader.uniforms.probeBlendWeights = new Uniform(new Vector4(1, 0, 0, 0))
+  probeBlendShader.uniforms.probeBlendRegion = new Uniform(new Vector4(0, 0, 0, 0))
+  probeBlendShader.uniforms.localProbeTexelHeight0 = new Uniform(1)
+  probeBlendShader.uniforms.localProbeTexelHeight1 = new Uniform(1)
+  probeBlendShader.uniforms.localProbeTexelHeight2 = new Uniform(1)
+  probeBlendShader.uniforms.localProbeTexelHeight3 = new Uniform(1)
+  probeBlendShader.uniforms.localProbeTexelWidth0 = new Uniform(1)
+  probeBlendShader.uniforms.localProbeTexelWidth1 = new Uniform(1)
+  probeBlendShader.uniforms.localProbeTexelWidth2 = new Uniform(1)
+  probeBlendShader.uniforms.localProbeTexelWidth3 = new Uniform(1)
 
-    return [
-      'probe-blend-v3',
-      usesTintedLightMap ? 'lightmap-tint' : 'plain',
-      currentProbeBlend.mode,
-      currentProbeBlend.radianceMode ?? currentProbeBlend.mode
-    ].join('-')
-  }
-  updateProbeBlendMaterialDebugState(material, probeBlend)
-  material.onBeforeCompile = (shader: Shader) => {
-    const probeBlendShader = shader as ProbeBlendShader
-    const currentProbeBlend = probeBlendRef.current
-    const currentPatchConfig = patchConfigRef.current
-
-    probeBlendShader.uniforms.lightMapAmbientTint = new Uniform(BLACK_COLOR.clone())
-    probeBlendShader.uniforms.lightMapTorchTint = new Uniform(WHITE_COLOR.clone())
-    probeBlendShader.uniforms.localProbePosition0 = new Uniform(DEFAULT_PROBE_POSITION.clone())
-    probeBlendShader.uniforms.localProbePosition1 = new Uniform(DEFAULT_PROBE_POSITION.clone())
-    probeBlendShader.uniforms.localProbePosition2 = new Uniform(DEFAULT_PROBE_POSITION.clone())
-    probeBlendShader.uniforms.localProbePosition3 = new Uniform(DEFAULT_PROBE_POSITION.clone())
-    probeBlendShader.uniforms.localProbeBoxMin0 = new Uniform(DEFAULT_PROBE_BOX_MIN.clone())
-    probeBlendShader.uniforms.localProbeBoxMin1 = new Uniform(DEFAULT_PROBE_BOX_MIN.clone())
-    probeBlendShader.uniforms.localProbeBoxMin2 = new Uniform(DEFAULT_PROBE_BOX_MIN.clone())
-    probeBlendShader.uniforms.localProbeBoxMin3 = new Uniform(DEFAULT_PROBE_BOX_MIN.clone())
-    probeBlendShader.uniforms.localProbeBoxMax0 = new Uniform(DEFAULT_PROBE_BOX_MAX.clone())
-    probeBlendShader.uniforms.localProbeBoxMax1 = new Uniform(DEFAULT_PROBE_BOX_MAX.clone())
-    probeBlendShader.uniforms.localProbeBoxMax2 = new Uniform(DEFAULT_PROBE_BOX_MAX.clone())
-    probeBlendShader.uniforms.localProbeBoxMax3 = new Uniform(DEFAULT_PROBE_BOX_MAX.clone())
-    probeBlendShader.uniforms.localProbeEnvMap0 = new Uniform<Texture | null>(null)
-    probeBlendShader.uniforms.localProbeEnvMap1 = new Uniform<Texture | null>(null)
-    probeBlendShader.uniforms.localProbeEnvMap2 = new Uniform<Texture | null>(null)
-    probeBlendShader.uniforms.localProbeEnvMap3 = new Uniform<Texture | null>(null)
-    probeBlendShader.uniforms.localProbeMaxMip0 = new Uniform(0)
-    probeBlendShader.uniforms.localProbeMaxMip1 = new Uniform(0)
-    probeBlendShader.uniforms.localProbeMaxMip2 = new Uniform(0)
-    probeBlendShader.uniforms.localProbeMaxMip3 = new Uniform(0)
-    probeBlendShader.uniforms.probeBlendMode = new Uniform(0)
-    probeBlendShader.uniforms.probeBlendRadianceMode = new Uniform(0)
-    probeBlendShader.uniforms.probeBlendWeights = new Uniform(new Vector4(1, 0, 0, 0))
-    probeBlendShader.uniforms.probeBlendRegion = new Uniform(new Vector4(0, 0, 0, 0))
-    probeBlendShader.uniforms.localProbeTexelHeight0 = new Uniform(1)
-    probeBlendShader.uniforms.localProbeTexelHeight1 = new Uniform(1)
-    probeBlendShader.uniforms.localProbeTexelHeight2 = new Uniform(1)
-    probeBlendShader.uniforms.localProbeTexelHeight3 = new Uniform(1)
-    probeBlendShader.uniforms.localProbeTexelWidth0 = new Uniform(1)
-    probeBlendShader.uniforms.localProbeTexelWidth1 = new Uniform(1)
-    probeBlendShader.uniforms.localProbeTexelWidth2 = new Uniform(1)
-    probeBlendShader.uniforms.localProbeTexelWidth3 = new Uniform(1)
-
-    probeBlendShader.vertexShader =
-      `varying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.vertexShader}`
-        .replace(
-          '#include <project_vertex>',
-          `vec4 probeBlendWorldPosition = vec4( transformed, 1.0 );
+  probeBlendShader.vertexShader =
+    `varying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.vertexShader}`
+      .replace(
+        '#include <project_vertex>',
+        `vec4 probeBlendWorldPosition = vec4( transformed, 1.0 );
 \t#ifdef USE_BATCHING
 \t\tprobeBlendWorldPosition = batchingMatrix * probeBlendWorldPosition;
 \t#endif
@@ -1353,38 +1339,35 @@ function attachProbeBlendMaterialShader(
 \tprobeBlendWorldPosition = modelMatrix * probeBlendWorldPosition;
 \tvProbeBlendWorldPosition = probeBlendWorldPosition.xyz;
 \t#include <project_vertex>`
-        )
-    probeBlendShader.fragmentShader =
-      `uniform vec3 lightMapAmbientTint;\nuniform vec3 lightMapTorchTint;\nvarying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
-        .replace(
-          '#include <envmap_physical_pars_fragment>',
-          PROBE_BLEND_SHADER_CHUNK
-        )
-        .replace(
-          'vec3 lightMapIrradiance = lightMapTexel.rgb * lightMapIntensity;',
-          `vec3 lightMapTorchIrradiance = vec3( lightMapTexel.r ) * lightMapTorchTint * lightMapIntensity;
+      )
+  probeBlendShader.fragmentShader =
+    `uniform vec3 lightMapAmbientTint;\nuniform vec3 lightMapTorchTint;\nvarying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
+      .replace(
+        '#include <envmap_physical_pars_fragment>',
+        PROBE_BLEND_SHADER_CHUNK
+      )
+      .replace(
+        'vec3 lightMapIrradiance = lightMapTexel.rgb * lightMapIntensity;',
+        `vec3 lightMapTorchIrradiance = vec3( lightMapTexel.r ) * lightMapTorchTint * lightMapIntensity;
 \t\tvec3 lightMapAmbientIrradiance = vec3( lightMapTexel.g ) * lightMapAmbientTint;
 \t\tvec3 lightMapIrradiance = lightMapTorchIrradiance + lightMapAmbientIrradiance;`
-        )
-
-    material.userData.probeBlendShaderDebug = {
-      fragmentHasProbeRadianceMode: probeBlendShader.fragmentShader.includes('probeBlendRadianceMode'),
-      fragmentHasSampleProbeBlendEnvMapWithMode: probeBlendShader.fragmentShader.includes(
-        'sampleProbeBlendEnvMapWithMode'
-      ),
-      fragmentHasGetIBLRadianceOverride: probeBlendShader.fragmentShader.includes(
-        'vec3 getIBLRadiance( const in vec3 viewDir, const in vec3 normal, const in float roughness )'
-      ),
-      fragmentHasGetIBLIrradianceOverride: probeBlendShader.fragmentShader.includes(
-        'vec3 getIBLIrradiance( const in vec3 normal )'
       )
-    }
-    shaderRef.current = probeBlendShader
-    updateProbeBlendShaderUniforms(probeBlendShader, currentProbeBlend, currentPatchConfig)
-    updateProbeBlendUniformDebugState(material, probeBlendShader)
-  }
 
-  material.needsUpdate = true
+  material.userData.probeBlendShaderDebug = {
+    fragmentHasProbeRadianceMode: probeBlendShader.fragmentShader.includes('probeBlendRadianceMode'),
+    fragmentHasSampleProbeBlendEnvMapWithMode: probeBlendShader.fragmentShader.includes(
+      'sampleProbeBlendEnvMapWithMode'
+    ),
+    fragmentHasGetIBLRadianceOverride: probeBlendShader.fragmentShader.includes(
+      'vec3 getIBLRadiance( const in vec3 viewDir, const in vec3 normal, const in float roughness )'
+    ),
+    fragmentHasGetIBLIrradianceOverride: probeBlendShader.fragmentShader.includes(
+      'vec3 getIBLIrradiance( const in vec3 normal )'
+    )
+  }
+  shaderRef.current = probeBlendShader
+  updateProbeBlendShaderUniforms(probeBlendShader, currentProbeBlend, currentPatchConfig)
+  updateProbeBlendUniformDebugState(material, probeBlendShader)
 }
 
 function hasCompleteProbeTextures(textures: Array<Texture | null | undefined>) {
@@ -1702,51 +1685,6 @@ function getReflectionCaptureCountKey(
   return null
 }
 
-function createReflectionProbeCaptureLights(layout: MazeLayout) {
-  const captureLightGroup = new Group()
-  const captureLights: PointLight[] = []
-
-  for (const mazeLight of layout.lights) {
-    const captureLight = new PointLight(
-      FIRE_COLOR,
-      TORCH_BASE_CANDELA,
-      REFLECTION_PROBE_LIGHT_DISTANCE,
-      REFLECTION_PROBE_LIGHT_DECAY
-    )
-
-    captureLight.castShadow = true
-    captureLight.position.set(
-      mazeLight.torchPosition.x,
-      mazeLight.torchPosition.y,
-      mazeLight.torchPosition.z
-    )
-    captureLight.shadow.bias = -0.001
-    captureLight.shadow.mapSize.set(
-      REFLECTION_PROBE_SHADOW_MAP_SIZE,
-      REFLECTION_PROBE_SHADOW_MAP_SIZE
-    )
-    captureLightGroup.add(captureLight)
-    captureLights.push(captureLight)
-  }
-
-  return {
-    captureLightGroup,
-    captureLights
-  }
-}
-
-function disposeReflectionProbeCaptureLights(
-  scene: ThreeScene,
-  captureLightGroup: Group,
-  captureLights: PointLight[]
-) {
-  scene.remove(captureLightGroup)
-  for (const captureLight of captureLights) {
-    captureLight.dispose()
-    captureLight.shadow.map?.dispose()
-  }
-}
-
 function getProbeVolumeBounds(
   probePosition: { x: number, y: number, z: number } | null | undefined
 ) {
@@ -1804,71 +1742,85 @@ function buildProbeBlendConfig(
 }
 
 function useProbeBlendMaterialShader(
-  materialRef: RefObject<ThreeMeshPhysicalMaterial | ThreeMeshStandardMaterial | null>,
+  material: ThreeMeshPhysicalMaterial | ThreeMeshStandardMaterial | null,
   probeBlend: ProbeBlendConfig,
-  patchConfig: MaterialShaderPatchConfig = {}
+  patchConfig: MaterialShaderPatchConfig = {},
+  materialKey: string
 ) {
-  const gl = useThree((state) => state.gl)
   const shaderRef = useRef<ProbeBlendShader | null>(null)
+  const materialRef = useRef(material)
   const probeBlendRef = useRef(probeBlend)
   const patchConfigRef = useRef(patchConfig)
-  const lastUniformUpdateKeyRef = useRef<string | null>(null)
-  const attachedMaterialRef =
-    useRef<ThreeMeshPhysicalMaterial | ThreeMeshStandardMaterial | null>(null)
 
+  materialRef.current = material
   probeBlendRef.current = probeBlend
   patchConfigRef.current = patchConfig
 
-  useEffect(() => {
-    const material = materialRef.current
+  const customProgramCacheKey = useMemo(
+    () => () => {
+      const currentPatchConfig = patchConfigRef.current
+      const currentProbeBlend = probeBlendRef.current
+      const usesTintedLightMap =
+        Boolean(currentPatchConfig.lightMapAmbientTint) ||
+        Boolean(currentPatchConfig.lightMapTorchTint)
 
-    if (!material || attachedMaterialRef.current === material) {
-      return
-    }
+      return [
+        'probe-blend-v3',
+        usesTintedLightMap ? 'lightmap-tint' : 'plain',
+        currentProbeBlend.mode,
+        currentProbeBlend.radianceMode ?? currentProbeBlend.mode
+      ].join('-')
+    },
+    []
+  )
+  const onBeforeCompile = useMemo(
+    () => (shader: Shader) => {
+      const currentMaterial = materialRef.current
 
-    const previousOnBeforeCompile = material.onBeforeCompile
-
-    attachProbeBlendMaterialShader(material, probeBlendRef, patchConfigRef, shaderRef)
-    attachedMaterialRef.current = material
-
-    return () => {
-      if (attachedMaterialRef.current === material) {
-        attachedMaterialRef.current = null
-        shaderRef.current = null
-        material.onBeforeCompile = previousOnBeforeCompile
-        material.needsUpdate = true
+      if (!currentMaterial) {
+        return
       }
-    }
-  }, [materialRef, patchConfig])
+
+      patchProbeBlendMaterialShader(
+        currentMaterial,
+        shader,
+        probeBlendRef,
+        patchConfigRef,
+        shaderRef
+      )
+    },
+    []
+  )
+  const onBeforeRender = useMemo(
+    () => () => {
+      const currentMaterial = materialRef.current
+
+      updateProbeBlendMaterialDebugState(currentMaterial, probeBlendRef.current)
+      updateProbeBlendShaderUniforms(
+        shaderRef.current,
+        probeBlendRef.current,
+        patchConfigRef.current
+      )
+      updateProbeBlendUniformDebugState(currentMaterial, shaderRef.current)
+    },
+    []
+  )
 
   useEffect(() => {
-    updateProbeBlendMaterialDebugState(materialRef.current, probeBlend)
+    shaderRef.current = null
+  }, [materialKey])
+
+  useEffect(() => {
+    updateProbeBlendMaterialDebugState(material, probeBlend)
     updateProbeBlendShaderUniforms(shaderRef.current, probeBlend, patchConfig)
-    updateProbeBlendUniformDebugState(materialRef.current, shaderRef.current)
-    const material = materialRef.current
-    const uniformUpdateKey = getProbeBlendUpdateKey(probeBlend, patchConfig)
+    updateProbeBlendUniformDebugState(material, shaderRef.current)
+  }, [material, materialKey, patchConfig, probeBlend])
 
-    if (!material) {
-      return
-    }
-
-    if (lastUniformUpdateKeyRef.current === uniformUpdateKey) {
-      return
-    }
-
-    const materialUniforms = gl.properties.get(material).uniforms
-
-    if (materialUniforms) {
-      updateProbeBlendShaderUniforms(
-        { uniforms: materialUniforms } as ProbeBlendShader,
-        probeBlend,
-        patchConfig
-      )
-    }
-
-    material.needsUpdate = true
-    lastUniformUpdateKeyRef.current = uniformUpdateKey
-  }, [gl, materialRef, patchConfig, probeBlend])
+  return {
+    customProgramCacheKey,
+    onBeforeCompile,
+    onBeforeRender
+  }
 }
 
 function isTextureRenderable(texture: Texture | null | undefined) {
@@ -2766,6 +2718,41 @@ function EnvironmentLighting({
       return undefined
     }
 
+    const probeCount = layout.reflectionProbes.length
+    const spawnPosition = getPlayerSpawnPosition()
+    const startupProbeIndices = Array.from(
+      new Set(
+        (() => {
+          const prioritizedProbeIndices = getReflectionProbeBlendForPosition(
+            layout,
+            {
+              x: spawnPosition.x,
+              z: spawnPosition.z
+            }
+          ).probeIndices.filter(
+            (probeIndex) =>
+              Number.isInteger(probeIndex) &&
+              probeIndex >= 0 &&
+              probeIndex < probeCount
+          )
+          let nearestProbeIndex = 0
+          let nearestProbeDistanceSquared = Number.POSITIVE_INFINITY
+
+          layout.reflectionProbes.forEach((probe, probeIndex) => {
+            const dx = probe.position.x - spawnPosition.x
+            const dz = probe.position.z - spawnPosition.z
+            const distanceSquared = (dx * dx) + (dz * dz)
+
+            if (distanceSquared < nearestProbeDistanceSquared) {
+              nearestProbeDistanceSquared = distanceSquared
+              nearestProbeIndex = probeIndex
+            }
+          })
+
+          return [...prioritizedProbeIndices, nearestProbeIndex]
+        })()
+      )
+    )
     const previousTargets = reflectionProbeTargets.current
     const previousRawTargets = reflectionProbeRawTargets.current
     reflectionProbeRawTargets.current = []
@@ -2774,55 +2761,140 @@ function EnvironmentLighting({
     const previousBackgroundIntensity = scene.backgroundIntensity
     const previousEnvironment = scene.environment
     const previousEnvironmentIntensity = scene.environmentIntensity
+    const emptyTextureArray = new Array<Texture>(probeCount)
+    const emptyAmbientColorArray = new Array<Color>(probeCount)
 
     if (scene.environment !== baseEnvironment.texture) {
       scene.environment = baseEnvironment.texture
     }
     scene.environmentIntensity = calibratedIntensity
-    scene.userData.reflectionProbeState = {
-      activeProbeId: null,
-      captureSceneState: getReflectionCaptureSceneState(scene, layout),
-      probeCaptureCounts: [],
-      probeMetrics: [],
-      probeRawMetrics: [],
-      probeRawReadbackErrors: [],
-      probeRawTextureSummaries: [],
-      probeCount: layout.reflectionProbes.length,
-      ready: false
-    }
+    onReflectionProbeAmbientColorsChange(emptyAmbientColorArray)
+    onReflectionProbeRawTexturesChange(emptyTextureArray)
+    onReflectionProbeTexturesChange(emptyTextureArray)
 
-    let nextTargets: Array<{ dispose: () => void; texture: Texture }> = []
-    let nextRawTargets: Array<{ dispose: () => void; texture: Texture }> = []
-    let nextProbeCaptureCounts: Array<{
+    let nextTargets = new Array<{ dispose: () => void; texture: Texture }>(probeCount)
+    let nextRawTargets = new Array<{ dispose: () => void; texture: Texture }>(probeCount)
+    let nextProbeCaptureCounts = new Array<{
       billboard: number
       ground: number
       sconce: number
       wall: number
-    }> = []
-    let nextProbeAmbientColors: Color[] = []
-    let nextProbeMetrics: ProbeMetric[] = []
-    let nextProbeRawMetrics: Array<ProbeMetric | null> = []
-    let nextProbeRawReadbackErrors: Array<string | null> = []
-    let nextProbeRawTextureSummaries: ProbeTextureSummary[] = []
+    } | null>(probeCount).fill(null)
+    let nextProbeAmbientColors = new Array<Color>(probeCount)
+    let nextProbeMetrics = new Array<ProbeMetric | null>(probeCount).fill(null)
+    let nextProbeRawMetrics = new Array<ProbeMetric | null>(probeCount).fill(null)
+    let nextProbeRawReadbackErrors = new Array<string | null>(probeCount).fill(null)
+    let nextProbeRawTextureSummaries = new Array<ProbeTextureSummary | null>(probeCount).fill(null)
     let cancelled = false
     let bakeHandle = 0
+    const buildReflectionProbeState = (
+      captureSceneState: ReturnType<typeof getReflectionCaptureSceneState>
+    ) => {
+      const loadedProbeCount = nextTargets.reduce(
+        (count, target) => count + Number(Boolean(target)),
+        0
+      )
+
+      return {
+        activeProbeId: null,
+        captureSceneState,
+        complete: loadedProbeCount === probeCount,
+        loadedProbeCount,
+        priorityProbeIndices: [...startupProbeIndices],
+        probeCaptureCounts: nextProbeCaptureCounts.map((counts) => (
+          counts
+            ? { ...counts }
+            : null
+        )),
+        probeCount,
+        probeMetrics: nextProbeMetrics.map((metric) => (
+          metric
+            ? { ...metric }
+            : null
+        )),
+        probeRawMetrics: nextProbeRawMetrics.map((metric) => (
+          metric
+            ? { ...metric }
+            : null
+        )),
+        probeRawReadbackErrors: [...nextProbeRawReadbackErrors],
+        probeRawTextureSummaries: nextProbeRawTextureSummaries.map((summary) => (
+          summary
+            ? { ...summary }
+            : null
+        )),
+        probeRawTextureUUIDs: nextRawTargets.map((target) => target?.texture.uuid ?? null),
+        probeTextureUUIDs: nextTargets.map((target) => target?.texture.uuid ?? null),
+        ready:
+          startupProbeIndices.length > 0 &&
+          startupProbeIndices.every((probeIndex) => Boolean(nextTargets[probeIndex]))
+      }
+    }
+
+    scene.userData.reflectionProbeState = buildReflectionProbeState(
+      getReflectionCaptureSceneState(scene, layout)
+    )
+
+    const disposeProbeTargets = (
+      targets: Array<{ dispose: () => void; texture: Texture }>
+    ) => {
+      for (const target of targets) {
+        if (!target) {
+          continue
+        }
+
+        target.dispose()
+      }
+    }
+
+    const publishReflectionProbeState = (captureSceneState: ReturnType<typeof getReflectionCaptureSceneState>) => {
+      const publishedAmbientColors = new Array<Color>(probeCount)
+      const publishedRawTextures = new Array<Texture>(probeCount)
+      const publishedTextures = new Array<Texture>(probeCount)
+
+      for (let probeIndex = 0; probeIndex < probeCount; probeIndex += 1) {
+        const ambientColor = nextProbeAmbientColors[probeIndex]
+        const rawTarget = nextRawTargets[probeIndex]
+        const target = nextTargets[probeIndex]
+
+        if (ambientColor) {
+          publishedAmbientColors[probeIndex] = ambientColor.clone()
+        }
+        if (rawTarget) {
+          publishedRawTextures[probeIndex] = rawTarget.texture
+        }
+        if (target) {
+          publishedTextures[probeIndex] = target.texture
+        }
+      }
+
+      reflectionProbeRawTargets.current = nextRawTargets
+      reflectionProbeTargets.current = nextTargets
+      onReflectionProbeAmbientColorsChange(publishedAmbientColors)
+      onReflectionProbeRawTexturesChange(publishedRawTextures)
+      onReflectionProbeTexturesChange(publishedTextures)
+      scene.userData.reflectionProbeState = buildReflectionProbeState(captureSceneState)
+    }
+
+    const restoreScene = (
+      hiddenObjects: Array<{ object: { visible: boolean }; visible: boolean }>
+    ) => {
+      for (const entry of hiddenObjects) {
+        entry.object.visible = entry.visible
+      }
+      scene.background = previousBackground
+      scene.backgroundIntensity = previousBackgroundIntensity
+      scene.environment = previousEnvironment
+      scene.environmentIntensity = previousEnvironmentIntensity
+    }
+
     const attemptBake = () => {
       if (cancelled) {
         return
       }
 
       const captureSceneState = getReflectionCaptureSceneState(scene, layout)
-      scene.userData.reflectionProbeState = {
-        activeProbeId: null,
-        captureSceneState,
-        probeCaptureCounts: [],
-        probeMetrics: [],
-        probeRawMetrics: [],
-        probeRawReadbackErrors: [],
-        probeRawTextureSummaries: [],
-        probeCount: layout.reflectionProbes.length,
-        ready: false
-      }
+      scene.userData.reflectionProbeState = buildReflectionProbeState(captureSceneState)
 
       if (!captureSceneState.ready) {
         bakeHandle = window.setTimeout(attemptBake, 50)
@@ -2841,20 +2913,34 @@ function EnvironmentLighting({
         }
       })
 
-      const { captureLightGroup, captureLights } = createReflectionProbeCaptureLights(layout)
-
-      scene.add(captureLightGroup)
       scene.environment = baseEnvironment.texture
       scene.environmentIntensity = calibratedIntensity
 
       const probeCaptureSize = getPmremCubeSize(baseEnvironment.texture)
+      const probeCaptureOrder = [
+        ...startupProbeIndices,
+        ...layout.reflectionProbes
+          .map((_, probeIndex) => probeIndex)
+          .filter((probeIndex) => !startupProbeIndices.includes(probeIndex))
+      ]
+      let captureOrderIndex = 0
 
-      nextTargets = []
-      nextRawTargets = []
-      nextProbeCaptureCounts = []
-      nextProbeAmbientColors = []
-      nextProbeMetrics = []
-      for (const probe of layout.reflectionProbes) {
+      nextTargets = new Array<{ dispose: () => void; texture: Texture }>(probeCount)
+      nextRawTargets = new Array<{ dispose: () => void; texture: Texture }>(probeCount)
+      nextProbeCaptureCounts = new Array<{
+        billboard: number
+        ground: number
+        sconce: number
+        wall: number
+      } | null>(probeCount).fill(null)
+      nextProbeAmbientColors = new Array<Color>(probeCount)
+      nextProbeMetrics = new Array<ProbeMetric | null>(probeCount).fill(null)
+      nextProbeRawMetrics = new Array<ProbeMetric | null>(probeCount).fill(null)
+      nextProbeRawReadbackErrors = new Array<string | null>(probeCount).fill(null)
+      nextProbeRawTextureSummaries = new Array<ProbeTextureSummary | null>(probeCount).fill(null)
+
+      const captureProbe = (probeIndex: number) => {
+        const probe = layout.reflectionProbes[probeIndex]
         const cubeRenderTarget = new WebGLCubeRenderTarget(
           probeCaptureSize,
           { type: HalfFloatType }
@@ -2921,9 +3007,9 @@ function EnvironmentLighting({
           entry.mesh.onBeforeRender = entry.onBeforeRender
         }
 
-        nextTargets.push(pmremGenerator.fromCubemap(cubeRenderTarget.texture))
-        nextRawTargets.push(cubeRenderTarget)
-        nextProbeCaptureCounts.push({ ...captureCounts })
+        nextTargets[probeIndex] = pmremGenerator.fromCubemap(cubeRenderTarget.texture)
+        nextRawTargets[probeIndex] = cubeRenderTarget
+        nextProbeCaptureCounts[probeIndex] = { ...captureCounts }
         const probeDebugStats = computeCubeRenderTargetDebugStats(gl, ambientCubeRenderTarget)
         let rawProbeDebugStats: ProbeMetric | null = null
         let rawProbeReadbackError: string | null = null
@@ -2942,8 +3028,8 @@ function EnvironmentLighting({
             `three.js WebGL readRenderTargetPixels only supports UnsignedByteType targets; raw probe target type ${cubeRenderTarget.texture.type} is not directly readable`
         }
 
-        nextProbeAmbientColors.push(probeDebugStats.averageColor)
-        nextProbeMetrics.push({
+        nextProbeAmbientColors[probeIndex] = probeDebugStats.averageColor
+        nextProbeMetrics[probeIndex] = {
           darkest: probeDebugStats.darkest,
           faceCenterColors: probeDebugStats.faceCenterColors.map((color) => ({ ...color })),
           faceGridColors: probeDebugStats.faceGridColors.map((face) =>
@@ -2952,8 +3038,8 @@ function EnvironmentLighting({
           luminanceStdDev: probeDebugStats.luminanceStdDev,
           nonWhiteFraction: probeDebugStats.nonWhiteFraction,
           warmFraction: probeDebugStats.warmFraction
-        })
-        nextProbeRawMetrics.push(
+        }
+        nextProbeRawMetrics[probeIndex] =
           rawProbeDebugStats
             ? {
                 darkest: rawProbeDebugStats.darkest,
@@ -2966,9 +3052,8 @@ function EnvironmentLighting({
                 warmFraction: rawProbeDebugStats.warmFraction
               }
             : null
-        )
-        nextProbeRawReadbackErrors.push(rawProbeReadbackError)
-        nextProbeRawTextureSummaries.push({
+        nextProbeRawReadbackErrors[probeIndex] = rawProbeReadbackError
+        nextProbeRawTextureSummaries[probeIndex] = {
           ...getCubeTextureFaceSize(cubeRenderTarget.texture),
           colorSpace:
             typeof cubeRenderTarget.texture.colorSpace === 'string'
@@ -2979,64 +3064,61 @@ function EnvironmentLighting({
           mapping: cubeRenderTarget.texture.mapping,
           minFilter: cubeRenderTarget.texture.minFilter,
           type: cubeRenderTarget.texture.type
-        })
+        }
         ambientCubeRenderTarget.dispose()
       }
 
-      disposeReflectionProbeCaptureLights(scene, captureLightGroup, captureLights)
-      for (const entry of hiddenObjects) {
-        entry.object.visible = entry.visible
-      }
-      scene.background = previousBackground
-      scene.backgroundIntensity = previousBackgroundIntensity
-      scene.environment = previousEnvironment
-      scene.environmentIntensity = previousEnvironmentIntensity
+      const finishBake = () => {
+        restoreScene(hiddenObjects)
 
-      if (cancelled) {
-        nextTargets.forEach((target) => target.dispose())
-        nextRawTargets.forEach((target) => target.dispose())
-        nextTargets = []
-        nextRawTargets = []
-        return
+        if (cancelled) {
+          disposeProbeTargets(nextTargets)
+          disposeProbeTargets(nextRawTargets)
+          nextTargets = new Array<{ dispose: () => void; texture: Texture }>(probeCount)
+          nextRawTargets = new Array<{ dispose: () => void; texture: Texture }>(probeCount)
+          return
+        }
+
+        disposeProbeTargets(previousTargets)
+        disposeProbeTargets(previousRawTargets)
+        publishReflectionProbeState(getReflectionCaptureSceneState(scene, layout))
       }
 
-      previousTargets.forEach((target) => target.dispose())
-      previousRawTargets.forEach((target) => target.dispose())
-      reflectionProbeRawTargets.current = nextRawTargets
-      reflectionProbeTargets.current = nextTargets
-      onReflectionProbeAmbientColorsChange(nextProbeAmbientColors.map((color) => color.clone()))
-      onReflectionProbeRawTexturesChange(nextRawTargets.map((target) => target.texture))
-      onReflectionProbeTexturesChange(nextTargets.map((target) => target.texture))
-      scene.userData.reflectionProbeState = {
-        activeProbeId: null,
-        captureSceneState: getReflectionCaptureSceneState(scene, layout),
-        probeCaptureCounts: nextProbeCaptureCounts.map((counts) => ({ ...counts })),
-        probeMetrics: nextProbeMetrics.map((metric) => ({ ...metric })),
-        probeRawMetrics: nextProbeRawMetrics.map((metric) => (
-          metric
-            ? { ...metric }
-            : null
-        )),
-        probeRawReadbackErrors: [...nextProbeRawReadbackErrors],
-        probeRawTextureSummaries: nextProbeRawTextureSummaries.map((summary) => ({ ...summary })),
-        probeRawTextureUUIDs: nextRawTargets.map((target) => target.texture.uuid),
-        probeTextureUUIDs: nextTargets.map((target) => target.texture.uuid),
-        probeCount: layout.reflectionProbes.length,
-        ready: nextTargets.length === layout.reflectionProbes.length
+      const bakeNextProbe = () => {
+        if (cancelled) {
+          finishBake()
+          return
+        }
+
+        const probeIndex = probeCaptureOrder[captureOrderIndex]
+
+        if (probeIndex === undefined) {
+          finishBake()
+          return
+        }
+
+        captureOrderIndex += 1
+        captureProbe(probeIndex)
+        publishReflectionProbeState(captureSceneState)
+        bakeHandle = window.setTimeout(
+          bakeNextProbe,
+          startupProbeIndices.every((startupProbeIndex) => Boolean(nextTargets[startupProbeIndex]))
+            ? 500
+            : 0
+        )
       }
+
+      bakeNextProbe()
     }
     bakeHandle = window.setTimeout(attemptBake, 0)
 
     return () => {
       cancelled = true
       window.clearTimeout(bakeHandle)
-      for (const target of nextTargets) {
-        target.dispose()
-      }
-      for (const target of nextRawTargets) {
-        target.dispose()
-      }
-      previousRawTargets.forEach((target) => target.dispose())
+      disposeProbeTargets(nextTargets)
+      disposeProbeTargets(nextRawTargets)
+      disposeProbeTargets(previousRawTargets)
+      disposeProbeTargets(previousTargets)
       onReflectionProbeAmbientColorsChange([])
       onReflectionProbeRawTexturesChange([])
       onReflectionProbeTexturesChange([])
@@ -3051,12 +3133,15 @@ function EnvironmentLighting({
       scene.userData.reflectionProbeState = {
         activeProbeId: null,
         captureSceneState: getReflectionCaptureSceneState(scene, layout),
+        complete: false,
+        loadedProbeCount: 0,
+        priorityProbeIndices: [...startupProbeIndices],
         probeCaptureCounts: [],
         probeMetrics: [],
         probeRawMetrics: [],
         probeRawReadbackErrors: [],
         probeRawTextureSummaries: [],
-        probeCount: layout.reflectionProbes.length,
+        probeCount,
         ready: false
       }
     }
@@ -3091,7 +3176,11 @@ function GroundSurfaceMaterial({
   maps: PbrMaps
   probeBlend?: ProbeBlendConfig
 }) {
-  const materialRef = useRef<ThreeMeshPhysicalMaterial>(null)
+  const [material, setMaterial] = useState<ThreeMeshPhysicalMaterial | null>(null)
+  const normalizedProbeBlend = useMemo(
+    () => probeBlend ?? { mode: 'none', probeTextures: [] },
+    [probeBlend]
+  )
   const patchConfig = useMemo(
     () => ({
       lightMapAmbientTint: BLACK_COLOR,
@@ -3099,26 +3188,32 @@ function GroundSurfaceMaterial({
     }),
     []
   )
+  const materialKey = useMemo(
+    () => getProbeBlendMaterialKey('ground-surface', normalizedProbeBlend, patchConfig),
+    [normalizedProbeBlend, patchConfig]
+  )
 
-  useProbeBlendMaterialShader(
-    materialRef,
-    probeBlend ?? {
-      mode: 'none',
-      probeTextures: []
-    },
-    patchConfig
+  const probeBlendMaterialProps = useProbeBlendMaterialShader(
+    material,
+    normalizedProbeBlend,
+    patchConfig,
+    materialKey
   )
 
   return (
     <meshPhysicalMaterial
       {...maps}
       bumpScale={0.08}
+      customProgramCacheKey={probeBlendMaterialProps.customProgramCacheKey}
       envMap={globalEnvMap ?? null}
       envMapIntensity={globalEnvMapIntensity}
+      key={materialKey}
       lightMap={lightMap}
       lightMapIntensity={lightMapIntensity}
       metalness={0}
-      ref={materialRef}
+      onBeforeCompile={probeBlendMaterialProps.onBeforeCompile}
+      onBeforeRender={probeBlendMaterialProps.onBeforeRender}
+      ref={setMaterial}
       roughness={0.18}
     />
   )
@@ -3384,7 +3479,7 @@ function WallSconce({
   torchCandelaMultiplier: number
 }) {
   const metal = useStandardPbrTextures(METAL_TEXTURE_URLS, METAL_TEXTURE_REPEAT)
-  const materialRef = useRef<ThreeMeshStandardMaterial>(null)
+  const [material, setMaterial] = useState<ThreeMeshStandardMaterial | null>(null)
   const patchConfig = useMemo(
     () => ({
       lightMapAmbientTint: BLACK_COLOR,
@@ -3417,27 +3512,47 @@ function WallSconce({
       ),
     [reflectionProbeBlend.probeIndices, reflectionProbeTextures]
   )
-
-  useProbeBlendMaterialShader(materialRef, {
-    ...buildProbeBlendConfig(
-      layout,
-      reflectionProbeBlend.probeIndices,
-      probeTextures,
-      probeIblEnabled &&
-        reflectionCapturesEnabled &&
-        hasCompleteProbeTextures(probeTextures)
-        ? 'constant'
-        : 'none',
-      {
-        radianceMode:
+  const probeBlend = useMemo(
+    () => ({
+      ...buildProbeBlendConfig(
+        layout,
+        reflectionProbeBlend.probeIndices,
+        probeTextures,
+        probeIblEnabled &&
           reflectionCapturesEnabled &&
           hasCompleteProbeTextures(probeTextures)
-            ? 'constant'
-            : 'none',
-        weights: reflectionProbeBlend.weights as [number, number, number, number]
-      }
-    )
-  }, patchConfig)
+          ? 'constant'
+          : 'none',
+        {
+          radianceMode:
+            reflectionCapturesEnabled &&
+            hasCompleteProbeTextures(probeTextures)
+              ? 'constant'
+              : 'none',
+          weights: reflectionProbeBlend.weights as [number, number, number, number]
+        }
+      )
+    }),
+    [
+      layout,
+      probeIblEnabled,
+      probeTextures,
+      reflectionCapturesEnabled,
+      reflectionProbeBlend.probeIndices,
+      reflectionProbeBlend.weights
+    ]
+  )
+  const materialKey = useMemo(
+    () => getProbeBlendMaterialKey('wall-sconce', probeBlend, patchConfig),
+    [patchConfig, probeBlend]
+  )
+
+  const probeBlendMaterialProps = useProbeBlendMaterialShader(
+    material,
+    probeBlend,
+    patchConfig,
+    materialKey
+  )
 
   return (
     <>
@@ -3449,13 +3564,17 @@ function WallSconce({
             bumpMap={metal.bumpMap}
             bumpScale={0.02}
             color="white"
+            customProgramCacheKey={probeBlendMaterialProps.customProgramCacheKey}
             envMap={environmentTexture ?? null}
             envMapIntensity={environmentIntensity}
+            key={materialKey}
             map={metal.map}
             metalness={0.85}
             metalnessMap={metal.metalnessMap}
             normalMap={metal.normalMap}
-            ref={materialRef}
+            onBeforeCompile={probeBlendMaterialProps.onBeforeCompile}
+            onBeforeRender={probeBlendMaterialProps.onBeforeRender}
+            ref={setMaterial}
             roughness={0.3}
             roughnessMap={metal.roughnessMap}
             side={DoubleSide}
@@ -4676,6 +4795,7 @@ function WallFaceMaterial({
   environmentIntensity,
   lightMap,
   lightMapIntensity,
+  materialKey,
   maps,
   patchConfig,
   probeBlend
@@ -4685,16 +4805,18 @@ function WallFaceMaterial({
   environmentIntensity: number
   lightMap?: Texture
   lightMapIntensity: number
+  materialKey: string
   maps: PbrMaps
   patchConfig: MaterialShaderPatchConfig
   probeBlend: ProbeBlendConfig
 }) {
-  const materialRef = useRef<ThreeMeshStandardMaterial>(null)
+  const [material, setMaterial] = useState<ThreeMeshStandardMaterial | null>(null)
 
-  useProbeBlendMaterialShader(
-    materialRef,
+  const probeBlendMaterialProps = useProbeBlendMaterialShader(
+    material,
     probeBlend,
-    patchConfig
+    patchConfig,
+    materialKey
   )
 
   return (
@@ -4702,12 +4824,16 @@ function WallFaceMaterial({
       {...maps}
       attach={attach}
       bumpScale={0.05}
+      customProgramCacheKey={probeBlendMaterialProps.customProgramCacheKey}
       envMap={environmentTexture ?? null}
       envMapIntensity={environmentIntensity}
+      key={materialKey}
       lightMap={lightMap}
       lightMapIntensity={lightMapIntensity}
       metalness={0.02}
-      ref={materialRef}
+      onBeforeCompile={probeBlendMaterialProps.onBeforeCompile}
+      onBeforeRender={probeBlendMaterialProps.onBeforeRender}
+      ref={setMaterial}
       roughness={0.92}
     />
   )
@@ -4806,6 +4932,10 @@ function MazeWallMesh({
       reflectionProbeBlend.weights
     ]
   )
+  const wallFaceMaterialBaseKey = useMemo(
+    () => getProbeBlendMaterialKey('maze-wall', probeBlend, faceMaterialPatchConfig),
+    [faceMaterialPatchConfig, probeBlend]
+  )
   const envMapIntensity = environmentIntensity
 
   useEffect(
@@ -4841,6 +4971,7 @@ function MazeWallMesh({
         environmentTexture={environmentTexture}
         lightMap={bakedLightmapsEnabled ? lightmapTextures.neutral : undefined}
         lightMapIntensity={lightMapIntensity}
+        materialKey={`${wallFaceMaterialBaseKey}:material-0`}
         maps={wallMaterialMaps}
         patchConfig={faceMaterialPatchConfig}
         probeBlend={probeBlend}
@@ -4851,6 +4982,7 @@ function MazeWallMesh({
         environmentTexture={environmentTexture}
         lightMap={bakedLightmapsEnabled ? lightmapTextures.neutral : undefined}
         lightMapIntensity={lightMapIntensity}
+        materialKey={`${wallFaceMaterialBaseKey}:material-1`}
         maps={wallMaterialMaps}
         patchConfig={faceMaterialPatchConfig}
         probeBlend={probeBlend}
@@ -4861,6 +4993,7 @@ function MazeWallMesh({
         environmentTexture={environmentTexture}
         lightMap={bakedLightmapsEnabled ? lightmapTextures.neutral : undefined}
         lightMapIntensity={lightMapIntensity}
+        materialKey={`${wallFaceMaterialBaseKey}:material-2`}
         maps={wallMaterialMaps}
         patchConfig={faceMaterialPatchConfig}
         probeBlend={probeBlend}
@@ -4871,6 +5004,7 @@ function MazeWallMesh({
         environmentTexture={environmentTexture}
         lightMap={bakedLightmapsEnabled ? lightmapTextures.neutral : undefined}
         lightMapIntensity={lightMapIntensity}
+        materialKey={`${wallFaceMaterialBaseKey}:material-3`}
         maps={wallMaterialMaps}
         patchConfig={faceMaterialPatchConfig}
         probeBlend={probeBlend}
@@ -4881,6 +5015,7 @@ function MazeWallMesh({
         environmentTexture={environmentTexture}
         lightMap={bakedLightmapsEnabled ? lightmapTextures.pz : undefined}
         lightMapIntensity={lightMapIntensity}
+        materialKey={`${wallFaceMaterialBaseKey}:material-4`}
         maps={wallMaterialMaps}
         patchConfig={faceMaterialPatchConfig}
         probeBlend={probeBlend}
@@ -4891,6 +5026,7 @@ function MazeWallMesh({
         environmentTexture={environmentTexture}
         lightMap={bakedLightmapsEnabled ? lightmapTextures.nz : undefined}
         lightMapIntensity={lightMapIntensity}
+        materialKey={`${wallFaceMaterialBaseKey}:material-5`}
         maps={wallMaterialMaps}
         patchConfig={faceMaterialPatchConfig}
         probeBlend={probeBlend}
@@ -5578,18 +5714,21 @@ function FlightRig({
             sconceCount: number
             wallCount: number
           }
+          complete?: boolean
+          loadedProbeCount?: number
+          priorityProbeIndices?: number[]
           probeCaptureCounts?: Array<{
             billboard: number
             ground: number
             sconce: number
             wall: number
-          }>
-          probeMetrics?: ProbeMetric[]
+          } | null>
+          probeMetrics?: Array<ProbeMetric | null>
           probeRawMetrics?: Array<ProbeMetric | null>
           probeRawReadbackErrors?: Array<string | null>
-          probeRawTextureSummaries?: ProbeTextureSummary[]
-          probeRawTextureUUIDs?: string[]
-          probeTextureUUIDs?: string[]
+          probeRawTextureSummaries?: Array<ProbeTextureSummary | null>
+          probeRawTextureUUIDs?: Array<string | null>
+          probeTextureUUIDs?: Array<string | null>
           probeCount: number
           ready: boolean
         } | null
@@ -6476,7 +6615,6 @@ function Scene({
       const savedBackgroundIntensity = scene.backgroundIntensity
       const savedEnvironment = scene.environment
       const savedEnvironmentIntensity = scene.environmentIntensity
-      const { captureLightGroup, captureLights } = createReflectionProbeCaptureLights(layout)
       const captureTarget = new WebGLCubeRenderTarget(size, { type: HalfFloatType })
       const captureCamera = new CubeCamera(0.1, REFLECTION_PROBE_FAR, captureTarget)
       const continuumSteps = getWallMaterialContinuumSteps()
@@ -6510,7 +6648,6 @@ function Scene({
       scene.backgroundIntensity = 1
       scene.environment = environmentTexture
       scene.environmentIntensity = environmentIntensity
-      scene.add(captureLightGroup)
 
       try {
         for (const step of continuumSteps) {
@@ -6545,7 +6682,6 @@ function Scene({
         targetWall.material = originalMaterials
         scene.remove(captureCamera)
         captureTarget.dispose()
-        disposeReflectionProbeCaptureLights(scene, captureLightGroup, captureLights)
         scene.background = savedBackground
         scene.backgroundIntensity = savedBackgroundIntensity
         scene.environment = savedEnvironment

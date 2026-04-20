@@ -22,8 +22,10 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 ## Testing
 - Run the production build before handoff.
 - Run `npm run test:unit` to verify player spawn and collision math.
+- `npm run test:unit` writes per-file and per-subtest timing data to `logs/latest-unit-test-profile.json` and enforces the 20-second reported unit-suite budget.
 - Run `npm run test:smoke` to exercise the built page through Playwright.
 - Run `npm run test:smoke:runner` when `npm run build:pages` has already prepared the root-published bundle.
+- Run `npm run test:render:integration` when you need the slower full-scene Playwright coverage for reflection, fog, and extended debug-control behavior.
 - Run `npm run test:probe-occlusion` to dump the synthetic `3x3` probe-capture artifacts under `logs/probe-occlusion-artifacts/` and verify that the sealed center probe does not see any torch signature beyond the no-lights skybox baseline.
 - Run `npm run ensure:mazes` to refresh persisted mazes, baked lightmap artifacts, and per-maze reflection-probe dumps under `logs/lightmap-artifacts/<maze-id>/reflection-probes/`.
 - Treat a scene that shows only the HDRI skybox and flame billboards as a render failure; the smoke test now checks that a real maze wall writes visible beauty-pass color.
@@ -121,12 +123,12 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the loaded scene uses one of the persisted maze files instead of the previous random wall field.
 - Verify the repository contains at least five valid maze files, that each maze file includes baked lightmap data, and that maze topology generation remains under 100ms before the later bake step.
 - Benchmark startup with `npm run bench:startup` and test duration with `npm run bench:tests` before handoff.
-- Inspect `logs/latest-test-benchmark.json` and `logs/latest-smoke-profile.json` after `npm run bench:tests` so the slowest scripts and smoke phases are identified from measurements rather than guessed.
+- Inspect `logs/latest-test-benchmark.json`, `logs/latest-unit-test-profile.json`, and `logs/latest-smoke-profile.json` after `npm run bench:tests` so the slowest scripts and smoke phases are identified from measurements rather than guessed.
 - Treat duration regressions as blocking issues.
 - Treat the temporary `test:perf` disablement as intentional until the static baked-lightmap torch-lighting evaluation ends.
 - Keep `npm run test:unit` under 20 seconds.
-- Keep the prepared smoke runner `npm run test:smoke:runner` under 1 minute after a single `npm run build:pages`.
-- Latest measured benchmark on April 19, 2026: `npm run build` took about `6.8s`; `npm run build:pages` took about `8.9s`; `npm run test:unit` took about `7.5s`; `npm run test:smoke:runner` took about `53.2s` after a prepared `build:pages`; the current smoke hot spots are `startup` at about `29.3s`, `volumetric-fog` at about `8.1s`, `debug-controls` at about `6.9s`, and `reflection-captures` at about `3.9s`; and `npm run test:perf:runner` remains intentionally skipped during the static baked-lightmap evaluation.
+- Keep the prepared smoke startup phase under 1 minute after a single `npm run build:pages`, and keep the total benchmarked smoke runner under 3 minutes while deeper render assertions remain split into slower integration specs.
+- Latest measured benchmark on April 20, 2026: `npm run build:pages` took about `7.9s`; `npm run test:unit` reported about `9.9s`; `npm run test:smoke:runner` took about `95.0s` after a prepared `build:pages`; the smoke startup phase was about `54.0s`; the current benchmarked smoke hot spots are `startup` at about `54.0s`, `reflection-captures` at about `32.6s`, and `debug-controls` at about `6.3s`; `npm run test:render:integration:runner` took about `2.3m`; and `npm run test:perf:runner` remains intentionally skipped during the static baked-lightmap evaluation.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.

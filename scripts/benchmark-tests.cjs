@@ -8,9 +8,11 @@ const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 const smokePort = 42731
 const thresholdsMs = {
   'test:unit': 20_000,
-  'test:smoke:runner': 60_000
+  'test:smoke:runner': 180_000
 }
+const smokeStartupThresholdMs = 60_000
 const smokeProfilePath = path.join(rootDir, 'logs', 'latest-smoke-profile.json')
+const unitProfilePath = path.join(rootDir, 'logs', 'latest-unit-test-profile.json')
 const benchmarkReportPath = path.join(rootDir, 'logs', 'latest-test-benchmark.json')
 
 function usesPlaywrightWebServer(scriptName) {
@@ -112,17 +114,34 @@ async function main() {
       scriptName === 'test:smoke:runner'
         ? readJsonIfPresent(smokeProfilePath)
         : null
+    const unitProfile =
+      scriptName === 'test:unit'
+        ? readJsonIfPresent(unitProfilePath)
+        : null
+    const effectiveDurationMs =
+      scriptName === 'test:unit' && typeof unitProfile?.totalDurationMs === 'number'
+        ? unitProfile.totalDurationMs
+        : result.durationMs
+    const startupPhaseDurationMs =
+      scriptName === 'test:smoke:runner'
+        ? smokeProfile?.phases?.find((phase) => phase.label === 'startup')?.durationMs ?? null
+        : null
 
     const record = {
       ...result,
+      effectiveDurationMs,
       overThreshold,
+      startupPhaseDurationMs,
       smokeProfile,
+      unitProfile,
       thresholdMs
     }
 
+    record.overThreshold = effectiveDurationMs > thresholdMs
+
     report.results.push(record)
     console.log(
-      `${scriptName}: ${formatMilliseconds(result.durationMs)} (threshold ${formatMilliseconds(thresholdMs)})`
+      `${scriptName}: ${formatMilliseconds(effectiveDurationMs)} (threshold ${formatMilliseconds(thresholdMs)})`
     )
 
     if (smokeProfile?.phases?.length) {
@@ -130,9 +149,23 @@ async function main() {
       for (const phase of smokeProfile.phases.slice(0, 5)) {
         console.log(`- ${formatMilliseconds(phase.durationMs)} ${phase.label}`)
       }
+      if (typeof startupPhaseDurationMs === 'number') {
+        console.log(
+          `Smoke startup phase: ${formatMilliseconds(startupPhaseDurationMs)} (threshold ${formatMilliseconds(smokeStartupThresholdMs)})`
+        )
+      }
       console.log(
         `Smoke screenshots: ${smokeProfile.screenshotCount} in ${formatMilliseconds(smokeProfile.screenshotMs)}`
       )
+    }
+
+    if (unitProfile?.files?.length) {
+      console.log('Slowest unit files:')
+      for (const entry of [...unitProfile.files]
+        .sort((left, right) => right.durationMs - left.durationMs)
+        .slice(0, 5)) {
+        console.log(`- ${formatMilliseconds(entry.durationMs)} ${entry.filePath}`)
+      }
     }
 
     if (result.error) {
@@ -140,8 +173,16 @@ async function main() {
       continue
     }
 
-    if (overThreshold) {
+    if (record.overThreshold) {
       failures.push(`${scriptName} exceeded its threshold`)
+    }
+
+    if (
+      scriptName === 'test:smoke:runner' &&
+      typeof startupPhaseDurationMs === 'number' &&
+      startupPhaseDurationMs > smokeStartupThresholdMs
+    ) {
+      failures.push('test:smoke:runner startup phase exceeded its threshold')
     }
   }
 

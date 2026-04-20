@@ -23,6 +23,19 @@ import {
 } from '../src/lib/mazePersistence.js'
 import { SCONCE_RADIUS } from '../src/lib/sceneLayout.js'
 
+const DEFAULT_MAZE_DIRECTORY = path.join(process.cwd(), 'src', 'data', 'mazes')
+
+async function importPersistedMaze(
+  fileName = 'maze-001.js',
+  directory = DEFAULT_MAZE_DIRECTORY
+) {
+  const module = await import(
+    `${pathToFileURL(path.join(directory, fileName)).href}?verify=${Math.random()}`
+  )
+
+  return module.default
+}
+
 test('generates valid mazes under 100ms', () => {
   const maze = generateMaze(123456, { bakeLightmap: false })
   const validation = validateMaze(maze, { requireLightmap: false })
@@ -51,8 +64,8 @@ test('persists at least five valid mazes', async () => {
   }
 })
 
-test('dumps persisted maze lightmap artifacts into the gitignored logs directory', () => {
-  const maze = generateMaze(123456)
+test('dumps persisted maze lightmap artifacts into the gitignored logs directory', async () => {
+  const maze = await importPersistedMaze()
   const artifactDirectory = dumpMazeLightmapArtifacts({ maze })
 
   assert.equal(artifactDirectory, path.join(DEFAULT_LIGHTMAP_ARTIFACT_DIRECTORY, maze.id))
@@ -66,6 +79,7 @@ test('deletes invalid maze files and regenerates replacements', async () => {
   const temporaryDirectory = fs.mkdtempSync(
     path.join(os.tmpdir(), 'levelsjam-maze-test-')
   )
+  const replacementMaze = await importPersistedMaze()
 
   try {
     fs.writeFileSync(
@@ -79,7 +93,7 @@ test('deletes invalid maze files and regenerates replacements', async () => {
 
     const files = await ensureMazeFiles({
       directory: temporaryDirectory,
-      mazeFactory: () => generateMaze(123456),
+      mazeFactory: () => JSON.parse(JSON.stringify(replacementMaze)),
       targetCount: 1
     })
 
@@ -96,8 +110,8 @@ test('deletes invalid maze files and regenerates replacements', async () => {
   }
 })
 
-test('converts persisted mazes into wall segments and torch placements', () => {
-  const layout = getMazeSceneLayout(generateMaze(123456), SCONCE_RADIUS)
+test('converts persisted mazes into wall segments and torch placements', async () => {
+  const layout = getMazeSceneLayout(await importPersistedMaze(), SCONCE_RADIUS)
 
   assert.ok(layout.walls.length > 0)
   assert.ok(layout.lights.length > 0)
