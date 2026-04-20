@@ -16,6 +16,7 @@ import {
   ClampToEdgeWrapping,
   Color,
   CubeCamera,
+  CubeUVReflectionMapping,
   DataTexture,
   DepthTexture,
   DoubleSide,
@@ -419,6 +420,8 @@ type ProbeMetric = {
 type ProbeTextureSummary = {
   colorSpace: string | null
   generateMipmaps: boolean
+  imageHeight: number | null
+  imageWidth: number | null
   magFilter: number
   mapping: number
   minFilter: number
@@ -994,6 +997,61 @@ function computeAverageHdrColor(texture: Texture | null, intensity = 1) {
     totalG / sampleCount,
     totalB / sampleCount
   ).multiplyScalar(intensity)
+}
+
+function getPmremCubeSize(texture: Texture | null | undefined) {
+  const image = texture?.image as
+    | {
+      height?: number
+    }
+    | undefined
+
+  if (
+    texture?.mapping === CubeUVReflectionMapping &&
+    typeof image?.height === 'number' &&
+    image.height > 0
+  ) {
+    return Math.max(16, Math.floor(image.height / 4))
+  }
+
+  return REFLECTION_PROBE_RENDER_SIZE
+}
+
+function getCubeTextureFaceSize(texture: Texture | null | undefined) {
+  const image = texture?.image as
+    | Array<{
+      height?: number
+      image?: {
+        height?: number
+        width?: number
+      }
+      width?: number
+    }>
+    | undefined
+
+  if (!Array.isArray(image) || image.length === 0) {
+    return {
+      height: null,
+      width: null
+    }
+  }
+
+  const firstFace = image[0]
+
+  return {
+    height:
+      typeof firstFace?.height === 'number'
+        ? firstFace.height
+        : typeof firstFace?.image?.height === 'number'
+          ? firstFace.image.height
+          : null,
+    width:
+      typeof firstFace?.width === 'number'
+        ? firstFace.width
+        : typeof firstFace?.image?.width === 'number'
+          ? firstFace.image.width
+          : null
+  }
 }
 
 function computeCubeRenderTargetDebugStats(
@@ -2229,6 +2287,8 @@ function EnvironmentLighting({
       scene.environment = baseEnvironment.texture
       scene.environmentIntensity = calibratedIntensity
 
+      const probeCaptureSize = getPmremCubeSize(baseEnvironment.texture)
+
       nextTargets = []
       nextRawTargets = []
       nextProbeCaptureCounts = []
@@ -2236,7 +2296,7 @@ function EnvironmentLighting({
       nextProbeMetrics = []
       for (const probe of layout.reflectionProbes) {
         const cubeRenderTarget = new WebGLCubeRenderTarget(
-          REFLECTION_PROBE_RENDER_SIZE,
+          probeCaptureSize,
           { type: HalfFloatType }
         )
         const ambientCubeRenderTarget = new WebGLCubeRenderTarget(
@@ -2349,6 +2409,7 @@ function EnvironmentLighting({
         )
         nextProbeRawReadbackErrors.push(rawProbeReadbackError)
         nextProbeRawTextureSummaries.push({
+          ...getCubeTextureFaceSize(cubeRenderTarget.texture),
           colorSpace:
             typeof cubeRenderTarget.texture.colorSpace === 'string'
               ? cubeRenderTarget.texture.colorSpace
