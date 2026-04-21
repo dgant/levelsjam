@@ -25,10 +25,11 @@ export type MazeLayout = {
   }>
   maze: {
     lightmap: {
+      atlasUrl?: string
       atlasHeight: number
       atlasWidth: number
       bakeMs: number
-      dataBase64: string
+      dataBase64?: string
       groundBounds: {
         centerX: number
         centerZ: number
@@ -96,3 +97,4 @@ export declare function getRandomMazeLayout(random?: () => number): MazeLayout
 export declare function getMazeLayoutById(id: string): MazeLayout | null
 export declare function getDebugMazeLayoutById(id: string): MazeLayout | null
 export declare function getWallBounds(layout?: MazeLayout): WallBounds[]
+export declare function resolveMazeDataUrl(relativePath: string): string

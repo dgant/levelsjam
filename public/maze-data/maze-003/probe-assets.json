@@ -1,0 +1,1772 @@
+{
+  "faceSize": 32,
+  "generatedAt": "2026-04-21T21:28:34.093Z",
+  "mazeId": "maze-003",
+  "probeCount": 49,
+  "probes": [
+    {
+      "coefficients": [
+        [
+          0.028067970377073464,
+          0.003943314371509438,
+          0.0026971453439580315
+        ],
+        [
+          -0.002605030825519055,
+          0.00043550669426859807,
+          0.00067835721454527
+        ],
+        [
+          -0.007203374645655897,
+          0.0015362890498987138,
+          0.001890488801524324
+        ],
+        [
+          -0.006992642654759498,
+          0.00019495100343350902,
+          0.0003615813119550824
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-000-depth-face-0.png",
+        "maze-003/reflection-probes/probe-000-depth-face-1.png",
+        "maze-003/reflection-probes/probe-000-depth-face-2.png",
+        "maze-003/reflection-probes/probe-000-depth-face-3.png",
+        "maze-003/reflection-probes/probe-000-depth-face-4.png",
+        "maze-003/reflection-probes/probe-000-depth-face-5.png"
+      ],
+      "index": 0,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-000-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.027381743791991514,
+          0.004098066351597333,
+          0.002753684233518359
+        ],
+        [
+          -0.0020701404184756377,
+          0.00016812968723713392,
+          0.00015324021199189763
+        ],
+        [
+          -0.003049915622847014,
+          0.001527471802380321,
+          0.0018356434398205748
+        ],
+        [
+          -0.00971334165071537,
+          0.000016259044256144964,
+          0.000008268413487838483
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-001-depth-face-0.png",
+        "maze-003/reflection-probes/probe-001-depth-face-1.png",
+        "maze-003/reflection-probes/probe-001-depth-face-2.png",
+        "maze-003/reflection-probes/probe-001-depth-face-3.png",
+        "maze-003/reflection-probes/probe-001-depth-face-4.png",
+        "maze-003/reflection-probes/probe-001-depth-face-5.png"
+      ],
+      "index": 1,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-001-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.021879552492299736,
+          0.0039539955586588155,
+          0.0026597533567088187
+        ],
+        [
+          0.0020321529791906294,
+          -0.000051111309695295,
+          -0.000337380374419759
+        ],
+        [
+          -0.00269685122098935,
+          0.0016015076061485175,
+          0.0019209318880359615
+        ],
+        [
+          -0.005633684170181236,
+          0.00017633041186435497,
+          0.00033712750481672743
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-002-depth-face-0.png",
+        "maze-003/reflection-probes/probe-002-depth-face-1.png",
+        "maze-003/reflection-probes/probe-002-depth-face-2.png",
+        "maze-003/reflection-probes/probe-002-depth-face-3.png",
+        "maze-003/reflection-probes/probe-002-depth-face-4.png",
+        "maze-003/reflection-probes/probe-002-depth-face-5.png"
+      ],
+      "index": 2,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-002-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.019138735624160002,
+          0.003999654361402291,
+          0.0026812822984504775
+        ],
+        [
+          0.003923075498317361,
+          0.00040213566015647156,
+          0.0006383933508377072
+        ],
+        [
+          -0.0026859099844172346,
+          0.0015846838098415024,
+          0.0018910236646154932
+        ],
+        [
+          -0.004530324266627156,
+          0.00017943657692086475,
+          0.0003651530007999154
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-003-depth-face-0.png",
+        "maze-003/reflection-probes/probe-003-depth-face-1.png",
+        "maze-003/reflection-probes/probe-003-depth-face-2.png",
+        "maze-003/reflection-probes/probe-003-depth-face-3.png",
+        "maze-003/reflection-probes/probe-003-depth-face-4.png",
+        "maze-003/reflection-probes/probe-003-depth-face-5.png"
+      ],
+      "index": 3,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-003-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.018605772684523722,
+          0.003986989146593306,
+          0.002682249937565021
+        ],
+        [
+          -0.003294055861234037,
+          -0.0000979696329854003,
+          -0.00035393392734799555
+        ],
+        [
+          -0.0025739659180462724,
+          0.001603092430787328,
+          0.0019044861601660436
+        ],
+        [
+          -0.006273227899141276,
+          0.00018755345715085677,
+          0.00038228885157537694
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-004-depth-face-0.png",
+        "maze-003/reflection-probes/probe-004-depth-face-1.png",
+        "maze-003/reflection-probes/probe-004-depth-face-2.png",
+        "maze-003/reflection-probes/probe-004-depth-face-3.png",
+        "maze-003/reflection-probes/probe-004-depth-face-4.png",
+        "maze-003/reflection-probes/probe-004-depth-face-5.png"
+      ],
+      "index": 4,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-004-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.01868874686753217,
+          0.003985650992295964,
+          0.0026882509671732682
+        ],
+        [
+          -0.006429461526333306,
+          0.0003803629631423243,
+          0.0006397536200058207
+        ],
+        [
+          -0.0018710295654968377,
+          0.001568266715953222,
+          0.0018922269829279316
+        ],
+        [
+          0.000063748682678637,
+          0.00019017153338005043,
+          0.0003772704226217831
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-005-depth-face-0.png",
+        "maze-003/reflection-probes/probe-005-depth-face-1.png",
+        "maze-003/reflection-probes/probe-005-depth-face-2.png",
+        "maze-003/reflection-probes/probe-005-depth-face-3.png",
+        "maze-003/reflection-probes/probe-005-depth-face-4.png",
+        "maze-003/reflection-probes/probe-005-depth-face-5.png"
+      ],
+      "index": 5,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-005-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.019118989232122515,
+          0.003939099553226036,
+          0.0026833878194534757
+        ],
+        [
+          0.006479462334057496,
+          -0.00015821898199991802,
+          -0.00035390380375047967
+        ],
+        [
+          -0.0015345382628612356,
+          0.0015701545050414677,
+          0.001904514227412807
+        ],
+        [
+          -0.005208893970913483,
+          0.0002024337065550129,
+          0.00038430193353286964
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-006-depth-face-0.png",
+        "maze-003/reflection-probes/probe-006-depth-face-1.png",
+        "maze-003/reflection-probes/probe-006-depth-face-2.png",
+        "maze-003/reflection-probes/probe-006-depth-face-3.png",
+        "maze-003/reflection-probes/probe-006-depth-face-4.png",
+        "maze-003/reflection-probes/probe-006-depth-face-5.png"
+      ],
+      "index": 6,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-006-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.027415873697760534,
+          0.004030210534497725,
+          0.002705964212250112
+        ],
+        [
+          -0.001875456414996263,
+          0.0004928918320143754,
+          0.0006767325997913218
+        ],
+        [
+          -0.000357987441586216,
+          0.0015723701459931533,
+          0.0018786693604912412
+        ],
+        [
+          0.003567916771200291,
+          -0.0002681266262454573,
+          -0.00045070699470603563
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-007-depth-face-0.png",
+        "maze-003/reflection-probes/probe-007-depth-face-1.png",
+        "maze-003/reflection-probes/probe-007-depth-face-2.png",
+        "maze-003/reflection-probes/probe-007-depth-face-3.png",
+        "maze-003/reflection-probes/probe-007-depth-face-4.png",
+        "maze-003/reflection-probes/probe-007-depth-face-5.png"
+      ],
+      "index": 7,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-007-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.02474186024583175,
+          0.004021693658320862,
+          0.0027046512364839992
+        ],
+        [
+          0.001945070822878454,
+          -0.00010062924354997973,
+          -0.000396958775132652
+        ],
+        [
+          -0.002419156182924763,
+          0.0016090135004169256,
+          0.0018916046577871779
+        ],
+        [
+          -0.005388875831517716,
+          0.00012781781323349407,
+          0.00034351921449427843
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-008-depth-face-0.png",
+        "maze-003/reflection-probes/probe-008-depth-face-1.png",
+        "maze-003/reflection-probes/probe-008-depth-face-2.png",
+        "maze-003/reflection-probes/probe-008-depth-face-3.png",
+        "maze-003/reflection-probes/probe-008-depth-face-4.png",
+        "maze-003/reflection-probes/probe-008-depth-face-5.png"
+      ],
+      "index": 8,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-008-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.015472638469841331,
+          0.004021981734357631,
+          0.002640776711948443
+        ],
+        [
+          -0.0002955389901835336,
+          0.00013856146256517956,
+          0.00013014068580135976
+        ],
+        [
+          0.0009707769385649732,
+          0.0016548420977443052,
+          0.001932734036184477
+        ],
+        [
+          -0.001519627238372262,
+          -0.00008384164032317255,
+          -0.00008772530332538235
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-009-depth-face-0.png",
+        "maze-003/reflection-probes/probe-009-depth-face-1.png",
+        "maze-003/reflection-probes/probe-009-depth-face-2.png",
+        "maze-003/reflection-probes/probe-009-depth-face-3.png",
+        "maze-003/reflection-probes/probe-009-depth-face-4.png",
+        "maze-003/reflection-probes/probe-009-depth-face-5.png"
+      ],
+      "index": 9,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-009-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.02928238603403401,
+          0.0040176651329487,
+          0.002635366538788363
+        ],
+        [
+          0.016733556904089127,
+          0.00016000647531286583,
+          0.0001405427230131986
+        ],
+        [
+          -0.0009427085170483607,
+          0.0016619446819405377,
+          0.001935599384158819
+        ],
+        [
+          0.0011155003168602468,
+          -0.00008891372982418891,
+          -0.00008064029671652868
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-010-depth-face-0.png",
+        "maze-003/reflection-probes/probe-010-depth-face-1.png",
+        "maze-003/reflection-probes/probe-010-depth-face-2.png",
+        "maze-003/reflection-probes/probe-010-depth-face-3.png",
+        "maze-003/reflection-probes/probe-010-depth-face-4.png",
+        "maze-003/reflection-probes/probe-010-depth-face-5.png"
+      ],
+      "index": 10,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-010-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.024041997491885247,
+          0.004007009553640585,
+          0.0026401474823233274
+        ],
+        [
+          -0.011823833865578807,
+          0.00010751783341196266,
+          0.00009779861071280745
+        ],
+        [
+          -0.00008137563388057196,
+          0.0016639131880549238,
+          0.0019467094307444855
+        ],
+        [
+          -0.0026879764741083874,
+          -0.0001135578895541584,
+          -0.00007783461365921832
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-011-depth-face-0.png",
+        "maze-003/reflection-probes/probe-011-depth-face-1.png",
+        "maze-003/reflection-probes/probe-011-depth-face-2.png",
+        "maze-003/reflection-probes/probe-011-depth-face-3.png",
+        "maze-003/reflection-probes/probe-011-depth-face-4.png",
+        "maze-003/reflection-probes/probe-011-depth-face-5.png"
+      ],
+      "index": 11,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-011-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.018342381626414994,
+          0.00401057416915164,
+          0.0026307316915565055
+        ],
+        [
+          -0.012463466418248472,
+          0.00015375077667706662,
+          0.00017029052414139134
+        ],
+        [
+          -0.0009681607847221287,
+          0.001671940619196946,
+          0.0019506864039290797
+        ],
+        [
+          0.001248103490980722,
+          -0.00011168785922823085,
+          -0.00007727270226508768
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-012-depth-face-0.png",
+        "maze-003/reflection-probes/probe-012-depth-face-1.png",
+        "maze-003/reflection-probes/probe-012-depth-face-2.png",
+        "maze-003/reflection-probes/probe-012-depth-face-3.png",
+        "maze-003/reflection-probes/probe-012-depth-face-4.png",
+        "maze-003/reflection-probes/probe-012-depth-face-5.png"
+      ],
+      "index": 12,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-012-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.010140325189695383,
+          0.003957440887053193,
+          0.002636333112607929
+        ],
+        [
+          -0.000013479099035193746,
+          0.00005726501257842347,
+          0.00009940355833214836
+        ],
+        [
+          0.00009761324710237479,
+          0.0016227181401287083,
+          0.0019471702599867103
+        ],
+        [
+          -0.0038153785244411055,
+          -0.00009391413238914437,
+          -0.00008410537651224506
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-013-depth-face-0.png",
+        "maze-003/reflection-probes/probe-013-depth-face-1.png",
+        "maze-003/reflection-probes/probe-013-depth-face-2.png",
+        "maze-003/reflection-probes/probe-013-depth-face-3.png",
+        "maze-003/reflection-probes/probe-013-depth-face-4.png",
+        "maze-003/reflection-probes/probe-013-depth-face-5.png"
+      ],
+      "index": 13,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-013-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.0246592658172916,
+          0.004002797583689039,
+          0.0027545476042874794
+        ],
+        [
+          -0.0044857044698523,
+          0.0004575577456991493,
+          0.0005808593516547758
+        ],
+        [
+          -0.005110856186716269,
+          0.001567627520634582,
+          0.0018778039084666569
+        ],
+        [
+          -0.0074081812282329376,
+          0.00009456536300168709,
+          0.0004041888733889501
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-014-depth-face-0.png",
+        "maze-003/reflection-probes/probe-014-depth-face-1.png",
+        "maze-003/reflection-probes/probe-014-depth-face-2.png",
+        "maze-003/reflection-probes/probe-014-depth-face-3.png",
+        "maze-003/reflection-probes/probe-014-depth-face-4.png",
+        "maze-003/reflection-probes/probe-014-depth-face-5.png"
+      ],
+      "index": 14,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-014-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.026342199310917493,
+          0.004062797258502749,
+          0.002750772350412887
+        ],
+        [
+          0.0028906444522566336,
+          -0.00012671959438380416,
+          -0.0004436999066964901
+        ],
+        [
+          0.00008524836519945092,
+          0.0016081357229566868,
+          0.0018864869722040407
+        ],
+        [
+          0.006124458604225777,
+          -0.00027568802599026594,
+          -0.0004488696851275684
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-015-depth-face-0.png",
+        "maze-003/reflection-probes/probe-015-depth-face-1.png",
+        "maze-003/reflection-probes/probe-015-depth-face-2.png",
+        "maze-003/reflection-probes/probe-015-depth-face-3.png",
+        "maze-003/reflection-probes/probe-015-depth-face-4.png",
+        "maze-003/reflection-probes/probe-015-depth-face-5.png"
+      ],
+      "index": 15,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-015-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.024861637340684032,
+          0.004063099364367425,
+          0.002701900884485326
+        ],
+        [
+          -0.0057706270528979885,
+          0.00040544171579860803,
+          0.0006431171118636129
+        ],
+        [
+          0.00029669098251105034,
+          0.0016032659992635102,
+          0.0018903965893616792
+        ],
+        [
+          0.004432707330722621,
+          -0.0003014125164326051,
+          -0.0005206815785934705
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-016-depth-face-0.png",
+        "maze-003/reflection-probes/probe-016-depth-face-1.png",
+        "maze-003/reflection-probes/probe-016-depth-face-2.png",
+        "maze-003/reflection-probes/probe-016-depth-face-3.png",
+        "maze-003/reflection-probes/probe-016-depth-face-4.png",
+        "maze-003/reflection-probes/probe-016-depth-face-5.png"
+      ],
+      "index": 16,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-016-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.02978096019067043,
+          0.004052875116391631,
+          0.002691322743052666
+        ],
+        [
+          0.01189720221172033,
+          -0.00008426563318126527,
+          -0.0003387075603331781
+        ],
+        [
+          -0.003820096337374124,
+          0.0016291904674137373,
+          0.0019054145961083003
+        ],
+        [
+          0.002273121893237474,
+          -0.00028269411275362176,
+          -0.0005183525563246156
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-017-depth-face-0.png",
+        "maze-003/reflection-probes/probe-017-depth-face-1.png",
+        "maze-003/reflection-probes/probe-017-depth-face-2.png",
+        "maze-003/reflection-probes/probe-017-depth-face-3.png",
+        "maze-003/reflection-probes/probe-017-depth-face-4.png",
+        "maze-003/reflection-probes/probe-017-depth-face-5.png"
+      ],
+      "index": 17,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-017-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.01420332045552433,
+          0.004003371490644302,
+          0.0026523147105297217
+        ],
+        [
+          -0.0076835868758225855,
+          0.00013356563861814853,
+          0.00010607878504326973
+        ],
+        [
+          -0.00013746196035343693,
+          0.001663871001992131,
+          0.0019482174263237054
+        ],
+        [
+          -0.004151457445958979,
+          -0.00009760099065018604,
+          -0.00004899210404786209
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-018-depth-face-0.png",
+        "maze-003/reflection-probes/probe-018-depth-face-1.png",
+        "maze-003/reflection-probes/probe-018-depth-face-2.png",
+        "maze-003/reflection-probes/probe-018-depth-face-3.png",
+        "maze-003/reflection-probes/probe-018-depth-face-4.png",
+        "maze-003/reflection-probes/probe-018-depth-face-5.png"
+      ],
+      "index": 18,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-018-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.023166188623988018,
+          0.003991682095481721,
+          0.002618663996881355
+        ],
+        [
+          -0.012912068046701345,
+          0.0001280606940452859,
+          0.00014061587817760737
+        ],
+        [
+          -0.0007149295564643992,
+          0.0016729215540931168,
+          0.001962629446473587
+        ],
+        [
+          -0.0016356488132191042,
+          -0.00010753161707990285,
+          -0.00009637327355159305
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-019-depth-face-0.png",
+        "maze-003/reflection-probes/probe-019-depth-face-1.png",
+        "maze-003/reflection-probes/probe-019-depth-face-2.png",
+        "maze-003/reflection-probes/probe-019-depth-face-3.png",
+        "maze-003/reflection-probes/probe-019-depth-face-4.png",
+        "maze-003/reflection-probes/probe-019-depth-face-5.png"
+      ],
+      "index": 19,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-019-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.005093306074290416,
+          0.0039616557866335314,
+          0.0026264150885227286
+        ],
+        [
+          -0.000023093791477926754,
+          0.00008061274361438416,
+          0.00013622707251575018
+        ],
+        [
+          0.0017185477117926016,
+          0.0016472087129660586,
+          0.001962565424048738
+        ],
+        [
+          -0.0019385217599439451,
+          -0.00010112224912890327,
+          -0.00008102317109797536
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-020-depth-face-0.png",
+        "maze-003/reflection-probes/probe-020-depth-face-1.png",
+        "maze-003/reflection-probes/probe-020-depth-face-2.png",
+        "maze-003/reflection-probes/probe-020-depth-face-3.png",
+        "maze-003/reflection-probes/probe-020-depth-face-4.png",
+        "maze-003/reflection-probes/probe-020-depth-face-5.png"
+      ],
+      "index": 20,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-020-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.014301439723994678,
+          0.004114267588956424,
+          0.0030806115368499803
+        ],
+        [
+          0.0034207791588922996,
+          -0.000024691697855292506,
+          -0.0004488923549929861
+        ],
+        [
+          0.0008406662394579362,
+          0.0014483227382659854,
+          0.0016423881683478416
+        ],
+        [
+          -0.003919421556785444,
+          -0.00011661214305402892,
+          -0.00010940778954183652
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-021-depth-face-0.png",
+        "maze-003/reflection-probes/probe-021-depth-face-1.png",
+        "maze-003/reflection-probes/probe-021-depth-face-2.png",
+        "maze-003/reflection-probes/probe-021-depth-face-3.png",
+        "maze-003/reflection-probes/probe-021-depth-face-4.png",
+        "maze-003/reflection-probes/probe-021-depth-face-5.png"
+      ],
+      "index": 21,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-021-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.014480561551688344,
+          0.0040359414818193235,
+          0.00272523248491677
+        ],
+        [
+          -0.0061221692561019255,
+          0.0003957256682823773,
+          0.0007124108114633694
+        ],
+        [
+          -0.0007074973135238545,
+          0.0016031798115549666,
+          0.0018903740474505784
+        ],
+        [
+          0.00032778890800353957,
+          0.0001157475826802565,
+          0.0003772052029309747
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-022-depth-face-0.png",
+        "maze-003/reflection-probes/probe-022-depth-face-1.png",
+        "maze-003/reflection-probes/probe-022-depth-face-2.png",
+        "maze-003/reflection-probes/probe-022-depth-face-3.png",
+        "maze-003/reflection-probes/probe-022-depth-face-4.png",
+        "maze-003/reflection-probes/probe-022-depth-face-5.png"
+      ],
+      "index": 22,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-022-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.01609857017782849,
+          0.0042028233644761746,
+          0.003051925137074329
+        ],
+        [
+          -0.001299657863090157,
+          0.0001595790871293981,
+          0.00019442108467112248
+        ],
+        [
+          0.0011507335600995027,
+          0.0014221182609659823,
+          0.0016289019677531162
+        ],
+        [
+          0.0011128502462933146,
+          0.00013590142289899958,
+          0.0003962006014039106
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-023-depth-face-0.png",
+        "maze-003/reflection-probes/probe-023-depth-face-1.png",
+        "maze-003/reflection-probes/probe-023-depth-face-2.png",
+        "maze-003/reflection-probes/probe-023-depth-face-3.png",
+        "maze-003/reflection-probes/probe-023-depth-face-4.png",
+        "maze-003/reflection-probes/probe-023-depth-face-5.png"
+      ],
+      "index": 23,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-023-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.013680751428891292,
+          0.004154080219847824,
+          0.0028177641034115033
+        ],
+        [
+          -0.00259815186268776,
+          0.00020536935945037938,
+          0.00016255094722874292
+        ],
+        [
+          -0.0003924892885109918,
+          0.001538449447651478,
+          0.0018177690071025131
+        ],
+        [
+          0.006746352083881113,
+          -0.00004531479007703819,
+          -0.000022600358688545554
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-024-depth-face-0.png",
+        "maze-003/reflection-probes/probe-024-depth-face-1.png",
+        "maze-003/reflection-probes/probe-024-depth-face-2.png",
+        "maze-003/reflection-probes/probe-024-depth-face-3.png",
+        "maze-003/reflection-probes/probe-024-depth-face-4.png",
+        "maze-003/reflection-probes/probe-024-depth-face-5.png"
+      ],
+      "index": 24,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-024-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.010104028586432674,
+          0.004115790795126399,
+          0.0029533675012026256
+        ],
+        [
+          0.0003989735603592187,
+          -0.000035767658637626424,
+          -0.0003422751472556033
+        ],
+        [
+          0.0009905999737341755,
+          0.001506377823243127,
+          0.0017195305896137926
+        ],
+        [
+          -0.0015512705325371051,
+          -0.00009941868268943466,
+          -0.00008607750594550737
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-025-depth-face-0.png",
+        "maze-003/reflection-probes/probe-025-depth-face-1.png",
+        "maze-003/reflection-probes/probe-025-depth-face-2.png",
+        "maze-003/reflection-probes/probe-025-depth-face-3.png",
+        "maze-003/reflection-probes/probe-025-depth-face-4.png",
+        "maze-003/reflection-probes/probe-025-depth-face-5.png"
+      ],
+      "index": 25,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-025-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.01307214544334495,
+          0.003999552440393991,
+          0.00261718711303591
+        ],
+        [
+          -0.007829810295985704,
+          0.0001413259988880039,
+          0.0001367541710345625
+        ],
+        [
+          -0.00034878245985688533,
+          0.0016782861748069924,
+          0.001963068124042204
+        ],
+        [
+          -0.004702902639761554,
+          -0.00009897641620464469,
+          -0.00008776594080689246
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-026-depth-face-0.png",
+        "maze-003/reflection-probes/probe-026-depth-face-1.png",
+        "maze-003/reflection-probes/probe-026-depth-face-2.png",
+        "maze-003/reflection-probes/probe-026-depth-face-3.png",
+        "maze-003/reflection-probes/probe-026-depth-face-4.png",
+        "maze-003/reflection-probes/probe-026-depth-face-5.png"
+      ],
+      "index": 26,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-026-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.003495725549103829,
+          0.003955363876406046,
+          0.0026152641552864707
+        ],
+        [
+          0.000023210939061686443,
+          0.00008149992868444787,
+          0.00013835911865390336
+        ],
+        [
+          0.001960547786687074,
+          0.0016487177967862126,
+          0.0019642253197121673
+        ],
+        [
+          -0.0007941993867001,
+          -0.00010295852726545746,
+          -0.00009085331427597506
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-027-depth-face-0.png",
+        "maze-003/reflection-probes/probe-027-depth-face-1.png",
+        "maze-003/reflection-probes/probe-027-depth-face-2.png",
+        "maze-003/reflection-probes/probe-027-depth-face-3.png",
+        "maze-003/reflection-probes/probe-027-depth-face-4.png",
+        "maze-003/reflection-probes/probe-027-depth-face-5.png"
+      ],
+      "index": 27,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-027-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.011843352397429228,
+          0.003967931391319642,
+          0.0026967499077051892
+        ],
+        [
+          -0.005501174816884177,
+          0.0001809153541440625,
+          0.00007654256083719762
+        ],
+        [
+          -0.0013087213415839591,
+          0.0016193820234023104,
+          0.001943105548621702
+        ],
+        [
+          -0.0014914617389654937,
+          -0.00012354609978112803,
+          -0.0001989419607260297
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-028-depth-face-0.png",
+        "maze-003/reflection-probes/probe-028-depth-face-1.png",
+        "maze-003/reflection-probes/probe-028-depth-face-2.png",
+        "maze-003/reflection-probes/probe-028-depth-face-3.png",
+        "maze-003/reflection-probes/probe-028-depth-face-4.png",
+        "maze-003/reflection-probes/probe-028-depth-face-5.png"
+      ],
+      "index": 28,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-028-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.010498039486021517,
+          0.004005857267875213,
+          0.002623676679805962
+        ],
+        [
+          -0.004368022488207724,
+          0.0001539314572436409,
+          0.00016900878452236795
+        ],
+        [
+          0.0011981016283650085,
+          0.0016682062958966104,
+          0.001949211192962604
+        ],
+        [
+          -0.001044632210675393,
+          -0.00011840925730983363,
+          -0.00008762072252863324
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-029-depth-face-0.png",
+        "maze-003/reflection-probes/probe-029-depth-face-1.png",
+        "maze-003/reflection-probes/probe-029-depth-face-2.png",
+        "maze-003/reflection-probes/probe-029-depth-face-3.png",
+        "maze-003/reflection-probes/probe-029-depth-face-4.png",
+        "maze-003/reflection-probes/probe-029-depth-face-5.png"
+      ],
+      "index": 29,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-029-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.027167812806902846,
+          0.0040992444111752156,
+          0.0027491536375245226
+        ],
+        [
+          -0.004301476961939911,
+          0.0003989749970734538,
+          0.0006382284599015067
+        ],
+        [
+          -0.003637142289597084,
+          0.0015866186438243549,
+          0.0018592263802310579
+        ],
+        [
+          0.00983990294505672,
+          -0.00029557861630954166,
+          -0.0005092417920028218
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-030-depth-face-0.png",
+        "maze-003/reflection-probes/probe-030-depth-face-1.png",
+        "maze-003/reflection-probes/probe-030-depth-face-2.png",
+        "maze-003/reflection-probes/probe-030-depth-face-3.png",
+        "maze-003/reflection-probes/probe-030-depth-face-4.png",
+        "maze-003/reflection-probes/probe-030-depth-face-5.png"
+      ],
+      "index": 30,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-030-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.02640635660335363,
+          0.0040282030252065,
+          0.002705186317035677
+        ],
+        [
+          0.008603522933147596,
+          -0.00009573901254782866,
+          -0.00040283028903420593
+        ],
+        [
+          0.00042279124583876417,
+          0.0016186441054921688,
+          0.001891124034290208
+        ],
+        [
+          0.00012019353996906202,
+          0.00013362949942019323,
+          0.00031849946842269877
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-031-depth-face-0.png",
+        "maze-003/reflection-probes/probe-031-depth-face-1.png",
+        "maze-003/reflection-probes/probe-031-depth-face-2.png",
+        "maze-003/reflection-probes/probe-031-depth-face-3.png",
+        "maze-003/reflection-probes/probe-031-depth-face-4.png",
+        "maze-003/reflection-probes/probe-031-depth-face-5.png"
+      ],
+      "index": 31,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-031-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.005350411541190038,
+          0.004030559491436568,
+          0.0026762854873793717
+        ],
+        [
+          0.0008975079442486306,
+          0.0001366504701018565,
+          0.00013023934355830841
+        ],
+        [
+          0.0018566698096272264,
+          0.0016534627660926987,
+          0.0019307306541913813
+        ],
+        [
+          -0.0017748450857045495,
+          -0.00009610157856949947,
+          -0.00014718136124884347
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-032-depth-face-0.png",
+        "maze-003/reflection-probes/probe-032-depth-face-1.png",
+        "maze-003/reflection-probes/probe-032-depth-face-2.png",
+        "maze-003/reflection-probes/probe-032-depth-face-3.png",
+        "maze-003/reflection-probes/probe-032-depth-face-4.png",
+        "maze-003/reflection-probes/probe-032-depth-face-5.png"
+      ],
+      "index": 32,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-032-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.006170635933539063,
+          0.004011790271838745,
+          0.002632695460492904
+        ],
+        [
+          -0.0022202212125648573,
+          0.0001251780404578542,
+          0.00010855192464952733
+        ],
+        [
+          0.0015069166333469565,
+          0.001665426832418813,
+          0.001949101788199865
+        ],
+        [
+          -0.0020326083500318342,
+          -0.00008037033658953554,
+          -0.00008753346269904045
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-033-depth-face-0.png",
+        "maze-003/reflection-probes/probe-033-depth-face-1.png",
+        "maze-003/reflection-probes/probe-033-depth-face-2.png",
+        "maze-003/reflection-probes/probe-033-depth-face-3.png",
+        "maze-003/reflection-probes/probe-033-depth-face-4.png",
+        "maze-003/reflection-probes/probe-033-depth-face-5.png"
+      ],
+      "index": 33,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-033-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.0029270196119576147,
+          0.003947355224475505,
+          0.0026212220508315394
+        ],
+        [
+          0.00007948531259111639,
+          0.00007610025676234079,
+          0.00013698786256118075
+        ],
+        [
+          0.0020561253233938232,
+          0.001637366771028881,
+          0.001962904379787917
+        ],
+        [
+          -0.00033539216898253885,
+          -0.00011545630302816421,
+          -0.00009483520688464778
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-034-depth-face-0.png",
+        "maze-003/reflection-probes/probe-034-depth-face-1.png",
+        "maze-003/reflection-probes/probe-034-depth-face-2.png",
+        "maze-003/reflection-probes/probe-034-depth-face-3.png",
+        "maze-003/reflection-probes/probe-034-depth-face-4.png",
+        "maze-003/reflection-probes/probe-034-depth-face-5.png"
+      ],
+      "index": 34,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-034-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.010373096410944733,
+          0.003957558634406759,
+          0.0026379449211845056
+        ],
+        [
+          -0.005651790224594974,
+          0.0001955781636214014,
+          0.0001654739233207261
+        ],
+        [
+          0.0001804198014139803,
+          0.0016264650647275078,
+          0.001949185374892801
+        ],
+        [
+          0.000043077194975321696,
+          -0.00006979417156645839,
+          -0.00009648076562830085
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-035-depth-face-0.png",
+        "maze-003/reflection-probes/probe-035-depth-face-1.png",
+        "maze-003/reflection-probes/probe-035-depth-face-2.png",
+        "maze-003/reflection-probes/probe-035-depth-face-3.png",
+        "maze-003/reflection-probes/probe-035-depth-face-4.png",
+        "maze-003/reflection-probes/probe-035-depth-face-5.png"
+      ],
+      "index": 35,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-035-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.011815226528113607,
+          0.004019491072257902,
+          0.002631439404200567
+        ],
+        [
+          0.000026418340202485425,
+          0.00013368925017166695,
+          0.00011077220916805952
+        ],
+        [
+          0.0005115547774339315,
+          0.001669765193027103,
+          0.0019471303672063502
+        ],
+        [
+          0.002163502373981806,
+          -0.00007897682239195525,
+          -0.00008571851136521942
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-036-depth-face-0.png",
+        "maze-003/reflection-probes/probe-036-depth-face-1.png",
+        "maze-003/reflection-probes/probe-036-depth-face-2.png",
+        "maze-003/reflection-probes/probe-036-depth-face-3.png",
+        "maze-003/reflection-probes/probe-036-depth-face-4.png",
+        "maze-003/reflection-probes/probe-036-depth-face-5.png"
+      ],
+      "index": 36,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-036-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.02827605711156186,
+          0.004045708658885195,
+          0.002692524473867082
+        ],
+        [
+          -0.006674623069315001,
+          0.00041773581132610105,
+          0.0006707593648342369
+        ],
+        [
+          0.0008421827781379746,
+          0.001598992443774478,
+          0.0018776302022371237
+        ],
+        [
+          0.0002770086918725831,
+          0.00013060327415269728,
+          0.0003067701417641106
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-037-depth-face-0.png",
+        "maze-003/reflection-probes/probe-037-depth-face-1.png",
+        "maze-003/reflection-probes/probe-037-depth-face-2.png",
+        "maze-003/reflection-probes/probe-037-depth-face-3.png",
+        "maze-003/reflection-probes/probe-037-depth-face-4.png",
+        "maze-003/reflection-probes/probe-037-depth-face-5.png"
+      ],
+      "index": 37,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-037-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.02972983834471027,
+          0.004072642802448662,
+          0.002723804951703091
+        ],
+        [
+          0.005575878917834005,
+          -0.00011392156685492561,
+          -0.0004030327535176279
+        ],
+        [
+          -0.003756493723028878,
+          0.0016155961261408904,
+          0.001886972197118046
+        ],
+        [
+          0.009353880807145885,
+          -0.0002718163182446684,
+          -0.0004787708455879544
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-038-depth-face-0.png",
+        "maze-003/reflection-probes/probe-038-depth-face-1.png",
+        "maze-003/reflection-probes/probe-038-depth-face-2.png",
+        "maze-003/reflection-probes/probe-038-depth-face-3.png",
+        "maze-003/reflection-probes/probe-038-depth-face-4.png",
+        "maze-003/reflection-probes/probe-038-depth-face-5.png"
+      ],
+      "index": 38,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-038-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.004184749296261155,
+          0.004071837927266583,
+          0.0027082298702704906
+        ],
+        [
+          0.0007224244177253763,
+          0.0004057137072301339,
+          0.0006431637442263358
+        ],
+        [
+          0.002045872980552723,
+          0.0016079002014291514,
+          0.0018912755137508786
+        ],
+        [
+          -0.00043618315846084827,
+          -0.00028627495499176356,
+          -0.000531517479892221
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-039-depth-face-0.png",
+        "maze-003/reflection-probes/probe-039-depth-face-1.png",
+        "maze-003/reflection-probes/probe-039-depth-face-2.png",
+        "maze-003/reflection-probes/probe-039-depth-face-3.png",
+        "maze-003/reflection-probes/probe-039-depth-face-4.png",
+        "maze-003/reflection-probes/probe-039-depth-face-5.png"
+      ],
+      "index": 39,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-039-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.004507007426245358,
+          0.004037355329871655,
+          0.002692366020067005
+        ],
+        [
+          -0.0007794733852879333,
+          -0.00010533176072080601,
+          -0.0003408787709578172
+        ],
+        [
+          0.0017188978527055586,
+          0.0016155030062913582,
+          0.0019071995363050208
+        ],
+        [
+          -0.00004045875588196486,
+          -0.0002724448859266778,
+          -0.000520496071484526
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-040-depth-face-0.png",
+        "maze-003/reflection-probes/probe-040-depth-face-1.png",
+        "maze-003/reflection-probes/probe-040-depth-face-2.png",
+        "maze-003/reflection-probes/probe-040-depth-face-3.png",
+        "maze-003/reflection-probes/probe-040-depth-face-4.png",
+        "maze-003/reflection-probes/probe-040-depth-face-5.png"
+      ],
+      "index": 40,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-040-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.0031274099548682967,
+          0.003974547902046554,
+          0.0026332213830013575
+        ],
+        [
+          0.00011567857452096724,
+          0.00007206633370263953,
+          0.00010860268318632388
+        ],
+        [
+          0.0020251681927532417,
+          0.0016417167479405748,
+          0.0019494058059721696
+        ],
+        [
+          0.00022595287504454257,
+          -0.0000751941144467978,
+          -0.00008837242673214275
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-041-depth-face-0.png",
+        "maze-003/reflection-probes/probe-041-depth-face-1.png",
+        "maze-003/reflection-probes/probe-041-depth-face-2.png",
+        "maze-003/reflection-probes/probe-041-depth-face-3.png",
+        "maze-003/reflection-probes/probe-041-depth-face-4.png",
+        "maze-003/reflection-probes/probe-041-depth-face-5.png"
+      ],
+      "index": 41,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-041-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.014216298782620738,
+          0.003981690355543407,
+          0.00270376285854468
+        ],
+        [
+          -0.0028411815116056176,
+          0.0004668763057183786,
+          0.0006451596415280669
+        ],
+        [
+          -0.0020403995978271867,
+          0.0015504912798599692,
+          0.0018922107560673342
+        ],
+        [
+          -0.00034811507628112337,
+          -0.00033979360209018534,
+          -0.0005241455941165973
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-042-depth-face-0.png",
+        "maze-003/reflection-probes/probe-042-depth-face-1.png",
+        "maze-003/reflection-probes/probe-042-depth-face-2.png",
+        "maze-003/reflection-probes/probe-042-depth-face-3.png",
+        "maze-003/reflection-probes/probe-042-depth-face-4.png",
+        "maze-003/reflection-probes/probe-042-depth-face-5.png"
+      ],
+      "index": 42,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-042-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.0208137891143111,
+          0.003987416406873196,
+          0.0026879229014577827
+        ],
+        [
+          0.010933931111909701,
+          -0.00009198722170049089,
+          -0.00034096431985688216
+        ],
+        [
+          -0.00012054021439726754,
+          0.0015811575670631852,
+          0.0019070104693468806
+        ],
+        [
+          0.005304443057318949,
+          -0.0003333493536940267,
+          -0.0005128325970489978
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-043-depth-face-0.png",
+        "maze-003/reflection-probes/probe-043-depth-face-1.png",
+        "maze-003/reflection-probes/probe-043-depth-face-2.png",
+        "maze-003/reflection-probes/probe-043-depth-face-3.png",
+        "maze-003/reflection-probes/probe-043-depth-face-4.png",
+        "maze-003/reflection-probes/probe-043-depth-face-5.png"
+      ],
+      "index": 43,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-043-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.02736019695626327,
+          0.004017901588415075,
+          0.0027196049277181697
+        ],
+        [
+          -0.006196428588475948,
+          0.00040845862768767766,
+          0.0006976844623056428
+        ],
+        [
+          -0.0057941699456543205,
+          0.0015692529454033835,
+          0.0018922851354599619
+        ],
+        [
+          0.007272740809148091,
+          -0.0003354643991533093,
+          -0.0005074681722442564
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-044-depth-face-0.png",
+        "maze-003/reflection-probes/probe-044-depth-face-1.png",
+        "maze-003/reflection-probes/probe-044-depth-face-2.png",
+        "maze-003/reflection-probes/probe-044-depth-face-3.png",
+        "maze-003/reflection-probes/probe-044-depth-face-4.png",
+        "maze-003/reflection-probes/probe-044-depth-face-5.png"
+      ],
+      "index": 44,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-044-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.024692171525225622,
+          0.0040796750345347636,
+          0.0027391191755681654
+        ],
+        [
+          -0.005699276872372703,
+          0.00015506220296395744,
+          0.00015585455198084499
+        ],
+        [
+          -0.0023640149950356964,
+          0.0015371835814465772,
+          0.0018533077998391333
+        ],
+        [
+          0.007345914375944361,
+          -0.00011951646342299876,
+          -0.00009283317248721175
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-045-depth-face-0.png",
+        "maze-003/reflection-probes/probe-045-depth-face-1.png",
+        "maze-003/reflection-probes/probe-045-depth-face-2.png",
+        "maze-003/reflection-probes/probe-045-depth-face-3.png",
+        "maze-003/reflection-probes/probe-045-depth-face-4.png",
+        "maze-003/reflection-probes/probe-045-depth-face-5.png"
+      ],
+      "index": 45,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-045-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.012875662380446209,
+          0.00407225781851347,
+          0.0027305829913763778
+        ],
+        [
+          -0.00597558063102941,
+          0.00018322915901044967,
+          0.00016577849538439743
+        ],
+        [
+          -0.001039821045490676,
+          0.0015463525094453953,
+          0.0018656860871865953
+        ],
+        [
+          0.00540655979415028,
+          -0.00012083038227763725,
+          -0.00006434393364697014
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-046-depth-face-0.png",
+        "maze-003/reflection-probes/probe-046-depth-face-1.png",
+        "maze-003/reflection-probes/probe-046-depth-face-2.png",
+        "maze-003/reflection-probes/probe-046-depth-face-3.png",
+        "maze-003/reflection-probes/probe-046-depth-face-4.png",
+        "maze-003/reflection-probes/probe-046-depth-face-5.png"
+      ],
+      "index": 46,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-046-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.006284821604955315,
+          0.004083291723215672,
+          0.0027360738408603474
+        ],
+        [
+          -0.002370933369207964,
+          0.00020217375411669839,
+          0.0001718378753060209
+        ],
+        [
+          0.001221544469278023,
+          0.001540822960655477,
+          0.0018538245045849648
+        ],
+        [
+          0.0016155159683819873,
+          -0.00013506009711168469,
+          -0.00009359414823236841
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-047-depth-face-0.png",
+        "maze-003/reflection-probes/probe-047-depth-face-1.png",
+        "maze-003/reflection-probes/probe-047-depth-face-2.png",
+        "maze-003/reflection-probes/probe-047-depth-face-3.png",
+        "maze-003/reflection-probes/probe-047-depth-face-4.png",
+        "maze-003/reflection-probes/probe-047-depth-face-5.png"
+      ],
+      "index": 47,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-047-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    },
+    {
+      "coefficients": [
+        [
+          0.004552022962620393,
+          0.003930259810928975,
+          0.00268339710697944
+        ],
+        [
+          -0.0003893785246749095,
+          -0.00011859818956268406,
+          -0.00033405662665122044
+        ],
+        [
+          0.0014506750259797347,
+          0.001563145621193393,
+          0.0019242310253189663
+        ],
+        [
+          -0.00007405911026150765,
+          -0.00030823558550283417,
+          -0.0004911006306910526
+        ]
+      ],
+      "depthFaces": [
+        "maze-003/reflection-probes/probe-048-depth-face-0.png",
+        "maze-003/reflection-probes/probe-048-depth-face-1.png",
+        "maze-003/reflection-probes/probe-048-depth-face-2.png",
+        "maze-003/reflection-probes/probe-048-depth-face-3.png",
+        "maze-003/reflection-probes/probe-048-depth-face-4.png",
+        "maze-003/reflection-probes/probe-048-depth-face-5.png"
+      ],
+      "index": 48,
+      "processedCubeUvRgbE": "maze-003/reflection-probes/probe-048-processed-cubeuv-rgbe.png",
+      "textureHeight": 128,
+      "textureWidth": 336
+    }
+  ]
+}

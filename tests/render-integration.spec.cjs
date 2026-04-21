@@ -309,12 +309,12 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     })
 
     await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveValue('0')
-    await expect(page.getByLabel('Lightmap Intensity Enabled')).toBeVisible()
-    await expect(page.getByLabel('Lightmap Intensity Enabled')).toBeChecked()
-    await expect(page.getByRole('slider', { name: 'Lightmap Intensity' })).toHaveValue('1')
-    await expect(page.getByLabel('IBL Intensity Enabled')).toBeVisible()
-    await expect(page.getByLabel('IBL Intensity Enabled')).not.toBeChecked()
-    await expect(page.getByRole('slider', { name: 'IBL Intensity' })).toHaveValue('0')
+    await expect(page.getByLabel('Surface Lightmap Enabled')).toBeVisible()
+    await expect(page.getByLabel('Surface Lightmap Enabled')).toBeChecked()
+    await expect(page.getByRole('slider', { name: 'Surface Lightmap' })).toHaveValue('1')
+    await expect(page.getByLabel('Volumetric Lightmap Enabled')).toBeVisible()
+    await expect(page.getByLabel('Volumetric Lightmap Enabled')).not.toBeChecked()
+    await expect(page.getByRole('slider', { name: 'Volumetric Lightmap' })).toHaveValue('0')
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeVisible()
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeChecked()
     await expect(page.getByRole('slider', { name: 'Reflection Intensity' })).toHaveValue('1')
@@ -331,8 +331,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   await timedStep(timingProfile, 'reflection-captures', async () => {
     await page.evaluate(() => {
       window.__levelsjamDebug.setView(
-        [5.4, 1.55, -6.9],
-        [7, 1.1, -6]
+        [0, 1.8, -14],
+        [0, 1.3, 6]
       )
     })
     await page.waitForTimeout(250)
@@ -447,9 +447,9 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
           hasLightMap: true
         }
       })
-    await setCheckbox(page, 'IBL Intensity Enabled', true)
-    await setSlider(page, 'IBL Intensity', 1)
-    await setCheckbox(page, 'Lightmap Intensity Enabled', false)
+    await setCheckbox(page, 'Volumetric Lightmap Enabled', true)
+    await setSlider(page, 'Volumetric Lightmap', 1)
+    await setCheckbox(page, 'Surface Lightmap Enabled', false)
     await expect
       .poll(
         async () => page.evaluate(
@@ -537,7 +537,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect
       .poll(
         async () => page.evaluate(
-          () => window.__levelsjamDebug.getReflectionProbeState()?.probeCaptureCounts?.[24] ?? null
+          () => window.__levelsjamDebug.getReflectionProbeState?.() ?? null
         ),
         {
           timeout: 10_000,
@@ -545,18 +545,20 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         }
       )
       .toMatchObject({
-        billboard: expect.any(Number),
-        ground: expect.any(Number),
-        sconce: expect.any(Number),
-        wall: expect.any(Number)
+        loadedProbeCount: expect.any(Number),
+        probeDepthTextureUUIDs: expect.any(Array),
+        probeTextureUUIDs: expect.any(Array)
       })
-    const probeCaptureCounts = await page.evaluate(
-      () => window.__levelsjamDebug.getReflectionProbeState()?.probeCaptureCounts?.[24] ?? null
+    const probeState = await page.evaluate(
+      () => window.__levelsjamDebug.getReflectionProbeState?.() ?? null
     )
-    expect(probeCaptureCounts.billboard).toBeGreaterThan(0)
-    expect(probeCaptureCounts.ground).toBeGreaterThan(0)
-    expect(probeCaptureCounts.sconce).toBeGreaterThan(0)
-    expect(probeCaptureCounts.wall).toBeGreaterThan(0)
+    expect(probeState.loadedProbeCount).toBeGreaterThan(0)
+    expect(
+      probeState.probeTextureUUIDs.filter(Boolean).length
+    ).toBeGreaterThan(0)
+    expect(
+      probeState.probeDepthTextureUUIDs.filter(Boolean).length
+    ).toBeGreaterThan(0)
 
     await page.evaluate(() => {
       window.__levelsjamDebug.setView(
@@ -579,8 +581,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       timingProfile
     )
     await page.keyboard.press('Backquote')
-    await setCheckbox(page, 'IBL Intensity Enabled', false)
-    await setCheckbox(page, 'Lightmap Intensity Enabled', true)
+    await setCheckbox(page, 'Volumetric Lightmap Enabled', false)
+    await setCheckbox(page, 'Surface Lightmap Enabled', true)
     await page.keyboard.press('Backquote')
     await page.waitForTimeout(250)
     const probeIblOffFrame = await screenshotCanvasRegion(
@@ -630,11 +632,12 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     expect(reflectionCaptureDiff.maxCombinedDifference).toBeGreaterThan(50)
     await page.keyboard.press('Backquote')
     await setCheckbox(page, 'Reflection Intensity Enabled', true)
-    await setCheckbox(page, 'IBL Intensity Enabled', false)
-    await setCheckbox(page, 'Lightmap Intensity Enabled', true)
+    await setCheckbox(page, 'Volumetric Lightmap Enabled', false)
+    await setCheckbox(page, 'Surface Lightmap Enabled', true)
   })
 
   await timedStep(timingProfile, 'volumetric-fog', async () => {
+    await page.getByRole('button', { name: '7. Fog' }).click()
     const volumetricFogIntensitySlider = page.getByRole('slider', {
       name: 'Volumetric Fog Intensity'
     })
@@ -694,6 +697,90 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         }
       )
       .toBe(1)
+
+    await setSlider(page, 'Volumetric Fog Intensity', 0)
+    await page.keyboard.press('Backquote')
+    await page.waitForTimeout(250)
+    const fogOffFrame = await screenshotCanvasRegion(
+      page,
+      canvas,
+      320,
+      200,
+      0.5,
+      0.6,
+      timingProfile
+    )
+    await page.keyboard.press('Backquote')
+    await page.getByRole('button', { name: '7. Fog' }).click()
+    await setSlider(page, 'Volumetric Fog Intensity', 1)
+    await page.keyboard.press('Backquote')
+    await page.waitForTimeout(250)
+    const fogOnFrame = await screenshotCanvasRegion(
+      page,
+      canvas,
+      320,
+      200,
+      0.5,
+      0.6,
+      timingProfile
+    )
+    const fogDiff = measureBufferDiff(fogOnFrame, fogOffFrame)
+
+    expect(fogDiff.averagePerChannel).toBeGreaterThan(0.05)
+    expect(fogDiff.maxCombinedDifference).toBeGreaterThan(10)
+
+    await page.keyboard.press('Backquote')
+    await page.getByRole('button', { name: '7. Fog' }).click()
+    await setCheckbox(page, 'Volumetric Fog', false)
+  })
+
+  await timedStep(timingProfile, 'lens-flares', async () => {
+    await page.getByRole('button', { name: '5. Flares' }).click()
+    await page.evaluate(() => {
+      window.__levelsjamDebug.setView(
+        [5.4, 1.55, -6.9],
+        [7, 1.1, -6]
+      )
+    })
+    await page.waitForTimeout(200)
+    await setCheckbox(page, 'Lens Flares', true)
+    await setSlider(page, 'Lens Flares Intensity', 0)
+    await page.keyboard.press('Backquote')
+    await page.waitForTimeout(250)
+    const lensFlareOffFrame = await screenshotCanvasRegion(
+      page,
+      canvas,
+      260,
+      180,
+      0.72,
+      0.74,
+      timingProfile
+    )
+    await page.keyboard.press('Backquote')
+    await page.getByRole('button', { name: '5. Flares' }).click()
+    await setSlider(page, 'Lens Flares Intensity', 1)
+    await page.keyboard.press('Backquote')
+    await page.waitForTimeout(500)
+    const lensFlareOnFrame = await screenshotCanvasRegion(
+      page,
+      canvas,
+      260,
+      180,
+      0.72,
+      0.74,
+      timingProfile
+    )
+    const lensFlareDiff = measureBufferDiff(
+      lensFlareOnFrame,
+      lensFlareOffFrame
+    )
+
+    expect(lensFlareDiff.averagePerChannel).toBeGreaterThan(1)
+    expect(lensFlareDiff.maxCombinedDifference).toBeGreaterThan(50)
+
+    await page.keyboard.press('Backquote')
+    await page.getByRole('button', { name: '5. Flares' }).click()
+    await setCheckbox(page, 'Lens Flares', false)
   })
 
   expect(consoleErrors).toEqual([])

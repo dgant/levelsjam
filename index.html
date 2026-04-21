@@ -84,7 +84,7 @@
       .loading-overlay-dots::after {
         content: '...';
         display: inline-block;
-        line-height: 1;
+        line-height: inherit;
         vertical-align: baseline;
         width: 1ch;
         overflow: hidden;
@@ -172,7 +172,9 @@
         document.body.appendChild(script)
       }
 
-      window.setTimeout(startApp, 0)
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(startApp)
+      })
     </script>
   </body>
 </html>

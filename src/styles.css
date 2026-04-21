@@ -93,7 +93,7 @@ body {
 .loading-overlay-dots::after {
   content: '...';
   display: inline-block;
-  line-height: 1;
+  line-height: inherit;
   vertical-align: baseline;
   width: 1ch;
   overflow: hidden;
@@ -184,6 +184,28 @@ body {
 .visual-control-row output {
   color: rgb(209 220 236 / 78%);
   font-size: 12px;
+}
+
+.visual-control-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.visual-control-tab {
+  padding: 6px 9px;
+  background: rgb(10 15 23 / 92%);
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 999px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.visual-control-tab-active {
+  background: rgb(231 216 178 / 14%);
+  border-color: rgb(231 216 178 / 38%);
 }
 
 .visual-control-row {

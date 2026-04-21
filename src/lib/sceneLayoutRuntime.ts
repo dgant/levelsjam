@@ -61,6 +61,10 @@ const DEBUG_MAZE_LOADERS = Object.freeze({
   'debug-probe-occlusion-3x3-sealed': () => import('../data/debug-mazes/debug-probe-occlusion-3x3-sealed.js')
 } satisfies Record<string, () => Promise<{ default: PersistedMaze }>>)
 
+export function resolveMazeDataUrl(relativePath: string) {
+  return `${MAZE_DATA_BASE_URL}/${relativePath}`
+}
+
 async function loadAvailableMazeIds() {
   if (!mazeManifestPromise) {
     mazeManifestPromise = fetch(MAZE_MANIFEST_URL)
@@ -96,7 +100,7 @@ async function loadPersistedMaze(id: string) {
     return maze
   }
 
-  const response = await fetch(`${MAZE_DATA_BASE_URL}/${id}.json`)
+  const response = await fetch(resolveMazeDataUrl(`${id}.json`))
 
   if (!response.ok) {
     if (response.status === 404) {

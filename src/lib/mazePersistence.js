@@ -108,71 +108,100 @@ function writeLightmapArtifactPng(filePath, width, height, pixelWriter) {
   fs.writeFileSync(filePath, PNG.sync.write(png))
 }
 
-export function dumpMazeLightmapArtifacts({
-  directory = DEFAULT_LIGHTMAP_ARTIFACT_DIRECTORY,
-  maze
-}) {
-  if (!directory || !maze.lightmap?.dataBase64) {
+export function buildMazeLightmapArtifactBuffers(maze) {
+  if (!maze.lightmap?.dataBase64) {
     return null
   }
 
-  const mazeDirectory = path.join(directory, maze.id)
   const lightmap = maze.lightmap
   const bytes = Buffer.from(lightmap.dataBase64, 'base64')
   const pixelStride = 3
-
-  fs.mkdirSync(mazeDirectory, { recursive: true })
 
   const readChannel = (row, column, channelOffset) => {
     const pixelIndex = (((row * lightmap.atlasWidth) + column) * pixelStride) + channelOffset
     return bytes[pixelIndex] ?? 0
   }
 
-  writeLightmapArtifactPng(
-    path.join(mazeDirectory, 'lightmap-atlas.png'),
-    lightmap.atlasWidth,
-    lightmap.atlasHeight,
-    (row, column) => [
+  const buildPngBuffer = (pixelWriter) => {
+    const png = new PNG({
+      height: lightmap.atlasHeight,
+      width: lightmap.atlasWidth
+    })
+
+    for (let row = 0; row < lightmap.atlasHeight; row += 1) {
+      for (let column = 0; column < lightmap.atlasWidth; column += 1) {
+        const pixelIndex = ((row * lightmap.atlasWidth) + column) * 4
+        const [r, g, b, a] = pixelWriter(row, column)
+
+        png.data[pixelIndex] = r
+        png.data[pixelIndex + 1] = g
+        png.data[pixelIndex + 2] = b
+        png.data[pixelIndex + 3] = a
+      }
+    }
+
+    return PNG.sync.write(png)
+  }
+
+  return {
+    ambientPng: buildPngBuffer((row, column) => {
+      const value = readChannel(row, column, 1)
+      return [value, value, value, 255]
+    }),
+    atlasPng: buildPngBuffer((row, column) => [
       readChannel(row, column, 0),
       readChannel(row, column, 1),
       readChannel(row, column, 2),
       255
-    ]
-  )
-  writeLightmapArtifactPng(
-    path.join(mazeDirectory, 'lightmap-torch.png'),
-    lightmap.atlasWidth,
-    lightmap.atlasHeight,
-    (row, column) => {
+    ]),
+    metadata: {
+      atlasHeight: lightmap.atlasHeight,
+      atlasWidth: lightmap.atlasWidth,
+      bakeMs: lightmap.bakeMs,
+      groundBounds: lightmap.groundBounds,
+      groundRect: lightmap.groundRect,
+      neutralRect: lightmap.neutralRect,
+      version: lightmap.version,
+      wallRects: lightmap.wallRects
+    },
+    torchPng: buildPngBuffer((row, column) => {
       const value = readChannel(row, column, 0)
       return [value, value, value, 255]
-    }
+    })
+  }
+}
+
+export function dumpMazeLightmapArtifacts({
+  directory = DEFAULT_LIGHTMAP_ARTIFACT_DIRECTORY,
+  maze
+}) {
+  if (!directory) {
+    return null
+  }
+
+  const mazeDirectory = path.join(directory, maze.id)
+  const buffers = buildMazeLightmapArtifactBuffers(maze)
+
+  if (!buffers) {
+    return null
+  }
+
+  fs.mkdirSync(mazeDirectory, { recursive: true })
+  fs.writeFileSync(
+    path.join(mazeDirectory, 'lightmap-atlas.png'),
+    buffers.atlasPng
   )
-  writeLightmapArtifactPng(
+  fs.writeFileSync(
+    path.join(mazeDirectory, 'lightmap-torch.png'),
+    buffers.torchPng
+  )
+  fs.writeFileSync(
     path.join(mazeDirectory, 'lightmap-ambient.png'),
-    lightmap.atlasWidth,
-    lightmap.atlasHeight,
-    (row, column) => {
-      const value = readChannel(row, column, 1)
-      return [value, value, value, 255]
-    }
+    buffers.ambientPng
   )
   fs.writeFileSync(
     path.join(mazeDirectory, 'lightmap-metadata.json'),
-    JSON.stringify(
-      {
-        atlasHeight: lightmap.atlasHeight,
-        atlasWidth: lightmap.atlasWidth,
-        bakeMs: lightmap.bakeMs,
-        groundBounds: lightmap.groundBounds,
-        groundRect: lightmap.groundRect,
-        neutralRect: lightmap.neutralRect,
-        version: lightmap.version,
-        wallRects: lightmap.wallRects
-      },
-      null,
-      2
-    )
+    JSON.stringify(buffers.metadata, null, 2)
   )
 
   return mazeDirectory

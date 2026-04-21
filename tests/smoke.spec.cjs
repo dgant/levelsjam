@@ -327,16 +327,20 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     })
 
     await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveValue('0')
-    await expect(page.getByLabel('Lightmap Intensity Enabled')).toBeVisible()
-    await expect(page.getByLabel('Lightmap Intensity Enabled')).toBeChecked()
-    await expect(page.getByRole('slider', { name: 'Lightmap Intensity' })).toHaveValue('1')
-    await expect(page.getByLabel('IBL Intensity Enabled')).toBeVisible()
-    await expect(page.getByLabel('IBL Intensity Enabled')).not.toBeChecked()
-    await expect(page.getByRole('slider', { name: 'IBL Intensity' })).toHaveValue('0')
+    await expect(page.getByLabel('Surface Lightmap Enabled')).toBeVisible()
+    await expect(page.getByLabel('Surface Lightmap Enabled')).toBeChecked()
+    await expect(page.getByRole('slider', { name: 'Surface Lightmap' })).toHaveValue('1')
+    await expect(page.getByLabel('Volumetric Lightmap Enabled')).toBeVisible()
+    await expect(page.getByLabel('Volumetric Lightmap Enabled')).not.toBeChecked()
+    await expect(page.getByRole('slider', { name: 'Volumetric Lightmap' })).toHaveValue('0')
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeVisible()
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeChecked()
     await expect(page.getByRole('slider', { name: 'Reflection Intensity' })).toHaveValue('1')
     await expect(page.getByLabel('Show Reflection Probes')).toBeVisible()
+    await page.keyboard.press('Digit7')
+    await expect(page.getByRole('slider', { name: 'Volumetric Fog Intensity' })).toBeVisible()
+    await page.keyboard.press('Digit1')
+    await expect(page.getByRole('slider', { name: 'Exposure' })).toBeVisible()
 
     await setCheckbox(page, 'Show Reflection Probes', true)
     await expect
@@ -442,9 +446,9 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
           hasLightMap: true
         }
       })
-    await setCheckbox(page, 'IBL Intensity Enabled', true)
-    await setSlider(page, 'IBL Intensity', 1)
-    await setCheckbox(page, 'Lightmap Intensity Enabled', false)
+    await setCheckbox(page, 'Volumetric Lightmap Enabled', true)
+    await setSlider(page, 'Volumetric Lightmap', 1)
+    await setCheckbox(page, 'Surface Lightmap Enabled', false)
     await expect
       .poll(
         async () => page.evaluate(
@@ -493,7 +497,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect
       .poll(
         async () => page.evaluate(
-          () => window.__levelsjamDebug.getReflectionProbeState()?.probeCaptureCounts?.[24] ?? null
+          () => window.__levelsjamDebug.getReflectionProbeState?.() ?? null
         ),
         {
           timeout: 10_000,
@@ -501,18 +505,20 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         }
       )
       .toMatchObject({
-        billboard: expect.any(Number),
-        ground: expect.any(Number),
-        sconce: expect.any(Number),
-        wall: expect.any(Number)
+        loadedProbeCount: expect.any(Number),
+        probeDepthTextureUUIDs: expect.any(Array),
+        probeTextureUUIDs: expect.any(Array)
       })
-    const probeCaptureCounts = await page.evaluate(
-      () => window.__levelsjamDebug.getReflectionProbeState()?.probeCaptureCounts?.[24] ?? null
+    const probeState = await page.evaluate(
+      () => window.__levelsjamDebug.getReflectionProbeState?.() ?? null
     )
-    expect(probeCaptureCounts.billboard).toBeGreaterThan(0)
-    expect(probeCaptureCounts.ground).toBeGreaterThan(0)
-    expect(probeCaptureCounts.sconce).toBeGreaterThan(0)
-    expect(probeCaptureCounts.wall).toBeGreaterThan(0)
+    expect(probeState.loadedProbeCount).toBeGreaterThan(0)
+    expect(
+      probeState.probeTextureUUIDs.filter(Boolean).length
+    ).toBeGreaterThan(0)
+    expect(
+      probeState.probeDepthTextureUUIDs.filter(Boolean).length
+    ).toBeGreaterThan(0)
 
     await setCheckbox(page, 'Reflection Intensity Enabled', false)
     await expect
@@ -552,8 +558,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         }
       })
     await setCheckbox(page, 'Reflection Intensity Enabled', true)
-    await setCheckbox(page, 'IBL Intensity Enabled', false)
-    await setCheckbox(page, 'Lightmap Intensity Enabled', true)
+    await setCheckbox(page, 'Volumetric Lightmap Enabled', false)
+    await setCheckbox(page, 'Surface Lightmap Enabled', true)
   })
 
   expect(consoleErrors).toEqual([])

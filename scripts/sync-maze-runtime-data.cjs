@@ -13,12 +13,33 @@ async function importMazeModule(filePath) {
   return imported.default
 }
 
+function replaceMazeLightmapWithRuntimeAssetUrls(maze) {
+  if (!maze.lightmap) {
+    return maze
+  }
+
+  return {
+    ...maze,
+    lightmap: {
+      ...maze.lightmap,
+      atlasUrl: `${maze.id}/surface-lightmap.png`,
+      dataBase64: undefined
+    }
+  }
+}
+
 async function main() {
+  const {
+    buildMazeLightmapArtifactBuffers
+  } = await import('../src/lib/mazePersistence.js')
+
   fs.mkdirSync(outputDirectory, { recursive: true })
 
   for (const fileName of fs.readdirSync(outputDirectory)) {
     if (fileName.endsWith('.json')) {
-      fs.rmSync(path.join(outputDirectory, fileName), { force: true })
+      fs.rmSync(path.join(outputDirectory, fileName), {
+        force: true
+      })
     }
   }
 
@@ -32,13 +53,23 @@ async function main() {
     const filePath = path.join(sourceDirectory, fileName)
     const maze = await importMazeModule(filePath)
     const mazeId = path.basename(fileName, '.js')
+    const mazeOutputDirectory = path.join(outputDirectory, mazeId)
+    const runtimeMaze = replaceMazeLightmapWithRuntimeAssetUrls(maze)
+    const lightmapBuffers = buildMazeLightmapArtifactBuffers(maze)
 
     console.log(
       `[sync-maze-runtime-data] writing ${index + 1}/${mazeFileNames.length} ${mazeId}.json`
     )
+    fs.mkdirSync(mazeOutputDirectory, { recursive: true })
+    if (lightmapBuffers) {
+      fs.writeFileSync(
+        path.join(mazeOutputDirectory, 'surface-lightmap.png'),
+        lightmapBuffers.atlasPng
+      )
+    }
     fs.writeFileSync(
       path.join(outputDirectory, `${mazeId}.json`),
-      JSON.stringify(maze)
+      JSON.stringify(runtimeMaze)
     )
     mazeIds.push(mazeId)
   }

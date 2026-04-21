@@ -96,3 +96,17 @@
   [x] There must always be five valid mazes. Whenever there are fewer, generate more until there are enough
 [x] Delete the existing sconces and random wall-sconce-light-flames
 [x] On game load, instantiate one of the available legal mazes at random. Each of the maze's wall gets a .25m x 2m x 2m mesh with the wall material, with shadows and collision enabled. Then for each light, place the sconce-billboard-light assembly against that wall, on the side of the cell it's supposed to be lighting
+[x] Reduce reflection probe size to 32x32
+[x] Reflections must be captured during offline lightmapping, not during runtime
+[x] On page load, the ellipsis animation is still very stuttery, almost as though the process which animates them is blocking on elements of the site loading. There must be minimal load on the main thread or whatever in any fashion that would interfere with smooth animation of the ellipses
+[x] Capture shadow maps for the reflection probes and apply them during reflections
+[x] Capture volumetric lightmaps for each probe. Replace the IBL lighting with volumetric lightmaps. Apply the shadow maps. In general this whole system should work the same as the reflection probes, and share locations and shadow maps and areas of influence, just for volumetric lightmapping instead of reflections
+[x] The lightmap/IBL/reflection intensity checkboxes should be on the same line with the slider like SSR, Volumetric Fog, etc. are.
+[x] In the debug settings (and code) replace references to the current lightmaps/IBL with "Surface Lightmap" and "Volumetric Lightmap" as appropriate (use your best judgment)
+[x] Move "Show Reflection Probes" above Tone Mapper.
+[x] Lens flares are completely invisible at max slider intensity (why is 0.02 the max?)
+[] SSR looks completely wrong. I think you should rip out whatever implementation you have and redo it from a canonical working example, while referencing the documentation. 
+[x] Volumetric fog looks completely wrong. Reimplement it starting from a canonical working example, while referencing the documentation. Use the probes as the light source for the fog
+[x] Add separate tabs in the visual controls for each of the post process effects (SSAO, bloom, dof, flares, ssr, fog). Remove their settings from the default tab. For each tab, include all settings for that post process effect as sliders/checkboxes/dropdowns. Use your best judgment for what would constitute a nice UI for testing out the different values for these, and what ranges would let me use them as intended. Use our current defaults or otherwise reasonable defaults (the settings likely already have defaults you can take). Number each tab so I can choose it via hotkey with numbers 1-9. All settings should be applied immediately on being changed; you have had a habit of making sliders only take effect after disabling/enabling an effect, and you need to avoid that style and make the sliders work instantaneously.
+[] Add the three.js Anamorphic post process effect with its own debug tab. Again, refer to the canonical working example and the documentation
+[] Delete all unused code and experiments and logs that we no longer produce. Do a general cleanup of anything unused.
