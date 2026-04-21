@@ -2,6 +2,8 @@
 
 ## Current State
 The repository contains a runnable browser game prototype for GitHub Pages. The intended build serves a three.js scene with immediate mouse-look, WASD movement, hold-space vertical thrust, a local Poly Haven `overcast_soil` HDRI used for the visible skybox and IBL, an infinite `puddle-ground` base plane plus a maze-local lit floor patch, one randomly selected persisted maze built from `stone-wall-29` wall meshes, maze-mounted metal sconces with animated torch billboards, baked per-maze torch lightmaps, static local reflection probes for in-maze specular response, and a backquote visual-controls panel with exposure, IBL intensity, torch candela, ambient-occlusion mode, tone-mapper, post-effect controls, and build metadata in the FPS overlay.
+The initial `MINOTAUR` loading shell now appears directly from inline HTML in [index.html](/E:/p/levelsjam/index.html) before the React bundle finishes booting.
+The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutRuntime.ts](/E:/p/levelsjam/src/lib/sceneLayoutRuntime.ts) so the main app bundle stays small, while Node tests and scripts continue to use the synchronous [sceneLayout.js](/E:/p/levelsjam/src/lib/sceneLayout.js) path.
 
 ## Local Setup
 - Install Node.js 20 or newer.
@@ -18,6 +20,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Verify the root-published production build with `npm run preview`.
 - Refresh the legacy GitHub Pages publishable files with `npm run build:pages`.
 - Treat `public/textures/` as the canonical texture source tree. `npm run build:pages` now copies built JS and CSS from `dist/assets` but syncs root `textures/` directly from `public/textures` so runtime assets do not round-trip through the Vite output folder.
+- Expect `npm run build:pages` to publish the lazy maze chunks as additional root `assets/maze-*.js` files alongside `assets/app.js`.
 
 ## Testing
 - Run the production build before handoff.
@@ -33,6 +36,7 @@ The repository contains a runnable browser game prototype for GitHub Pages. The 
 - Run the maze-generation validation script or its test entrypoint whenever maze files or maze rules change so persisted mazes keep their baked lightmaps in sync.
 - Verify the main page renders the 3D scene without console errors.
 - Verify the loading overlay appears with `MINOTAUR` and `Entering the labyrinth...` before the scene fades in.
+- If you change the loading overlay markup or styling, update both the inline bootstrap shell in [index.html](/E:/p/levelsjam/index.html) and the React overlay in [App.tsx](/E:/p/levelsjam/src/App.tsx) so the immediate first paint and the live app stay visually aligned.
 - Verify `W`, `A`, `S`, and `D` move the camera.
 - Verify the top-right overlay shows the active maze ID, Git revision, and revision timestamp.
 - Verify `F9` toggles the top-right overlay.

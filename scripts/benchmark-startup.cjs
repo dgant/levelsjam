@@ -47,7 +47,10 @@ function measureBrightness(buffer) {
 async function waitForBrightCanvas(page) {
   const canvas = page.locator('canvas')
 
-  await canvas.waitFor()
+  await canvas.waitFor({
+    state: 'visible',
+    timeout: 180_000
+  })
 
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const brightness = measureBrightness(
@@ -77,7 +80,10 @@ async function main() {
     browser = await chromium.launch({ headless: true })
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 
-    await page.goto(url, { waitUntil: 'load' })
+    await page.goto(url, {
+      timeout: 120_000,
+      waitUntil: 'domcontentloaded'
+    })
     sceneReadyAt = await waitForBrightCanvas(page)
 
     metrics = await page.evaluate(() => {

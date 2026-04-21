@@ -333,7 +333,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       )
       .toMatchObject({
         probeBlendMode: {
-          glValue: 0
+          glValue: 3
         },
         probeBlendRadianceMode: {
           glValue: 1
@@ -395,7 +395,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       )
       .toMatchObject({
         probeBlendMode: {
-          glValue: 0
+          glValue: 3
         },
         probeBlendRadianceMode: {
           glValue: 0
@@ -413,7 +413,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       )
       .toMatchObject({
         probeBlendMode: {
-          glValue: 0
+          glValue: 3
         },
         probeBlendRadianceMode: {
           glValue: 0

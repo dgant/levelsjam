@@ -8,10 +8,111 @@
       content="Levels Jam 2026 prototype: a torchlit labyrinth rendered with three.js."
     />
     <title>Levels Jam 2026</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        background: #06080c;
+      }
+
+      html,
+      body,
+      #root {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        overflow: hidden;
+        background:
+          radial-gradient(circle at top, rgb(33 38 46 / 90%), rgb(6 8 12 / 100%) 60%);
+        font-family:
+          "Segoe UI",
+          system-ui,
+          sans-serif;
+      }
+
+      .app-shell-bootstrap {
+        width: 100%;
+        height: 100%;
+        position: relative;
+      }
+
+      .loading-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 4;
+        display: grid;
+        place-content: center;
+        gap: 0.35rem;
+        background:
+          linear-gradient(180deg, rgb(9 11 15 / 88%), rgb(4 6 9 / 94%));
+        text-align: center;
+      }
+
+      .loading-overlay h1,
+      .loading-overlay h2 {
+        margin: 0;
+        color: #f3eddc;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+      }
+
+      .loading-overlay h1 {
+        font-size: clamp(2.8rem, 6vw, 5.5rem);
+        font-weight: 800;
+      }
+
+      .loading-overlay h2 {
+        font-size: clamp(0.95rem, 2vw, 1.35rem);
+        font-weight: 500;
+        color: rgb(230 212 171 / 88%);
+        display: inline-flex;
+        justify-content: center;
+        align-items: baseline;
+      }
+
+      .loading-overlay-dots {
+        display: inline-block;
+        width: 3ch;
+        text-align: left;
+        white-space: pre;
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="app-shell app-shell-bootstrap">
+        <div
+          aria-hidden="false"
+          class="loading-overlay"
+          data-loading-complete="false"
+        >
+          <h1>MINOTAUR</h1>
+          <h2>
+            <span>Entering the labyrinth</span>
+            <span
+              aria-hidden="true"
+              class="loading-overlay-dots"
+            >...</span>
+          </h2>
+        </div>
+      </div>
+    </div>
     <script>
+      const bootstrapDots = document.querySelector('.loading-overlay-dots')
+      if (bootstrapDots) {
+        let bootstrapDotCount = 1
+        const bootstrapDotsInterval = window.setInterval(() => {
+          if (!bootstrapDots.isConnected) {
+            window.clearInterval(bootstrapDotsInterval)
+            return
+          }
+          bootstrapDots.textContent = '.'.repeat(bootstrapDotCount)
+          bootstrapDotCount = (bootstrapDotCount % 3) + 1
+        }, 250)
+      }
+
       const isLocalHost = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
       const isDevServer =
         isLocalHost &&

@@ -3,9 +3,8 @@ import {
   PLAYER_EYE_HEIGHT,
   PLAYER_HEIGHT,
   PLAYER_RADIUS,
-  PLAYER_SPAWN_POSITION,
-  getWallBounds
-} from './sceneLayout.js'
+  PLAYER_SPAWN_POSITION
+} from './sceneConstants.js'
 
 function cloneVector(position) {
   return { x: position.x, y: position.y, z: position.z }
@@ -136,7 +135,7 @@ export function resolvePlayerCollision(
   const floorY = options.floorY ?? GROUND_Y
   const radius = options.radius ?? PLAYER_RADIUS
   const height = options.height ?? PLAYER_HEIGHT
-  const wallBounds = options.wallBounds ?? getWallBounds()
+  const wallBounds = options.wallBounds ?? []
   const position = cloneVector(desiredPosition)
   const currentPreviousPosition = cloneVector(previousPosition)
   const collisions = { floor: false, wallNormals: [], walls: [] }

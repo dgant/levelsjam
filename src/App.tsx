@@ -106,13 +106,13 @@ import {
   updateVerticalVelocity
 } from './lib/playerMotion.js'
 import {
-  MAZE_CELL_SIZE,
   GROUND_SIZE,
   GROUND_Y,
+  MAZE_CELL_SIZE,
   getDebugMazeLayoutById,
-  getMazeLayoutById,
-  getRandomMazeLayout,
   getWallBounds,
+  loadMazeLayoutById,
+  loadRandomMazeLayout,
   PLAYER_EYE_HEIGHT,
   PLAYER_SPAWN_POSITION,
   SCONCE_RADIUS,
@@ -121,7 +121,8 @@ import {
   WALL_HEIGHT,
   WALL_LENGTH,
   WALL_WIDTH
-} from './lib/sceneLayout.js'
+} from './lib/sceneLayoutRuntime'
+import type { MazeLayout } from './lib/sceneLayout.js'
 import { computeLocalBillboardQuaternion } from './lib/billboard.js'
 import {
   buildGroundReflectionProbeRects,
@@ -425,8 +426,6 @@ type ProbeTextureSummary = {
   type: number
 }
 
-type MazeLayout = ReturnType<typeof getRandomMazeLayout>
-
 type LightmapRect = {
   height: number
   width: number
@@ -449,7 +448,7 @@ type GroundPatchRect = {
   width: number
 }
 
-type ProbeBlendMode = 'none' | 'constant' | 'world'
+type ProbeBlendMode = 'none' | 'constant' | 'world' | 'disabled'
 
 type ProbeTextureInfo = {
   maxMip: number
@@ -940,6 +939,10 @@ vec4 sampleProbeBlendEnvMapWithMode( vec3 direction, float roughness, int mode )
     return sampleProbeBlendLocalMaps( vProbeBlendWorldPosition, direction, roughness, probeBlendWeights );
   }
 
+  if ( mode == 3 ) {
+    return vec4( 0.0 );
+  }
+
   return textureCubeUV( envMap, envMapRotation * direction, roughness ) * envMapIntensity;
 }
 
@@ -1136,6 +1139,8 @@ function updateProbeBlendShaderUniforms(
         ? 1
         : probeBlend.mode === 'constant'
           ? 2
+          : probeBlend.mode === 'disabled'
+            ? 3
           : 0
   }
   if (shader.uniforms.probeBlendRadianceMode) {
@@ -1144,6 +1149,8 @@ function updateProbeBlendShaderUniforms(
         ? 1
         : (probeBlend.radianceMode ?? probeBlend.mode) === 'constant'
           ? 2
+          : (probeBlend.radianceMode ?? probeBlend.mode) === 'disabled'
+            ? 3
           : 0
   }
   shader.uniforms.probeBlendWeights?.value.set(
@@ -3166,6 +3173,7 @@ function GroundSurfaceMaterial({
   lightMap,
   lightMapIntensity,
   maps,
+  patchConfig,
   probeBlend
 }: {
   globalEnvMap?: Texture | null
@@ -3173,6 +3181,7 @@ function GroundSurfaceMaterial({
   lightMap?: Texture
   lightMapIntensity?: number
   maps: PbrMaps
+  patchConfig?: MaterialShaderPatchConfig
   probeBlend?: ProbeBlendConfig
 }) {
   const [material, setMaterial] = useState<ThreeMeshPhysicalMaterial | null>(null)
@@ -3180,22 +3189,24 @@ function GroundSurfaceMaterial({
     () => probeBlend ?? { mode: 'none', probeTextures: [] },
     [probeBlend]
   )
-  const patchConfig = useMemo(
+  const resolvedPatchConfig = useMemo(
     () => ({
+      ...patchConfig,
       lightMapAmbientTint: BLACK_COLOR,
-      lightMapTorchTint: TORCH_LIGHTMAP_TINT
+      lightMapTorchTint: TORCH_LIGHTMAP_TINT,
+      ...patchConfig
     }),
-    []
+    [patchConfig]
   )
   const materialKey = useMemo(
-    () => getProbeBlendMaterialKey('ground-surface', normalizedProbeBlend, patchConfig),
-    [normalizedProbeBlend, patchConfig]
+    () => getProbeBlendMaterialKey('ground-surface', normalizedProbeBlend, resolvedPatchConfig),
+    [normalizedProbeBlend, resolvedPatchConfig]
   )
 
   const probeBlendMaterialProps = useProbeBlendMaterialShader(
     material,
     normalizedProbeBlend,
-    patchConfig,
+    resolvedPatchConfig,
     materialKey
   )
 
@@ -3252,6 +3263,16 @@ function GroundPatchMesh({
     },
     [geometry]
   )
+  const patchConfig = useMemo(
+    () => ({
+      lightMapAmbientTint:
+        bakedLightmapsEnabled && probeBlend.mode !== 'world'
+          ? WHITE_COLOR
+          : BLACK_COLOR,
+      lightMapTorchTint: TORCH_LIGHTMAP_TINT
+    }),
+    [bakedLightmapsEnabled, probeBlend.mode]
+  )
 
   return (
     <mesh
@@ -3274,6 +3295,7 @@ function GroundPatchMesh({
             : 0
         }
         maps={maps}
+        patchConfig={patchConfig}
         probeBlend={probeBlend}
       />
     </mesh>
@@ -3336,20 +3358,25 @@ function Ground({
             const probeTextures = rect.probeIndices.map(
               (probeIndex) => reflectionProbeTextures[probeIndex] ?? null
             )
+            const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
+            const useProbeDiffuse =
+              probeIblEnabled &&
+              reflectionCapturesEnabled &&
+              hasProbeTextures
 
             return buildProbeBlendConfig(
               layout,
               rect.probeIndices,
               probeTextures,
-              probeIblEnabled &&
-                reflectionCapturesEnabled &&
-                hasCompleteProbeTextures(probeTextures)
+              useProbeDiffuse
                 ? 'world'
-                : 'none',
+                : bakedLightmapsEnabled
+                  ? 'disabled'
+                  : 'none',
               {
                 radianceMode:
                   reflectionCapturesEnabled &&
-                  hasCompleteProbeTextures(probeTextures)
+                  hasProbeTextures
                     ? 'world'
                     : 'none',
                 region: rect.region
@@ -4876,13 +4903,6 @@ function MazeWallMesh({
     () => createWallGeometry(),
     []
   )
-  const faceMaterialPatchConfig = useMemo(
-    () => ({
-      lightMapAmbientTint: WHITE_COLOR,
-      lightMapTorchTint: TORCH_LIGHTMAP_TINT
-    }),
-    []
-  )
   const lightMapIntensity =
     bakedLightmapsEnabled
       ? torchCandelaMultiplier * WALL_LIGHTMAP_INTENSITY_SCALE
@@ -4902,29 +4922,45 @@ function MazeWallMesh({
       ),
     [reflectionProbeBlend.probeIndices, reflectionProbeTextures]
   )
+  const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
+  const useProbeDiffuse =
+    probeIblEnabled &&
+    reflectionCapturesEnabled &&
+    hasProbeTextures
+  const faceMaterialPatchConfig = useMemo(
+    () => ({
+      lightMapAmbientTint:
+        bakedLightmapsEnabled && !useProbeDiffuse
+          ? WHITE_COLOR
+          : BLACK_COLOR,
+      lightMapTorchTint: TORCH_LIGHTMAP_TINT
+    }),
+    [bakedLightmapsEnabled, useProbeDiffuse]
+  )
   const probeBlend = useMemo(
     () =>
       buildProbeBlendConfig(
         layout,
         reflectionProbeBlend.probeIndices,
         probeTextures,
-        probeIblEnabled &&
-          reflectionCapturesEnabled &&
-          hasCompleteProbeTextures(probeTextures)
+        useProbeDiffuse
           ? 'constant'
-          : 'none',
+          : bakedLightmapsEnabled
+            ? 'disabled'
+            : 'none',
         {
           radianceMode:
             reflectionCapturesEnabled &&
-            hasCompleteProbeTextures(probeTextures)
+            hasProbeTextures
               ? 'constant'
               : 'none',
           weights: reflectionProbeBlend.weights as [number, number, number, number]
         }
       ),
     [
+      bakedLightmapsEnabled,
       layout,
-      probeIblEnabled,
+      useProbeDiffuse,
       reflectionCapturesEnabled,
       probeTextures,
       reflectionProbeBlend.probeIndices,
@@ -5668,8 +5704,8 @@ function FlightRig({
           materialColor: [number, number, number] | null
           quaternion: [number, number, number, number]
           probeBlend: {
-            mode: 'constant' | 'none' | 'world'
-            radianceMode: 'constant' | 'none' | 'world'
+            mode: 'constant' | 'disabled' | 'none' | 'world'
+            radianceMode: 'constant' | 'disabled' | 'none' | 'world'
             probeTextureCount: number
             region: {
               minX: number
@@ -5797,8 +5833,8 @@ function FlightRig({
           materialColor: [number, number, number] | null
           quaternion: [number, number, number, number]
           probeBlend: {
-            mode: 'constant' | 'none' | 'world'
-            radianceMode: 'constant' | 'none' | 'world'
+            mode: 'constant' | 'disabled' | 'none' | 'world'
+            radianceMode: 'constant' | 'disabled' | 'none' | 'world'
             probeTextureCount: number
             region: {
               minX: number
@@ -5857,8 +5893,8 @@ function FlightRig({
               map?: Texture | null
               userData?: {
                 probeBlendDebug?: {
-                  mode: 'constant' | 'none' | 'world'
-                  radianceMode: 'constant' | 'none' | 'world'
+                  mode: 'constant' | 'disabled' | 'none' | 'world'
+                  radianceMode: 'constant' | 'disabled' | 'none' | 'world'
                   probeTextureCount: number
                   region: {
                     minX: number
@@ -7421,17 +7457,49 @@ export default function App() {
   const [controlsOpen, setControlsOpen] = useState(false)
   const [fps, setFps] = useState(0)
   const [overlayVisible, setOverlayVisible] = useState(true)
-  const [mazeLayout] = useState(() => {
-    const mazeId = new URLSearchParams(window.location.search).get('maze')
-
-    return (
-      (mazeId ? (getDebugMazeLayoutById(mazeId) ?? getMazeLayoutById(mazeId)) : null) ??
-      getRandomMazeLayout()
-    )
-  })
+  const requestedMazeId = useMemo(
+    () => new URLSearchParams(window.location.search).get('maze'),
+    []
+  )
+  const [mazeLayout, setMazeLayout] = useState<MazeLayout | null>(null)
   const [sceneLoaded, setSceneLoaded] = useState(false)
   const [visualSettings, setVisualSettings] = useState(createDefaultVisualSettings)
   const composerEnabled = true
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadLayout = async () => {
+      setSceneLoaded(false)
+
+      const debugLayout = requestedMazeId
+        ? getDebugMazeLayoutById(requestedMazeId)
+        : null
+
+      if (debugLayout) {
+        if (!cancelled) {
+          setMazeLayout(debugLayout)
+        }
+        return
+      }
+
+      const nextLayout =
+        (requestedMazeId
+          ? await loadMazeLayoutById(requestedMazeId)
+          : null) ??
+        await loadRandomMazeLayout()
+
+      if (!cancelled) {
+        setMazeLayout(nextLayout)
+      }
+    }
+
+    void loadLayout()
+
+    return () => {
+      cancelled = true
+    }
+  }, [requestedMazeId])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -7625,6 +7693,14 @@ export default function App() {
 
   const onAssetsReady = () => {
     setSceneLoaded(true)
+  }
+
+  if (!mazeLayout) {
+    return (
+      <div className="app-shell">
+        <LoadingOverlay complete={false} />
+      </div>
+    )
   }
 
   return (

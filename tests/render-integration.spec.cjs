@@ -362,7 +362,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
           intervals: [100, 250, 500]
         }
       )
-      .toBe('none')
+      .toBe('disabled')
     await expect
       .poll(
         async () => page.evaluate(
@@ -386,7 +386,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       )
       .toMatchObject({
         localProbeTextureBoundCount: 4,
-        probeBlendMode: 0,
+        probeBlendMode: 3,
         probeBlendRadianceMode: 1
       })
     await expect
@@ -401,7 +401,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       )
       .toMatchObject({
         probeBlendMode: {
-          glValue: 0
+          glValue: 3
         },
         probeBlendRadianceMode: {
           glValue: 1

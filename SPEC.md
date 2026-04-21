@@ -144,11 +144,13 @@
 
 ## Loading And Startup
 - The page shows a centered loading overlay before the scene becomes visible.
+- The initial HTML response includes the loading overlay shell so `MINOTAUR` and `Entering the labyrinth...` appear immediately before the React app and maze payload finish loading.
 - The loading overlay shows an `h1` with the text `MINOTAUR`.
 - The loading overlay shows an `h2` with the text `Entering the labyrinth...`.
 - The loading overlay animates the trailing dots on the subtitle through `1`, `2`, `3`, `1`, `2`, `3` at 0.25 second intervals.
 - The loading subtitle keeps a consistent total width while the trailing dots animate.
 - The loading overlay remains visible until the scene assets have loaded.
+- Persisted maze definitions and their baked lightmap payloads load outside the initial app bundle rather than being parsed eagerly before the loading overlay can appear.
 - Once the scene assets have loaded, the loading text fades out over 2 seconds.
 - Once the scene assets have loaded, the viewport fades in over the same 2 second interval.
 
@@ -180,8 +182,10 @@
 - The reflective floor and sconce materials use the same calibrated HDRI intensity path for their global specular fallback instead of a separate brighter scale.
 - The ground and walls use extracted PBR texture packs with tiling based on a 1 meter world scale unless a source specifies otherwise.
 - Maze wall materials do not add direct runtime scene-environment IBL on top of their baked diffuse lightmaps.
+- Lightmapped maze walls and the baked maze floor patch do not receive direct runtime global-HDRI diffuse lighting; their diffuse ambient comes from the baked lightmap ambient channel when probe IBL is disabled, or from local probe IBL when probe IBL is enabled.
 - Reflective and semi-reflective materials read from the shared environment consistently, with the nearest local maze reflection probe taking precedence over the global HDRI for in-maze specular.
 - Enabling `Probe IBL` allows lit PBR maze geometry, including walls, to receive probe-driven local image-based lighting instead of relying only on the global HDRI fallback.
+- Enabling `Probe IBL` on baked maze geometry replaces the baked ambient-lightmap diffuse contribution with probe-driven local diffuse IBL while preserving the baked torch-light term and the reflective specular path.
 - Disabling `Reflection Captures` makes the scene fall back to the global HDRI-only reflection path for materials that otherwise use local probe reflections.
 - The reflective maze floor patch uses local reflection probes so puddled areas can reflect nearby torch sources rather than only the global HDRI.
 - The reflective maze floor patch blends nearby local reflection probes with weighted interpolation rather than switching between one nearest probe per region.
@@ -247,7 +251,9 @@
 
 ## Performance Requirements
 - The page becomes interactive quickly on load.
+- The initial page shell renders immediately without waiting for the full React app bundle or persisted maze payloads to parse.
 - Startup avoids remote third-party lighting assets during play by serving required scene textures from the project.
+- The initial runtime bundle does not eagerly embed every persisted maze module and baked-lightmap payload.
 - The frame rate remains stable during ordinary movement and camera motion.
 - The automated browser performance test is temporarily disabled while the static baked-lightmap torch-lighting evaluation is under way.
 - The project documents startup-time and test-duration benchmarks and treats regressions in those measurements as actionable.

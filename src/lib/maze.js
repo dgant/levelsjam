@@ -4,7 +4,7 @@ export const MAZE_CELL_SIZE = 2
 export const MAZE_WALL_THICKNESS = 0.25
 export const MAZE_WALL_HEIGHT = 2
 export const MAZE_TARGET_COUNT = 5
-export const MAZE_LIGHTMAP_VERSION = 13
+export const MAZE_LIGHTMAP_VERSION = 14
 export const MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS = 0.125
 
 const MAZE_LIGHTMAP_GROUND_TILE_SIZE = 256
@@ -17,8 +17,12 @@ const MAZE_LIGHTMAP_SAMPLE_EPSILON = 0.02
 const MAZE_LIGHTMAP_TORCH_STRENGTH = 1
 const MAZE_LIGHTMAP_TARGET_PEAK = 0.45
 const MAZE_LIGHTMAP_GROUND_SUPERSAMPLE_GRID = 1
+const MAZE_LIGHTMAP_GROUND_AMBIENT_SAMPLE_SIZE = 48
 const MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID = 2
-const MAZE_LIGHTMAP_WALL_AMBIENT_INTENSITY = 0.0225
+const MAZE_LIGHTMAP_WALL_AMBIENT_SAMPLE_WIDTH = 24
+const MAZE_LIGHTMAP_WALL_AMBIENT_SAMPLE_HEIGHT = 32
+const MAZE_LIGHTMAP_SKY_AMBIENT_DISTANCE = 24
+const MAZE_LIGHTMAP_SKY_AMBIENT_INTENSITY = 0.03
 const MAZE_REFLECTION_PROBE_Y = 1.25
 
 const CARDINAL_DIRECTIONS = [
@@ -90,6 +94,27 @@ const BASE_EAR = [
   { x: 3, y: 3 },
   { x: 3, y: 4 }
 ]
+const SKY_AMBIENT_DIRECTIONS = Object.freeze(
+  [
+    [0, 1, 0],
+    [0.55, 0.83, 0],
+    [-0.55, 0.83, 0],
+    [0, 0.83, 0.55],
+    [0, 0.83, -0.55],
+    [0.42, 0.7, 0.58],
+    [-0.42, 0.7, 0.58],
+    [0.42, 0.7, -0.58],
+    [-0.42, 0.7, -0.58]
+  ].map(([x, y, z]) => {
+    const length = Math.hypot(x, y, z)
+
+    return {
+      x: x / length,
+      y: y / length,
+      z: z / length
+    }
+  })
+)
 
 function encodeBytesToBase64(bytes) {
   if (typeof Buffer !== 'undefined') {
@@ -903,6 +928,70 @@ function allocateLightmapRect(state, width, height) {
   return rect
 }
 
+function writeResampledIntensityRect(
+  target,
+  atlasWidth,
+  rect,
+  sampleWidth,
+  sampleHeight,
+  sampleIntensity,
+  options = {}
+) {
+  const alignUToRectEdges = options.alignUToRectEdges ?? false
+  const coarseSamples = new Float32Array(sampleWidth * sampleHeight)
+  let maxIntensity = 0
+
+  for (let sampleRow = 0; sampleRow < sampleHeight; sampleRow += 1) {
+    const sampleV = sampleHeight > 1
+      ? sampleRow / (sampleHeight - 1)
+      : 0.5
+
+    for (let sampleColumn = 0; sampleColumn < sampleWidth; sampleColumn += 1) {
+      const sampleU = alignUToRectEdges && sampleWidth > 1
+        ? sampleColumn / (sampleWidth - 1)
+        : (sampleColumn + 0.5) / sampleWidth
+      const coarseIndex = (sampleRow * sampleWidth) + sampleColumn
+      const intensity = Math.max(0, sampleIntensity(sampleU, sampleV))
+
+      coarseSamples[coarseIndex] = intensity
+    }
+  }
+
+  for (let row = 0; row < rect.height; row += 1) {
+    const v = rect.height > 1
+      ? row / (rect.height - 1)
+      : 0.5
+    const sampleY = Math.max(0, Math.min(sampleHeight - 1, v * (sampleHeight - 1)))
+    const sampleY0 = Math.floor(sampleY)
+    const sampleY1 = Math.min(sampleHeight - 1, sampleY0 + 1)
+    const sampleTY = sampleY - sampleY0
+
+    for (let column = 0; column < rect.width; column += 1) {
+      const u = alignUToRectEdges && rect.width > 1
+        ? column / (rect.width - 1)
+        : (column + 0.5) / rect.width
+      const sampleX = Math.max(0, Math.min(sampleWidth - 1, u * (sampleWidth - 1)))
+      const sampleX0 = Math.floor(sampleX)
+      const sampleX1 = Math.min(sampleWidth - 1, sampleX0 + 1)
+      const sampleTX = sampleX - sampleX0
+      const topLeft = coarseSamples[(sampleY0 * sampleWidth) + sampleX0]
+      const topRight = coarseSamples[(sampleY0 * sampleWidth) + sampleX1]
+      const bottomLeft = coarseSamples[(sampleY1 * sampleWidth) + sampleX0]
+      const bottomRight = coarseSamples[(sampleY1 * sampleWidth) + sampleX1]
+      const top = topLeft + ((topRight - topLeft) * sampleTX)
+      const bottom = bottomLeft + ((bottomRight - bottomLeft) * sampleTX)
+      const intensity = top + ((bottom - top) * sampleTY)
+      const pixelOffset =
+        ((rect.y + row) * atlasWidth) + rect.x + column
+
+      target[pixelOffset] = intensity
+      maxIntensity = Math.max(maxIntensity, intensity)
+    }
+  }
+
+  return maxIntensity
+}
+
 function nextPowerOfTwo(value) {
   return 2 ** Math.ceil(Math.log2(Math.max(1, value)))
 }
@@ -1298,6 +1387,82 @@ function accumulateTorchLighting(
   return litIntensity
 }
 
+function accumulateSkyAmbientLighting(
+  samplePosition,
+  sampleNormal,
+  walls,
+  torchPlacements,
+  skipWallId,
+  skipSurfaceGroupId,
+  sconceRadius
+) {
+  const rayStart = {
+    x: samplePosition.x + (sampleNormal.x * MAZE_LIGHTMAP_SAMPLE_EPSILON),
+    y: samplePosition.y + (sampleNormal.y * MAZE_LIGHTMAP_SAMPLE_EPSILON),
+    z: samplePosition.z + (sampleNormal.z * MAZE_LIGHTMAP_SAMPLE_EPSILON)
+  }
+  let visibleWeight = 0
+  let totalWeight = 0
+
+  for (const direction of SKY_AMBIENT_DIRECTIONS) {
+    const lambert =
+      (sampleNormal.x * direction.x) +
+      (sampleNormal.y * direction.y) +
+      (sampleNormal.z * direction.z)
+
+    if (lambert <= 0) {
+      continue
+    }
+
+    totalWeight += lambert
+    const rayEnd = {
+      x: rayStart.x + (direction.x * MAZE_LIGHTMAP_SKY_AMBIENT_DISTANCE),
+      y: rayStart.y + (direction.y * MAZE_LIGHTMAP_SKY_AMBIENT_DISTANCE),
+      z: rayStart.z + (direction.z * MAZE_LIGHTMAP_SKY_AMBIENT_DISTANCE)
+    }
+
+    if (
+      isTorchOccluded(
+        rayStart,
+        rayEnd,
+        walls,
+        skipWallId,
+        skipSurfaceGroupId
+      )
+    ) {
+      continue
+    }
+
+    let blockedBySconce = false
+
+    for (const torchPlacement of torchPlacements) {
+      if (
+        segmentIntersectsLowerHemisphereCap(
+          rayStart,
+          rayEnd,
+          torchPlacement.sconcePosition,
+          sconceRadius
+        )
+      ) {
+        blockedBySconce = true
+        break
+      }
+    }
+
+    if (blockedBySconce) {
+      continue
+    }
+
+    visibleWeight += lambert
+  }
+
+  if (totalWeight <= 1e-6) {
+    return 0
+  }
+
+  return (visibleWeight / totalWeight) * MAZE_LIGHTMAP_SKY_AMBIENT_INTENSITY
+}
+
 export function bakeMazeLightmap(
   maze,
   sconceRadius = MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS
@@ -1431,6 +1596,28 @@ export function bakeMazeLightmap(
       )
     }
   )
+  peakIntensity = Math.max(
+    peakIntensity,
+    writeResampledIntensityRect(
+      atlasAmbientFloatData,
+      atlasWidth,
+      groundRect,
+      MAZE_LIGHTMAP_GROUND_AMBIENT_SAMPLE_SIZE,
+      MAZE_LIGHTMAP_GROUND_AMBIENT_SAMPLE_SIZE,
+      (u, v) => {
+        const sample = getGroundSample(groundBounds, u, v)
+        return accumulateSkyAmbientLighting(
+          sample.position,
+          sample.normal,
+          walls,
+          torchPlacements,
+          null,
+          null,
+          sconceRadius
+        )
+      }
+    )
+  )
 
   for (const surfaceGroup of surfaceGroups) {
     for (const faceKey of ['nz', 'pz']) {
@@ -1452,12 +1639,28 @@ export function bakeMazeLightmap(
         },
         { alignUToRectEdges: true }
       )
-      writeIntensityRect(
-        atlasAmbientFloatData,
-        surfaceGroupRects[surfaceGroup.id][faceKey],
-        1,
-        () => MAZE_LIGHTMAP_WALL_AMBIENT_INTENSITY,
-        { alignUToRectEdges: true }
+      peakIntensity = Math.max(
+        peakIntensity,
+        writeResampledIntensityRect(
+          atlasAmbientFloatData,
+          atlasWidth,
+          surfaceGroupRects[surfaceGroup.id][faceKey],
+          MAZE_LIGHTMAP_WALL_AMBIENT_SAMPLE_WIDTH,
+          MAZE_LIGHTMAP_WALL_AMBIENT_SAMPLE_HEIGHT,
+          (u, v) => {
+            const sample = getWallSurfaceFaceSample(surfaceGroup, faceKey, u, v)
+            return accumulateSkyAmbientLighting(
+              sample.position,
+              sample.normal,
+              walls,
+              torchPlacements,
+              null,
+              surfaceGroup.id,
+              sconceRadius
+            )
+          },
+          { alignUToRectEdges: true }
+        )
       )
     }
   }
