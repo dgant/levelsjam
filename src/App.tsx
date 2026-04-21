@@ -109,7 +109,6 @@ import {
   GROUND_SIZE,
   GROUND_Y,
   MAZE_CELL_SIZE,
-  getDebugMazeLayoutById,
   getWallBounds,
   loadMazeLayoutById,
   loadRandomMazeLayout,
@@ -174,7 +173,6 @@ const POINTER_UNLOCK_CODES = new Set([
 const PUDDLE_TEXTURE_REPEAT = 60
 const WALL_TEXTURE_REPEAT = 2
 const METAL_TEXTURE_REPEAT = 1
-const LOADING_DOT_INTERVAL_MS = 250
 const LOADING_FADE_DURATION_MS = 2000
 const FIRE_FLIPBOOK_GRID = 6
 const FIRE_FLIPBOOK_FRAME_COUNT = FIRE_FLIPBOOK_GRID * FIRE_FLIPBOOK_GRID
@@ -192,14 +190,26 @@ const FIRE_FLIPBOOK_CROP_HEIGHT =
 const FIRE_COLOR = new Color('#ffb168')
 const BLACK_COLOR = new Color(0, 0, 0)
 const FIRE_BILLBOARD_INTENSITY_SCALE = 1 / TORCH_BASE_CANDELA
+const LIGHTMAP_AMBIENT_TINT = new Color(1, 1, 1)
 const TORCH_LIGHTMAP_TINT = FIRE_COLOR.clone()
 const TORCH_BILLBOARD_LAYER = 1
 const FLOOR_LIGHTMAP_INTENSITY_SCALE = 1
 const WALL_LIGHTMAP_INTENSITY_SCALE = 1
+
+function recordStartupMarker(name: string) {
+  if (document.body.dataset[name] && document.body.dataset[name] !== 'pending') {
+    return
+  }
+
+  document.body.dataset[name] = performance.now().toFixed(1)
+}
 const MAZE_GROUND_PATCH_OFFSET_Y = 0.002
 const REFLECTION_PROBE_RENDER_SIZE = 64
 const REFLECTION_PROBE_AMBIENT_RENDER_SIZE = 24
 const REFLECTION_PROBE_FAR = 48
+const REFLECTION_PROBE_STARTUP_DELAY_MS = 5000
+const REFLECTION_PROBE_STARTUP_CAPTURE_DELAY_MS = 250
+const REFLECTION_PROBE_BACKGROUND_CAPTURE_DELAY_MS = 1000
 const REFLECTION_PROBE_EMISSIVE_RADIUS = 0.16
 const REFLECTION_PROBE_EMISSIVE_SCALE = 2
 const FOG_VOLUME_HEIGHT = 6
@@ -207,7 +217,7 @@ const FOG_VOLUME_SLICE_COUNT = 24
 const FOG_VOLUME_MAX_TORCHES = 16
 const EFFECT_EPSILON = 0.0001
 const MAX_PHYSICS_SUBSTEPS = 10
-const MIN_LOADING_OVERLAY_MS = 300
+const MIN_LOADING_OVERLAY_MS = 200
 const DEFAULT_PROBE_BOX_MAX = new Vector3(0.5, WALL_HEIGHT, 0.5)
 const DEFAULT_PROBE_BOX_MIN = new Vector3(-0.5, GROUND_Y, -0.5)
 const DEFAULT_PROBE_POSITION = new Vector3(0, 1, 0)
@@ -2455,7 +2465,7 @@ function createWallMaterialContinuumStepMaterial(
         radianceMode: 'none'
       },
       {
-        lightMapAmbientTint: WHITE_COLOR,
+        lightMapAmbientTint: LIGHTMAP_AMBIENT_TINT,
         lightMapTorchTint: TORCH_LIGHTMAP_TINT
       },
       { current: null }
@@ -2487,9 +2497,7 @@ function LoadingOverlay({
 }: {
   complete: boolean
 }) {
-  const [dotCount, setDotCount] = useState(1)
   const [minimumDisplayElapsed, setMinimumDisplayElapsed] = useState(false)
-  const dots = '.'.repeat(dotCount)
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -2501,21 +2509,18 @@ function LoadingOverlay({
     }
   }, [])
 
-  useEffect(() => {
-    if (complete) {
-      return undefined
-    }
-
-    const intervalId = window.setInterval(() => {
-      setDotCount((current) => (current % 3) + 1)
-    }, LOADING_DOT_INTERVAL_MS)
-
-    return () => {
-      window.clearInterval(intervalId)
-    }
-  }, [complete])
-
   const visiblyComplete = complete && minimumDisplayElapsed
+
+  useEffect(() => {
+    if (visiblyComplete) {
+      recordStartupMarker('loadingOverlayCompleteAt')
+      return
+    }
+
+    if (!document.body.dataset.loadingOverlayCompleteAt) {
+      document.body.dataset.loadingOverlayCompleteAt = 'pending'
+    }
+  }, [visiblyComplete])
 
   return (
     <div
@@ -2529,9 +2534,7 @@ function LoadingOverlay({
         <span
           aria-hidden="true"
           className="loading-overlay-dots"
-        >
-          {dots}
-        </span>
+        ></span>
       </h2>
     </div>
   )
@@ -2612,6 +2615,7 @@ function StartupReporter() {
 function EnvironmentLighting({
   layout,
   iblIntensity,
+  volumetricLighting,
   onEnvironmentFogColorChange,
   onEnvironmentTextureChange,
   onReflectionProbeAmbientColorsChange,
@@ -2620,6 +2624,7 @@ function EnvironmentLighting({
 }: {
   layout: MazeLayout
   iblIntensity: number
+  volumetricLighting: EffectSettings
   onEnvironmentFogColorChange: (color: Color) => void
   onEnvironmentTextureChange: (texture: Texture | null) => void
   onReflectionProbeAmbientColorsChange: (colors: Color[]) => void
@@ -2638,6 +2643,7 @@ function EnvironmentLighting({
     () => computeAverageHdrColor(hdrTexture, calibratedIntensity),
     [calibratedIntensity, hdrTexture]
   )
+  const needsProbeAmbientCapture = isEffectActive(volumetricLighting)
 
   useEffect(() => {
     const captureSceneState = getReflectionCaptureSceneState(scene, layout)
@@ -2951,12 +2957,16 @@ function EnvironmentLighting({
           probeCaptureSize,
           { type: HalfFloatType }
         )
-        const ambientCubeRenderTarget = new WebGLCubeRenderTarget(
-          REFLECTION_PROBE_AMBIENT_RENDER_SIZE,
-          { type: UnsignedByteType }
-        )
+        const ambientCubeRenderTarget = needsProbeAmbientCapture
+          ? new WebGLCubeRenderTarget(
+              REFLECTION_PROBE_AMBIENT_RENDER_SIZE,
+              { type: UnsignedByteType }
+            )
+          : null
         const cubeCamera = new CubeCamera(0.1, REFLECTION_PROBE_FAR, cubeRenderTarget)
-        const ambientCubeCamera = new CubeCamera(0.1, REFLECTION_PROBE_FAR, ambientCubeRenderTarget)
+        const ambientCubeCamera = ambientCubeRenderTarget
+          ? new CubeCamera(0.1, REFLECTION_PROBE_FAR, ambientCubeRenderTarget)
+          : null
         const captureCounts = {
           billboard: 0,
           ground: 0,
@@ -2974,8 +2984,8 @@ function EnvironmentLighting({
           probe.position.z
         )
         cubeCamera.layers.enable(TORCH_BILLBOARD_LAYER)
-        ambientCubeCamera.position.copy(cubeCamera.position)
-        ambientCubeCamera.layers.enable(TORCH_BILLBOARD_LAYER)
+        ambientCubeCamera?.position.copy(cubeCamera.position)
+        ambientCubeCamera?.layers.enable(TORCH_BILLBOARD_LAYER)
         scene.traverse((object) => {
           if (!(object instanceof Mesh)) {
             return
@@ -3006,9 +3016,11 @@ function EnvironmentLighting({
         scene.add(cubeCamera)
         cubeCamera.update(gl, scene)
         scene.remove(cubeCamera)
-        scene.add(ambientCubeCamera)
-        ambientCubeCamera.update(gl, scene)
-        scene.remove(ambientCubeCamera)
+        if (ambientCubeCamera) {
+          scene.add(ambientCubeCamera)
+          ambientCubeCamera.update(gl, scene)
+          scene.remove(ambientCubeCamera)
+        }
         for (const entry of originalMeshCallbacks) {
           entry.mesh.onBeforeRender = entry.onBeforeRender
         }
@@ -3016,49 +3028,26 @@ function EnvironmentLighting({
         nextTargets[probeIndex] = pmremGenerator.fromCubemap(cubeRenderTarget.texture)
         nextRawTargets[probeIndex] = cubeRenderTarget
         nextProbeCaptureCounts[probeIndex] = { ...captureCounts }
-        const probeDebugStats = computeCubeRenderTargetDebugStats(gl, ambientCubeRenderTarget)
-        let rawProbeDebugStats: ProbeMetric | null = null
-        let rawProbeReadbackError: string | null = null
+        if (ambientCubeRenderTarget) {
+          const probeDebugStats = computeCubeRenderTargetDebugStats(gl, ambientCubeRenderTarget)
 
-        if (isCubeRenderTargetReadbackSupported(cubeRenderTarget)) {
-          try {
-            rawProbeDebugStats = computeCubeRenderTargetDebugStats(gl, cubeRenderTarget)
-          } catch (error) {
-            rawProbeReadbackError =
-              error instanceof Error
-                ? error.message
-                : String(error)
+          nextProbeAmbientColors[probeIndex] = probeDebugStats.averageColor
+          nextProbeMetrics[probeIndex] = {
+            darkest: probeDebugStats.darkest,
+            faceCenterColors: probeDebugStats.faceCenterColors.map((color) => ({ ...color })),
+            faceGridColors: probeDebugStats.faceGridColors.map((face) =>
+              face.map((color) => ({ ...color }))
+            ),
+            luminanceStdDev: probeDebugStats.luminanceStdDev,
+            nonWhiteFraction: probeDebugStats.nonWhiteFraction,
+            warmFraction: probeDebugStats.warmFraction
           }
         } else {
-          rawProbeReadbackError =
-            `three.js WebGL readRenderTargetPixels only supports UnsignedByteType targets; raw probe target type ${cubeRenderTarget.texture.type} is not directly readable`
+          nextProbeAmbientColors[probeIndex] = fogAmbientColor.clone()
+          nextProbeMetrics[probeIndex] = null
         }
-
-        nextProbeAmbientColors[probeIndex] = probeDebugStats.averageColor
-        nextProbeMetrics[probeIndex] = {
-          darkest: probeDebugStats.darkest,
-          faceCenterColors: probeDebugStats.faceCenterColors.map((color) => ({ ...color })),
-          faceGridColors: probeDebugStats.faceGridColors.map((face) =>
-            face.map((color) => ({ ...color }))
-          ),
-          luminanceStdDev: probeDebugStats.luminanceStdDev,
-          nonWhiteFraction: probeDebugStats.nonWhiteFraction,
-          warmFraction: probeDebugStats.warmFraction
-        }
-        nextProbeRawMetrics[probeIndex] =
-          rawProbeDebugStats
-            ? {
-                darkest: rawProbeDebugStats.darkest,
-                faceCenterColors: rawProbeDebugStats.faceCenterColors.map((color) => ({ ...color })),
-                faceGridColors: rawProbeDebugStats.faceGridColors.map((face) =>
-                  face.map((color) => ({ ...color }))
-                ),
-                luminanceStdDev: rawProbeDebugStats.luminanceStdDev,
-                nonWhiteFraction: rawProbeDebugStats.nonWhiteFraction,
-                warmFraction: rawProbeDebugStats.warmFraction
-              }
-            : null
-        nextProbeRawReadbackErrors[probeIndex] = rawProbeReadbackError
+        nextProbeRawMetrics[probeIndex] = null
+        nextProbeRawReadbackErrors[probeIndex] = null
         nextProbeRawTextureSummaries[probeIndex] = {
           ...getCubeTextureFaceSize(cubeRenderTarget.texture),
           colorSpace:
@@ -3071,7 +3060,7 @@ function EnvironmentLighting({
           minFilter: cubeRenderTarget.texture.minFilter,
           type: cubeRenderTarget.texture.type
         }
-        ambientCubeRenderTarget.dispose()
+        ambientCubeRenderTarget?.dispose()
       }
 
       const finishBake = () => {
@@ -3109,14 +3098,14 @@ function EnvironmentLighting({
         bakeHandle = window.setTimeout(
           bakeNextProbe,
           startupProbeIndices.every((startupProbeIndex) => Boolean(nextTargets[startupProbeIndex]))
-            ? 500
-            : 0
+            ? REFLECTION_PROBE_BACKGROUND_CAPTURE_DELAY_MS
+            : REFLECTION_PROBE_STARTUP_CAPTURE_DELAY_MS
         )
       }
 
       bakeNextProbe()
     }
-    bakeHandle = window.setTimeout(attemptBake, 0)
+    bakeHandle = window.setTimeout(attemptBake, REFLECTION_PROBE_STARTUP_DELAY_MS)
 
     return () => {
       cancelled = true
@@ -3161,6 +3150,8 @@ function EnvironmentLighting({
     onReflectionProbeTexturesChange,
     pmremGenerator,
     calibratedIntensity,
+    fogAmbientColor,
+    needsProbeAmbientCapture,
     scene
   ])
 
@@ -3230,7 +3221,6 @@ function GroundSurfaceMaterial({
 }
 
 function GroundPatchMesh({
-  bakedLightmapsEnabled,
   debugIndex,
   environmentTexture,
   environmentIntensity,
@@ -3239,9 +3229,9 @@ function GroundPatchMesh({
   maps,
   probeBlend,
   rect,
+  surfaceLightmapsEnabled,
   torchCandelaMultiplier
 }: {
-  bakedLightmapsEnabled: boolean
   debugIndex: number
   environmentTexture: Texture | null
   environmentIntensity: number
@@ -3250,6 +3240,7 @@ function GroundPatchMesh({
   maps: PbrMaps
   probeBlend: ProbeBlendConfig
   rect: GroundPatchRect
+  surfaceLightmapsEnabled: boolean
   torchCandelaMultiplier: number
 }) {
   const geometry = useMemo(
@@ -3266,12 +3257,12 @@ function GroundPatchMesh({
   const patchConfig = useMemo(
     () => ({
       lightMapAmbientTint:
-        bakedLightmapsEnabled && probeBlend.mode !== 'world'
-          ? WHITE_COLOR
+        surfaceLightmapsEnabled && probeBlend.mode !== 'world'
+          ? LIGHTMAP_AMBIENT_TINT
           : BLACK_COLOR,
       lightMapTorchTint: TORCH_LIGHTMAP_TINT
     }),
-    [bakedLightmapsEnabled, probeBlend.mode]
+    [probeBlend.mode, surfaceLightmapsEnabled]
   )
 
   return (
@@ -3288,9 +3279,9 @@ function GroundPatchMesh({
       <GroundSurfaceMaterial
         globalEnvMap={environmentTexture}
         globalEnvMapIntensity={environmentIntensity}
-        lightMap={bakedLightmapsEnabled ? groundLightmapTexture : undefined}
+        lightMap={surfaceLightmapsEnabled ? groundLightmapTexture : undefined}
         lightMapIntensity={
-          bakedLightmapsEnabled
+          surfaceLightmapsEnabled
             ? torchCandelaMultiplier * FLOOR_LIGHTMAP_INTENSITY_SCALE
             : 0
         }
@@ -3345,47 +3336,46 @@ function Ground({
         />
       </mesh>
       {groundPatchRects.map((rect, index) => (
-        <GroundPatchMesh
-          bakedLightmapsEnabled={bakedLightmapsEnabled}
-          debugIndex={index}
-          environmentTexture={environmentTexture}
-          environmentIntensity={environmentIntensity}
-          groundBounds={layout.maze.lightmap.groundBounds}
-          groundLightmapTexture={groundLightmapTexture}
-          key={rect.id}
-          maps={puddle}
-          probeBlend={(() => {
-            const probeTextures = rect.probeIndices.map(
-              (probeIndex) => reflectionProbeTextures[probeIndex] ?? null
-            )
-            const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
-            const useProbeDiffuse =
-              probeIblEnabled &&
-              reflectionCapturesEnabled &&
-              hasProbeTextures
+        (() => {
+          const probeTextures = rect.probeIndices.map(
+            (probeIndex) => reflectionProbeTextures[probeIndex] ?? null
+          )
+          const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
+          const useProbeIbl =
+            probeIblEnabled &&
+            reflectionCapturesEnabled &&
+            hasProbeTextures
+          const surfaceLightmapsEnabled = bakedLightmapsEnabled && !useProbeIbl
 
-            return buildProbeBlendConfig(
-              layout,
-              rect.probeIndices,
-              probeTextures,
-              useProbeDiffuse
-                ? 'world'
-                : bakedLightmapsEnabled
-                  ? 'disabled'
-                  : 'none',
-              {
-                radianceMode:
-                  reflectionCapturesEnabled &&
-                  hasProbeTextures
-                    ? 'world'
-                    : 'none',
-                region: rect.region
-              }
-            )
-          })()}
-          rect={rect}
-          torchCandelaMultiplier={torchCandelaMultiplier}
-        />
+          return (
+            <GroundPatchMesh
+              debugIndex={index}
+              environmentTexture={environmentTexture}
+              environmentIntensity={environmentIntensity}
+              groundBounds={layout.maze.lightmap.groundBounds}
+              groundLightmapTexture={groundLightmapTexture}
+              key={rect.id}
+              maps={puddle}
+              probeBlend={buildProbeBlendConfig(
+                layout,
+                rect.probeIndices,
+                probeTextures,
+                useProbeIbl ? 'world' : 'disabled',
+                {
+                  radianceMode:
+                    reflectionCapturesEnabled &&
+                    hasProbeTextures
+                      ? 'world'
+                      : 'none',
+                  region: rect.region
+                }
+              )}
+              rect={rect}
+              surfaceLightmapsEnabled={surfaceLightmapsEnabled}
+              torchCandelaMultiplier={torchCandelaMultiplier}
+            />
+          )
+        })()
       ))}
     </>
   )
@@ -4411,22 +4401,7 @@ void main() {
 }
 `
 
-const REFLECTION_PROBE_DEBUG_TONEMAP_GLSL = `
-vec3 debugTonemap(vec3 color) {
-  const float debugExposure = 1.5;
-  const float debugWhitePoint = 24.0;
-  color = max(color * debugExposure, vec3(0.0));
-  return clamp(
-    log2(vec3(1.0) + color) / log2(vec3(1.0 + debugWhitePoint)),
-    vec3(0.0),
-    vec3(1.0)
-  );
-}
-`
-
-function createProcessedReflectionProbeFragmentShader(options: {
-  toneMap?: boolean
-}) {
+function createProcessedReflectionProbeFragmentShader() {
   return `
 uniform int faceIndex;
 uniform sampler2D probeCubeUvMap;
@@ -4434,7 +4409,6 @@ uniform sampler2D probeCubeUvMap;
 varying vec2 vUv;
 
 ${PROBE_CUBEUV_SAMPLING_GLSL}
-${options.toneMap === false ? '' : REFLECTION_PROBE_DEBUG_TONEMAP_GLSL}
 
 vec3 getFaceDirection(int face, vec2 uv) {
   vec2 p = (uv * 2.0) - 1.0;
@@ -4467,11 +4441,7 @@ void main() {
     PROBE_CUBEUV_TEXEL_HEIGHT,
     PROBE_CUBEUV_MAX_MIP
   );
-  ${
-    options.toneMap === false
-      ? 'gl_FragColor = vec4(texel.rgb, 1.0);'
-      : 'gl_FragColor = vec4(debugTonemap(texel.rgb), 1.0);'
-  }
+  gl_FragColor = vec4(texel.rgb, 1.0);
   #include <colorspace_fragment>
 }
 `
@@ -4484,7 +4454,6 @@ uniform sampler2D probeCubeUvMap;
 varying vec3 vProbeDirection;
 
 ${PROBE_CUBEUV_SAMPLING_GLSL}
-${REFLECTION_PROBE_DEBUG_TONEMAP_GLSL}
 
 void main() {
   vec4 texel = probeBlendTextureCubeUV(
@@ -4495,50 +4464,13 @@ void main() {
     PROBE_CUBEUV_TEXEL_HEIGHT,
     PROBE_CUBEUV_MAX_MIP
   );
-  gl_FragColor = vec4(debugTonemap(texel.rgb), 1.0);
+  gl_FragColor = vec4(texel.rgb, 1.0);
   #include <colorspace_fragment>
 }
 `
 }
 
 const REFLECTION_PROBE_ATLAS_FRAGMENT_SHADER = `
-uniform int faceIndex;
-uniform samplerCube probeCubeMap;
-
-varying vec2 vUv;
-
-${REFLECTION_PROBE_DEBUG_TONEMAP_GLSL}
-
-vec3 getFaceDirection(int face, vec2 uv) {
-  vec2 p = (uv * 2.0) - 1.0;
-
-  if (face == 0) {
-    return normalize(vec3(1.0, -p.y, -p.x));
-  }
-  if (face == 1) {
-    return normalize(vec3(-1.0, -p.y, p.x));
-  }
-  if (face == 2) {
-    return normalize(vec3(p.x, 1.0, p.y));
-  }
-  if (face == 3) {
-    return normalize(vec3(p.x, -1.0, -p.y));
-  }
-  if (face == 4) {
-    return normalize(vec3(p.x, -p.y, 1.0));
-  }
-
-  return normalize(vec3(-p.x, -p.y, -1.0));
-}
-
-void main() {
-  vec4 texel = textureCube(probeCubeMap, getFaceDirection(faceIndex, vUv));
-  gl_FragColor = vec4(debugTonemap(texel.rgb), 1.0);
-  #include <colorspace_fragment>
-}
-`
-
-const REFLECTION_PROBE_ATLAS_RAW_FRAGMENT_SHADER = `
 uniform int faceIndex;
 uniform samplerCube probeCubeMap;
 
@@ -4576,10 +4508,7 @@ void main() {
 function captureCubeTextureAtlasDataUrls(
   gl: WebGLRenderer,
   probeTexture: Texture,
-  size: number,
-  options: {
-    toneMap?: boolean
-  } = {}
+  size: number
 ) {
   if (size <= 0) {
     return null
@@ -4590,10 +4519,7 @@ function captureCubeTextureAtlasDataUrls(
   const atlasMaterial = new ShaderMaterial({
     depthTest: false,
     depthWrite: false,
-    fragmentShader:
-      options.toneMap === false
-        ? REFLECTION_PROBE_ATLAS_RAW_FRAGMENT_SHADER
-        : REFLECTION_PROBE_ATLAS_FRAGMENT_SHADER,
+    fragmentShader: REFLECTION_PROBE_ATLAS_FRAGMENT_SHADER,
     uniforms: {
       faceIndex: { value: 0 },
       probeCubeMap: { value: probeTexture }
@@ -4664,10 +4590,7 @@ function captureCubeTextureAtlasDataUrls(
 function captureCubeUvTextureAtlasDataUrls(
   gl: WebGLRenderer,
   probeTexture: Texture,
-  size: number,
-  options: {
-    toneMap?: boolean
-  } = {}
+  size: number
 ) {
   if (size <= 0) {
     return null
@@ -4684,7 +4607,7 @@ function captureCubeUvTextureAtlasDataUrls(
   const atlasMaterial = new ShaderMaterial({
     depthTest: false,
     depthWrite: false,
-    fragmentShader: createProcessedReflectionProbeFragmentShader(options)
+    fragmentShader: createProcessedReflectionProbeFragmentShader()
       .replaceAll('PROBE_CUBEUV_TEXEL_WIDTH', textureInfo.texelWidth.toFixed(12))
       .replaceAll('PROBE_CUBEUV_TEXEL_HEIGHT', textureInfo.texelHeight.toFixed(12))
       .replaceAll('PROBE_CUBEUV_MAX_MIP', textureInfo.maxMip.toFixed(1)),
@@ -4903,10 +4826,6 @@ function MazeWallMesh({
     () => createWallGeometry(),
     []
   )
-  const lightMapIntensity =
-    bakedLightmapsEnabled
-      ? torchCandelaMultiplier * WALL_LIGHTMAP_INTENSITY_SCALE
-      : 0
   const reflectionProbeBlend = useMemo(
     () =>
       getReflectionProbeBlendForPosition(layout, {
@@ -4923,19 +4842,24 @@ function MazeWallMesh({
     [reflectionProbeBlend.probeIndices, reflectionProbeTextures]
   )
   const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
-  const useProbeDiffuse =
+  const useProbeIbl =
     probeIblEnabled &&
     reflectionCapturesEnabled &&
     hasProbeTextures
+  const surfaceLightmapsEnabled = bakedLightmapsEnabled && !useProbeIbl
+  const lightMapIntensity =
+    surfaceLightmapsEnabled
+      ? torchCandelaMultiplier * WALL_LIGHTMAP_INTENSITY_SCALE
+      : 0
   const faceMaterialPatchConfig = useMemo(
     () => ({
       lightMapAmbientTint:
-        bakedLightmapsEnabled && !useProbeDiffuse
-          ? WHITE_COLOR
+        surfaceLightmapsEnabled
+          ? LIGHTMAP_AMBIENT_TINT
           : BLACK_COLOR,
       lightMapTorchTint: TORCH_LIGHTMAP_TINT
     }),
-    [bakedLightmapsEnabled, useProbeDiffuse]
+    [surfaceLightmapsEnabled]
   )
   const probeBlend = useMemo(
     () =>
@@ -4943,11 +4867,7 @@ function MazeWallMesh({
         layout,
         reflectionProbeBlend.probeIndices,
         probeTextures,
-        useProbeDiffuse
-          ? 'constant'
-          : bakedLightmapsEnabled
-            ? 'disabled'
-            : 'none',
+        useProbeIbl ? 'constant' : 'disabled',
         {
           radianceMode:
             reflectionCapturesEnabled &&
@@ -4958,9 +4878,9 @@ function MazeWallMesh({
         }
       ),
     [
-      bakedLightmapsEnabled,
       layout,
-      useProbeDiffuse,
+      surfaceLightmapsEnabled,
+      useProbeIbl,
       reflectionCapturesEnabled,
       probeTextures,
       reflectionProbeBlend.probeIndices,
@@ -5004,7 +4924,7 @@ function MazeWallMesh({
         attach="material-0"
         environmentIntensity={envMapIntensity}
         environmentTexture={environmentTexture}
-        lightMap={bakedLightmapsEnabled ? lightmapTextures.neutral : undefined}
+        lightMap={surfaceLightmapsEnabled ? lightmapTextures.neutral : undefined}
         lightMapIntensity={lightMapIntensity}
         materialKey={`${wallFaceMaterialBaseKey}:material-0`}
         maps={wallMaterialMaps}
@@ -5015,7 +4935,7 @@ function MazeWallMesh({
         attach="material-1"
         environmentIntensity={envMapIntensity}
         environmentTexture={environmentTexture}
-        lightMap={bakedLightmapsEnabled ? lightmapTextures.neutral : undefined}
+        lightMap={surfaceLightmapsEnabled ? lightmapTextures.neutral : undefined}
         lightMapIntensity={lightMapIntensity}
         materialKey={`${wallFaceMaterialBaseKey}:material-1`}
         maps={wallMaterialMaps}
@@ -5026,7 +4946,7 @@ function MazeWallMesh({
         attach="material-2"
         environmentIntensity={envMapIntensity}
         environmentTexture={environmentTexture}
-        lightMap={bakedLightmapsEnabled ? lightmapTextures.neutral : undefined}
+        lightMap={surfaceLightmapsEnabled ? lightmapTextures.neutral : undefined}
         lightMapIntensity={lightMapIntensity}
         materialKey={`${wallFaceMaterialBaseKey}:material-2`}
         maps={wallMaterialMaps}
@@ -5037,7 +4957,7 @@ function MazeWallMesh({
         attach="material-3"
         environmentIntensity={envMapIntensity}
         environmentTexture={environmentTexture}
-        lightMap={bakedLightmapsEnabled ? lightmapTextures.neutral : undefined}
+        lightMap={surfaceLightmapsEnabled ? lightmapTextures.neutral : undefined}
         lightMapIntensity={lightMapIntensity}
         materialKey={`${wallFaceMaterialBaseKey}:material-3`}
         maps={wallMaterialMaps}
@@ -5048,7 +4968,7 @@ function MazeWallMesh({
         attach="material-4"
         environmentIntensity={envMapIntensity}
         environmentTexture={environmentTexture}
-        lightMap={bakedLightmapsEnabled ? lightmapTextures.pz : undefined}
+        lightMap={surfaceLightmapsEnabled ? lightmapTextures.pz : undefined}
         lightMapIntensity={lightMapIntensity}
         materialKey={`${wallFaceMaterialBaseKey}:material-4`}
         maps={wallMaterialMaps}
@@ -5059,7 +4979,7 @@ function MazeWallMesh({
         attach="material-5"
         environmentIntensity={envMapIntensity}
         environmentTexture={environmentTexture}
-        lightMap={bakedLightmapsEnabled ? lightmapTextures.nz : undefined}
+        lightMap={surfaceLightmapsEnabled ? lightmapTextures.nz : undefined}
         lightMapIntensity={lightMapIntensity}
         materialKey={`${wallFaceMaterialBaseKey}:material-5`}
         maps={wallMaterialMaps}
@@ -6303,7 +6223,10 @@ function Scene({
   onAssetsReady: () => void
   visualSettings: VisualSettings
 }) {
+  recordStartupMarker('sceneRenderStartedAt')
+
   useEffect(() => {
+    recordStartupMarker('sceneMountedAt')
     onAssetsReady()
   }, [onAssetsReady])
 
@@ -6592,9 +6515,7 @@ function Scene({
         geometryCamera.update(gl, scene)
         scene.remove(geometryCamera)
 
-        return captureCubeTextureAtlasDataUrls(gl, geometryTarget.texture, size, {
-          toneMap: false
-        })
+        return captureCubeTextureAtlasDataUrls(gl, geometryTarget.texture, size)
       } finally {
         scene.background = savedBackground
         scene.environment = savedEnvironment
@@ -6775,6 +6696,7 @@ function Scene({
       <EnvironmentLighting
         iblIntensity={visualSettings.iblIntensity}
         layout={layout}
+        volumetricLighting={visualSettings.volumetricLighting}
         onEnvironmentFogColorChange={setEnvironmentFogColor}
         onEnvironmentTextureChange={setEnvironmentTexture}
         onReflectionProbeAmbientColorsChange={setReflectionProbeAmbientColors}
@@ -7467,21 +7389,16 @@ export default function App() {
   const composerEnabled = true
 
   useEffect(() => {
+    document.getElementById('bootstrap-loading-shell')?.remove()
+  }, [])
+
+  useEffect(() => {
     let cancelled = false
 
     const loadLayout = async () => {
       setSceneLoaded(false)
-
-      const debugLayout = requestedMazeId
-        ? getDebugMazeLayoutById(requestedMazeId)
-        : null
-
-      if (debugLayout) {
-        if (!cancelled) {
-          setMazeLayout(debugLayout)
-        }
-        return
-      }
+      document.body.dataset.mazeLayoutRequestedAt = performance.now().toFixed(1)
+      document.body.dataset.requestedMazeId = requestedMazeId ?? 'random'
 
       const nextLayout =
         (requestedMazeId
@@ -7490,6 +7407,7 @@ export default function App() {
         await loadRandomMazeLayout()
 
       if (!cancelled) {
+        document.body.dataset.mazeLayoutLoadedAt = performance.now().toFixed(1)
         setMazeLayout(nextLayout)
       }
     }
@@ -7498,6 +7416,7 @@ export default function App() {
 
     return () => {
       cancelled = true
+      document.body.dataset.mazeLayoutCancelledAt = performance.now().toFixed(1)
     }
   }, [requestedMazeId])
 
@@ -7692,6 +7611,7 @@ export default function App() {
   }
 
   const onAssetsReady = () => {
+    recordStartupMarker('sceneAssetsReadyAt')
     setSceneLoaded(true)
   }
 
@@ -7750,6 +7670,7 @@ export default function App() {
           dpr={[1, 2]}
           gl={{ antialias: true }}
           onCreated={({ gl }) => {
+            recordStartupMarker('canvasCreatedAt')
             gl.outputColorSpace = SRGBColorSpace
             gl.toneMapping = NoToneMapping
             gl.toneMappingExposure = 1

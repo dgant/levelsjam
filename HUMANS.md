@@ -29,8 +29,10 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Run `npm run test:smoke` to exercise the built page through Playwright.
 - Run `npm run test:smoke:runner` when `npm run build:pages` has already prepared the root-published bundle.
 - Run `npm run test:render:integration` when you need the slower full-scene Playwright coverage for reflection, fog, and extended debug-control behavior.
+- `npm run test:render:integration` writes phase and screenshot timing data to `logs/latest-render-integration-profile.json`.
 - Run `npm run test:probe-occlusion` to dump the synthetic `3x3` probe-capture artifacts under `logs/probe-occlusion-artifacts/` and verify that the sealed center probe does not see any torch signature beyond the no-lights skybox baseline.
 - Run `npm run ensure:mazes` to refresh persisted mazes, baked lightmap artifacts, and per-maze reflection-probe dumps under `logs/lightmap-artifacts/<maze-id>/reflection-probes/`.
+- Treat `logs/lightmap-artifacts/<maze-id>/` as the canonical human-inspection output for the current persisted maze lighting data. After any persisted-maze rebake, expect the lightmap PNGs and reflection-probe PNGs there to be current rather than stale.
 - Treat a scene that shows only the HDRI skybox and flame billboards as a render failure; the smoke test now checks that a real maze wall writes visible beauty-pass color.
 - `npm run test:perf` is temporarily disabled while the static baked-lightmap torch-lighting evaluation is under way.
 - Run the maze-generation validation script or its test entrypoint whenever maze files or maze rules change so persisted mazes keep their baked lightmaps in sync.
@@ -74,9 +76,9 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify toggling `Reflection Captures` produces a visible change on an in-maze reflective floor patch.
 - Verify enabling `Show Reflection Probes` draws a probe sphere at each maze probe position.
 - Verify the reflection-probe spheres directly display the processed local reflection source used by in-game materials and visibly show nearby maze geometry and torch reflections rather than a black sphere, an empty sphere, or a nearly all-sky capture.
-- Verify the reflection-probe spheres remain readable regardless of the gameplay exposure slider because their preview uses a fixed neutral diagnostic tone map.
+- Verify the reflection-probe spheres do not apply any extra tone mapping, exposure compensation, or arbitrary gain beyond normal output color-space conversion.
 - Verify `window.__levelsjamDebug.getReflectionProbeState()` reports a nonzero probe count and becomes `ready: true` after load.
-- For deeper probe debugging, call `window.__levelsjamDebug.captureReflectionProbeAtlas(probeIndex, size)` in the browser console to get six PNG data URLs for the exact raw captured cubemap faces after the fixed diagnostic tone map.
+- For deeper probe debugging, call `window.__levelsjamDebug.captureReflectionProbeAtlas(probeIndex, size)` in the browser console to get six PNG data URLs for the exact raw captured cubemap faces.
 - For deeper runtime-reflection debugging, call `window.__levelsjamDebug.captureReflectionProbeProcessedAtlas(probeIndex, size)` in the browser console to get six PNG data URLs for the processed probe texture that reflective materials actually sample in-game.
 - For direct source-binding debugging, call `window.__levelsjamDebug.getReflectionProbeTextureState(probeIndex)` to inspect the exact runtime raw and processed probe texture UUIDs bound for that probe.
 - For debug-sphere binding checks, enable `Show Reflection Probes` and call `window.__levelsjamDebug.getReflectionProbeVisualizationState(probeIndex)` to confirm the overlay sphere is using the same processed probe texture UUID.
@@ -127,7 +129,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify the loaded scene uses one of the persisted maze files instead of the previous random wall field.
 - Verify the repository contains at least five valid maze files, that each maze file includes baked lightmap data, and that maze topology generation remains under 100ms before the later bake step.
 - Benchmark startup with `npm run bench:startup` and test duration with `npm run bench:tests` before handoff.
-- Inspect `logs/latest-test-benchmark.json`, `logs/latest-unit-test-profile.json`, and `logs/latest-smoke-profile.json` after `npm run bench:tests` so the slowest scripts and smoke phases are identified from measurements rather than guessed.
+- Inspect `logs/latest-test-benchmark.json`, `logs/latest-unit-test-profile.json`, `logs/latest-smoke-profile.json`, and `logs/latest-render-integration-profile.json` after `npm run bench:tests` so the slowest scripts and browser-test phases are identified from measurements rather than guessed.
 - Treat duration regressions as blocking issues.
 - Treat the temporary `test:perf` disablement as intentional until the static baked-lightmap torch-lighting evaluation ends.
 - Keep `npm run test:unit` under 20 seconds.

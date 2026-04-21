@@ -77,10 +77,11 @@
 - Maze generation writes lightmap diagnostic artifact textures to a non-source-controlled inspection directory so a human can review the baked wall and floor outputs.
 - Maze artifact generation also writes per-maze reflection-probe capture dumps into the same non-source-controlled inspection directory so a human can inspect the exact runtime cubemap faces used by local reflections.
 - Each maze artifact directory includes raw, processed-runtime, and geometry-only reflection-probe face PNGs for every probe rather than storing those probe diagnostics in a separate unrelated artifact tree.
+- Refreshing persisted maze lighting regenerates the inspectable PNG artifact set for the current mazes under `logs/lightmap-artifacts` so the human-readable lightmap and reflection-capture outputs stay in sync with the latest baked maze data.
 - The repository includes a source-controlled synthetic `3x3` reflection diagnostic maze for probe-occlusion tests.
 - The synthetic `3x3` reflection diagnostic mazes place their torches on outer-facing cell walls so the sealed center probe has no direct view of any torch-lit wall face.
 - Reflection probe debug visualization displays the actual processed local reflection source used by the runtime shading path directly on the debug spheres so a human can inspect what reflective materials are sampling in-game.
-- Reflection probe debug visualization uses a fixed neutral preview tone map rather than the gameplay exposure control so bright captured sources do not wash out the diagnostic view.
+- Reflection probe debug visualization presents that reflection source raw, without additional tone mapping, exposure compensation, or arbitrary gain multipliers.
 - Reflection probe debugging exposes an on-demand geometry-only cubemap capture against a black background so capture-stage maze visibility can be verified independently from later probe filtering or beauty-pass shading.
 - The top of each wall sconce aligns to the bottom of its torch billboard by default so the flame billboard does not appear to float above the fixture.
 - Screen-space ambient occlusion controls visibly affect the scene when enabled.
@@ -145,11 +146,17 @@
 ## Loading And Startup
 - The page shows a centered loading overlay before the scene becomes visible.
 - The initial HTML response includes the loading overlay shell so `MINOTAUR` and `Entering the labyrinth...` appear immediately before the React app and maze payload finish loading.
+- The initial loading shell is rendered outside the React root so its first paint does not wait for React startup.
+- The initial loading shell yields one browser paint before the main app module is requested so the shell is visible immediately instead of being delayed by app bootstrap work.
+- The initial loading shell becomes visible in under 1 second from navigation start on the project’s enforced startup benchmark.
 - The loading overlay shows an `h1` with the text `MINOTAUR`.
 - The loading overlay shows an `h2` with the text `Entering the labyrinth...`.
 - The loading overlay animates the trailing dots on the subtitle through `1`, `2`, `3`, `1`, `2`, `3` at 0.25 second intervals.
+- The loading-overlay dot animation does not rely on JavaScript timers and remains visually smooth while the app bundle and maze payload load.
+- The animated ellipsis aligns on the same baseline as the rest of the loading subtitle text instead of floating higher than the letters.
 - The loading subtitle keeps a consistent total width while the trailing dots animate.
 - The loading overlay remains visible until the scene assets have loaded.
+- The loading overlay becomes eligible to start its fade-out in under 5 seconds from navigation start on the project’s enforced startup benchmark.
 - Persisted maze definitions and their baked lightmap payloads load outside the initial app bundle rather than being parsed eagerly before the loading overlay can appear.
 - Once the scene assets have loaded, the loading text fades out over 2 seconds.
 - Once the scene assets have loaded, the viewport fades in over the same 2 second interval.
@@ -183,9 +190,10 @@
 - The ground and walls use extracted PBR texture packs with tiling based on a 1 meter world scale unless a source specifies otherwise.
 - Maze wall materials do not add direct runtime scene-environment IBL on top of their baked diffuse lightmaps.
 - Lightmapped maze walls and the baked maze floor patch do not receive direct runtime global-HDRI diffuse lighting; their diffuse ambient comes from the baked lightmap ambient channel when probe IBL is disabled, or from local probe IBL when probe IBL is enabled.
+- Reflection probe captures, processed reflection-probe textures, and baked lightmaps remain raw lighting captures and are not tone-mapped or manually re-scaled for runtime use, debug previews, or exported inspection artifacts.
 - Reflective and semi-reflective materials read from the shared environment consistently, with the nearest local maze reflection probe taking precedence over the global HDRI for in-maze specular.
 - Enabling `Probe IBL` allows lit PBR maze geometry, including walls, to receive probe-driven local image-based lighting instead of relying only on the global HDRI fallback.
-- Enabling `Probe IBL` on baked maze geometry replaces the baked ambient-lightmap diffuse contribution with probe-driven local diffuse IBL while preserving the baked torch-light term and the reflective specular path.
+- Enabling `Probe IBL` on baked maze geometry replaces the baked surface-lightmap contribution with probe-driven local diffuse IBL so the toggle can be used to inspect a pure local-IBL alternative to surface lightmaps.
 - Disabling `Reflection Captures` makes the scene fall back to the global HDRI-only reflection path for materials that otherwise use local probe reflections.
 - The reflective maze floor patch uses local reflection probes so puddled areas can reflect nearby torch sources rather than only the global HDRI.
 - The reflective maze floor patch blends nearby local reflection probes with weighted interpolation rather than switching between one nearest probe per region.
@@ -195,6 +203,7 @@
 - Local reflection probes capture the baked maze lighting state so reflected maze surfaces remain consistent with the torch-lightmap shadows.
 - Local reflection probes also capture the authored HDRI sky where it is locally visible so disabling reflection captures does not reveal a completely different sky contribution.
 - Local reflection-probe captures preserve wall and sconce occlusion of torch emitters instead of showing torches through opaque maze walls.
+- Local reflection-probe captures preserve the authored brightness balance of the baked maze geometry and do not darken significantly relative to the approved capture baseline unless the authored bake itself changes.
 - The torch billboards face the camera continuously.
 - The torch billboards animate smoothly through the flipbook loop without lighting artifacts from scene lights.
 - The torch billboards are excluded from screen-space reflections.
