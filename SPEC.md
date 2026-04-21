@@ -81,7 +81,8 @@
 - The repository includes a source-controlled synthetic `3x3` reflection diagnostic maze for probe-occlusion tests.
 - The synthetic `3x3` reflection diagnostic mazes place their torches on outer-facing cell walls so the sealed center probe has no direct view of any torch-lit wall face.
 - Reflection probe debug visualization displays the actual processed local reflection source used by the runtime shading path directly on the debug spheres so a human can inspect what reflective materials are sampling in-game.
-- Reflection probe debug visualization presents that reflection source raw, without additional tone mapping, exposure compensation, or arbitrary gain multipliers.
+- Reflection probe debug visualization renders as ordinary non-colliding scene geometry rather than as a separately composited overlay so it can be compared directly against the lit scene.
+- Reflection probe debug visualization remains bound to the actual processed local reflection source used by the runtime shading path and otherwise follows the same exposure and post-tonemapping presentation path as the rest of the scene.
 - Reflection probe debugging exposes an on-demand geometry-only cubemap capture against a black background so capture-stage maze visibility can be verified independently from later probe filtering or beauty-pass shading.
 - The top of each wall sconce aligns to the bottom of its torch billboard by default so the flame billboard does not appear to float above the fixture.
 - Screen-space ambient occlusion controls visibly affect the scene when enabled.

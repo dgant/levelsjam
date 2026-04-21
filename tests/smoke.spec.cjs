@@ -228,6 +228,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   const resourceUrls = new Set()
   const timingProfile = createSmokeTimingProfile()
   const runStartedAt = Date.now()
+  let loadingCompleteAtMs = Number.NaN
+  let shellVisibleAtMs = Number.NaN
   activeSmokeTimingProfile = timingProfile
 
   page.on('console', (message) => {
@@ -244,13 +246,37 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     resourceUrls.add(response.url())
   })
 
-  const loadingOverlay = page.locator('.loading-overlay')
+  const bootstrapLoadingOverlay = page.locator('#bootstrap-loading-shell .loading-overlay')
+  const loadingOverlay = page.locator('#root .loading-overlay')
   const canvas = page.locator('canvas')
 
   await timedStep(timingProfile, 'startup', async () => {
-    await page.goto('/?maze=maze-001', { waitUntil: 'domcontentloaded' })
+    const response = await page.goto('/?maze=maze-001', { waitUntil: 'commit' })
+    shellVisibleAtMs = await page.evaluate(() => performance.now())
+    const initialHtml = await response.text()
+
+    expect(initialHtml).toContain('bootstrap-loading-shell')
+    expect(initialHtml).toContain('MINOTAUR')
+    expect(initialHtml).toContain('Entering the labyrinth')
+
     if (await loadingOverlay.count()) {
-      await expect(loadingOverlay).toBeVisible({ timeout: 5_000 })
+      await expect
+        .poll(
+          async () => page.evaluate(() => {
+            const dots = document.querySelector('.loading-overlay-dots')
+
+            if (!dots) {
+              return null
+            }
+
+            return getComputedStyle(dots, '::after').animationName
+          }),
+          {
+            timeout: 5_000,
+            intervals: [100, 250, 500]
+          }
+        )
+        .toBe('loading-overlay-dots')
       await expect
         .poll(
           async () => loadingOverlay.getAttribute('data-loading-complete'),
@@ -260,6 +286,11 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
           }
         )
         .toBe('true')
+      loadingCompleteAtMs = await page.evaluate(() => {
+        const marker = Number(document.body.dataset.loadingOverlayCompleteAt ?? 'NaN')
+
+        return Number.isFinite(marker) ? marker : performance.now()
+      })
       await expect(loadingOverlay).toHaveAttribute('aria-hidden', 'true')
     }
     await expect
@@ -299,7 +330,47 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByLabel('Probe IBL')).toBeVisible()
     await expect(page.getByLabel('Probe IBL')).not.toBeChecked()
     await expect(page.getByLabel('Reflection Captures')).toBeVisible()
+    await expect(page.getByLabel('Show Reflection Probes')).toBeVisible()
     await expect(page.getByRole('slider', { name: 'Move Speed' })).toBeVisible()
+
+    await setCheckbox(page, 'Show Reflection Probes', true)
+    await expect
+      .poll(
+        async () => page.evaluate(() => ({
+          probeTextureState:
+            window.__levelsjamDebug.getReflectionProbeTextureState?.(0) ?? null,
+          visualizationState:
+            window.__levelsjamDebug.getReflectionProbeVisualizationState?.(0) ?? null
+        })),
+        {
+          timeout: 5_000,
+          intervals: [100, 250, 500]
+        }
+      )
+      .toMatchObject({
+        probeTextureState: {
+          processedTextureUUID: expect.any(String)
+        },
+        visualizationState: {
+          depthTest: true,
+          depthWrite: true,
+          toneMapped: true,
+          uniformTextureUUID: expect.any(String),
+          visible: true
+        }
+      })
+    const probeVisualizationState = await page.evaluate(
+      () => ({
+        probeTextureState:
+          window.__levelsjamDebug.getReflectionProbeTextureState?.(0) ?? null,
+        visualizationState:
+          window.__levelsjamDebug.getReflectionProbeVisualizationState?.(0) ?? null
+      })
+    )
+    expect(
+      probeVisualizationState.visualizationState.uniformTextureUUID
+    ).toBe(probeVisualizationState.probeTextureState.processedTextureUUID)
+    await setCheckbox(page, 'Show Reflection Probes', false)
   })
 
   await timedStep(timingProfile, 'reflection-captures', async () => {
@@ -339,6 +410,27 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
           glValue: 1
         }
       })
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => ({
+            ground: window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4),
+            wall: window.__levelsjamDebug.getDebugMeshState('maze-wall', 10)
+          })
+        ),
+        {
+          timeout: 5_000,
+          intervals: [100, 250, 500]
+        }
+      )
+      .toMatchObject({
+        ground: {
+          hasLightMap: true
+        },
+        wall: {
+          hasLightMap: true
+        }
+      })
     await setCheckbox(page, 'Probe IBL', true)
     await expect
       .poll(
@@ -356,6 +448,27 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         },
         probeBlendRadianceMode: {
           glValue: 1
+        }
+      })
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => ({
+            ground: window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4),
+            wall: window.__levelsjamDebug.getDebugMeshState('maze-wall', 10)
+          })
+        ),
+        {
+          timeout: 5_000,
+          intervals: [100, 250, 500]
+        }
+      )
+      .toMatchObject({
+        ground: {
+          hasLightMap: false
+        },
+        wall: {
+          hasLightMap: false
         }
       })
     await expect
@@ -424,7 +537,9 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   })
 
   expect(consoleErrors).toEqual([])
-    expect(pageErrors).toEqual([])
+  expect(pageErrors).toEqual([])
+  expect(shellVisibleAtMs).toBeLessThan(1_000)
+  expect(loadingCompleteAtMs).toBeLessThan(5_000)
   expect(
     [...resourceUrls].some((url) => url.includes('overcast_soil_1k.hdr'))
   ).toBe(true)
@@ -446,5 +561,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     [...resourceUrls].some((url) => url.includes('waternormals.jpg'))
   ).toBe(false)
 
+  timingProfile.loadingCompleteAtMs = loadingCompleteAtMs
+  timingProfile.shellVisibleAtMs = shellVisibleAtMs
   timingProfile.totalRunMs = Date.now() - runStartedAt
 })

@@ -7,7 +7,7 @@ import {
   ToneMapping,
   Vignette
 } from '@react-three/postprocessing'
-import { Canvas, createPortal, useFrame, useLoader, useThree } from '@react-three/fiber'
+import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
 import {
   BasicShadowMap,
   BoxGeometry,
@@ -4177,14 +4177,14 @@ function ReflectionProbeVisualization({
           >
             <sphereGeometry args={[0.18, 16, 16]} />
             <shaderMaterial
-              depthTest={false}
-              depthWrite={false}
+              depthTest
+              depthWrite
               fragmentShader={createProcessedReflectionProbeSphereFragmentShader()
                 .replaceAll('PROBE_CUBEUV_TEXEL_WIDTH', textureInfo.texelWidth.toFixed(12))
                 .replaceAll('PROBE_CUBEUV_TEXEL_HEIGHT', textureInfo.texelHeight.toFixed(12))
                 .replaceAll('PROBE_CUBEUV_MAX_MIP', textureInfo.maxMip.toFixed(1))}
               side={DoubleSide}
-              toneMapped={false}
+              toneMapped
               uniforms={{
                 probeCubeUvMap: { value: texture }
               }}
@@ -4204,32 +4204,6 @@ function ReflectionProbeVisualization({
   )
 }
 
-function DebugOverlayRenderer({
-  overlayScene,
-  visible
-}: {
-  overlayScene: ThreeScene
-  visible: boolean
-}) {
-  const camera = useThree((state) => state.camera)
-  const gl = useThree((state) => state.gl)
-
-  useFrame(() => {
-    if (!visible || overlayScene.children.length === 0) {
-      return
-    }
-
-    const savedAutoClear = gl.autoClear
-
-    gl.autoClear = false
-    gl.clearDepth()
-    gl.render(overlayScene, camera)
-    gl.autoClear = savedAutoClear
-  }, 1000)
-
-  return null
-}
-
 function ReflectionProbeDebugOverlay({
   layout,
   reflectionProbeTextures,
@@ -4240,19 +4214,15 @@ function ReflectionProbeDebugOverlay({
   visible: boolean
 }) {
   const gl = useThree((state) => state.gl)
-  const overlayScene = useMemo(() => new ThreeScene(), [])
-
-  useEffect(
-    () => () => {
-      overlayScene.clear()
-    },
-    [overlayScene]
-  )
+  const scene = useThree((state) => state.scene)
 
   useEffect(() => {
     const globalWindow = window as Window & {
       __levelsjamDebug?: {
         getReflectionProbeVisualizationState?: (probeIndex: number) => {
+          depthTest: boolean | null
+          depthWrite: boolean | null
+          toneMapped: boolean | null
           uniformTextureUUID: string | null
           visible: boolean | null
         } | null
@@ -4271,11 +4241,14 @@ function ReflectionProbeDebugOverlay({
       ...existing,
       getReflectionProbeVisualizationState: (probeIndex: number) => {
         let match: {
+          depthTest: boolean | null
+          depthWrite: boolean | null
+          toneMapped: boolean | null
           uniformTextureUUID: string | null
           visible: boolean | null
         } | null = null
 
-        overlayScene.traverse((object) => {
+        scene.traverse((object) => {
           if (
             match ||
             !(object instanceof Mesh) ||
@@ -4291,6 +4264,18 @@ function ReflectionProbeDebugOverlay({
           }
 
           match = {
+            depthTest:
+              typeof object.material?.depthTest === 'boolean'
+                ? object.material.depthTest
+                : null,
+            depthWrite:
+              typeof object.material?.depthWrite === 'boolean'
+                ? object.material.depthWrite
+                : null,
+            toneMapped:
+              typeof object.material?.toneMapped === 'boolean'
+                ? object.material.toneMapped
+                : null,
             uniformTextureUUID:
               material.uniforms?.probeCubeUvMap?.value?.uuid ?? null,
             visible: object.visible
@@ -4308,7 +4293,7 @@ function ReflectionProbeDebugOverlay({
           }>
         } | null = null
 
-        overlayScene.traverse((object) => {
+        scene.traverse((object) => {
           if (
             match ||
             !(object instanceof Mesh) ||
@@ -4372,23 +4357,14 @@ function ReflectionProbeDebugOverlay({
         delete globalWindow.__levelsjamDebug
       }
     }
-  }, [gl, overlayScene])
+  }, [gl, scene])
 
   return (
-    <>
-      {createPortal(
-        <ReflectionProbeVisualization
-          layout={layout}
-          reflectionProbeTextures={reflectionProbeTextures}
-          visible={visible}
-        />,
-        overlayScene
-      )}
-      <DebugOverlayRenderer
-        overlayScene={overlayScene}
-        visible={visible}
-      />
-    </>
+    <ReflectionProbeVisualization
+      layout={layout}
+      reflectionProbeTextures={reflectionProbeTextures}
+      visible={visible}
+    />
   )
 }
 

@@ -76,7 +76,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify toggling `Reflection Captures` produces a visible change on an in-maze reflective floor patch.
 - Verify enabling `Show Reflection Probes` draws a probe sphere at each maze probe position.
 - Verify the reflection-probe spheres directly display the processed local reflection source used by in-game materials and visibly show nearby maze geometry and torch reflections rather than a black sphere, an empty sphere, or a nearly all-sky capture.
-- Verify the reflection-probe spheres do not apply any extra tone mapping, exposure compensation, or arbitrary gain beyond normal output color-space conversion.
+- Verify the reflection-probe spheres render as ordinary non-colliding scene geometry rather than as an overlay, so they depth-test against the scene and follow the same exposure path as the rest of the frame.
 - Verify `window.__levelsjamDebug.getReflectionProbeState()` reports a nonzero probe count and becomes `ready: true` after load.
 - For deeper probe debugging, call `window.__levelsjamDebug.captureReflectionProbeAtlas(probeIndex, size)` in the browser console to get six PNG data URLs for the exact raw captured cubemap faces.
 - For deeper runtime-reflection debugging, call `window.__levelsjamDebug.captureReflectionProbeProcessedAtlas(probeIndex, size)` in the browser console to get six PNG data URLs for the processed probe texture that reflective materials actually sample in-game.
