@@ -16,7 +16,6 @@ import {
   WALL_WIDTH
 } from './sceneConstants.js'
 import {
-  bakeMazeLightmap,
   getMazeSceneLayout
 } from './maze.js'
 import type { MazeLayout, WallBounds } from './sceneLayout.js'
@@ -39,150 +38,126 @@ export {
   WALL_WIDTH
 }
 
-type MazeModule = {
-  default: {
-    height: number
-    id: string
-    lightmap?: unknown
-    width: number
-  }
+type PersistedMaze = {
+  height: number
+  id: string
+  lightmap?: unknown
+  width: number
 }
 
-const mazeModuleLoaders = import.meta.glob<MazeModule>('../data/mazes/maze-*.js')
-const mazeModuleEntries = Object.entries(mazeModuleLoaders)
-  .map(([path, load]) => {
-    const match = path.match(/\/(maze-\d+)\.js$/)
+type MazeManifest = {
+  mazeIds: string[]
+}
 
-    if (!match) {
+const MAZE_DATA_BASE_URL = `${import.meta.env.BASE_URL}maze-data`
+const MAZE_MANIFEST_URL = `${MAZE_DATA_BASE_URL}/index.json`
+const AVAILABLE_MAZE_IDS: string[] = []
+let mazeManifestPromise: Promise<string[]> | null = null
+const mazeLayoutPromiseCache = new Map<string, Promise<MazeLayout | null>>()
+const loadedDebugMazes = new Map<string, PersistedMaze>()
+const DEBUG_MAZE_LOADERS = Object.freeze({
+  'debug-probe-occlusion-3x3-no-lights': () => import('../data/debug-mazes/debug-probe-occlusion-3x3-no-lights.js'),
+  'debug-probe-occlusion-3x3-open-north': () => import('../data/debug-mazes/debug-probe-occlusion-3x3-open-north.js'),
+  'debug-probe-occlusion-3x3-sealed': () => import('../data/debug-mazes/debug-probe-occlusion-3x3-sealed.js')
+} satisfies Record<string, () => Promise<{ default: PersistedMaze }>>)
+
+async function loadAvailableMazeIds() {
+  if (!mazeManifestPromise) {
+    mazeManifestPromise = fetch(MAZE_MANIFEST_URL)
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(
+            `Failed to load maze manifest from ${MAZE_MANIFEST_URL}: ${response.status}`
+          )
+        }
+
+        const manifest = await response.json() as MazeManifest
+        const mazeIds = Array.isArray(manifest.mazeIds)
+          ? manifest.mazeIds.filter((id): id is string => typeof id === 'string')
+          : []
+
+        AVAILABLE_MAZE_IDS.length = 0
+        AVAILABLE_MAZE_IDS.push(...mazeIds)
+        return [...AVAILABLE_MAZE_IDS]
+      })
+  }
+
+  return mazeManifestPromise
+}
+
+async function loadPersistedMaze(id: string) {
+  const loadDebugMaze = DEBUG_MAZE_LOADERS[id]
+
+  if (loadDebugMaze) {
+    const module = await loadDebugMaze()
+    const maze = module.default
+
+    loadedDebugMazes.set(id, maze)
+    return maze
+  }
+
+  const response = await fetch(`${MAZE_DATA_BASE_URL}/${id}.json`)
+
+  if (!response.ok) {
+    if (response.status === 404) {
       return null
     }
 
-    return {
-      id: match[1],
-      load
-    }
-  })
-  .filter((entry): entry is { id: string; load: () => Promise<MazeModule> } => Boolean(entry))
-  .sort((left, right) => left.id.localeCompare(right.id))
-
-export const AVAILABLE_MAZE_IDS = Object.freeze(
-  mazeModuleEntries.map((entry) => entry.id)
-)
-
-function buildDebugProbeOcclusionMaze(id: string, options: {
-  includeLights?: boolean
-  openCenterNorth?: boolean
-} = {}) {
-  const width = 3
-  const height = 3
-  const centerCell = { x: 1, y: 1 }
-  const openEdges = []
-
-  if (options.openCenterNorth) {
-    openEdges.push({
-      from: { x: 1, y: 0 },
-      to: { x: 1, y: 1 }
-    })
+    throw new Error(
+      `Failed to load maze payload ${id}: ${response.status}`
+    )
   }
 
-  const lights = options.includeLights === false
-    ? []
-    : (() => {
-        const placements = []
-
-        for (let y = 0; y < height; y += 1) {
-          for (let x = 0; x < width; x += 1) {
-            if (x === centerCell.x && y === centerCell.y) {
-              continue
-            }
-
-            let side: 'north' | 'east' | 'south' | 'west' = 'north'
-
-            if (x < centerCell.x) {
-              side = 'west'
-            } else if (x > centerCell.x) {
-              side = 'east'
-            } else if (y < centerCell.y) {
-              side = 'north'
-            } else {
-              side = 'south'
-            }
-
-            placements.push({
-              cell: { x, y },
-              side
-            })
-          }
-        }
-
-        return placements
-      })()
-
-  const maze = {
-    height,
-    id,
-    lights,
-    opening: {
-      cell: { x: -1, y: -1 },
-      side: 'north'
-    },
-    openEdges,
-    width
-  }
-
-  maze.lightmap = bakeMazeLightmap(maze)
-  return maze
+  return await response.json() as PersistedMaze
 }
 
-const DEBUG_MAZES = Object.freeze({
-  'debug-probe-occlusion-3x3-no-lights': Object.freeze(
-    buildDebugProbeOcclusionMaze('debug-probe-occlusion-3x3-no-lights', {
-      includeLights: false
-    })
-  ),
-  'debug-probe-occlusion-3x3-open-north': Object.freeze(
-    buildDebugProbeOcclusionMaze('debug-probe-occlusion-3x3-open-north', {
-      openCenterNorth: true
-    })
-  ),
-  'debug-probe-occlusion-3x3-sealed': Object.freeze(
-    buildDebugProbeOcclusionMaze('debug-probe-occlusion-3x3-sealed')
-  )
-})
-
 export function getDebugMazeLayoutById(id: string): MazeLayout | null {
-  const maze = DEBUG_MAZES[id as keyof typeof DEBUG_MAZES]
+  const maze = loadedDebugMazes.get(id)
 
-  if (!maze) {
-    return null
-  }
-
-  return getMazeSceneLayout(maze, SCONCE_RADIUS) as MazeLayout
+  return maze
+    ? getMazeSceneLayout(maze, SCONCE_RADIUS) as MazeLayout
+    : null
 }
 
 export async function loadMazeLayoutById(id: string): Promise<MazeLayout | null> {
-  const entry = mazeModuleEntries.find((candidate) => candidate.id === id)
+  const cached = mazeLayoutPromiseCache.get(id)
 
-  if (!entry) {
-    return null
+  if (cached) {
+    return cached
   }
 
-  const imported = await entry.load()
-  return getMazeSceneLayout(imported.default, SCONCE_RADIUS) as MazeLayout
+  const layoutPromise = (async () => {
+    const persistedMaze = await loadPersistedMaze(id)
+
+    if (!persistedMaze) {
+      return null
+    }
+
+    return getMazeSceneLayout(persistedMaze, SCONCE_RADIUS) as MazeLayout
+  })()
+
+  mazeLayoutPromiseCache.set(id, layoutPromise)
+  return layoutPromise
 }
 
 export async function loadRandomMazeLayout(
   random: () => number = Math.random
 ): Promise<MazeLayout> {
-  const index = Math.floor(random() * mazeModuleEntries.length)
-  const entry = mazeModuleEntries[index] ?? mazeModuleEntries[0]
+  const mazeIds = await loadAvailableMazeIds()
+  const index = Math.floor(random() * mazeIds.length)
+  const mazeId = mazeIds[index] ?? mazeIds[0]
 
-  if (!entry) {
+  if (!mazeId) {
     throw new Error('No persisted mazes are available')
   }
 
-  const imported = await entry.load()
-  return getMazeSceneLayout(imported.default, SCONCE_RADIUS) as MazeLayout
+  const layout = await loadMazeLayoutById(mazeId)
+
+  if (!layout) {
+    throw new Error(`Failed to load persisted maze ${mazeId}`)
+  }
+
+  return layout
 }
 
 export function getWallBounds(layout: MazeLayout): WallBounds[] {

@@ -77,9 +77,9 @@ async function captureMazeReflectionArtifacts(page, maze, artifactRoot) {
     waitUntil: 'domcontentloaded'
   })
   await page.waitForFunction(
-    () => window.__levelsjamDebug?.getReflectionProbeState?.()?.ready === true,
+    () => window.__levelsjamDebug?.getReflectionProbeState?.()?.complete === true,
     undefined,
-    { timeout: 180_000 }
+    { timeout: 600_000 }
   )
 
   const initialProbeState = await page.evaluate(

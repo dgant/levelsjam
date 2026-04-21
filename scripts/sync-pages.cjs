@@ -19,6 +19,10 @@ for (const { sourcePath, targetPath } of [
     targetPath: path.join(rootDir, 'assets')
   },
   {
+    sourcePath: path.join(publicDir, 'maze-data'),
+    targetPath: path.join(rootDir, 'maze-data')
+  },
+  {
     sourcePath: path.join(publicDir, 'textures'),
     targetPath: path.join(rootDir, 'textures')
   }

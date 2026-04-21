@@ -2,14 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  AUTHORED_LIGHTING_SOURCE_SCALE,
   DEFAULT_EXPOSURE_STOPS,
-  DEFAULT_IBL_INTENSITY_MULTIPLIER,
-  DEFAULT_TORCH_CANDELA_MULTIPLIER,
+  LEGACY_DEFAULT_EXPOSURE_STOPS,
   INTERNAL_LIGHT_UNIT_SCALE,
-  MAX_IBL_INTENSITY_MULTIPLIER,
-  MAX_TORCH_CANDELA_MULTIPLIER,
-  MIN_IBL_INTENSITY_MULTIPLIER,
-  MIN_TORCH_CANDELA_MULTIPLIER,
   getHdrLightingIntensity,
   getRendererExposure
 } from '../src/lib/lightingCalibration.js'
@@ -19,7 +15,7 @@ function almostEqual(actual, expected, epsilon = 1e-6) {
 }
 
 test('keeps neutral exposure at zero stops', () => {
-  assert.equal(DEFAULT_EXPOSURE_STOPS, -4.5)
+  assert.equal(DEFAULT_EXPOSURE_STOPS, 0)
   almostEqual(getRendererExposure(0), 1)
 })
 
@@ -34,13 +30,12 @@ test('maps exposure stops to renderer exposure', () => {
   )
 })
 
-test('exposes the ibl and torch control ranges', () => {
-  assert.equal(DEFAULT_IBL_INTENSITY_MULTIPLIER, 1)
-  assert.equal(DEFAULT_TORCH_CANDELA_MULTIPLIER, 1)
-  assert.equal(MIN_IBL_INTENSITY_MULTIPLIER, 0)
-  assert.equal(MAX_IBL_INTENSITY_MULTIPLIER, 16)
-  assert.equal(MIN_TORCH_CANDELA_MULTIPLIER, 0)
-  assert.equal(MAX_TORCH_CANDELA_MULTIPLIER, 16)
+test('preserves the legacy default exposure as authored source scale', () => {
+  assert.equal(LEGACY_DEFAULT_EXPOSURE_STOPS, -4.5)
+  almostEqual(
+    AUTHORED_LIGHTING_SOURCE_SCALE,
+    getRendererExposure(LEGACY_DEFAULT_EXPOSURE_STOPS)
+  )
 })
 
 test('uses a shared internal light-unit scale for HDRI', () => {

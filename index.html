@@ -73,14 +73,68 @@
       }
 
       .loading-overlay-dots {
-        display: inline-block;
+        display: inline-flex;
+        align-items: baseline;
         width: 3ch;
         text-align: left;
-        white-space: pre;
+        white-space: nowrap;
+        vertical-align: baseline;
+      }
+
+      .loading-overlay-dots::after {
+        content: '...';
+        display: inline-block;
+        line-height: 1;
+        vertical-align: baseline;
+        width: 1ch;
+        overflow: hidden;
+        animation: loading-overlay-dots 0.75s linear infinite;
+      }
+
+      @keyframes loading-overlay-dots {
+        0%,
+        24.99% {
+          width: 1ch;
+        }
+
+        25%,
+        49.99% {
+          width: 2ch;
+        }
+
+        50%,
+        74.99% {
+          width: 3ch;
+        }
+
+        75%,
+        100% {
+          width: 1ch;
+        }
       }
     </style>
   </head>
   <body>
+    <div
+      aria-hidden="false"
+      class="app-shell app-shell-bootstrap"
+      id="bootstrap-loading-shell"
+    >
+      <div
+        aria-hidden="false"
+        class="loading-overlay"
+        data-loading-complete="false"
+      >
+        <h1>MINOTAUR</h1>
+        <h2>
+          <span>Entering the labyrinth</span>
+          <span
+            aria-hidden="true"
+            class="loading-overlay-dots"
+          ></span>
+        </h2>
+      </div>
+    </div>
     <div id="root">
       <div class="app-shell app-shell-bootstrap">
         <div
@@ -94,41 +148,31 @@
             <span
               aria-hidden="true"
               class="loading-overlay-dots"
-            >...</span>
+            ></span>
           </h2>
         </div>
       </div>
     </div>
     <script>
-      const bootstrapDots = document.querySelector('.loading-overlay-dots')
-      if (bootstrapDots) {
-        let bootstrapDotCount = 1
-        const bootstrapDotsInterval = window.setInterval(() => {
-          if (!bootstrapDots.isConnected) {
-            window.clearInterval(bootstrapDotsInterval)
-            return
-          }
-          bootstrapDots.textContent = '.'.repeat(bootstrapDotCount)
-          bootstrapDotCount = (bootstrapDotCount % 3) + 1
-        }, 250)
-      }
-
       const isLocalHost = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
       const isDevServer =
         isLocalHost &&
         ['4273', '5173'].includes(window.location.port)
+      const startApp = () => {
+        if (!isDevServer) {
+          const stylesheet = document.createElement('link')
+          stylesheet.rel = 'stylesheet'
+          stylesheet.href = './assets/app.css'
+          document.head.appendChild(stylesheet)
+        }
 
-      if (!isDevServer) {
-        const stylesheet = document.createElement('link')
-        stylesheet.rel = 'stylesheet'
-        stylesheet.href = './assets/app.css'
-        document.head.appendChild(stylesheet)
+        const script = document.createElement('script')
+        script.type = 'module'
+        script.src = isDevServer ? '/src/main.tsx' : './assets/app.js'
+        document.body.appendChild(script)
       }
 
-      const script = document.createElement('script')
-      script.type = 'module'
-      script.src = isDevServer ? '/src/main.tsx' : './assets/app.js'
-      document.body.appendChild(script)
+      window.setTimeout(startApp, 0)
     </script>
   </body>
 </html>

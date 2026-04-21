@@ -67,13 +67,45 @@ async function waitForBrightCanvas(page) {
   throw new Error('Canvas did not reach the expected brightness threshold')
 }
 
+async function waitForLoadingShell(page) {
+  const overlay = page.locator('#bootstrap-loading-shell .loading-overlay')
+
+  await overlay.waitFor({
+    state: 'visible',
+    timeout: 5_000
+  })
+
+  return page.evaluate(() => {
+    const dots = document.querySelector('.loading-overlay-dots')
+
+    return {
+      dotsAnimationName: dots
+        ? getComputedStyle(dots, '::after').animationName
+        : null,
+      visibleAt: performance.now()
+    }
+  })
+}
+
+async function waitForLoadingComplete(page) {
+  await page.waitForFunction(
+    () => document.querySelector('#root .loading-overlay')?.getAttribute('data-loading-complete') === 'true',
+    undefined,
+    { timeout: 10_000 }
+  )
+
+  return page.evaluate(() => performance.now())
+}
+
 async function main() {
   const serverStart = process.hrtime.bigint()
   runNodeScript(devServerCommand[0], devServerCommand[1])
   const serverReadyMs = Number(process.hrtime.bigint() - serverStart) / 1e6
 
   let browser
+  let loadingCompleteAt
   let metrics
+  let shellState
   let sceneReadyAt
 
   try {
@@ -82,8 +114,10 @@ async function main() {
 
     await page.goto(url, {
       timeout: 120_000,
-      waitUntil: 'domcontentloaded'
+      waitUntil: 'commit'
     })
+    shellState = await waitForLoadingShell(page)
+    loadingCompleteAt = await waitForLoadingComplete(page)
     sceneReadyAt = await waitForBrightCanvas(page)
 
     metrics = await page.evaluate(() => {
@@ -117,6 +151,9 @@ async function main() {
   console.log(`Server ready: ${formatMilliseconds(serverReadyMs)}`)
   console.log(`First response end: ${formatMilliseconds(metrics.responseEnd)}`)
   console.log(`DOMContentLoaded: ${formatMilliseconds(metrics.domContentLoaded)}`)
+  console.log(`Loading shell visible: ${formatMilliseconds(shellState.visibleAt)}`)
+  console.log(`Loading shell complete: ${formatMilliseconds(loadingCompleteAt)}`)
+  console.log(`Loading dots animation: ${shellState.dotsAnimationName ?? 'missing'}`)
   console.log(`Load event end: ${formatMilliseconds(metrics.loadEventEnd)}`)
   console.log(`Scene ready at first rendered frame: ${formatMilliseconds(sceneReadyAt)}`)
   console.log(`Navigation transfer size: ${metrics.transferSize} bytes`)

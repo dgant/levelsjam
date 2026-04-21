@@ -1,9 +1,17 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 import {
-  AVAILABLE_MAZES,
-  DEFAULT_MAZE_LAYOUT,
+  MAZE_CELL_SIZE,
+  MAZE_HEIGHT,
+  MAZE_WIDTH,
+  getMazeSceneLayout
+} from '../src/lib/maze.js'
+import {
+  GROUND_Y,
   MAZE_COUNT,
   PLAYER_SPAWN_POSITION,
   SCONCE_RADIUS,
@@ -11,12 +19,29 @@ import {
   WALL_FACE_OFFSET,
   WALL_HEIGHT,
   WALL_LENGTH,
-  WALL_WIDTH,
-  getDebugMazeLayoutById,
-  getRandomMazeLayout,
-  getWallBounds
-} from '../src/lib/sceneLayout.js'
-import { MAZE_CELL_SIZE, MAZE_HEIGHT, MAZE_WIDTH } from '../src/lib/maze.js'
+  WALL_WIDTH
+} from '../src/lib/sceneConstants.js'
+import { getDebugMazeLayoutById } from '../src/lib/debugMazeLayouts.js'
+
+const mazeDirectory = path.join(process.cwd(), 'src', 'data', 'mazes')
+
+async function importPersistedMaze(fileName) {
+  const module = await import(
+    `${pathToFileURL(path.join(mazeDirectory, fileName)).href}?verify=${Math.random()}`
+  )
+
+  return module.default
+}
+
+let defaultMazeLayoutPromise = null
+
+async function getDefaultMazeLayout() {
+  defaultMazeLayoutPromise ??= importPersistedMaze('maze-001.js').then((maze) =>
+    getMazeSceneLayout(maze, SCONCE_RADIUS)
+  )
+
+  return defaultMazeLayoutPromise
+}
 
 function decodeBase64Bytes(base64) {
   return Uint8Array.from(Buffer.from(base64, 'base64'))
@@ -35,24 +60,34 @@ function averageTorchLightmapChannel(bytes, atlasWidth, rect) {
   return sum / (rect.width * rect.height * 255)
 }
 
-test('keeps at least five persisted mazes available to the runtime', () => {
-  assert.ok(AVAILABLE_MAZES.length >= MAZE_COUNT)
-  assert.ok(AVAILABLE_MAZES.every((maze) => maze.width === MAZE_WIDTH))
-  assert.ok(AVAILABLE_MAZES.every((maze) => maze.height === MAZE_HEIGHT))
+function getWallBounds(layout) {
+  return layout.walls.map((wall) => ({
+    ...wall.bounds
+  }))
+}
+
+test('keeps at least five persisted mazes available to the runtime', async () => {
+  const mazeFiles = fs.readdirSync(mazeDirectory).filter((fileName) => /^maze-\d+\.js$/.test(fileName))
+  const firstMaze = await importPersistedMaze(mazeFiles[0])
+
+  assert.ok(mazeFiles.length >= MAZE_COUNT)
+  assert.equal(firstMaze.width, MAZE_WIDTH)
+  assert.equal(firstMaze.height, MAZE_HEIGHT)
 })
 
-test('returns one of the available mazes when selecting a random layout', () => {
-  const layout = getRandomMazeLayout(() => 0)
+test('builds a scene layout from a persisted maze with walls, lights, probes, and a lightmap', async () => {
+  const layout = await getDefaultMazeLayout()
 
-  assert.equal(layout.maze.id, AVAILABLE_MAZES[0].id)
+  assert.equal(layout.maze.id, 'maze-001')
   assert.ok(layout.walls.length > 0)
   assert.ok(layout.lights.length > 0)
   assert.equal(layout.reflectionProbes.length, layout.maze.width * layout.maze.height)
   assert.ok(layout.maze.lightmap)
 })
 
-test('expands the baked ground patch beyond the maze footprint', () => {
-  const bounds = DEFAULT_MAZE_LAYOUT.maze.lightmap.groundBounds
+test('expands the baked ground patch beyond the maze footprint', async () => {
+  const layout = await getDefaultMazeLayout()
+  const bounds = layout.maze.lightmap.groundBounds
 
   assert.equal(bounds.centerX, 0)
   assert.equal(bounds.centerZ, 0)
@@ -60,12 +95,14 @@ test('expands the baked ground patch beyond the maze footprint', () => {
   assert.ok(bounds.depth > (MAZE_HEIGHT * MAZE_CELL_SIZE))
 })
 
-test('uses the requested wall mesh dimensions for maze wall segments', () => {
+test('uses the requested wall mesh dimensions for maze wall segments', async () => {
+  const layout = await getDefaultMazeLayout()
+
   assert.equal(WALL_WIDTH, 0.25)
   assert.equal(WALL_HEIGHT, 2)
   assert.equal(WALL_LENGTH, 2)
 
-  for (const wall of DEFAULT_MAZE_LAYOUT.walls) {
+  for (const wall of layout.walls) {
     const width = wall.bounds.maxX - wall.bounds.minX
     const depth = wall.bounds.maxZ - wall.bounds.minZ
 
@@ -79,8 +116,10 @@ test('uses the requested wall mesh dimensions for maze wall segments', () => {
   }
 })
 
-test('places each sconce one radius outside the wall face on the lit-cell side', () => {
-  for (const light of DEFAULT_MAZE_LAYOUT.lights) {
+test('places each sconce one radius outside the wall face on the lit-cell side', async () => {
+  const layout = await getDefaultMazeLayout()
+
+  for (const light of layout.lights) {
     const deltaX = light.sconcePosition.x - light.torchPosition.x
     const deltaZ = light.sconcePosition.z - light.torchPosition.z
 
@@ -98,11 +137,13 @@ test('sizes the torch billboard to match its wall clearance', () => {
   assert.equal(TORCH_BILLBOARD_SIZE, WALL_FACE_OFFSET)
 })
 
-test('exposes wall bounds for collision checks', () => {
-  const bounds = getWallBounds(DEFAULT_MAZE_LAYOUT)
+test('exposes wall bounds for collision checks', async () => {
+  const layout = await getDefaultMazeLayout()
+  const bounds = getWallBounds(layout)
 
-  assert.equal(bounds.length, DEFAULT_MAZE_LAYOUT.walls.length)
+  assert.equal(bounds.length, layout.walls.length)
   assert.ok(bounds.every((wall) => wall.maxY - wall.minY === WALL_HEIGHT))
+  assert.ok(bounds.every((wall) => wall.minY === GROUND_Y))
   assert.equal(WALL_FACE_OFFSET, (WALL_WIDTH / 2) + SCONCE_RADIUS)
 })
 

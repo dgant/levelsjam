@@ -115,10 +115,10 @@
 - The scene does not use God Rays.
 - Bloom, Depth of Field, Lens Flares, SSR, Ambient Occlusion, and Vignette default to disabled.
 - Bloom, Depth of Field, Lens Flares, and SSR store zero-strength defaults so enabling them at zero does not transiently flash a nonzero effect.
-- The debug panel exposure control defaults to `-4.5`.
-- The debug panel exposes an IBL intensity multiplier across a wide enough range to rebalance the HDRI against the torches without relying on physically calibrated EV semantics.
-- The debug panel exposes a torch candela multiplier across a wide enough range to rebalance the torches against the HDRI without relying on physically calibrated EV semantics.
-- The debug panel exposes player top speed, acceleration distance, and deceleration distance controls.
+- The debug panel exposure control defaults to `0.0`.
+- The debug panel exposes a `Lightmap Intensity` enabled toggle and scalar slider that control the baked surface-lightmap contribution on participating materials.
+- The debug panel exposes an `IBL Intensity` enabled toggle and scalar slider that control the local-probe diffuse or irradiance contribution on participating materials.
+- The debug panel exposes a `Reflection Intensity` enabled toggle and scalar slider that control the local-probe reflection contribution on participating materials.
 - The debug panel lens flare control adjusts the effect using the lens flare opacity parameter rather than an arbitrary color-gain multiplier.
 - The debug panel lens flare control provides useful adjustment very close to zero rather than jumping immediately to an over-bright flare.
 - The debug panel SSR intensity control is clamped to a maximum of `1.0`.
@@ -131,13 +131,11 @@
 - The debug panel allows Depth of Field focus distance values up to 8 meters.
 - The debug panel exposes Bloom `kernelSize`.
 - The Bloom kernel-size control updates the configured bloom kernel preset.
-- The debug panel exposes a checkbox that disables baked maze lightmaps while leaving the underlying maze geometry visible.
-- The debug panel exposes a checkbox that disables local maze reflection captures while leaving the global HDRI environment active.
-- The debug panel exposes a `Probe IBL` checkbox that enables or disables using local reflection captures as a local image-based-lighting source for all lit PBR scene geometry.
-- The `Reflection Captures` checkbox visibly removes or restores local probe-driven reflections on materials that are otherwise using them.
-- The `Probe IBL` checkbox visibly removes or restores local probe-driven diffuse or irradiance contribution on the lit PBR geometry that participates in probe IBL testing.
+- Disabling `Lightmap Intensity` visibly removes the baked surface-lightmap contribution from materials that use those lightmaps while leaving the underlying geometry visible.
+- Enabling `IBL Intensity` visibly adds local-probe diffuse or irradiance contribution on participating lit PBR geometry.
+- Disabling `Reflection Intensity` visibly removes local-probe reflection contribution from materials that otherwise use it.
 - The debug panel exposes a checkbox, disabled by default, that draws a sphere at each maze reflection-probe position using that probe's captured reflection texture.
-- The debug panel `Probe IBL` checkbox defaults to `off`.
+- The debug panel `IBL Intensity` enabled toggle defaults to `off`.
 - Double-clicking any debug-panel label resets that control to its authored default value.
 - The debug panel does not expose obsolete atmosphere or sun-direction controls.
 - The page shows an FPS counter in the top-right corner together with the current Git revision and revision timestamp.
@@ -185,17 +183,16 @@
 - The scene also derives local specular reflection data from static maze reflection probes captured inside the maze.
 - The current reflection probes are authored-baseline captures rather than live-recaptured responses to every debug-slider change.
 - The visible skybox remains the authored HDRI even when local reflection probes drive material reflections.
-- The environment map from `overcast_soil` is treated as canonically authored intensity at an IBL multiplier of `1`.
 - The visible skybox and the environment lighting use the same calibrated HDRI intensity path.
-- The reflective floor and sconce materials use the same calibrated HDRI intensity path for their global specular fallback instead of a separate brighter scale.
+- The torch and sky-source bake intensities are pre-scaled from the legacy `-4.5` stop baseline so runtime `Exposure 0.0` preserves the previously approved lighting balance without needing an extra exposure offset.
 - The ground and walls use extracted PBR texture packs with tiling based on a 1 meter world scale unless a source specifies otherwise.
 - Maze wall materials do not add direct runtime scene-environment IBL on top of their baked diffuse lightmaps.
-- Lightmapped maze walls and the baked maze floor patch do not receive direct runtime global-HDRI diffuse lighting; their diffuse ambient comes from the baked lightmap ambient channel when probe IBL is disabled, or from local probe IBL when probe IBL is enabled.
+- Lightmapped maze walls and the baked maze floor patch do not receive direct runtime global-HDRI diffuse lighting; their diffuse ambient comes from the baked lightmap ambient channel plus any explicitly enabled local probe IBL contribution.
 - Reflection probe captures, processed reflection-probe textures, and baked lightmaps remain raw lighting captures and are not tone-mapped or manually re-scaled for runtime use, debug previews, or exported inspection artifacts.
 - Reflective and semi-reflective materials read from the shared environment consistently, with the nearest local maze reflection probe taking precedence over the global HDRI for in-maze specular.
-- Enabling `Probe IBL` allows lit PBR maze geometry, including walls, to receive probe-driven local image-based lighting instead of relying only on the global HDRI fallback.
-- Enabling `Probe IBL` on baked maze geometry replaces the baked surface-lightmap contribution with probe-driven local diffuse IBL so the toggle can be used to inspect a pure local-IBL alternative to surface lightmaps.
-- Disabling `Reflection Captures` makes the scene fall back to the global HDRI-only reflection path for materials that otherwise use local probe reflections.
+- Enabling `IBL Intensity` allows lit PBR maze geometry, including walls, to receive additive probe-driven local image-based lighting without implicitly changing the baked surface-lightmap contribution.
+- Disabling `Lightmap Intensity` while enabling `IBL Intensity` allows baked maze geometry to be inspected in a pure local-IBL mode without any baked surface-lightmap contribution.
+- Disabling `Reflection Intensity` removes local probe reflections rather than silently replacing them with another local reflection source.
 - The reflective maze floor patch uses local reflection probes so puddled areas can reflect nearby torch sources rather than only the global HDRI.
 - The reflective maze floor patch blends nearby local reflection probes with weighted interpolation rather than switching between one nearest probe per region.
 - Reflective maze sconces blend nearby local reflection probes with weighted interpolation rather than switching between one nearest probe at the object position.
@@ -217,7 +214,7 @@
 - The maze walls define the primary navigable space instead of the previous open random-wall field.
 - The maze opening is visually readable as the one exterior break in the perimeter walls.
 - Exposure acts as a neutral stop-offset presentation control with `0.0` meaning no extra gain.
-- IBL intensity and torch candela controls are the primary balancing controls between the HDRI and torches.
+- Lightmap intensity, probe diffuse IBL intensity, and probe reflection intensity are the primary runtime balancing controls for baked maze lighting.
 - Positive exposure values darken the rendered image by stops and negative values brighten it by stops.
 - The renderer uses the postprocessing composer path for the default scene as well as for optional post effects, so enabling an effect does not switch the scene onto a different tone-mapping pipeline.
 - Enabling SSR from the debug panel does not halt rendering or introduce runtime errors.
@@ -246,16 +243,12 @@
 - The debug controls panel can be opened and closed with backquote.
 - The debug controls panel exposes exposure.
 - The debug controls panel exposes the active tone mapper.
-- The debug controls panel exposes the IBL intensity multiplier.
-- The debug controls panel exposes the torch candela multiplier.
-- The debug controls panel exposes player top speed.
-- The debug controls panel exposes player acceleration distance.
-- The debug controls panel exposes player deceleration distance.
+- The debug controls panel exposes enabled and intensity controls for `Lightmap Intensity`, `IBL Intensity`, and `Reflection Intensity`.
 - The debug controls panel exposes ambient-occlusion mode and intensity.
 - The debug controls panel exposes ambient-occlusion radius.
 - The debug controls panel exposes enabled and intensity controls for Bloom, Depth of Field, Lens Flares, SSR, and Vignette.
 - The debug controls panel exposes volumetric-lighting or fog controls, including amount and noise frequency.
-- The debug controls panel exposes toggles for baked maze lightmaps, local reflection captures, and reflection-probe visualization.
+- The debug controls panel exposes a toggle for reflection-probe visualization.
 - The debug controls panel lays out each control row on one line in value-label-control order.
 - The debug controls panel does not expose controls for removed effects or removed atmosphere systems.
 

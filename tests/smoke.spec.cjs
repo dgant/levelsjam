@@ -326,12 +326,17 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       timeout: 5_000
     })
 
-    await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveValue('-4.5')
-    await expect(page.getByLabel('Probe IBL')).toBeVisible()
-    await expect(page.getByLabel('Probe IBL')).not.toBeChecked()
-    await expect(page.getByLabel('Reflection Captures')).toBeVisible()
+    await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveValue('0')
+    await expect(page.getByLabel('Lightmap Intensity Enabled')).toBeVisible()
+    await expect(page.getByLabel('Lightmap Intensity Enabled')).toBeChecked()
+    await expect(page.getByRole('slider', { name: 'Lightmap Intensity' })).toHaveValue('1')
+    await expect(page.getByLabel('IBL Intensity Enabled')).toBeVisible()
+    await expect(page.getByLabel('IBL Intensity Enabled')).not.toBeChecked()
+    await expect(page.getByRole('slider', { name: 'IBL Intensity' })).toHaveValue('0')
+    await expect(page.getByLabel('Reflection Intensity Enabled')).toBeVisible()
+    await expect(page.getByLabel('Reflection Intensity Enabled')).toBeChecked()
+    await expect(page.getByRole('slider', { name: 'Reflection Intensity' })).toHaveValue('1')
     await expect(page.getByLabel('Show Reflection Probes')).toBeVisible()
-    await expect(page.getByRole('slider', { name: 'Move Speed' })).toBeVisible()
 
     await setCheckbox(page, 'Show Reflection Probes', true)
     await expect
@@ -406,7 +411,13 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         probeBlendMode: {
           glValue: 3
         },
+        probeBlendDiffuseIntensity: {
+          glValue: 0
+        },
         probeBlendRadianceMode: {
+          glValue: 1
+        },
+        probeBlendRadianceIntensity: {
           glValue: 1
         }
       })
@@ -431,7 +442,9 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
           hasLightMap: true
         }
       })
-    await setCheckbox(page, 'Probe IBL', true)
+    await setCheckbox(page, 'IBL Intensity Enabled', true)
+    await setSlider(page, 'IBL Intensity', 1)
+    await setCheckbox(page, 'Lightmap Intensity Enabled', false)
     await expect
       .poll(
         async () => page.evaluate(
@@ -446,7 +459,13 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         probeBlendMode: {
           glValue: 1
         },
+        probeBlendDiffuseIntensity: {
+          glValue: 1
+        },
         probeBlendRadianceMode: {
+          glValue: 1
+        },
+        probeBlendRadianceIntensity: {
           glValue: 1
         }
       })
@@ -495,7 +514,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     expect(probeCaptureCounts.sconce).toBeGreaterThan(0)
     expect(probeCaptureCounts.wall).toBeGreaterThan(0)
 
-    await setCheckbox(page, 'Reflection Captures', false)
+    await setCheckbox(page, 'Reflection Intensity Enabled', false)
     await expect
       .poll(
         async () => page.evaluate(
@@ -508,10 +527,10 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       )
       .toMatchObject({
         probeBlendMode: {
-          glValue: 3
+          glValue: 1
         },
         probeBlendRadianceMode: {
-          glValue: 0
+          glValue: 3
         }
       })
     await expect
@@ -526,14 +545,15 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       )
       .toMatchObject({
         probeBlendMode: {
-          glValue: 3
+          glValue: 2
         },
         probeBlendRadianceMode: {
-          glValue: 0
+          glValue: 3
         }
       })
-    await setCheckbox(page, 'Reflection Captures', true)
-    await setCheckbox(page, 'Probe IBL', false)
+    await setCheckbox(page, 'Reflection Intensity Enabled', true)
+    await setCheckbox(page, 'IBL Intensity Enabled', false)
+    await setCheckbox(page, 'Lightmap Intensity Enabled', true)
   })
 
   expect(consoleErrors).toEqual([])

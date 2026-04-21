@@ -1,7 +1,7 @@
 # How To Work On This Project
 
 ## Current State
-The repository contains a runnable browser game prototype for GitHub Pages. The intended build serves a three.js scene with immediate mouse-look, WASD movement, hold-space vertical thrust, a local Poly Haven `overcast_soil` HDRI used for the visible skybox and IBL, an infinite `puddle-ground` base plane plus a maze-local lit floor patch, one randomly selected persisted maze built from `stone-wall-29` wall meshes, maze-mounted metal sconces with animated torch billboards, baked per-maze torch lightmaps, static local reflection probes for in-maze specular response, and a backquote visual-controls panel with exposure, IBL intensity, torch candela, ambient-occlusion mode, tone-mapper, post-effect controls, and build metadata in the FPS overlay.
+The repository contains a runnable browser game prototype for GitHub Pages. The intended build serves a three.js scene with immediate mouse-look, WASD movement, hold-space vertical thrust, a local Poly Haven `overcast_soil` HDRI used for the visible skybox, an infinite `puddle-ground` base plane plus a maze-local lit floor patch, one randomly selected persisted maze built from `stone-wall-29` wall meshes, maze-mounted metal sconces with animated torch billboards, baked per-maze torch lightmaps, static local reflection probes for in-maze specular response, and a backquote visual-controls panel with exposure, `Lightmap Intensity`, `IBL Intensity`, `Reflection Intensity`, ambient-occlusion mode, tone-mapper, post-effect controls, and build metadata in the FPS overlay.
 The initial `MINOTAUR` loading shell now appears directly from inline HTML in [index.html](/E:/p/levelsjam/index.html) before the React bundle finishes booting.
 The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutRuntime.ts](/E:/p/levelsjam/src/lib/sceneLayoutRuntime.ts) so the main app bundle stays small, while Node tests and scripts continue to use the synchronous [sceneLayout.js](/E:/p/levelsjam/src/lib/sceneLayout.js) path.
 
@@ -52,7 +52,6 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify horizontal motion follows the current camera-relative input direction and that directly opposing input decelerates rather than accelerates through the turn.
 - Verify mouse lock releases on escape-style modifier keys and only re-engages after an explicit click on the scene canvas.
 - Verify the visible skybox comes from local `overcast_soil_1k.hdr`.
-- Verify `IBL Intensity 1.00x` is the canonical authored HDRI baseline rather than a corrective fudge factor.
 - Verify the visible skybox brightness tracks the same calibrated HDRI path as the environment lighting.
 - Verify the ground, maze walls, and sconces load the committed PBR texture packs instead of preview images.
 - Verify the torch billboard uses the linked flipbook asset rather than a generated placeholder atlas.
@@ -72,8 +71,8 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify the scene does not rely on realtime torch point lights for maze illumination.
 - Verify reflective maze materials respond to the local maze reflection probes rather than only to the global HDRI.
 - Verify reflective floor highlights transition smoothly across maze cells instead of stepping abruptly at reflection-probe region boundaries.
-- Verify disabling `Reflection Captures` removes the local probe contribution from the puddled maze floor while leaving the global HDRI environment intact.
-- Verify toggling `Reflection Captures` produces a visible change on an in-maze reflective floor patch.
+- Verify disabling `Reflection Intensity` removes the local probe reflection contribution from the puddled maze floor.
+- Verify toggling `Reflection Intensity` produces a visible change on an in-maze reflective floor patch.
 - Verify enabling `Show Reflection Probes` draws a probe sphere at each maze probe position.
 - Verify the reflection-probe spheres directly display the processed local reflection source used by in-game materials and visibly show nearby maze geometry and torch reflections rather than a black sphere, an empty sphere, or a nearly all-sky capture.
 - Verify the reflection-probe spheres render as ordinary non-colliding scene geometry rather than as an overlay, so they depth-test against the scene and follow the same exposure path as the rest of the frame.
@@ -85,14 +84,13 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify moving the camera between maze cells does not change `window.__levelsjamDebug.getReflectionProbeState().activeProbeId` from `null` or make the scene lighting flicker.
 - Verify the fire flipbook runs at the updated faster rate.
 - Verify the tone mapper is `AgX` by default.
-- Verify the visual controls panel exposes `Exposure`, `IBL Intensity`, `Torch Candelas`, `Ambient Occlusion`, `AO Intensity`, the tone mapper, and the enabled/intensity controls for Bloom, Depth Of Field, Lens Flares, SSR, and Vignette.
-- Verify the visual controls panel also exposes `Baked Lightmaps`, `Reflection Captures`, and `Show Reflection Probes`.
+- Verify the visual controls panel exposes `Exposure`, `Lightmap Intensity`, `IBL Intensity`, `Reflection Intensity`, `Ambient Occlusion`, `AO Intensity`, the tone mapper, and the enabled/intensity controls for Bloom, Depth Of Field, Lens Flares, SSR, and Vignette.
+- Verify the visual controls panel also exposes `Show Reflection Probes`.
 - Verify the visual controls panel also exposes `Bloom Kernel`, `AO Radius`, `DOF Focus Distance`, `DOF Focal Length`, `Depth Of Field Bokeh Scale`, and the volumetric fog controls.
-- Verify the visual controls panel exposes `Move Speed`, `Accel Distance`, and `Decel Distance`.
 - Verify the `DOF Focus Distance` slider reaches 8 meters.
-- Verify the `IBL Intensity` and `Torch Candelas` sliders each cover a wide enough range to rebalance the HDRI and torches without touching the exposure stops control.
+- Verify the `Lightmap Intensity`, `IBL Intensity`, and `Reflection Intensity` controls each produce a visible material change when enabled.
 - Verify Bloom, Depth Of Field, Lens Flares, and SSR start disabled.
-- Verify the default `Exposure` value is `-4.5`.
+- Verify the default `Exposure` value is `0`.
 - Verify each sconce, billboard, and torch light sits one sconce radius outside the wall face rather than intersecting the wall.
 - After `npm run test:smoke`, inspect any saved rendering artifacts if the smoke checks fail.
 - Verify changing `Exposure` changes rendered brightness by stop differences.

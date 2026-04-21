@@ -5,11 +5,11 @@ const { expect, test } = require('@playwright/test')
 
 test.setTimeout(300_000)
 
-const SMOKE_TIMING_LOG_PATH = path.resolve(
+const RENDER_TIMING_LOG_PATH = path.resolve(
   __dirname,
   '..',
   'logs',
-  'latest-smoke-profile.json'
+  'latest-render-integration-profile.json'
 )
 let activeSmokeTimingProfile = null
 
@@ -43,9 +43,9 @@ function writeSmokeTimingProfile(timingProfile) {
     wroteAt: new Date().toISOString()
   }
 
-  fs.mkdirSync(path.dirname(SMOKE_TIMING_LOG_PATH), { recursive: true })
+  fs.mkdirSync(path.dirname(RENDER_TIMING_LOG_PATH), { recursive: true })
   fs.writeFileSync(
-    SMOKE_TIMING_LOG_PATH,
+    RENDER_TIMING_LOG_PATH,
     JSON.stringify(completedProfile, null, 2)
   )
 }
@@ -244,13 +244,19 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     resourceUrls.add(response.url())
   })
 
-  const loadingOverlay = page.locator('.loading-overlay')
+  const bootstrapLoadingOverlay = page.locator('#bootstrap-loading-shell .loading-overlay')
+  const loadingOverlay = page.locator('#root .loading-overlay')
   const canvas = page.locator('canvas')
 
   await timedStep(timingProfile, 'startup', async () => {
-    await page.goto('/?maze=maze-001', { waitUntil: 'domcontentloaded' })
+    const response = await page.goto('/?maze=maze-001', { waitUntil: 'commit' })
+    const initialHtml = await response.text()
+
+    expect(initialHtml).toContain('bootstrap-loading-shell')
+    expect(initialHtml).toContain('MINOTAUR')
+    expect(initialHtml).toContain('Entering the labyrinth')
+
     if (await loadingOverlay.count()) {
-      await expect(loadingOverlay).toBeVisible({ timeout: 5_000 })
       await expect
         .poll(
           async () => loadingOverlay.getAttribute('data-loading-complete'),
@@ -302,11 +308,16 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       timeout: 5_000
     })
 
-    await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveValue('-4.5')
-    await expect(page.getByLabel('Probe IBL')).toBeVisible()
-    await expect(page.getByLabel('Probe IBL')).not.toBeChecked()
-    await expect(page.getByLabel('Reflection Captures')).toBeVisible()
-    await expect(page.getByRole('slider', { name: 'Move Speed' })).toBeVisible()
+    await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveValue('0')
+    await expect(page.getByLabel('Lightmap Intensity Enabled')).toBeVisible()
+    await expect(page.getByLabel('Lightmap Intensity Enabled')).toBeChecked()
+    await expect(page.getByRole('slider', { name: 'Lightmap Intensity' })).toHaveValue('1')
+    await expect(page.getByLabel('IBL Intensity Enabled')).toBeVisible()
+    await expect(page.getByLabel('IBL Intensity Enabled')).not.toBeChecked()
+    await expect(page.getByRole('slider', { name: 'IBL Intensity' })).toHaveValue('0')
+    await expect(page.getByLabel('Reflection Intensity Enabled')).toBeVisible()
+    await expect(page.getByLabel('Reflection Intensity Enabled')).toBeChecked()
+    await expect(page.getByRole('slider', { name: 'Reflection Intensity' })).toHaveValue('1')
 
     await setSlider(page, 'Exposure', 1.25)
     await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveValue('1.25')
@@ -314,7 +325,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       .locator('[data-testid="visual-controls"] span[title="Double-click to reset"]')
       .filter({ hasText: 'Exposure' })
       .dblclick()
-    await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveValue('-4.5')
+    await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveValue('0')
   })
 
   await timedStep(timingProfile, 'reflection-captures', async () => {
@@ -386,7 +397,9 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       )
       .toMatchObject({
         localProbeTextureBoundCount: 4,
+        probeBlendDiffuseIntensity: 0,
         probeBlendMode: 3,
+        probeBlendRadianceIntensity: 1,
         probeBlendRadianceMode: 1
       })
     await expect
@@ -403,11 +416,40 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         probeBlendMode: {
           glValue: 3
         },
+        probeBlendDiffuseIntensity: {
+          glValue: 0
+        },
         probeBlendRadianceMode: {
+          glValue: 1
+        },
+        probeBlendRadianceIntensity: {
           glValue: 1
         }
       })
-    await setCheckbox(page, 'Probe IBL', true)
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => ({
+            ground: window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4),
+            wall: window.__levelsjamDebug.getDebugMeshState('maze-wall', 10)
+          })
+        ),
+        {
+          timeout: 5_000,
+          intervals: [100, 250, 500]
+        }
+      )
+      .toMatchObject({
+        ground: {
+          hasLightMap: true
+        },
+        wall: {
+          hasLightMap: true
+        }
+      })
+    await setCheckbox(page, 'IBL Intensity Enabled', true)
+    await setSlider(page, 'IBL Intensity', 1)
+    await setCheckbox(page, 'Lightmap Intensity Enabled', false)
     await expect
       .poll(
         async () => page.evaluate(
@@ -431,7 +473,9 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       )
       .toMatchObject({
         localProbeTextureBoundCount: 4,
+        probeBlendDiffuseIntensity: 1,
         probeBlendMode: 2,
+        probeBlendRadianceIntensity: 1,
         probeBlendRadianceMode: 2
       })
     await expect
@@ -448,7 +492,13 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         probeBlendMode: {
           glValue: 1
         },
+        probeBlendDiffuseIntensity: {
+          glValue: 1
+        },
         probeBlendRadianceMode: {
+          glValue: 1
+        },
+        probeBlendRadianceIntensity: {
           glValue: 1
         }
       })
@@ -463,6 +513,27 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         }
       )
       .toBe('world')
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => ({
+            ground: window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4),
+            wall: window.__levelsjamDebug.getDebugMeshState('maze-wall', 10)
+          })
+        ),
+        {
+          timeout: 5_000,
+          intervals: [100, 250, 500]
+        }
+      )
+      .toMatchObject({
+        ground: {
+          hasLightMap: false
+        },
+        wall: {
+          hasLightMap: false
+        }
+      })
     await expect
       .poll(
         async () => page.evaluate(
@@ -487,7 +558,6 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     expect(probeCaptureCounts.sconce).toBeGreaterThan(0)
     expect(probeCaptureCounts.wall).toBeGreaterThan(0)
 
-    await setCheckbox(page, 'Probe IBL', false)
     await page.evaluate(() => {
       window.__levelsjamDebug.setView(
         [5.4, 1.55, -6.9],
@@ -499,6 +569,36 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     })
     await page.waitForTimeout(250)
     await page.keyboard.press('Backquote')
+    const probeIblOnFrame = await screenshotCanvasRegion(
+      page,
+      canvas,
+      260,
+      180,
+      0.72,
+      0.74,
+      timingProfile
+    )
+    await page.keyboard.press('Backquote')
+    await setCheckbox(page, 'IBL Intensity Enabled', false)
+    await setCheckbox(page, 'Lightmap Intensity Enabled', true)
+    await page.keyboard.press('Backquote')
+    await page.waitForTimeout(250)
+    const probeIblOffFrame = await screenshotCanvasRegion(
+      page,
+      canvas,
+      260,
+      180,
+      0.72,
+      0.74,
+      timingProfile
+    )
+    const probeIblDiff = measureBufferDiff(
+      probeIblOnFrame,
+      probeIblOffFrame
+    )
+
+    expect(probeIblDiff.averagePerChannel).toBeGreaterThan(1)
+    expect(probeIblDiff.maxCombinedDifference).toBeGreaterThan(50)
     const reflectionCaptureOnFrame = await screenshotCanvasRegion(
       page,
       canvas,
@@ -509,7 +609,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       timingProfile
     )
     await page.keyboard.press('Backquote')
-    await setCheckbox(page, 'Reflection Captures', false)
+    await setCheckbox(page, 'Reflection Intensity Enabled', false)
     await page.keyboard.press('Backquote')
     await page.waitForTimeout(250)
     const reflectionCaptureOffFrame = await screenshotCanvasRegion(
@@ -529,8 +629,9 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     expect(reflectionCaptureDiff.averagePerChannel).toBeGreaterThan(1)
     expect(reflectionCaptureDiff.maxCombinedDifference).toBeGreaterThan(50)
     await page.keyboard.press('Backquote')
-    await setCheckbox(page, 'Reflection Captures', true)
-    await setCheckbox(page, 'Probe IBL', false)
+    await setCheckbox(page, 'Reflection Intensity Enabled', true)
+    await setCheckbox(page, 'IBL Intensity Enabled', false)
+    await setCheckbox(page, 'Lightmap Intensity Enabled', true)
   })
 
   await timedStep(timingProfile, 'volumetric-fog', async () => {
@@ -584,7 +685,6 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         useProbeAmbientTexture: 1
       })
 
-    await setCheckbox(page, 'Reflection Captures', true)
     await expect
       .poll(
         async () => page.evaluate(() => window.__levelsjamDebug.getFogState?.()?.useProbeAmbientTexture ?? null),

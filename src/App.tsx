@@ -85,13 +85,8 @@ import {
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js'
 import { SSREffect } from './vendor/screen-space-reflections.js'
 import {
+  AUTHORED_LIGHTING_SOURCE_SCALE,
   DEFAULT_EXPOSURE_STOPS,
-  DEFAULT_IBL_INTENSITY_MULTIPLIER,
-  DEFAULT_TORCH_CANDELA_MULTIPLIER,
-  MAX_IBL_INTENSITY_MULTIPLIER,
-  MAX_TORCH_CANDELA_MULTIPLIER,
-  MIN_IBL_INTENSITY_MULTIPLIER,
-  MIN_TORCH_CANDELA_MULTIPLIER,
   getHdrLightingIntensity,
   getRendererExposure
 } from './lib/lightingCalibration.js'
@@ -189,12 +184,20 @@ const FIRE_FLIPBOOK_CROP_HEIGHT =
   FIRE_FLIPBOOK_FRAME_CROP.maxY - FIRE_FLIPBOOK_FRAME_CROP.minY
 const FIRE_COLOR = new Color('#ffb168')
 const BLACK_COLOR = new Color(0, 0, 0)
-const FIRE_BILLBOARD_INTENSITY_SCALE = 1 / TORCH_BASE_CANDELA
+const FIRE_BILLBOARD_INTENSITY_SCALE =
+  AUTHORED_LIGHTING_SOURCE_SCALE / TORCH_BASE_CANDELA
 const LIGHTMAP_AMBIENT_TINT = new Color(1, 1, 1)
 const TORCH_LIGHTMAP_TINT = FIRE_COLOR.clone()
 const TORCH_BILLBOARD_LAYER = 1
-const FLOOR_LIGHTMAP_INTENSITY_SCALE = 1
-const WALL_LIGHTMAP_INTENSITY_SCALE = 1
+const FLOOR_LIGHTMAP_INTENSITY_SCALE = AUTHORED_LIGHTING_SOURCE_SCALE
+const WALL_LIGHTMAP_INTENSITY_SCALE = AUTHORED_LIGHTING_SOURCE_SCALE
+const BAKED_ENVIRONMENT_INTENSITY = getHdrLightingIntensity(
+  AUTHORED_LIGHTING_SOURCE_SCALE
+)
+const DEFAULT_LIGHTMAP_CONTRIBUTION_INTENSITY = 1
+const DEFAULT_PROBE_IBL_INTENSITY = 0
+const DEFAULT_REFLECTION_INTENSITY = 1
+const MAX_LIGHTING_CONTRIBUTION_INTENSITY = 4
 
 function recordStartupMarker(name: string) {
   if (document.body.dataset[name] && document.body.dataset[name] !== 'pending') {
@@ -286,6 +289,11 @@ type EffectSettings = {
   intensity: number
 }
 
+type LightingContributionSettings = {
+  enabled: boolean
+  intensity: number
+}
+
 type BloomKernelSizeKey =
   | 'very-small'
   | 'small'
@@ -350,13 +358,11 @@ type VisualSettings = {
   ambientOcclusionIntensity: number
   ambientOcclusionMode: AmbientOcclusionMode
   ambientOcclusionRadius: number
-  bakedLightmapsEnabled: boolean
   exposureStops: number
-  iblIntensity: number
-  probeIblEnabled: boolean
-  reflectionCapturesEnabled: boolean
+  iblContribution: LightingContributionSettings
+  lightmapContribution: LightingContributionSettings
+  reflectionContribution: LightingContributionSettings
   showReflectionProbes: boolean
-  torchCandelaMultiplier: number
   toneMapping: ToneMappingMode
   bloom: BloomSettings
   depthOfField: DepthOfFieldSettings
@@ -374,19 +380,17 @@ type GenericEffectSettingKey =
   'vignette' |
   'volumetricLighting'
 type BooleanSettingKey =
-  | 'bakedLightmapsEnabled'
-  | 'probeIblEnabled'
-  | 'reflectionCapturesEnabled'
+  | 'iblContributionEnabled'
+  | 'lightmapContributionEnabled'
+  | 'reflectionContributionEnabled'
   | 'showReflectionProbes'
 type ScalarSettingKey =
   | 'ambientOcclusionIntensity'
   | 'ambientOcclusionRadius'
   | 'exposureStops'
-  | 'iblIntensity'
-  | 'movementAccelerationDistance'
-  | 'movementDecelerationDistance'
-  | 'movementMaxHorizontalSpeedMph'
-  | 'torchCandelaMultiplier'
+  | 'iblContributionIntensity'
+  | 'lightmapContributionIntensity'
+  | 'reflectionContributionIntensity'
   | 'volumetricNoiseFrequency'
 
 type PbrMaps = {
@@ -467,7 +471,9 @@ type ProbeTextureInfo = {
 }
 
 type ProbeBlendConfig = {
+  diffuseIntensity?: number
   mode: ProbeBlendMode
+  radianceIntensity?: number
   radianceMode?: ProbeBlendMode
   probeBoxes?: Array<{
     max: { x: number, y: number, z: number } | null
@@ -518,7 +524,9 @@ type ProbeBlendShader = Shader & {
     localProbeTexelWidth2?: Uniform<number>
     localProbeTexelWidth3?: Uniform<number>
     probeBlendMode?: Uniform<number>
+    probeBlendDiffuseIntensity?: Uniform<number>
     probeBlendRadianceMode?: Uniform<number>
+    probeBlendRadianceIntensity?: Uniform<number>
     probeBlendRegion?: Uniform<Vector4>
     probeBlendWeights?: Uniform<Vector4>
   }
@@ -568,13 +576,20 @@ function createDefaultVisualSettings(): VisualSettings {
     ambientOcclusionIntensity: 1,
     ambientOcclusionRadius: DEFAULT_AO_RADIUS_METERS,
     ambientOcclusionMode: 'off',
-    bakedLightmapsEnabled: true,
     exposureStops: DEFAULT_EXPOSURE_STOPS,
-    iblIntensity: DEFAULT_IBL_INTENSITY_MULTIPLIER,
-    probeIblEnabled: false,
-    reflectionCapturesEnabled: true,
+    iblContribution: {
+      enabled: false,
+      intensity: DEFAULT_PROBE_IBL_INTENSITY
+    },
+    lightmapContribution: {
+      enabled: true,
+      intensity: DEFAULT_LIGHTMAP_CONTRIBUTION_INTENSITY
+    },
+    reflectionContribution: {
+      enabled: true,
+      intensity: DEFAULT_REFLECTION_INTENSITY
+    },
     showReflectionProbes: false,
-    torchCandelaMultiplier: DEFAULT_TORCH_CANDELA_MULTIPLIER,
     toneMapping: 'agx',
     bloom: { enabled: false, intensity: 0.7, kernelSize: 'large' },
     depthOfField: {
@@ -600,6 +615,10 @@ function createDefaultVisualSettings(): VisualSettings {
 
 function isEffectActive(effect: EffectSettings) {
   return effect.enabled && effect.intensity > EFFECT_EPSILON
+}
+
+function getEnabledContributionIntensity(settings: LightingContributionSettings) {
+  return settings.enabled ? settings.intensity : 0
 }
 
 function isDepthOfFieldActive(settings: DepthOfFieldSettings) {
@@ -870,7 +889,13 @@ vec4 sampleProbeBlendTexture(
   );
 }
 
-vec4 sampleProbeBlendLocalMaps( vec3 worldPosition, vec3 direction, float roughness, vec4 weights ) {
+vec4 sampleProbeBlendLocalMaps(
+  vec3 worldPosition,
+  vec3 direction,
+  float roughness,
+  vec4 weights,
+  float intensity
+) {
   vec4 color0 = sampleProbeBlendTexture(
     localProbeEnvMap0,
     worldPosition,
@@ -920,14 +945,20 @@ vec4 sampleProbeBlendLocalMaps( vec3 worldPosition, vec3 direction, float roughn
     localProbeMaxMip3
   );
 
-  return
+  return (
     ( color0 * weights.x ) +
     ( color1 * weights.y ) +
     ( color2 * weights.z ) +
-    ( color3 * weights.w );
+    ( color3 * weights.w )
+  ) * intensity;
 }
 
-vec4 sampleProbeBlendEnvMapWithMode( vec3 direction, float roughness, int mode ) {
+vec4 sampleProbeBlendEnvMapWithMode(
+  vec3 direction,
+  float roughness,
+  int mode,
+  float intensity
+) {
   if ( mode == 1 ) {
     float tx = probeBlendRegion.z > 0.0
       ? clamp( ( vProbeBlendWorldPosition.x - probeBlendRegion.x ) / probeBlendRegion.z, 0.0, 1.0 )
@@ -942,11 +973,23 @@ vec4 sampleProbeBlendEnvMapWithMode( vec3 direction, float roughness, int mode )
       tx * tz
     );
 
-    return sampleProbeBlendLocalMaps( vProbeBlendWorldPosition, direction, roughness, weights );
+    return sampleProbeBlendLocalMaps(
+      vProbeBlendWorldPosition,
+      direction,
+      roughness,
+      weights,
+      intensity
+    );
   }
 
   if ( mode == 2 ) {
-    return sampleProbeBlendLocalMaps( vProbeBlendWorldPosition, direction, roughness, probeBlendWeights );
+    return sampleProbeBlendLocalMaps(
+      vProbeBlendWorldPosition,
+      direction,
+      roughness,
+      probeBlendWeights,
+      intensity
+    );
   }
 
   if ( mode == 3 ) {
@@ -961,7 +1004,12 @@ vec3 getIBLIrradiance( const in vec3 normal ) {
   #ifdef ENVMAP_TYPE_CUBE_UV
 
     vec3 worldNormal = inverseTransformDirection( normal, viewMatrix );
-    vec4 envMapColor = sampleProbeBlendEnvMapWithMode( worldNormal, 1.0, probeBlendMode );
+    vec4 envMapColor = sampleProbeBlendEnvMapWithMode(
+      worldNormal,
+      1.0,
+      probeBlendMode,
+      probeBlendDiffuseIntensity
+    );
 
     return PI * envMapColor.rgb;
 
@@ -981,7 +1029,12 @@ vec3 getIBLRadiance( const in vec3 viewDir, const in vec3 normal, const in float
     reflectVec = normalize( mix( reflectVec, normal, pow4( roughness ) ) );
     reflectVec = inverseTransformDirection( reflectVec, viewMatrix );
 
-    vec4 envMapColor = sampleProbeBlendEnvMapWithMode( reflectVec, roughness, probeBlendRadianceMode );
+    vec4 envMapColor = sampleProbeBlendEnvMapWithMode(
+      reflectVec,
+      roughness,
+      probeBlendRadianceMode,
+      probeBlendRadianceIntensity
+    );
 
     return envMapColor.rgb;
 
@@ -1153,6 +1206,10 @@ function updateProbeBlendShaderUniforms(
             ? 3
           : 0
   }
+  if (shader.uniforms.probeBlendDiffuseIntensity) {
+    shader.uniforms.probeBlendDiffuseIntensity.value =
+      probeBlend.diffuseIntensity ?? 1
+  }
   if (shader.uniforms.probeBlendRadianceMode) {
     shader.uniforms.probeBlendRadianceMode.value =
       (probeBlend.radianceMode ?? probeBlend.mode) === 'world'
@@ -1162,6 +1219,10 @@ function updateProbeBlendShaderUniforms(
           : (probeBlend.radianceMode ?? probeBlend.mode) === 'disabled'
             ? 3
           : 0
+  }
+  if (shader.uniforms.probeBlendRadianceIntensity) {
+    shader.uniforms.probeBlendRadianceIntensity.value =
+      probeBlend.radianceIntensity ?? 1
   }
   shader.uniforms.probeBlendWeights?.value.set(
     ...(probeBlend.weights ?? [1, 0, 0, 0])
@@ -1193,6 +1254,7 @@ function getProbeBlendUpdateKey(
           patchConfig.lightMapTorchTint.b
         ]
       : null,
+    diffuseIntensity: probeBlend.diffuseIntensity ?? 1,
     mode: probeBlend.mode,
     probeBoxes: (probeBlend.probeBoxes ?? []).map((box) => box
       ? {
@@ -1211,6 +1273,7 @@ function getProbeBlendUpdateKey(
         : null
     ),
     probeTextureUUIDs: probeBlend.probeTextures.map((texture) => texture?.uuid ?? null),
+    radianceIntensity: probeBlend.radianceIntensity ?? 1,
     radianceMode: probeBlend.radianceMode ?? probeBlend.mode,
     region: probeBlend.region
       ? [
@@ -1241,7 +1304,9 @@ function updateProbeBlendMaterialDebugState(
   }
 
   material.userData.probeBlendDebug = {
+    diffuseIntensity: probeBlend.diffuseIntensity ?? 1,
     mode: probeBlend.mode,
+    radianceIntensity: probeBlend.radianceIntensity ?? 1,
     radianceMode: probeBlend.radianceMode ?? probeBlend.mode,
     probeTextureCount: probeBlend.probeTextures.filter(Boolean).length,
     region: probeBlend.region
@@ -1292,7 +1357,9 @@ function updateProbeBlendUniformDebugState(
       shader.uniforms.localProbeEnvMap3?.value
     ].filter(Boolean).length,
     probeBlendMode: shader.uniforms.probeBlendMode?.value ?? null,
-    probeBlendRadianceMode: shader.uniforms.probeBlendRadianceMode?.value ?? null
+    probeBlendDiffuseIntensity: shader.uniforms.probeBlendDiffuseIntensity?.value ?? null,
+    probeBlendRadianceMode: shader.uniforms.probeBlendRadianceMode?.value ?? null,
+    probeBlendRadianceIntensity: shader.uniforms.probeBlendRadianceIntensity?.value ?? null
   }
 }
 
@@ -1330,7 +1397,9 @@ function patchProbeBlendMaterialShader(
   probeBlendShader.uniforms.localProbeMaxMip2 = new Uniform(0)
   probeBlendShader.uniforms.localProbeMaxMip3 = new Uniform(0)
   probeBlendShader.uniforms.probeBlendMode = new Uniform(0)
+  probeBlendShader.uniforms.probeBlendDiffuseIntensity = new Uniform(1)
   probeBlendShader.uniforms.probeBlendRadianceMode = new Uniform(0)
+  probeBlendShader.uniforms.probeBlendRadianceIntensity = new Uniform(1)
   probeBlendShader.uniforms.probeBlendWeights = new Uniform(new Vector4(1, 0, 0, 0))
   probeBlendShader.uniforms.probeBlendRegion = new Uniform(new Vector4(0, 0, 0, 0))
   probeBlendShader.uniforms.localProbeTexelHeight0 = new Uniform(1)
@@ -1358,7 +1427,7 @@ function patchProbeBlendMaterialShader(
 \t#include <project_vertex>`
       )
   probeBlendShader.fragmentShader =
-    `uniform vec3 lightMapAmbientTint;\nuniform vec3 lightMapTorchTint;\nvarying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
+    `uniform vec3 lightMapAmbientTint;\nuniform vec3 lightMapTorchTint;\nuniform float probeBlendDiffuseIntensity;\nuniform float probeBlendRadianceIntensity;\nvarying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
       .replace(
         '#include <envmap_physical_pars_fragment>',
         PROBE_BLEND_SHADER_CHUNK
@@ -1732,6 +1801,8 @@ function buildProbeBlendConfig(
   probeTextures: Array<Texture | null>,
   mode: ProbeBlendMode,
   options: {
+    diffuseIntensity?: number
+    radianceIntensity?: number
     radianceMode?: ProbeBlendMode
     region?: {
       minX: number
@@ -1743,7 +1814,9 @@ function buildProbeBlendConfig(
   } = {}
 ) {
   return {
+    diffuseIntensity: options.diffuseIntensity ?? 1,
     mode,
+    radianceIntensity: options.radianceIntensity ?? 1,
     radianceMode: options.radianceMode ?? mode,
     probeBoxes: probeIndices.map((probeIndex) =>
       getProbeVolumeBounds(layout.reflectionProbes[probeIndex]?.position)
@@ -2614,7 +2687,6 @@ function StartupReporter() {
 
 function EnvironmentLighting({
   layout,
-  iblIntensity,
   volumetricLighting,
   onEnvironmentFogColorChange,
   onEnvironmentTextureChange,
@@ -2623,7 +2695,6 @@ function EnvironmentLighting({
   onReflectionProbeTexturesChange
 }: {
   layout: MazeLayout
-  iblIntensity: number
   volumetricLighting: EffectSettings
   onEnvironmentFogColorChange: (color: Color) => void
   onEnvironmentTextureChange: (texture: Texture | null) => void
@@ -2638,10 +2709,9 @@ function EnvironmentLighting({
   const environmentTarget = useRef<{ dispose: () => void; texture: Texture } | null>(null)
   const reflectionProbeRawTargets = useRef<Array<{ dispose: () => void; texture: Texture }>>([])
   const reflectionProbeTargets = useRef<Array<{ dispose: () => void; texture: Texture }>>([])
-  const calibratedIntensity = getHdrLightingIntensity(iblIntensity)
   const fogAmbientColor = useMemo(
-    () => computeAverageHdrColor(hdrTexture, calibratedIntensity),
-    [calibratedIntensity, hdrTexture]
+    () => computeAverageHdrColor(hdrTexture, BAKED_ENVIRONMENT_INTENSITY),
+    [hdrTexture]
   )
   const needsProbeAmbientCapture = isEffectActive(volumetricLighting)
 
@@ -2691,8 +2761,8 @@ function EnvironmentLighting({
     environmentTarget.current = nextEnvironment
     scene.background = hdrTexture
     scene.environment = nextEnvironment.texture
-    scene.backgroundIntensity = calibratedIntensity
-    scene.environmentIntensity = calibratedIntensity
+    scene.backgroundIntensity = BAKED_ENVIRONMENT_INTENSITY
+    scene.environmentIntensity = BAKED_ENVIRONMENT_INTENSITY
     onEnvironmentFogColorChange(fogAmbientColor.clone())
     onEnvironmentTextureChange(nextEnvironment.texture)
 
@@ -2720,8 +2790,8 @@ function EnvironmentLighting({
   ])
 
   useEffect(() => {
-    scene.backgroundIntensity = calibratedIntensity
-  }, [calibratedIntensity, scene])
+    scene.backgroundIntensity = BAKED_ENVIRONMENT_INTENSITY
+  }, [scene])
 
   useEffect(() => {
     const baseEnvironment = environmentTarget.current
@@ -2779,7 +2849,7 @@ function EnvironmentLighting({
     if (scene.environment !== baseEnvironment.texture) {
       scene.environment = baseEnvironment.texture
     }
-    scene.environmentIntensity = calibratedIntensity
+    scene.environmentIntensity = BAKED_ENVIRONMENT_INTENSITY
     onReflectionProbeAmbientColorsChange(emptyAmbientColorArray)
     onReflectionProbeRawTexturesChange(emptyTextureArray)
     onReflectionProbeTexturesChange(emptyTextureArray)
@@ -2926,7 +2996,7 @@ function EnvironmentLighting({
       })
 
       scene.environment = baseEnvironment.texture
-      scene.environmentIntensity = calibratedIntensity
+      scene.environmentIntensity = BAKED_ENVIRONMENT_INTENSITY
 
       const probeCaptureSize = getPmremCubeSize(baseEnvironment.texture)
       const probeCaptureOrder = [
@@ -3124,7 +3194,7 @@ function EnvironmentLighting({
       if (scene.environment !== baseEnvironment.texture) {
         scene.environment = baseEnvironment.texture
       }
-      scene.environmentIntensity = calibratedIntensity
+      scene.environmentIntensity = BAKED_ENVIRONMENT_INTENSITY
       scene.userData.reflectionProbeState = {
         activeProbeId: null,
         captureSceneState: getReflectionCaptureSceneState(scene, layout),
@@ -3149,7 +3219,6 @@ function EnvironmentLighting({
     onReflectionProbeRawTexturesChange,
     onReflectionProbeTexturesChange,
     pmremGenerator,
-    calibratedIntensity,
     fogAmbientColor,
     needsProbeAmbientCapture,
     scene
@@ -3226,22 +3295,22 @@ function GroundPatchMesh({
   environmentIntensity,
   groundBounds,
   groundLightmapTexture,
+  lightmapContributionIntensity,
   maps,
   probeBlend,
   rect,
-  surfaceLightmapsEnabled,
-  torchCandelaMultiplier
+  surfaceLightmapsEnabled
 }: {
   debugIndex: number
   environmentTexture: Texture | null
   environmentIntensity: number
   groundBounds: MazeLightmap['groundBounds']
   groundLightmapTexture: Texture
+  lightmapContributionIntensity: number
   maps: PbrMaps
   probeBlend: ProbeBlendConfig
   rect: GroundPatchRect
   surfaceLightmapsEnabled: boolean
-  torchCandelaMultiplier: number
 }) {
   const geometry = useMemo(
     () => createGroundPatchGeometry(rect, groundBounds),
@@ -3257,12 +3326,12 @@ function GroundPatchMesh({
   const patchConfig = useMemo(
     () => ({
       lightMapAmbientTint:
-        surfaceLightmapsEnabled && probeBlend.mode !== 'world'
-          ? LIGHTMAP_AMBIENT_TINT
+        surfaceLightmapsEnabled
+          ? LIGHTMAP_AMBIENT_TINT.clone().multiplyScalar(lightmapContributionIntensity)
           : BLACK_COLOR,
       lightMapTorchTint: TORCH_LIGHTMAP_TINT
     }),
-    [probeBlend.mode, surfaceLightmapsEnabled]
+    [lightmapContributionIntensity, surfaceLightmapsEnabled]
   )
 
   return (
@@ -3282,7 +3351,7 @@ function GroundPatchMesh({
         lightMap={surfaceLightmapsEnabled ? groundLightmapTexture : undefined}
         lightMapIntensity={
           surfaceLightmapsEnabled
-            ? torchCandelaMultiplier * FLOOR_LIGHTMAP_INTENSITY_SCALE
+            ? lightmapContributionIntensity * FLOOR_LIGHTMAP_INTENSITY_SCALE
             : 0
         }
         maps={maps}
@@ -3294,25 +3363,23 @@ function GroundPatchMesh({
 }
 
 function Ground({
-  bakedLightmapsEnabled,
   environmentTexture,
   environmentIntensity,
+  iblContributionIntensity,
   layout,
+  lightmapContributionIntensity,
   groundLightmapTexture,
-  probeIblEnabled,
-  reflectionCapturesEnabled,
+  reflectionContributionIntensity,
   reflectionProbeTextures,
-  torchCandelaMultiplier
 }: {
-  bakedLightmapsEnabled: boolean
   environmentTexture: Texture | null
   environmentIntensity: number
+  iblContributionIntensity: number
   layout: MazeLayout
+  lightmapContributionIntensity: number
   groundLightmapTexture: Texture
-  probeIblEnabled: boolean
-  reflectionCapturesEnabled: boolean
+  reflectionContributionIntensity: number
   reflectionProbeTextures: Texture[]
-  torchCandelaMultiplier: number
 }) {
   const puddle = usePuddleTextures(PUDDLE_TEXTURE_REPEAT)
   const groundPatchRects = useMemo(
@@ -3341,11 +3408,14 @@ function Ground({
             (probeIndex) => reflectionProbeTextures[probeIndex] ?? null
           )
           const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
-          const useProbeIbl =
-            probeIblEnabled &&
-            reflectionCapturesEnabled &&
+          const surfaceLightmapsEnabled =
+            lightmapContributionIntensity > EFFECT_EPSILON
+          const probeIblActive =
+            iblContributionIntensity > EFFECT_EPSILON &&
             hasProbeTextures
-          const surfaceLightmapsEnabled = bakedLightmapsEnabled && !useProbeIbl
+          const reflectionActive =
+            reflectionContributionIntensity > EFFECT_EPSILON &&
+            hasProbeTextures
 
           return (
             <GroundPatchMesh
@@ -3355,24 +3425,22 @@ function Ground({
               groundBounds={layout.maze.lightmap.groundBounds}
               groundLightmapTexture={groundLightmapTexture}
               key={rect.id}
+              lightmapContributionIntensity={lightmapContributionIntensity}
               maps={puddle}
               probeBlend={buildProbeBlendConfig(
                 layout,
                 rect.probeIndices,
                 probeTextures,
-                useProbeIbl ? 'world' : 'disabled',
+                probeIblActive ? 'world' : 'disabled',
                 {
-                  radianceMode:
-                    reflectionCapturesEnabled &&
-                    hasProbeTextures
-                      ? 'world'
-                      : 'none',
+                  diffuseIntensity: iblContributionIntensity,
+                  radianceIntensity: reflectionContributionIntensity,
+                  radianceMode: reflectionActive ? 'world' : 'disabled',
                   region: rect.region
                 }
               )}
               rect={rect}
               surfaceLightmapsEnabled={surfaceLightmapsEnabled}
-              torchCandelaMultiplier={torchCandelaMultiplier}
             />
           )
         })()
@@ -3383,12 +3451,10 @@ function Ground({
 
 function TorchBillboard({
   position,
-  seed,
-  torchCandelaMultiplier
+  seed
 }: {
   position: [number, number, number]
   seed: number
-  torchCandelaMultiplier: number
 }) {
   const camera = useThree((state) => state.camera)
   const texture = useFireFlipbookTexture()
@@ -3428,15 +3494,12 @@ function TorchBillboard({
       ((row + FIRE_FLIPBOOK_FRAME_CROP.maxY) / FIRE_FLIPBOOK_GRID)
 
     if (material.current) {
-      const brightness =
-        TORCH_BASE_CANDELA *
-        torchCandelaMultiplier
       const billboardMaterial = material.current.material as {
         color: Color
       }
 
       billboardMaterial.color.copy(FIRE_COLOR).multiplyScalar(
-        brightness * FIRE_BILLBOARD_INTENSITY_SCALE
+        TORCH_BASE_CANDELA * FIRE_BILLBOARD_INTENSITY_SCALE
       )
     }
   })
@@ -3478,21 +3541,21 @@ function TorchBillboard({
 function WallSconce({
   environmentTexture,
   environmentIntensity,
+  iblContributionIntensity,
   layout,
+  lightmapContributionIntensity,
   mazeLight,
-  probeIblEnabled,
-  reflectionCapturesEnabled,
+  reflectionContributionIntensity,
   reflectionProbeTextures,
-  torchCandelaMultiplier
 }: {
   environmentTexture: Texture | null
   environmentIntensity: number
+  iblContributionIntensity: number
   layout: MazeLayout
+  lightmapContributionIntensity: number
   mazeLight: MazeLayout['lights'][number]
-  probeIblEnabled: boolean
-  reflectionCapturesEnabled: boolean
+  reflectionContributionIntensity: number
   reflectionProbeTextures: Texture[]
-  torchCandelaMultiplier: number
 }) {
   const metal = useStandardPbrTextures(METAL_TEXTURE_URLS, METAL_TEXTURE_REPEAT)
   const [material, setMaterial] = useState<ThreeMeshStandardMaterial | null>(null)
@@ -3528,32 +3591,40 @@ function WallSconce({
       ),
     [reflectionProbeBlend.probeIndices, reflectionProbeTextures]
   )
+  const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
+  const diffuseProbeIntensity =
+    lightmapContributionIntensity + iblContributionIntensity
+  const diffuseProbeActive =
+    diffuseProbeIntensity > EFFECT_EPSILON &&
+    hasProbeTextures
+  const reflectionActive =
+    reflectionContributionIntensity > EFFECT_EPSILON &&
+    hasProbeTextures
   const probeBlend = useMemo(
     () => ({
       ...buildProbeBlendConfig(
         layout,
         reflectionProbeBlend.probeIndices,
         probeTextures,
-        probeIblEnabled &&
-          reflectionCapturesEnabled &&
-          hasCompleteProbeTextures(probeTextures)
-          ? 'constant'
-          : 'none',
+        diffuseProbeActive ? 'constant' : 'disabled',
         {
-          radianceMode:
-            reflectionCapturesEnabled &&
-            hasCompleteProbeTextures(probeTextures)
-              ? 'constant'
-              : 'none',
+          diffuseIntensity: diffuseProbeIntensity,
+          radianceIntensity: reflectionContributionIntensity,
+          radianceMode: reflectionActive ? 'constant' : 'disabled',
           weights: reflectionProbeBlend.weights as [number, number, number, number]
         }
       )
     }),
     [
+      diffuseProbeActive,
+      diffuseProbeIntensity,
+      hasProbeTextures,
+      iblContributionIntensity,
       layout,
-      probeIblEnabled,
+      lightmapContributionIntensity,
       probeTextures,
-      reflectionCapturesEnabled,
+      reflectionContributionIntensity,
+      reflectionActive,
       reflectionProbeBlend.probeIndices,
       reflectionProbeBlend.weights
     ]
@@ -3601,7 +3672,6 @@ function WallSconce({
       <TorchBillboard
         position={torchPosition}
         seed={mazeLight.index + 1}
-        torchCandelaMultiplier={torchCandelaMultiplier}
       />
     </>
   )
@@ -3807,7 +3877,6 @@ function FogVolume({
   environmentFogColor,
   layout,
   noiseFrequency,
-  reflectionCapturesEnabled,
   reflectionProbeAmbientColors,
   torchPositions,
   visible,
@@ -3816,7 +3885,6 @@ function FogVolume({
   environmentFogColor: Color
   layout: MazeLayout
   noiseFrequency: number
-  reflectionCapturesEnabled: boolean
   reflectionProbeAmbientColors: Color[]
   torchPositions: Array<{ x: number, y: number, z: number }>
   visible: boolean
@@ -3930,7 +3998,6 @@ function FogVolume({
       uniforms.torchCount.value = Math.min(FOG_VOLUME_MAX_TORCHES, torchPositions.length)
       uniforms.torchPositions.value = fogTorchPositions
       uniforms.useProbeAmbientTexture.value =
-        reflectionCapturesEnabled &&
         Boolean(probeAmbientTexture)
           ? 1
           : 0
@@ -3942,7 +4009,6 @@ function FogVolume({
     probeAmbientTexture,
     probeBounds,
     probeGrid,
-    reflectionCapturesEnabled,
     torchPositions.length,
     visible,
     volumeIntensity
@@ -4124,7 +4190,6 @@ function FogVolume({
               time: { value: 0 },
               useProbeAmbientTexture: {
                 value:
-                  reflectionCapturesEnabled &&
                   Boolean(probeAmbientTexture)
                     ? 1
                     : 0
@@ -4655,25 +4720,23 @@ function captureCubeUvTextureAtlasDataUrls(
 }
 
 function MazeWalls({
-  bakedLightmapsEnabled,
   environmentTexture,
   environmentIntensity,
+  iblContributionIntensity,
   layout,
+  lightmapContributionIntensity,
   lightmapBytes,
-  probeIblEnabled,
-  reflectionCapturesEnabled,
+  reflectionContributionIntensity,
   reflectionProbeTextures,
-  torchCandelaMultiplier
 }: {
-  bakedLightmapsEnabled: boolean
   environmentTexture: Texture | null
   environmentIntensity: number
+  iblContributionIntensity: number
   layout: MazeLayout
+  lightmapContributionIntensity: number
   lightmapBytes: Uint8Array
-  probeIblEnabled: boolean
-  reflectionCapturesEnabled: boolean
+  reflectionContributionIntensity: number
   reflectionProbeTextures: Texture[]
-  torchCandelaMultiplier: number
 }) {
   const wall = useStandardPbrTextures(WALL_TEXTURE_URLS, WALL_TEXTURE_REPEAT)
 
@@ -4681,18 +4744,17 @@ function MazeWalls({
     <>
       {layout.walls.map((mazeWall, wallIndex) => (
         <MazeWallMesh
-          bakedLightmapsEnabled={bakedLightmapsEnabled}
           environmentTexture={environmentTexture}
           environmentIntensity={environmentIntensity}
+          iblContributionIntensity={iblContributionIntensity}
           key={mazeWall.id}
           lightmap={layout.maze.lightmap}
           lightmapBytes={lightmapBytes}
           layout={layout}
+          lightmapContributionIntensity={lightmapContributionIntensity}
           mazeWall={mazeWall}
-          probeIblEnabled={probeIblEnabled}
-          reflectionCapturesEnabled={reflectionCapturesEnabled}
+          reflectionContributionIntensity={reflectionContributionIntensity}
           reflectionProbeTextures={reflectionProbeTextures}
-          torchCandelaMultiplier={torchCandelaMultiplier}
           wallIndex={wallIndex}
           wallMaterialMaps={wall}
         />
@@ -4701,13 +4763,13 @@ function MazeWalls({
         <WallSconce
           environmentTexture={environmentTexture}
           environmentIntensity={environmentIntensity}
+          iblContributionIntensity={iblContributionIntensity}
           key={mazeLight.id}
           layout={layout}
+          lightmapContributionIntensity={lightmapContributionIntensity}
           mazeLight={mazeLight}
-          probeIblEnabled={probeIblEnabled}
-          reflectionCapturesEnabled={reflectionCapturesEnabled}
+          reflectionContributionIntensity={reflectionContributionIntensity}
           reflectionProbeTextures={reflectionProbeTextures}
-          torchCandelaMultiplier={torchCandelaMultiplier}
         />
       ))}
     </>
@@ -4765,31 +4827,29 @@ function WallFaceMaterial({
 }
 
 function MazeWallMesh({
-  bakedLightmapsEnabled,
   environmentTexture,
   environmentIntensity,
+  iblContributionIntensity,
   lightmap,
   lightmapBytes,
   layout,
+  lightmapContributionIntensity,
   mazeWall,
-  probeIblEnabled,
-  reflectionCapturesEnabled,
+  reflectionContributionIntensity,
   reflectionProbeTextures,
-  torchCandelaMultiplier,
   wallIndex,
   wallMaterialMaps
 }: {
-  bakedLightmapsEnabled: boolean
   environmentTexture: Texture | null
   environmentIntensity: number
+  iblContributionIntensity: number
   lightmap: MazeLightmap
   lightmapBytes: Uint8Array
   layout: MazeLayout
+  lightmapContributionIntensity: number
   mazeWall: MazeLayout['walls'][number]
-  probeIblEnabled: boolean
-  reflectionCapturesEnabled: boolean
+  reflectionContributionIntensity: number
   reflectionProbeTextures: Texture[]
-  torchCandelaMultiplier: number
   wallIndex: number
   wallMaterialMaps: PbrMaps
 }) {
@@ -4818,24 +4878,27 @@ function MazeWallMesh({
     [reflectionProbeBlend.probeIndices, reflectionProbeTextures]
   )
   const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
-  const useProbeIbl =
-    probeIblEnabled &&
-    reflectionCapturesEnabled &&
+  const surfaceLightmapsEnabled =
+    lightmapContributionIntensity > EFFECT_EPSILON
+  const probeIblActive =
+    iblContributionIntensity > EFFECT_EPSILON &&
     hasProbeTextures
-  const surfaceLightmapsEnabled = bakedLightmapsEnabled && !useProbeIbl
+  const reflectionActive =
+    reflectionContributionIntensity > EFFECT_EPSILON &&
+    hasProbeTextures
   const lightMapIntensity =
     surfaceLightmapsEnabled
-      ? torchCandelaMultiplier * WALL_LIGHTMAP_INTENSITY_SCALE
+      ? lightmapContributionIntensity * WALL_LIGHTMAP_INTENSITY_SCALE
       : 0
   const faceMaterialPatchConfig = useMemo(
     () => ({
       lightMapAmbientTint:
         surfaceLightmapsEnabled
-          ? LIGHTMAP_AMBIENT_TINT
+          ? LIGHTMAP_AMBIENT_TINT.clone().multiplyScalar(lightmapContributionIntensity)
           : BLACK_COLOR,
       lightMapTorchTint: TORCH_LIGHTMAP_TINT
     }),
-    [surfaceLightmapsEnabled]
+    [lightmapContributionIntensity, surfaceLightmapsEnabled]
   )
   const probeBlend = useMemo(
     () =>
@@ -4843,22 +4906,22 @@ function MazeWallMesh({
         layout,
         reflectionProbeBlend.probeIndices,
         probeTextures,
-        useProbeIbl ? 'constant' : 'disabled',
+        probeIblActive ? 'constant' : 'disabled',
         {
-          radianceMode:
-            reflectionCapturesEnabled &&
-            hasProbeTextures
-              ? 'constant'
-              : 'none',
+          diffuseIntensity: iblContributionIntensity,
+          radianceIntensity: reflectionContributionIntensity,
+          radianceMode: reflectionActive ? 'constant' : 'disabled',
           weights: reflectionProbeBlend.weights as [number, number, number, number]
         }
       ),
     [
+      iblContributionIntensity,
       layout,
-      surfaceLightmapsEnabled,
-      useProbeIbl,
-      reflectionCapturesEnabled,
+      lightmapContributionIntensity,
       probeTextures,
+      probeIblActive,
+      reflectionActive,
+      reflectionContributionIntensity,
       reflectionProbeBlend.probeIndices,
       reflectionProbeBlend.weights
     ]
@@ -4967,31 +5030,29 @@ function MazeWallMesh({
 }
 
 function SceneGeometry({
-  bakedLightmapsEnabled,
   environmentTexture,
   environmentIntensity,
   environmentFogColor,
+  iblContributionIntensity,
   layout,
-  probeIblEnabled,
+  lightmapContributionIntensity,
   reflectionProbeAmbientColors,
-  reflectionCapturesEnabled,
+  reflectionContributionIntensity,
   reflectionProbeTextures,
   showReflectionProbes,
-  torchCandelaMultiplier,
   volumetricLighting,
   volumetricNoiseFrequency
 }: {
-  bakedLightmapsEnabled: boolean
   environmentTexture: Texture | null
   environmentIntensity: number
   environmentFogColor: Color
+  iblContributionIntensity: number
   layout: MazeLayout
-  probeIblEnabled: boolean
+  lightmapContributionIntensity: number
   reflectionProbeAmbientColors: Color[]
-  reflectionCapturesEnabled: boolean
+  reflectionContributionIntensity: number
   reflectionProbeTextures: Texture[]
   showReflectionProbes: boolean
-  torchCandelaMultiplier: number
   volumetricLighting: EffectSettings
   volumetricNoiseFrequency: number
 }) {
@@ -5001,26 +5062,24 @@ function SceneGeometry({
   return (
     <>
       <Ground
-        bakedLightmapsEnabled={bakedLightmapsEnabled}
         environmentTexture={environmentTexture}
         environmentIntensity={environmentIntensity}
+        iblContributionIntensity={iblContributionIntensity}
         layout={layout}
+        lightmapContributionIntensity={lightmapContributionIntensity}
         groundLightmapTexture={groundLightmapTexture}
-        probeIblEnabled={probeIblEnabled}
-        reflectionCapturesEnabled={reflectionCapturesEnabled}
+        reflectionContributionIntensity={reflectionContributionIntensity}
         reflectionProbeTextures={reflectionProbeTextures}
-        torchCandelaMultiplier={torchCandelaMultiplier}
       />
       <MazeWalls
-        bakedLightmapsEnabled={bakedLightmapsEnabled}
         environmentTexture={environmentTexture}
         environmentIntensity={environmentIntensity}
+        iblContributionIntensity={iblContributionIntensity}
         layout={layout}
+        lightmapContributionIntensity={lightmapContributionIntensity}
         lightmapBytes={lightmapBytes}
-        probeIblEnabled={probeIblEnabled}
-        reflectionCapturesEnabled={reflectionCapturesEnabled}
+        reflectionContributionIntensity={reflectionContributionIntensity}
         reflectionProbeTextures={reflectionProbeTextures}
-        torchCandelaMultiplier={torchCandelaMultiplier}
       />
       <ReflectionProbeDebugOverlay
         layout={layout}
@@ -5032,7 +5091,6 @@ function SceneGeometry({
           environmentFogColor={environmentFogColor}
           layout={layout}
           noiseFrequency={volumetricNoiseFrequency}
-          reflectionCapturesEnabled={reflectionCapturesEnabled}
           reflectionProbeAmbientColors={reflectionProbeAmbientColors}
           torchPositions={layout.lights.map((light) => light.torchPosition)}
           visible={volumetricLighting.enabled}
@@ -5193,12 +5251,10 @@ function ExposureEffectPrimitive({
 
 function TorchLensFlareEffectPrimitive({
   intensity,
-  mazeLights,
-  torchCandelaMultiplier
+  mazeLights
 }: {
   intensity: number
   mazeLights: MazeLayout['lights']
-  torchCandelaMultiplier: number
 }) {
   const camera = useThree((state) => state.camera)
   const raycaster = useThree((state) => state.raycaster)
@@ -5368,7 +5424,7 @@ function TorchLensFlareEffectPrimitive({
     haloScaleUniform.value = 0.16 + (normalizedIntensity * 0.08)
     colorGainUniform.value.copy(FIRE_COLOR).multiplyScalar(
       (0.05 + (normalizedIntensity * 0.25)) *
-      Math.sqrt(torchCandelaMultiplier)
+      Math.sqrt(AUTHORED_LIGHTING_SOURCE_SCALE)
     )
   })
 
@@ -5379,12 +5435,10 @@ function TorchLensFlareEffectPrimitive({
 
 function TorchLensFlare({
   intensity,
-  layout,
-  torchCandelaMultiplier
+  layout
 }: {
   intensity: number
   layout: MazeLayout
-  torchCandelaMultiplier: number
 }) {
   if (layout.lights.length === 0) {
     return null
@@ -5394,7 +5448,6 @@ function TorchLensFlare({
     <TorchLensFlareEffectPrimitive
       intensity={intensity}
       mazeLights={layout.lights}
-      torchCandelaMultiplier={torchCandelaMultiplier}
     />
   )
 }
@@ -5600,7 +5653,9 @@ function FlightRig({
           materialColor: [number, number, number] | null
           quaternion: [number, number, number, number]
           probeBlend: {
+            diffuseIntensity: number
             mode: 'constant' | 'disabled' | 'none' | 'world'
+            radianceIntensity: number
             radianceMode: 'constant' | 'disabled' | 'none' | 'world'
             probeTextureCount: number
             region: {
@@ -5625,7 +5680,9 @@ function FlightRig({
               texelWidth: number | null
             }>
             localProbeTextureBoundCount: number
+            probeBlendDiffuseIntensity: number | null
             probeBlendMode: number | null
+            probeBlendRadianceIntensity: number | null
             probeBlendRadianceMode: number | null
           } | null
           scale: [number, number, number]
@@ -5729,7 +5786,9 @@ function FlightRig({
           materialColor: [number, number, number] | null
           quaternion: [number, number, number, number]
           probeBlend: {
+            diffuseIntensity: number
             mode: 'constant' | 'disabled' | 'none' | 'world'
+            radianceIntensity: number
             radianceMode: 'constant' | 'disabled' | 'none' | 'world'
             probeTextureCount: number
             region: {
@@ -5788,8 +5847,10 @@ function FlightRig({
               lightMapIntensity?: number
               map?: Texture | null
               userData?: {
-                probeBlendDebug?: {
+            probeBlendDebug?: {
+                  diffuseIntensity: number
                   mode: 'constant' | 'disabled' | 'none' | 'world'
+                  radianceIntensity: number
                   radianceMode: 'constant' | 'disabled' | 'none' | 'world'
                   probeTextureCount: number
                   region: {
@@ -5814,7 +5875,9 @@ function FlightRig({
                     texelWidth: number | null
                   }>
                   localProbeTextureBoundCount: number
+                  probeBlendDiffuseIntensity: number | null
                   probeBlendMode: number | null
+                  probeBlendRadianceIntensity: number | null
                   probeBlendRadianceMode: number | null
                 } | null
               }
@@ -5953,7 +6016,9 @@ function FlightRig({
           localProbeEnvMap1: localProbeTextureUUIDs[1] ?? null,
           localProbeEnvMap2: localProbeTextureUUIDs[2] ?? null,
           localProbeEnvMap3: localProbeTextureUUIDs[3] ?? null,
+          probeBlendDiffuseIntensity: null,
           probeBlendMode: null,
+          probeBlendRadianceIntensity: null,
           probeBlendRadianceMode: null
         }
 
@@ -6213,10 +6278,7 @@ function Scene({
   const [reflectionProbeAmbientColors, setReflectionProbeAmbientColors] = useState<Color[]>([])
   const [reflectionProbeRawTextures, setReflectionProbeRawTextures] = useState<Texture[]>([])
   const [reflectionProbeTextures, setReflectionProbeTextures] = useState<Texture[]>([])
-  const environmentIntensity = useMemo(
-    () => getHdrLightingIntensity(visualSettings.iblIntensity),
-    [visualSettings.iblIntensity]
-  )
+  const environmentIntensity = BAKED_ENVIRONMENT_INTENSITY
 
   useEffect(() => {
     const globalWindow = window as Window & {
@@ -6670,7 +6732,6 @@ function Scene({
   return (
     <>
       <EnvironmentLighting
-        iblIntensity={visualSettings.iblIntensity}
         layout={layout}
         volumetricLighting={visualSettings.volumetricLighting}
         onEnvironmentFogColorChange={setEnvironmentFogColor}
@@ -6680,17 +6741,16 @@ function Scene({
         onReflectionProbeTexturesChange={setReflectionProbeTextures}
       />
       <SceneGeometry
-        bakedLightmapsEnabled={visualSettings.bakedLightmapsEnabled}
         environmentTexture={environmentTexture}
         environmentIntensity={environmentIntensity}
         environmentFogColor={environmentFogColor}
+        iblContributionIntensity={getEnabledContributionIntensity(visualSettings.iblContribution)}
         layout={layout}
-        probeIblEnabled={visualSettings.probeIblEnabled}
+        lightmapContributionIntensity={getEnabledContributionIntensity(visualSettings.lightmapContribution)}
         reflectionProbeAmbientColors={reflectionProbeAmbientColors}
-        reflectionCapturesEnabled={visualSettings.reflectionCapturesEnabled}
+        reflectionContributionIntensity={getEnabledContributionIntensity(visualSettings.reflectionContribution)}
         reflectionProbeTextures={reflectionProbeTextures}
         showReflectionProbes={visualSettings.showReflectionProbes}
-        torchCandelaMultiplier={visualSettings.torchCandelaMultiplier}
         volumetricLighting={visualSettings.volumetricLighting}
         volumetricNoiseFrequency={visualSettings.volumetricNoiseFrequency}
       />
@@ -6748,7 +6808,6 @@ function Scene({
           <TorchLensFlare
             intensity={visualSettings.lensFlare.intensity}
             layout={layout}
-            torchCandelaMultiplier={visualSettings.torchCandelaMultiplier}
           />
         ) : null}
         {vignetteActive ? (
@@ -6880,42 +6939,105 @@ function VisualControls({
         />
       </label>
 
+      <div className="visual-control-row">
+        <output>{visualSettings.lightmapContribution.enabled ? 'on' : 'off'}</output>
+        <ResettableLabel onReset={() => onResetBooleanSetting('lightmapContributionEnabled')}>
+          Lightmap Intensity
+        </ResettableLabel>
+        <input
+          aria-label="Lightmap Intensity Enabled"
+          checked={visualSettings.lightmapContribution.enabled}
+          onChange={(event) => {
+            onBooleanSettingChange('lightmapContributionEnabled', event.target.checked)
+          }}
+          type="checkbox"
+        />
+      </div>
+
       <label className="visual-control-row">
-        <output>{visualSettings.iblIntensity.toFixed(2)}x</output>
-        <ResettableLabel onReset={() => onResetScalarSetting('iblIntensity')}>
+        <output>{visualSettings.lightmapContribution.intensity.toFixed(2)}x</output>
+        <ResettableLabel onReset={() => onResetScalarSetting('lightmapContributionIntensity')}>
+          Lightmap Intensity
+        </ResettableLabel>
+        <input
+          aria-label="Lightmap Intensity"
+          disabled={!visualSettings.lightmapContribution.enabled}
+          max={MAX_LIGHTING_CONTRIBUTION_INTENSITY}
+          min={0}
+          onChange={(event) => {
+            onScalarSettingChange('lightmapContributionIntensity', Number(event.target.value))
+          }}
+          step={0.05}
+          type="range"
+          value={visualSettings.lightmapContribution.intensity}
+        />
+      </label>
+
+      <div className="visual-control-row">
+        <output>{visualSettings.iblContribution.enabled ? 'on' : 'off'}</output>
+        <ResettableLabel onReset={() => onResetBooleanSetting('iblContributionEnabled')}>
+          IBL Intensity
+        </ResettableLabel>
+        <input
+          aria-label="IBL Intensity Enabled"
+          checked={visualSettings.iblContribution.enabled}
+          onChange={(event) => {
+            onBooleanSettingChange('iblContributionEnabled', event.target.checked)
+          }}
+          type="checkbox"
+        />
+      </div>
+
+      <label className="visual-control-row">
+        <output>{visualSettings.iblContribution.intensity.toFixed(2)}x</output>
+        <ResettableLabel onReset={() => onResetScalarSetting('iblContributionIntensity')}>
           IBL Intensity
         </ResettableLabel>
         <input
           aria-label="IBL Intensity"
-          max={MAX_IBL_INTENSITY_MULTIPLIER}
-          min={MIN_IBL_INTENSITY_MULTIPLIER}
+          disabled={!visualSettings.iblContribution.enabled}
+          max={MAX_LIGHTING_CONTRIBUTION_INTENSITY}
+          min={0}
           onChange={(event) => {
-            onScalarSettingChange('iblIntensity', Number(event.target.value))
+            onScalarSettingChange('iblContributionIntensity', Number(event.target.value))
           }}
           step={0.05}
           type="range"
-          value={visualSettings.iblIntensity}
+          value={visualSettings.iblContribution.intensity}
         />
       </label>
 
-      <label className="visual-control-row">
-        <output>{visualSettings.torchCandelaMultiplier.toFixed(2)}x</output>
-        <ResettableLabel onReset={() => onResetScalarSetting('torchCandelaMultiplier')}>
-          Torch Candelas
+      <div className="visual-control-row">
+        <output>{visualSettings.reflectionContribution.enabled ? 'on' : 'off'}</output>
+        <ResettableLabel onReset={() => onResetBooleanSetting('reflectionContributionEnabled')}>
+          Reflection Intensity
         </ResettableLabel>
         <input
-          aria-label="Torch Candelas"
-          max={MAX_TORCH_CANDELA_MULTIPLIER}
-          min={MIN_TORCH_CANDELA_MULTIPLIER}
+          aria-label="Reflection Intensity Enabled"
+          checked={visualSettings.reflectionContribution.enabled}
           onChange={(event) => {
-            onScalarSettingChange(
-              'torchCandelaMultiplier',
-              Number(event.target.value)
-            )
+            onBooleanSettingChange('reflectionContributionEnabled', event.target.checked)
+          }}
+          type="checkbox"
+        />
+      </div>
+
+      <label className="visual-control-row">
+        <output>{visualSettings.reflectionContribution.intensity.toFixed(2)}x</output>
+        <ResettableLabel onReset={() => onResetScalarSetting('reflectionContributionIntensity')}>
+          Reflection Intensity
+        </ResettableLabel>
+        <input
+          aria-label="Reflection Intensity"
+          disabled={!visualSettings.reflectionContribution.enabled}
+          max={MAX_LIGHTING_CONTRIBUTION_INTENSITY}
+          min={0}
+          onChange={(event) => {
+            onScalarSettingChange('reflectionContributionIntensity', Number(event.target.value))
           }}
           step={0.05}
           type="range"
-          value={visualSettings.torchCandelaMultiplier}
+          value={visualSettings.reflectionContribution.intensity}
         />
       </label>
 
@@ -6947,51 +7069,6 @@ function VisualControls({
       </label>
 
       <div className="visual-control-row">
-        <output>{visualSettings.bakedLightmapsEnabled ? 'on' : 'off'}</output>
-        <ResettableLabel onReset={() => onResetBooleanSetting('bakedLightmapsEnabled')}>
-          Baked Lightmaps
-        </ResettableLabel>
-        <input
-          aria-label="Baked Lightmaps"
-          checked={visualSettings.bakedLightmapsEnabled}
-          onChange={(event) => {
-            onBooleanSettingChange('bakedLightmapsEnabled', event.target.checked)
-          }}
-          type="checkbox"
-        />
-      </div>
-
-      <div className="visual-control-row">
-        <output>{visualSettings.reflectionCapturesEnabled ? 'on' : 'off'}</output>
-        <ResettableLabel onReset={() => onResetBooleanSetting('reflectionCapturesEnabled')}>
-          Reflection Captures
-        </ResettableLabel>
-        <input
-          aria-label="Reflection Captures"
-          checked={visualSettings.reflectionCapturesEnabled}
-          onChange={(event) => {
-            onBooleanSettingChange('reflectionCapturesEnabled', event.target.checked)
-          }}
-          type="checkbox"
-        />
-      </div>
-
-      <div className="visual-control-row">
-        <output>{visualSettings.probeIblEnabled ? 'on' : 'off'}</output>
-        <ResettableLabel onReset={() => onResetBooleanSetting('probeIblEnabled')}>
-          Probe IBL
-        </ResettableLabel>
-        <input
-          aria-label="Probe IBL"
-          checked={visualSettings.probeIblEnabled}
-          onChange={(event) => {
-            onBooleanSettingChange('probeIblEnabled', event.target.checked)
-          }}
-          type="checkbox"
-        />
-      </div>
-
-      <div className="visual-control-row">
         <output>{visualSettings.showReflectionProbes ? 'on' : 'off'}</output>
         <ResettableLabel onReset={() => onResetBooleanSetting('showReflectionProbes')}>
           Show Reflection Probes
@@ -7005,69 +7082,6 @@ function VisualControls({
           type="checkbox"
         />
       </div>
-
-      <label className="visual-control-row">
-        <output>{visualSettings.movement.maxHorizontalSpeedMph.toFixed(1)}mph</output>
-        <ResettableLabel onReset={() => onResetScalarSetting('movementMaxHorizontalSpeedMph')}>
-          Move Speed
-        </ResettableLabel>
-        <input
-          aria-label="Move Speed"
-          max={40}
-          min={1}
-          onChange={(event) => {
-            onScalarSettingChange(
-              'movementMaxHorizontalSpeedMph',
-              Number(event.target.value)
-            )
-          }}
-          step={0.5}
-          type="range"
-          value={visualSettings.movement.maxHorizontalSpeedMph}
-        />
-      </label>
-
-      <label className="visual-control-row">
-        <output>{visualSettings.movement.accelerationDistance.toFixed(2)}m</output>
-        <ResettableLabel onReset={() => onResetScalarSetting('movementAccelerationDistance')}>
-          Accel Distance
-        </ResettableLabel>
-        <input
-          aria-label="Accel Distance"
-          max={12}
-          min={0.25}
-          onChange={(event) => {
-            onScalarSettingChange(
-              'movementAccelerationDistance',
-              Number(event.target.value)
-            )
-          }}
-          step={0.05}
-          type="range"
-          value={visualSettings.movement.accelerationDistance}
-        />
-      </label>
-
-      <label className="visual-control-row">
-        <output>{visualSettings.movement.decelerationDistance.toFixed(2)}m</output>
-        <ResettableLabel onReset={() => onResetScalarSetting('movementDecelerationDistance')}>
-          Decel Distance
-        </ResettableLabel>
-        <input
-          aria-label="Decel Distance"
-          max={4}
-          min={0.1}
-          onChange={(event) => {
-            onScalarSettingChange(
-              'movementDecelerationDistance',
-              Number(event.target.value)
-            )
-          }}
-          step={0.05}
-          type="range"
-          value={visualSettings.movement.decelerationDistance}
-        />
-      </label>
 
       <label className="visual-control-row">
         <output>
@@ -7420,32 +7434,32 @@ export default function App() {
 
   const onScalarSettingChange = (key: ScalarSettingKey, value: number) => {
     setVisualSettings((current) => {
-      if (key === 'movementAccelerationDistance') {
+      if (key === 'iblContributionIntensity') {
         return {
           ...current,
-          movement: {
-            ...current.movement,
-            accelerationDistance: value
+          iblContribution: {
+            ...current.iblContribution,
+            intensity: value
           }
         }
       }
 
-      if (key === 'movementDecelerationDistance') {
+      if (key === 'lightmapContributionIntensity') {
         return {
           ...current,
-          movement: {
-            ...current.movement,
-            decelerationDistance: value
+          lightmapContribution: {
+            ...current.lightmapContribution,
+            intensity: value
           }
         }
       }
 
-      if (key === 'movementMaxHorizontalSpeedMph') {
+      if (key === 'reflectionContributionIntensity') {
         return {
           ...current,
-          movement: {
-            ...current.movement,
-            maxHorizontalSpeedMph: value
+          reflectionContribution: {
+            ...current.reflectionContribution,
+            intensity: value
           }
         }
       }
@@ -7508,27 +7522,59 @@ export default function App() {
     key: BooleanSettingKey,
     value: boolean
   ) => {
-    setVisualSettings((current) => ({
-      ...current,
-      [key]: value
-    }))
+    setVisualSettings((current) => {
+      if (key === 'iblContributionEnabled') {
+        return {
+          ...current,
+          iblContribution: {
+            ...current.iblContribution,
+            enabled: value
+          }
+        }
+      }
+
+      if (key === 'lightmapContributionEnabled') {
+        return {
+          ...current,
+          lightmapContribution: {
+            ...current.lightmapContribution,
+            enabled: value
+          }
+        }
+      }
+
+      if (key === 'reflectionContributionEnabled') {
+        return {
+          ...current,
+          reflectionContribution: {
+            ...current.reflectionContribution,
+            enabled: value
+          }
+        }
+      }
+
+      return {
+        ...current,
+        [key]: value
+      }
+    })
   }
 
   const onResetScalarSetting = (key: ScalarSettingKey) => {
     const defaults = createDefaultVisualSettings()
 
-    if (key === 'movementAccelerationDistance') {
-      onScalarSettingChange(key, defaults.movement.accelerationDistance)
+    if (key === 'iblContributionIntensity') {
+      onScalarSettingChange(key, defaults.iblContribution.intensity)
       return
     }
 
-    if (key === 'movementDecelerationDistance') {
-      onScalarSettingChange(key, defaults.movement.decelerationDistance)
+    if (key === 'lightmapContributionIntensity') {
+      onScalarSettingChange(key, defaults.lightmapContribution.intensity)
       return
     }
 
-    if (key === 'movementMaxHorizontalSpeedMph') {
-      onScalarSettingChange(key, defaults.movement.maxHorizontalSpeedMph)
+    if (key === 'reflectionContributionIntensity') {
+      onScalarSettingChange(key, defaults.reflectionContribution.intensity)
       return
     }
 
@@ -7582,6 +7628,21 @@ export default function App() {
 
   const onResetBooleanSetting = (key: BooleanSettingKey) => {
     const defaults = createDefaultVisualSettings()
+
+    if (key === 'iblContributionEnabled') {
+      onBooleanSettingChange(key, defaults.iblContribution.enabled)
+      return
+    }
+
+    if (key === 'lightmapContributionEnabled') {
+      onBooleanSettingChange(key, defaults.lightmapContribution.enabled)
+      return
+    }
+
+    if (key === 'reflectionContributionEnabled') {
+      onBooleanSettingChange(key, defaults.reflectionContribution.enabled)
+      return
+    }
 
     onBooleanSettingChange(key, defaults[key])
   }

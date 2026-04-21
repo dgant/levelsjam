@@ -8,15 +8,25 @@ const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 const smokePort = 42731
 const thresholdsMs = {
   'test:unit': 20_000,
-  'test:smoke:runner': 180_000
+  'test:smoke:runner': 180_000,
+  'test:render:integration:runner': 180_000
 }
 const smokeStartupThresholdMs = 60_000
 const smokeProfilePath = path.join(rootDir, 'logs', 'latest-smoke-profile.json')
+const renderIntegrationProfilePath = path.join(
+  rootDir,
+  'logs',
+  'latest-render-integration-profile.json'
+)
 const unitProfilePath = path.join(rootDir, 'logs', 'latest-unit-test-profile.json')
 const benchmarkReportPath = path.join(rootDir, 'logs', 'latest-test-benchmark.json')
 
 function usesPlaywrightWebServer(scriptName) {
-  return scriptName.includes('smoke') || scriptName.includes('perf')
+  return (
+    scriptName.includes('smoke') ||
+    scriptName.includes('perf') ||
+    scriptName.includes('render:integration')
+  )
 }
 
 function formatMilliseconds(value) {
@@ -114,6 +124,10 @@ async function main() {
       scriptName === 'test:smoke:runner'
         ? readJsonIfPresent(smokeProfilePath)
         : null
+    const renderIntegrationProfile =
+      scriptName === 'test:render:integration:runner'
+        ? readJsonIfPresent(renderIntegrationProfilePath)
+        : null
     const unitProfile =
       scriptName === 'test:unit'
         ? readJsonIfPresent(unitProfilePath)
@@ -121,6 +135,9 @@ async function main() {
     const effectiveDurationMs =
       scriptName === 'test:unit' && typeof unitProfile?.totalDurationMs === 'number'
         ? unitProfile.totalDurationMs
+        : scriptName === 'test:render:integration:runner' &&
+            typeof renderIntegrationProfile?.totalRunMs === 'number'
+          ? renderIntegrationProfile.totalRunMs
         : result.durationMs
     const startupPhaseDurationMs =
       scriptName === 'test:smoke:runner'
@@ -131,6 +148,7 @@ async function main() {
       ...result,
       effectiveDurationMs,
       overThreshold,
+      renderIntegrationProfile,
       startupPhaseDurationMs,
       smokeProfile,
       unitProfile,
@@ -156,6 +174,16 @@ async function main() {
       }
       console.log(
         `Smoke screenshots: ${smokeProfile.screenshotCount} in ${formatMilliseconds(smokeProfile.screenshotMs)}`
+      )
+    }
+
+    if (renderIntegrationProfile?.phases?.length) {
+      console.log('Top render-integration phases:')
+      for (const phase of renderIntegrationProfile.phases.slice(0, 5)) {
+        console.log(`- ${formatMilliseconds(phase.durationMs)} ${phase.label}`)
+      }
+      console.log(
+        `Render screenshots: ${renderIntegrationProfile.screenshotCount} in ${formatMilliseconds(renderIntegrationProfile.screenshotMs)}`
       )
     }
 

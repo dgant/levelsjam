@@ -60,6 +60,27 @@ function writeMazeIndex(directory, fileNames) {
   fs.writeFileSync(path.join(directory, 'index.js'), contents)
 }
 
+function pruneObsoleteMazeArtifactDirectories(artifactsDirectory, mazeIds) {
+  if (!artifactsDirectory || !fs.existsSync(artifactsDirectory)) {
+    return
+  }
+
+  const expectedMazeIds = new Set(mazeIds)
+
+  for (const entry of fs.readdirSync(artifactsDirectory, { withFileTypes: true })) {
+    if (!entry.isDirectory()) {
+      continue
+    }
+
+    if (!expectedMazeIds.has(entry.name)) {
+      fs.rmSync(path.join(artifactsDirectory, entry.name), {
+        force: true,
+        recursive: true
+      })
+    }
+  }
+}
+
 function needsMazeRewrite(maze) {
   if (maze.lightmap?.version !== MAZE_LIGHTMAP_VERSION) {
     return true
@@ -161,19 +182,35 @@ export async function ensureMazeFiles({
   artifactsDirectory = DEFAULT_LIGHTMAP_ARTIFACT_DIRECTORY,
   directory,
   mazeFactory = generateMaze,
+  onProgress = null,
   targetCount = MAZE_TARGET_COUNT
 }) {
+  const reportProgress = onProgress ?? (() => {})
+
   fs.mkdirSync(directory, { recursive: true })
 
   const validMazes = []
   const signatures = new Set()
   const fileNames = getMazeFiles(directory)
 
-  for (const fileName of fileNames) {
+  for (let fileIndex = 0; fileIndex < fileNames.length; fileIndex += 1) {
+    const fileName = fileNames[fileIndex]
+
+    reportProgress({
+      fileName,
+      index: fileIndex + 1,
+      stage: 'inspect-existing',
+      total: fileNames.length
+    })
     const filePath = path.join(directory, fileName)
     let maze = await importMazeModule(filePath)
     if (maze.width !== MAZE_WIDTH || maze.height !== MAZE_HEIGHT) {
       fs.rmSync(filePath, { force: true })
+      reportProgress({
+        action: 'remove-invalid-dimensions',
+        fileName,
+        stage: 'inspect-existing'
+      })
       continue
     }
 
@@ -181,23 +218,44 @@ export async function ensureMazeFiles({
     if (shouldRewrite) {
       maze.lightmap = bakeMazeLightmap(maze)
       fs.writeFileSync(filePath, serializeMazeModule(maze))
+      reportProgress({
+        action: 'rewrite-lightmap',
+        fileName,
+        stage: 'inspect-existing'
+      })
     }
 
     const validation = validateMaze(maze)
 
     if (!validation.valid) {
       fs.rmSync(filePath, { force: true })
+      reportProgress({
+        action: 'remove-invalid-maze',
+        fileName,
+        stage: 'inspect-existing'
+      })
       continue
     }
 
     const signature = getMazeSignature(maze)
     if (signatures.has(signature)) {
       fs.rmSync(filePath, { force: true })
+      reportProgress({
+        action: 'remove-duplicate-maze',
+        fileName,
+        stage: 'inspect-existing'
+      })
       continue
     }
 
     signatures.add(signature)
     validMazes.push({ fileName, maze })
+    reportProgress({
+      action: shouldRewrite ? 'kept-rewritten' : 'kept-existing',
+      fileName,
+      stage: 'inspect-existing',
+      validCount: validMazes.length
+    })
   }
 
   let nextIndex = getNextMazeIndex(getMazeFiles(directory))
@@ -230,10 +288,29 @@ export async function ensureMazeFiles({
     )
     signatures.add(signature)
     validMazes.push({ fileName, maze })
+    reportProgress({
+      action: 'generate-new-maze',
+      fileName,
+      stage: 'generate-missing',
+      validCount: validMazes.length
+    })
   }
 
   if (artifactsDirectory) {
-    for (const { maze } of validMazes) {
+    pruneObsoleteMazeArtifactDirectories(
+      artifactsDirectory,
+      validMazes.map(({ maze }) => maze.id)
+    )
+
+    for (let index = 0; index < validMazes.length; index += 1) {
+      const { maze } = validMazes[index]
+
+      reportProgress({
+        index: index + 1,
+        mazeId: maze.id,
+        stage: 'dump-artifacts',
+        total: validMazes.length
+      })
       dumpMazeLightmapArtifacts({
         directory: artifactsDirectory,
         maze

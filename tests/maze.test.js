@@ -21,7 +21,7 @@ import {
   dumpMazeLightmapArtifacts,
   ensureMazeFiles
 } from '../src/lib/mazePersistence.js'
-import { SCONCE_RADIUS } from '../src/lib/sceneLayout.js'
+import { SCONCE_RADIUS } from '../src/lib/sceneConstants.js'
 
 const DEFAULT_MAZE_DIRECTORY = path.join(process.cwd(), 'src', 'data', 'mazes')
 
