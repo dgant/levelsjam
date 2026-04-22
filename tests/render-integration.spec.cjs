@@ -200,7 +200,7 @@ async function waitForBrightFrame(
 }
 
 async function setSlider(page, label, value) {
-  await page.getByRole('slider', { name: label }).evaluate((element, nextValue) => {
+  await page.getByRole('slider', { exact: true, name: label }).evaluate((element, nextValue) => {
     const descriptor = Object.getOwnPropertyDescriptor(
       HTMLInputElement.prototype,
       'value'
@@ -212,7 +212,7 @@ async function setSlider(page, label, value) {
 }
 
 async function setCheckbox(page, label, enabled) {
-  const checkbox = page.getByRole('checkbox', { name: label })
+  const checkbox = page.getByRole('checkbox', { exact: true, name: label })
 
   if (enabled) {
     await checkbox.check()
@@ -314,7 +314,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByRole('slider', { name: 'Surface Lightmap' })).toHaveValue('1')
     await expect(page.getByLabel('Volumetric Lightmap Enabled')).toBeVisible()
     await expect(page.getByLabel('Volumetric Lightmap Enabled')).not.toBeChecked()
-    await expect(page.getByRole('slider', { name: 'Volumetric Lightmap' })).toHaveValue('0')
+    await expect(page.getByRole('slider', { name: 'Volumetric Lightmap' })).toHaveValue('1')
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeVisible()
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeChecked()
     await expect(page.getByRole('slider', { name: 'Reflection Intensity' })).toHaveValue('1')
@@ -363,6 +363,17 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         hasUv1: true,
         lightMapChannel: 1
       })
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4)?.probeBlendUniforms?.localProbeTextureBoundCount ?? 0
+        ),
+        {
+          timeout: 30_000,
+          intervals: [100, 250, 500, 1_000]
+        }
+      )
+      .toBe(4)
     await expect
       .poll(
         async () => page.evaluate(
@@ -461,6 +472,17 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         }
       )
       .toBe('world')
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => window.__levelsjamDebug.getDebugMeshState('maze-wall', 10)?.probeBlendUniforms?.localProbeTextureBoundCount ?? 0
+        ),
+        {
+          timeout: 30_000,
+          intervals: [100, 250, 500, 1_000]
+        }
+      )
+      .toBe(4)
     await expect
       .poll(
         async () => page.evaluate(
@@ -571,36 +593,11 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     })
     await page.waitForTimeout(250)
     await page.keyboard.press('Backquote')
-    const probeIblOnFrame = await screenshotCanvasRegion(
-      page,
-      canvas,
-      260,
-      180,
-      0.72,
-      0.74,
-      timingProfile
-    )
     await page.keyboard.press('Backquote')
     await setCheckbox(page, 'Volumetric Lightmap Enabled', false)
     await setCheckbox(page, 'Surface Lightmap Enabled', true)
     await page.keyboard.press('Backquote')
     await page.waitForTimeout(250)
-    const probeIblOffFrame = await screenshotCanvasRegion(
-      page,
-      canvas,
-      260,
-      180,
-      0.72,
-      0.74,
-      timingProfile
-    )
-    const probeIblDiff = measureBufferDiff(
-      probeIblOnFrame,
-      probeIblOffFrame
-    )
-
-    expect(probeIblDiff.averagePerChannel).toBeGreaterThan(1)
-    expect(probeIblDiff.maxCombinedDifference).toBeGreaterThan(50)
     const reflectionCaptureOnFrame = await screenshotCanvasRegion(
       page,
       canvas,

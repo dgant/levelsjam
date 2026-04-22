@@ -87,7 +87,22 @@ function cubeTexelSolidAngle(u, v, size) {
   )
 }
 
-function computeVolumetricLightmapCoefficients(rawAtlas) {
+function decodeRgbE8(r, g, b, a) {
+  if (a <= 0) {
+    return [0, 0, 0]
+  }
+
+  const exponent = a - 128
+  const scale = 2 ** exponent
+
+  return [
+    (r / 255) * scale,
+    (g / 255) * scale,
+    (b / 255) * scale
+  ]
+}
+
+function computeVolumetricLightmapCoefficients(rawRgbEAtlas) {
   const basisWeights = [
     ([x, y, z]) => 0.282095,
     ([x, y, z]) => 0.488603 * x,
@@ -97,19 +112,20 @@ function computeVolumetricLightmapCoefficients(rawAtlas) {
   const coefficients = basisWeights.map(() => [0, 0, 0])
   let totalWeight = 0
 
-  for (let faceIndex = 0; faceIndex < rawAtlas.length; faceIndex += 1) {
+  for (let faceIndex = 0; faceIndex < rawRgbEAtlas.length; faceIndex += 1) {
     const png = PNG.sync.read(
-      Buffer.from(rawAtlas[faceIndex].replace(/^data:image\/png;base64,/, ''), 'base64')
+      Buffer.from(rawRgbEAtlas[faceIndex].replace(/^data:image\/png;base64,/, ''), 'base64')
     )
 
     for (let row = 0; row < png.height; row += 1) {
       for (let column = 0; column < png.width; column += 1) {
         const pixelIndex = ((row * png.width) + column) * 4
-        const color = [
-          png.data[pixelIndex] / 255,
-          png.data[pixelIndex + 1] / 255,
-          png.data[pixelIndex + 2] / 255
-        ]
+        const color = decodeRgbE8(
+          png.data[pixelIndex],
+          png.data[pixelIndex + 1],
+          png.data[pixelIndex + 2],
+          png.data[pixelIndex + 3]
+        )
         const direction = directionForFaceUv(
           faceIndex,
           (column + 0.5) / png.width,
@@ -241,6 +257,7 @@ async function captureMazeReflectionArtifacts(page, maze, artifactRoot) {
 
     if (
       !Array.isArray(capture.rawAtlas) ||
+      !Array.isArray(capture.rawRgbEAtlas) ||
       !Array.isArray(capture.processedAtlas) ||
       !Array.isArray(capture.geometryAtlas) ||
       !Array.isArray(capture.depthAtlas) ||
@@ -257,6 +274,7 @@ async function captureMazeReflectionArtifacts(page, maze, artifactRoot) {
     )
 
     writeAtlasArtifacts(probeDirectory, 'raw', capture.rawAtlas)
+    writeAtlasArtifacts(probeDirectory, 'raw-rgbe', capture.rawRgbEAtlas)
     writeAtlasArtifacts(probeDirectory, 'processed', capture.processedAtlas)
     writeAtlasArtifacts(probeDirectory, 'geometry', capture.geometryAtlas)
     writeAtlasArtifacts(probeDirectory, 'depth', capture.depthAtlas)
@@ -291,7 +309,7 @@ async function captureMazeReflectionArtifacts(page, maze, artifactRoot) {
     }
 
     runtimeManifest.probes.push({
-      coefficients: computeVolumetricLightmapCoefficients(capture.rawAtlas),
+      coefficients: computeVolumetricLightmapCoefficients(capture.rawRgbEAtlas),
       depthFaces: runtimeDepthFiles.map((fileName) =>
         path.posix.join(runtimeProbeDirectoryRelative, fileName)
       ),

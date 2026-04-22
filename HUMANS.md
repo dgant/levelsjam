@@ -73,19 +73,19 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify reflective floor highlights transition smoothly across maze cells instead of stepping abruptly at reflection-probe region boundaries.
 - Verify disabling `Reflection Intensity` removes the local probe reflection contribution from the puddled maze floor.
 - Verify toggling `Reflection Intensity` produces a visible change on an in-maze reflective floor patch.
-- Verify enabling `Show Reflection Probes` draws a probe sphere at each maze probe position.
+- Verify setting `Probe Debug` to `Reflection` draws a probe sphere at each maze probe position.
 - Verify the reflection-probe spheres directly display the processed local reflection source used by in-game materials and visibly show nearby maze geometry and torch reflections rather than a black sphere, an empty sphere, or a nearly all-sky capture.
 - Verify the reflection-probe spheres render as ordinary non-colliding scene geometry rather than as an overlay, so they depth-test against the scene and follow the same exposure path as the rest of the frame.
 - Verify `window.__levelsjamDebug.getReflectionProbeState()` reports a nonzero probe count and becomes `ready: true` after load.
 - For deeper probe debugging, call `window.__levelsjamDebug.captureReflectionProbeAtlas(probeIndex, size)` in the browser console to get six PNG data URLs for the exact raw captured cubemap faces.
 - For deeper runtime-reflection debugging, call `window.__levelsjamDebug.captureReflectionProbeProcessedAtlas(probeIndex, size)` in the browser console to get six PNG data URLs for the processed probe texture that reflective materials actually sample in-game.
 - For direct source-binding debugging, call `window.__levelsjamDebug.getReflectionProbeTextureState(probeIndex)` to inspect the exact runtime raw and processed probe texture UUIDs bound for that probe.
-- For debug-sphere binding checks, enable `Show Reflection Probes` and call `window.__levelsjamDebug.getReflectionProbeVisualizationState(probeIndex)` to confirm the overlay sphere is using the same processed probe texture UUID.
+- For debug-sphere binding checks, set `Probe Debug` to `Reflection` and call `window.__levelsjamDebug.getReflectionProbeVisualizationState(probeIndex)` to confirm the overlay sphere is using the same processed probe texture UUID.
 - Verify moving the camera between maze cells does not change `window.__levelsjamDebug.getReflectionProbeState().activeProbeId` from `null` or make the scene lighting flicker.
 - Verify the fire flipbook runs at the updated faster rate.
 - Verify the tone mapper is `AgX` by default.
 - Verify the visual controls panel exposes `Exposure`, `Surface Lightmap`, `Volumetric Lightmap`, `Reflection Intensity`, `Ambient Occlusion`, `AO Intensity`, the tone mapper, and the enabled/intensity controls for Bloom, Depth Of Field, Lens Flares, SSR, and Vignette.
-- Verify the visual controls panel also exposes `Show Reflection Probes`.
+- Verify the visual controls panel also exposes `Probe Debug`.
 - Verify the visual controls panel also exposes `Bloom Kernel`, `AO Radius`, `DOF Focus Distance`, `DOF Focal Length`, `Depth Of Field Bokeh Scale`, and the volumetric fog controls.
 - Verify the `DOF Focus Distance` slider reaches 8 meters.
 - Verify the `Surface Lightmap`, `Volumetric Lightmap`, and `Reflection Intensity` controls each produce a visible material change when enabled.

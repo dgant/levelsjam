@@ -203,7 +203,7 @@ const BAKED_ENVIRONMENT_INTENSITY = getHdrLightingIntensity(
   AUTHORED_LIGHTING_SOURCE_SCALE
 )
 const DEFAULT_LIGHTMAP_CONTRIBUTION_INTENSITY = 1
-const DEFAULT_PROBE_IBL_INTENSITY = 0
+const DEFAULT_PROBE_IBL_INTENSITY = 1
 const DEFAULT_REFLECTION_INTENSITY = 1
 const MAX_LIGHTING_CONTRIBUTION_INTENSITY = 4
 
@@ -293,7 +293,6 @@ uniform int samples;
 uniform float scale;
 uniform float texelWidth;
 uniform float threshold;
-uniform sampler2D inputBuffer;
 
 float sampleLuminance(vec3 color) {
   return dot(color, vec3(0.2126, 0.7152, 0.0722));
@@ -503,14 +502,35 @@ type LightingContributionSettings = {
   intensity: number
 }
 
+type ProbeDebugMode =
+  | 'none'
+  | 'reflection'
+  | 'volumetric-lightmap'
+  | 'shadow-map'
+
 type AnamorphicSettings = EffectSettings & {
+  colorGain: number
   samples: number
   scale: number
   threshold: number
 }
 
+type SSRPassOutputMode =
+  | 'default'
+  | 'ssr'
+  | 'beauty'
+  | 'depth'
+  | 'normal'
+  | 'metalness'
+
 type SSRSettings = EffectSettings & {
+  blur: boolean
+  bouncing: boolean
+  distanceAttenuation: boolean
+  fresnel: boolean
+  infiniteThick: boolean
   maxDistance: number
+  output: SSRPassOutputMode
   resolutionScale: number
   thickness: number
 }
@@ -525,6 +545,9 @@ type BloomKernelSizeKey =
 
 type BloomSettings = EffectSettings & {
   kernelSize: BloomKernelSizeKey
+  resolutionScale: number
+  smoothing: number
+  threshold: number
 }
 
 type DepthOfFieldSettings = {
@@ -532,6 +555,23 @@ type DepthOfFieldSettings = {
   enabled: boolean
   focalLength: number
   focusDistance: number
+  resolutionScale: number
+}
+
+type LensFlareSettings = EffectSettings & {
+  aditionalStreaks: boolean
+  animated: boolean
+  anamorphic: boolean
+  flareShape: number
+  flareSize: number
+  flareSpeed: number
+  ghostScale: number
+  glareSize: number
+  haloScale: number
+  opacity: number
+  secondaryGhosts: boolean
+  starBurst: boolean
+  starPoints: number
 }
 
 type MovementSettings = {
@@ -589,6 +629,20 @@ const DEFAULT_AO_RADIUS_METERS = 1.25
 const DEFAULT_VOLUMETRIC_NOISE_FREQUENCY = 2
 const GIT_REVISION = __GIT_REVISION__
 const GIT_REVISION_TIMESTAMP = __GIT_REVISION_TIMESTAMP__
+const PROBE_DEBUG_MODE_OPTIONS: Array<{ key: ProbeDebugMode, label: string }> = [
+  { key: 'none', label: 'None' },
+  { key: 'reflection', label: 'Reflection' },
+  { key: 'volumetric-lightmap', label: 'Volumetric Lightmap' },
+  { key: 'shadow-map', label: 'Shadow Map' }
+]
+const SSR_OUTPUT_OPTIONS: Array<{ key: SSRPassOutputMode, label: string, value: number }> = [
+  { key: 'default', label: 'Default', value: 0 },
+  { key: 'ssr', label: 'SSR', value: 1 },
+  { key: 'beauty', label: 'Beauty', value: 3 },
+  { key: 'depth', label: 'Depth', value: 4 },
+  { key: 'normal', label: 'Normal', value: 5 },
+  { key: 'metalness', label: 'Metalness', value: 7 }
+]
 
 type VisualSettings = {
   anamorphic: AnamorphicSettings
@@ -598,12 +652,12 @@ type VisualSettings = {
   exposureStops: number
   iblContribution: LightingContributionSettings
   lightmapContribution: LightingContributionSettings
+  lensFlare: LensFlareSettings
+  probeDebugMode: ProbeDebugMode
   reflectionContribution: LightingContributionSettings
-  showReflectionProbes: boolean
   toneMapping: ToneMappingMode
   bloom: BloomSettings
   depthOfField: DepthOfFieldSettings
-  lensFlare: EffectSettings
   movement: MovementSettings
   ssr: SSRSettings
   volumetricLighting: EffectSettings
@@ -612,14 +666,12 @@ type VisualSettings = {
 }
 
 type GenericEffectSettingKey =
-  'lensFlare' |
   'vignette' |
   'volumetricLighting'
 type BooleanSettingKey =
   | 'iblContributionEnabled'
   | 'lightmapContributionEnabled'
   | 'reflectionContributionEnabled'
-  | 'showReflectionProbes'
 type ScalarSettingKey =
   | 'ambientOcclusionIntensity'
   | 'ambientOcclusionRadius'
@@ -960,6 +1012,7 @@ class FogVolumeEffectImpl extends Effect {
 function createDefaultVisualSettings(): VisualSettings {
   return {
     anamorphic: {
+      colorGain: 1,
       enabled: false,
       intensity: 0.5,
       samples: 32,
@@ -978,20 +1031,44 @@ function createDefaultVisualSettings(): VisualSettings {
       enabled: true,
       intensity: DEFAULT_LIGHTMAP_CONTRIBUTION_INTENSITY
     },
+    lensFlare: {
+      aditionalStreaks: false,
+      animated: true,
+      anamorphic: false,
+      enabled: false,
+      flareShape: 0.08,
+      flareSize: 0.0025,
+      flareSpeed: 0.01,
+      ghostScale: 0.14,
+      glareSize: 0.03,
+      haloScale: 0.16,
+      intensity: 0,
+      opacity: 1,
+      secondaryGhosts: true,
+      starBurst: false,
+      starPoints: 6
+    },
+    probeDebugMode: 'none',
     reflectionContribution: {
       enabled: true,
       intensity: DEFAULT_REFLECTION_INTENSITY
     },
-    showReflectionProbes: false,
     toneMapping: 'agx',
-    bloom: { enabled: false, intensity: 0.7, kernelSize: 'large' },
+    bloom: {
+      enabled: false,
+      intensity: 0.7,
+      kernelSize: 'large',
+      resolutionScale: BLOOM_RESOLUTION_SCALES.large,
+      smoothing: 0,
+      threshold: 0.05
+    },
     depthOfField: {
       bokehScale: 0,
       enabled: false,
       focalLength: 0.03,
-      focusDistance: 0.02
+      focusDistance: 0.02,
+      resolutionScale: 0.25
     },
-    lensFlare: { enabled: false, intensity: 0 },
     movement: {
       accelerationDistance:
         DEFAULT_MOVEMENT_SETTINGS.horizontalAccelerationDistance,
@@ -1000,9 +1077,15 @@ function createDefaultVisualSettings(): VisualSettings {
       maxHorizontalSpeedMph: DEFAULT_MOVEMENT_SETTINGS.maxHorizontalSpeedMph
     },
     ssr: {
+      blur: true,
+      bouncing: false,
+      distanceAttenuation: true,
       enabled: false,
+      fresnel: true,
       intensity: 0,
+      infiniteThick: false,
       maxDistance: 18,
+      output: 'default',
       resolutionScale: 0.75,
       thickness: 0.018
     },
@@ -1329,7 +1412,6 @@ vec3 applyProbeBoxProjection(
 
 vec3 sampleProbeBlendTexture(
   sampler2D probeMap,
-  samplerCube probeDepthMap,
   vec3 worldPosition,
   vec3 direction,
   float roughness,
@@ -1357,14 +1439,10 @@ vec3 sampleProbeBlendTexture(
       texelHeight,
       maxMip
     )
-  ) * sampleProbeVisibility(
-    probeDepthMap,
-    worldPosition,
-    probePosition
   );
 }
 
-vec3 reconstructProbeRadiance(
+vec3 reconstructProbeIrradiance(
   vec3 direction,
   vec3 coeffL0,
   vec3 coeffL1,
@@ -1376,37 +1454,55 @@ vec3 reconstructProbeRadiance(
   float basisL1 = 0.488603 * normalizedDirection.x;
   float basisL2 = 0.488603 * normalizedDirection.y;
   float basisL3 = 0.488603 * normalizedDirection.z;
+  float bandKernelL0 = PI;
+  float bandKernelL1 = 2.09439510239;
 
   return max(
     vec3( 0.0 ),
-    ( coeffL0 * basisL0 ) +
-    ( coeffL1 * basisL1 ) +
-    ( coeffL2 * basisL2 ) +
-    ( coeffL3 * basisL3 )
+    ( coeffL0 * basisL0 * bandKernelL0 ) +
+    ( coeffL1 * basisL1 * bandKernelL1 ) +
+    ( coeffL2 * basisL2 * bandKernelL1 ) +
+    ( coeffL3 * basisL3 * bandKernelL1 )
   ) * ( 4.0 * PI );
 }
 
 vec3 sampleProbeBlendDiffuse(
-  samplerCube probeDepthMap,
-  vec3 worldPosition,
   vec3 direction,
-  vec3 probePosition,
   vec3 coeffL0,
   vec3 coeffL1,
   vec3 coeffL2,
   vec3 coeffL3
 ) {
-  return reconstructProbeRadiance(
+  return reconstructProbeIrradiance(
     direction,
     coeffL0,
     coeffL1,
     coeffL2,
     coeffL3
-  ) * sampleProbeVisibility(
-    probeDepthMap,
-    worldPosition,
-    probePosition
   );
+}
+
+vec4 getProbeBlendVisibleWeights(
+  vec3 worldPosition,
+  vec4 baseWeights
+) {
+  vec4 visibleWeights = vec4(
+    sampleProbeVisibility( localProbeDepthMap0, worldPosition, localProbePosition0 ),
+    sampleProbeVisibility( localProbeDepthMap1, worldPosition, localProbePosition1 ),
+    sampleProbeVisibility( localProbeDepthMap2, worldPosition, localProbePosition2 ),
+    sampleProbeVisibility( localProbeDepthMap3, worldPosition, localProbePosition3 )
+  ) * baseWeights;
+  float visibleWeightSum =
+    visibleWeights.x +
+    visibleWeights.y +
+    visibleWeights.z +
+    visibleWeights.w;
+
+  if ( visibleWeightSum <= 0.0001 ) {
+    return baseWeights;
+  }
+
+  return visibleWeights / visibleWeightSum;
 }
 
 vec3 sampleProbeBlendLocalRadiance(
@@ -1416,9 +1512,9 @@ vec3 sampleProbeBlendLocalRadiance(
   vec4 weights,
   float intensity
 ) {
+  vec4 visibleWeights = getProbeBlendVisibleWeights( worldPosition, weights );
   vec3 color0 = sampleProbeBlendTexture(
     localProbeEnvMap0,
-    localProbeDepthMap0,
     worldPosition,
     direction,
     roughness,
@@ -1431,7 +1527,6 @@ vec3 sampleProbeBlendLocalRadiance(
   );
   vec3 color1 = sampleProbeBlendTexture(
     localProbeEnvMap1,
-    localProbeDepthMap1,
     worldPosition,
     direction,
     roughness,
@@ -1444,7 +1539,6 @@ vec3 sampleProbeBlendLocalRadiance(
   );
   vec3 color2 = sampleProbeBlendTexture(
     localProbeEnvMap2,
-    localProbeDepthMap2,
     worldPosition,
     direction,
     roughness,
@@ -1457,7 +1551,6 @@ vec3 sampleProbeBlendLocalRadiance(
   );
   vec3 color3 = sampleProbeBlendTexture(
     localProbeEnvMap3,
-    localProbeDepthMap3,
     worldPosition,
     direction,
     roughness,
@@ -1470,10 +1563,10 @@ vec3 sampleProbeBlendLocalRadiance(
   );
 
   return (
-    ( color0 * weights.x ) +
-    ( color1 * weights.y ) +
-    ( color2 * weights.z ) +
-    ( color3 * weights.w )
+    ( color0 * visibleWeights.x ) +
+    ( color1 * visibleWeights.y ) +
+    ( color2 * visibleWeights.z ) +
+    ( color3 * visibleWeights.w )
   ) * intensity;
 }
 
@@ -1483,41 +1576,30 @@ vec3 sampleProbeBlendLocalDiffuse(
   vec4 weights,
   float intensity
 ) {
+  vec4 visibleWeights = getProbeBlendVisibleWeights( worldPosition, weights );
   vec3 color0 = sampleProbeBlendDiffuse(
-    localProbeDepthMap0,
-    worldPosition,
     direction,
-    localProbePosition0,
     localProbeCoeffL00,
     localProbeCoeffL10,
     localProbeCoeffL20,
     localProbeCoeffL30
   );
   vec3 color1 = sampleProbeBlendDiffuse(
-    localProbeDepthMap1,
-    worldPosition,
     direction,
-    localProbePosition1,
     localProbeCoeffL01,
     localProbeCoeffL11,
     localProbeCoeffL21,
     localProbeCoeffL31
   );
   vec3 color2 = sampleProbeBlendDiffuse(
-    localProbeDepthMap2,
-    worldPosition,
     direction,
-    localProbePosition2,
     localProbeCoeffL02,
     localProbeCoeffL12,
     localProbeCoeffL22,
     localProbeCoeffL32
   );
   vec3 color3 = sampleProbeBlendDiffuse(
-    localProbeDepthMap3,
-    worldPosition,
     direction,
-    localProbePosition3,
     localProbeCoeffL03,
     localProbeCoeffL13,
     localProbeCoeffL23,
@@ -1525,10 +1607,10 @@ vec3 sampleProbeBlendLocalDiffuse(
   );
 
   return (
-    ( color0 * weights.x ) +
-    ( color1 * weights.y ) +
-    ( color2 * weights.z ) +
-    ( color3 * weights.w )
+    ( color0 * visibleWeights.x ) +
+    ( color1 * visibleWeights.y ) +
+    ( color2 * visibleWeights.z ) +
+    ( color3 * visibleWeights.w )
   ) * intensity;
 }
 
@@ -2301,7 +2383,6 @@ function loadRuntimeProbeCubeUvTexture(url: string) {
       url,
       (texture) => {
         texture.colorSpace = NoColorSpace
-        texture.flipY = false
         texture.generateMipmaps = false
         texture.magFilter = LinearFilter
         texture.mapping = CubeUVReflectionMapping
@@ -5089,35 +5170,38 @@ function FogVolume({
 }
 
 function ReflectionProbeVisualization({
+  mode,
+  reflectionProbeCoefficients,
+  reflectionProbeDepthTextures,
   layout,
   reflectionProbeTextures,
   visible
 }: {
+  mode: ProbeDebugMode
+  reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
+  reflectionProbeDepthTextures: CubeTexture[]
   layout: MazeLayout
   reflectionProbeTextures: Texture[]
   visible: boolean
 }) {
-  if (!visible) {
+  if (!visible || mode === 'none') {
     return null
   }
 
   return (
     <>
       {layout.reflectionProbes.map((probe, index) => {
-        const texture = reflectionProbeTextures[index]
-        const textureInfo = getCubeUvTextureInfo(texture)
+        let material: ReactNode = null
 
-        if (!texture || !textureInfo) {
-          return null
-        }
+        if (mode === 'reflection') {
+          const texture = reflectionProbeTextures[index]
+          const textureInfo = getCubeUvTextureInfo(texture)
 
-        return (
-          <mesh
-            key={probe.id}
-            position={[probe.position.x, probe.position.y, probe.position.z]}
-            userData={{ debugIndex: index, debugRole: 'reflection-probe-visual' }}
-          >
-            <sphereGeometry args={[0.18, 16, 16]} />
+          if (!texture || !textureInfo) {
+            return null
+          }
+
+          material = (
             <shaderMaterial
               depthTest
               depthWrite
@@ -5139,6 +5223,78 @@ function ReflectionProbeVisualization({
                 }
               `}
             />
+          )
+        } else if (mode === 'volumetric-lightmap') {
+          const coefficients = reflectionProbeCoefficients[index]
+
+          if (!coefficients) {
+            return null
+          }
+
+          material = (
+            <shaderMaterial
+              depthTest
+              depthWrite
+              fragmentShader={createVolumetricLightmapProbeSphereFragmentShader()}
+              side={DoubleSide}
+              toneMapped
+              uniforms={{
+                coeffL0: { value: new Vector3(...coefficients[0]) },
+                coeffL1: { value: new Vector3(...coefficients[1]) },
+                coeffL2: { value: new Vector3(...coefficients[2]) },
+                coeffL3: { value: new Vector3(...coefficients[3]) }
+              }}
+              vertexShader={`
+                varying vec3 vProbeDirection;
+
+                void main() {
+                  vProbeDirection = position;
+                  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+              `}
+            />
+          )
+        } else if (mode === 'shadow-map') {
+          const depthTexture = reflectionProbeDepthTextures[index]
+
+          if (!depthTexture) {
+            return null
+          }
+
+          material = (
+            <shaderMaterial
+              depthTest
+              depthWrite
+              fragmentShader={createShadowProbeSphereFragmentShader()}
+              side={DoubleSide}
+              toneMapped
+              uniforms={{
+                probeDepthMap: { value: depthTexture }
+              }}
+              vertexShader={`
+                varying vec3 vProbeDirection;
+
+                void main() {
+                  vProbeDirection = position;
+                  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+              `}
+            />
+          )
+        }
+
+        return (
+          <mesh
+            key={probe.id}
+            position={[probe.position.x, probe.position.y, probe.position.z]}
+            userData={{
+              debugIndex: index,
+              debugRole: 'reflection-probe-visual',
+              probeDebugMode: mode
+            }}
+          >
+            <sphereGeometry args={[0.18, 16, 16]} />
+            {material}
           </mesh>
         )
       })}
@@ -5147,10 +5303,16 @@ function ReflectionProbeVisualization({
 }
 
 function ReflectionProbeDebugOverlay({
+  mode,
+  reflectionProbeCoefficients,
+  reflectionProbeDepthTextures,
   layout,
   reflectionProbeTextures,
   visible
 }: {
+  mode: ProbeDebugMode
+  reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
+  reflectionProbeDepthTextures: CubeTexture[]
   layout: MazeLayout
   reflectionProbeTextures: Texture[]
   visible: boolean
@@ -5161,13 +5323,18 @@ function ReflectionProbeDebugOverlay({
   useEffect(() => {
     const globalWindow = window as Window & {
       __levelsjamDebug?: {
-        getReflectionProbeVisualizationState?: (probeIndex: number) => {
-          depthTest: boolean | null
-          depthWrite: boolean | null
-          toneMapped: boolean | null
-          uniformTextureUUID: string | null
-          visible: boolean | null
-        } | null
+      getReflectionProbeVisualizationState?: (probeIndex: number) => {
+        depthTest: boolean | null
+        depthWrite: boolean | null
+        mode: ProbeDebugMode | null
+        toneMapped: boolean | null
+        uniformTextureUUIDs: {
+          coeffL0: string | null
+          probeCubeUvMap: string | null
+          probeDepthMap: string | null
+        }
+        visible: boolean | null
+      } | null
         getReflectionProbeVisualizationProgramState?: (probeIndex: number) => {
           uniforms: Record<string, {
             cacheValue: number | null
@@ -5185,8 +5352,13 @@ function ReflectionProbeDebugOverlay({
         let match: {
           depthTest: boolean | null
           depthWrite: boolean | null
+          mode: ProbeDebugMode | null
           toneMapped: boolean | null
-          uniformTextureUUID: string | null
+          uniformTextureUUIDs: {
+            coeffL0: string | null
+            probeCubeUvMap: string | null
+            probeDepthMap: string | null
+          }
           visible: boolean | null
         } | null = null
 
@@ -5201,9 +5373,12 @@ function ReflectionProbeDebugOverlay({
 
           const material = object.material as {
             uniforms?: {
+              coeffL0?: { value?: Vector3 | null }
+              probeDepthMap?: { value?: Texture | null }
               probeCubeUvMap?: { value?: Texture | null }
             }
           }
+          const currentMode = object.userData?.probeDebugMode as ProbeDebugMode | undefined
 
           match = {
             depthTest:
@@ -5214,12 +5389,18 @@ function ReflectionProbeDebugOverlay({
               typeof object.material?.depthWrite === 'boolean'
                 ? object.material.depthWrite
                 : null,
+            mode: currentMode ?? null,
             toneMapped:
               typeof object.material?.toneMapped === 'boolean'
                 ? object.material.toneMapped
                 : null,
-            uniformTextureUUID:
-              material.uniforms?.probeCubeUvMap?.value?.uuid ?? null,
+            uniformTextureUUIDs: {
+              coeffL0: material.uniforms?.coeffL0?.value ? '__coefficients__' : null,
+              probeCubeUvMap:
+                material.uniforms?.probeCubeUvMap?.value?.uuid ?? null,
+              probeDepthMap:
+                material.uniforms?.probeDepthMap?.value?.uuid ?? null
+            },
             visible: object.visible
           }
         })
@@ -5303,6 +5484,9 @@ function ReflectionProbeDebugOverlay({
 
   return (
     <ReflectionProbeVisualization
+      mode={mode}
+      reflectionProbeCoefficients={reflectionProbeCoefficients}
+      reflectionProbeDepthTextures={reflectionProbeDepthTextures}
       layout={layout}
       reflectionProbeTextures={reflectionProbeTextures}
       visible={visible}
@@ -5327,6 +5511,15 @@ uniform sampler2D probeCubeUvMap;
 varying vec2 vUv;
 
 ${PROBE_CUBEUV_SAMPLING_GLSL}
+
+vec3 decodeRGBE8( vec4 rgbe ) {
+  if ( rgbe.a <= 0.0 ) {
+    return vec3( 0.0 );
+  }
+
+  float exponent = ( rgbe.a * 255.0 ) - 128.0;
+  return rgbe.rgb * exp2( exponent );
+}
 
 vec3 getFaceDirection(int face, vec2 uv) {
   vec2 p = (uv * 2.0) - 1.0;
@@ -5359,7 +5552,7 @@ void main() {
     PROBE_CUBEUV_TEXEL_HEIGHT,
     PROBE_CUBEUV_MAX_MIP
   );
-  gl_FragColor = vec4(texel.rgb, 1.0);
+  gl_FragColor = vec4(decodeRGBE8(texel), 1.0);
   #include <colorspace_fragment>
 }
 `
@@ -5392,6 +5585,83 @@ void main() {
     PROBE_CUBEUV_MAX_MIP
   );
   gl_FragColor = vec4(decodeRGBE8(texel), 1.0);
+  #include <colorspace_fragment>
+}
+`
+}
+
+function createVolumetricLightmapProbeSphereFragmentShader() {
+  return `
+uniform vec3 coeffL0;
+uniform vec3 coeffL1;
+uniform vec3 coeffL2;
+uniform vec3 coeffL3;
+
+varying vec3 vProbeDirection;
+
+vec3 reconstructProbeRadiance(
+  vec3 direction,
+  vec3 basisCoeffL0,
+  vec3 basisCoeffL1,
+  vec3 basisCoeffL2,
+  vec3 basisCoeffL3
+) {
+  vec3 normalizedDirection = normalize( direction );
+  float basisL0 = 0.282095;
+  float basisL1 = 0.488603 * normalizedDirection.x;
+  float basisL2 = 0.488603 * normalizedDirection.y;
+  float basisL3 = 0.488603 * normalizedDirection.z;
+
+  return max(
+    vec3( 0.0 ),
+    ( basisCoeffL0 * basisL0 ) +
+    ( basisCoeffL1 * basisL1 ) +
+    ( basisCoeffL2 * basisL2 ) +
+    ( basisCoeffL3 * basisL3 )
+  ) * ( 4.0 * PI );
+}
+
+void main() {
+  gl_FragColor = vec4(
+    reconstructProbeRadiance(
+      vProbeDirection,
+      coeffL0,
+      coeffL1,
+      coeffL2,
+      coeffL3
+    ),
+    1.0
+  );
+  #include <colorspace_fragment>
+}
+`
+}
+
+function createShadowProbeSphereFragmentShader() {
+  return `
+uniform samplerCube probeDepthMap;
+
+varying vec3 vProbeDirection;
+
+float decodePackedDistance( vec4 packedDistance ) {
+  return dot(
+    packedDistance,
+    vec4(
+      1.0,
+      1.0 / 255.0,
+      1.0 / 65025.0,
+      1.0 / 16581375.0
+    )
+  ) * ${REFLECTION_PROBE_FAR.toFixed(1)};
+}
+
+void main() {
+  float distanceToSurface = decodePackedDistance(
+    textureCube( probeDepthMap, normalize( vProbeDirection ) )
+  );
+  float normalizedDistance = clamp( distanceToSurface / ${REFLECTION_PROBE_FAR.toFixed(1)}, 0.0, 1.0 );
+
+  gl_FragColor = vec4( vec3( normalizedDistance ), 1.0 );
   #include <colorspace_fragment>
 }
 `
@@ -5466,6 +5736,53 @@ void main() {
 }
 `
 
+const REFLECTION_PROBE_ATLAS_FRAGMENT_SHADER_RGBE = `
+uniform int faceIndex;
+uniform samplerCube probeCubeMap;
+
+varying vec2 vUv;
+
+vec3 getFaceDirection(int face, vec2 uv) {
+  vec2 p = (uv * 2.0) - 1.0;
+
+  if (face == 0) {
+    return normalize(vec3(1.0, -p.y, -p.x));
+  }
+  if (face == 1) {
+    return normalize(vec3(-1.0, -p.y, p.x));
+  }
+  if (face == 2) {
+    return normalize(vec3(p.x, 1.0, p.y));
+  }
+  if (face == 3) {
+    return normalize(vec3(p.x, -1.0, -p.y));
+  }
+  if (face == 4) {
+    return normalize(vec3(p.x, -p.y, 1.0));
+  }
+
+  return normalize(vec3(-p.x, -p.y, -1.0));
+}
+
+vec4 encodeRGBE8(vec3 value) {
+  float maxComponent = max(max(value.r, value.g), value.b);
+
+  if (maxComponent <= 1e-6) {
+    return vec4(0.0, 0.0, 0.0, 0.0);
+  }
+
+  float exponent = ceil(log2(maxComponent));
+  vec3 mantissa = value / exp2(exponent);
+
+  return vec4(mantissa, (exponent + 128.0) / 255.0);
+}
+
+void main() {
+  vec4 texel = textureCube(probeCubeMap, getFaceDirection(faceIndex, vUv));
+  gl_FragColor = encodeRGBE8(texel.rgb);
+}
+`
+
 const TEXTURE_2D_CAPTURE_FRAGMENT_SHADER = `
 uniform sampler2D sourceTexture;
 
@@ -5510,6 +5827,88 @@ function captureCubeTextureAtlasDataUrls(
     fragmentShader: options.applyColorSpaceTransform === false
       ? REFLECTION_PROBE_ATLAS_FRAGMENT_SHADER_RAW
       : REFLECTION_PROBE_ATLAS_FRAGMENT_SHADER,
+    uniforms: {
+      faceIndex: { value: 0 },
+      probeCubeMap: { value: probeTexture }
+    },
+    vertexShader: REFLECTION_PROBE_ATLAS_VERTEX_SHADER
+  })
+  const atlasMesh = new Mesh(new PlaneGeometry(2, 2), atlasMaterial)
+  const atlasTarget = new WebGLRenderTarget(size, size, {
+    depthBuffer: false,
+    format: RGBAFormat,
+    magFilter: NearestFilter,
+    minFilter: NearestFilter,
+    stencilBuffer: false,
+    type: UnsignedByteType
+  })
+  const savedAutoClear = gl.autoClear
+  const savedTarget = gl.getRenderTarget()
+  const pixelBuffer = new Uint8Array(size * size * 4)
+  const dataUrls: string[] = []
+
+  atlasScene.add(atlasMesh)
+  gl.autoClear = true
+
+  try {
+    for (let faceIndex = 0; faceIndex < 6; faceIndex += 1) {
+      atlasMaterial.uniforms.faceIndex.value = faceIndex
+      gl.setRenderTarget(atlasTarget)
+      gl.clear(true, true, true)
+      gl.render(atlasScene, atlasCamera)
+      gl.readRenderTargetPixels(atlasTarget, 0, 0, size, size, pixelBuffer)
+
+      const canvas = document.createElement('canvas')
+      const context = canvas.getContext('2d')
+
+      if (!context) {
+        return null
+      }
+
+      canvas.width = size
+      canvas.height = size
+      const imageData = context.createImageData(size, size)
+
+      for (let row = 0; row < size; row += 1) {
+        const sourceRow = size - 1 - row
+        const sourceOffset = sourceRow * size * 4
+        const targetOffset = row * size * 4
+
+        imageData.data.set(
+          pixelBuffer.subarray(sourceOffset, sourceOffset + (size * 4)),
+          targetOffset
+        )
+      }
+
+      context.putImageData(imageData, 0, 0)
+      dataUrls.push(canvas.toDataURL('image/png'))
+    }
+  } finally {
+    gl.setRenderTarget(savedTarget)
+    gl.autoClear = savedAutoClear
+    atlasMesh.geometry.dispose()
+    atlasMaterial.dispose()
+    atlasTarget.dispose()
+  }
+
+  return dataUrls
+}
+
+function captureCubeTextureEncodedAtlasDataUrls(
+  gl: WebGLRenderer,
+  probeTexture: Texture,
+  size: number
+) {
+  if (size <= 0) {
+    return null
+  }
+
+  const atlasScene = new ThreeScene()
+  const atlasCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1)
+  const atlasMaterial = new ShaderMaterial({
+    depthTest: false,
+    depthWrite: false,
+    fragmentShader: REFLECTION_PROBE_ATLAS_FRAGMENT_SHADER_RGBE,
     uniforms: {
       faceIndex: { value: 0 },
       probeCubeMap: { value: probeTexture }
@@ -6124,22 +6523,22 @@ function SceneGeometry({
   iblContributionIntensity,
   layout,
   lightmapContributionIntensity,
+  probeDebugMode,
   reflectionProbeCoefficients,
   reflectionProbeDepthTextures,
   reflectionContributionIntensity,
-  reflectionProbeTextures,
-  showReflectionProbes
+  reflectionProbeTextures
 }: {
   environmentTexture: Texture | null
   environmentIntensity: number
   iblContributionIntensity: number
   layout: MazeLayout
   lightmapContributionIntensity: number
+  probeDebugMode: ProbeDebugMode
   reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
   reflectionProbeDepthTextures: CubeTexture[]
   reflectionContributionIntensity: number
   reflectionProbeTextures: Texture[]
-  showReflectionProbes: boolean
 }) {
   const lightmapBytes = useMazeLightmapBytes(layout.maze.lightmap)
   const groundLightmapTexture = useGroundLightmapTexture(layout.maze.lightmap, lightmapBytes)
@@ -6171,39 +6570,48 @@ function SceneGeometry({
         reflectionProbeTextures={reflectionProbeTextures}
       />
       <ReflectionProbeDebugOverlay
+        mode={probeDebugMode}
+        reflectionProbeCoefficients={reflectionProbeCoefficients}
+        reflectionProbeDepthTextures={reflectionProbeDepthTextures}
         layout={layout}
         reflectionProbeTextures={reflectionProbeTextures}
-        visible={showReflectionProbes}
+        visible={probeDebugMode !== 'none'}
       />
     </>
   )
 }
 
 function BloomEffectPrimitive({
-  intensity,
-  kernelSize
+  settings
 }: {
-  intensity: number
-  kernelSize: BloomKernelSizeKey
+  settings: BloomSettings
 }) {
+  const {
+    intensity,
+    kernelSize,
+    resolutionScale,
+    smoothing,
+    threshold
+  } = settings
   const effect = useMemo(
     () =>
       new BloomEffect({
         intensity,
         kernelSize: BLOOM_KERNEL_SIZES[kernelSize],
-        luminanceSmoothing: 0,
-        luminanceThreshold: 0.05,
+        luminanceSmoothing: smoothing,
+        luminanceThreshold: threshold,
         mipmapBlur: false,
-        resolutionScale: BLOOM_RESOLUTION_SCALES[kernelSize]
+        resolutionScale
       }),
-    [kernelSize]
+    [intensity, kernelSize, resolutionScale, smoothing, threshold]
   )
 
   useEffect(() => {
     effect.intensity = intensity
-    effect.luminanceMaterial.threshold = 0.05
-    effect.luminanceMaterial.smoothing = 0
-  }, [effect, intensity])
+    effect.luminanceMaterial.threshold = threshold
+    effect.luminanceMaterial.smoothing = smoothing
+    effect.resolution.scale = resolutionScale
+  }, [effect, intensity, resolutionScale, smoothing, threshold])
 
   useEffect(() => () => effect.dispose(), [effect])
 
@@ -6238,21 +6646,31 @@ function SSRPassPrimitive({
   )
 
   useEffect(() => {
-    pass.blur = true
-    pass.bouncing = false
-    pass.distanceAttenuation = true
+    pass.blur = settings.blur
+    pass.bouncing = settings.bouncing
+    pass.distanceAttenuation = settings.distanceAttenuation
     pass.enabled = settings.enabled
-    pass.fresnel = true
-    pass.infiniteThick = false
+    pass.fresnel = settings.fresnel
+    pass.infiniteThick = settings.infiniteThick
     pass.opacity = MathUtils.clamp(settings.intensity, 0, 1)
     pass.maxDistance = settings.maxDistance
+    pass.output =
+      SSR_OUTPUT_OPTIONS.find((option) => option.key === settings.output)?.value ??
+      ThreeSSRPass.OUTPUT.Default
     pass.resolutionScale = settings.resolutionScale
     pass.thickness = settings.thickness
   }, [
     pass,
+    settings.blur,
+    settings.bouncing,
+    settings.distanceAttenuation,
+    pass,
     settings.enabled,
+    settings.fresnel,
+    settings.infiniteThick,
     settings.intensity,
     settings.maxDistance,
+    settings.output,
     settings.resolutionScale,
     settings.thickness
   ])
@@ -6275,7 +6693,7 @@ function AnamorphicEffectPrimitive({
   const size = useThree((state) => state.size)
 
   useEffect(() => {
-    effect.colorGain = FIRE_COLOR
+    effect.colorGain = FIRE_COLOR.clone().multiplyScalar(settings.colorGain)
     effect.intensity = settings.enabled ? settings.intensity : 0
     effect.samples = settings.samples
     effect.scale = settings.scale
@@ -6283,6 +6701,7 @@ function AnamorphicEffectPrimitive({
     effect.threshold = settings.threshold
   }, [
     effect,
+    settings.colorGain,
     settings.enabled,
     settings.intensity,
     settings.samples,
@@ -6367,10 +6786,10 @@ function ExposureEffectPrimitive({
 }
 
 function TorchLensFlareEffectPrimitive({
-  intensity,
+  settings,
   mazeLights
 }: {
-  intensity: number
+  settings: LensFlareSettings
   mazeLights: MazeLayout['lights']
 }) {
   const camera = useThree((state) => state.camera)
@@ -6399,31 +6818,47 @@ function TorchLensFlareEffectPrimitive({
   const effect = useMemo(
     () => {
       const nextEffect = new PostLensFlareEffectImpl({
-        aditionalStreaks: false,
-        animated: true,
-        anamorphic: false,
+        aditionalStreaks: settings.aditionalStreaks,
+        animated: settings.animated,
+        anamorphic: settings.anamorphic,
         blendFunction: BlendFunction.NORMAL,
         colorGain: new Color(0, 0, 0),
         enabled: true,
-        flareShape: 0.08,
-        flareSize: 0.0025,
-        flareSpeed: 0.01,
-        ghostScale: 0.14,
-        glareSize: 0.03,
-        haloScale: 0.16,
+        flareShape: settings.flareShape,
+        flareSize: settings.flareSize,
+        flareSpeed: settings.flareSpeed,
+        ghostScale: settings.ghostScale,
+        glareSize: settings.glareSize,
+        haloScale: settings.haloScale,
         lensDirtTexture: null,
         lensPosition: new Vector3(),
-        opacity: 1,
+        opacity: settings.opacity,
         screenRes: new Vector2(size.width, size.height),
-        secondaryGhosts: true,
-        starBurst: false,
-        starPoints: 6
+        secondaryGhosts: settings.secondaryGhosts,
+        starBurst: settings.starBurst,
+        starPoints: settings.starPoints
       })
 
       nextEffect.blendMode.opacity.value = 0
       return nextEffect
     },
-    [size.height, size.width]
+    [
+      settings.aditionalStreaks,
+      settings.animated,
+      settings.anamorphic,
+      settings.flareShape,
+      settings.flareSize,
+      settings.flareSpeed,
+      settings.ghostScale,
+      settings.glareSize,
+      settings.haloScale,
+      settings.opacity,
+      settings.secondaryGhosts,
+      settings.starBurst,
+      settings.starPoints,
+      size.height,
+      size.width
+    ]
   )
 
   useFrame((_, delta) => {
@@ -6517,9 +6952,9 @@ function TorchLensFlareEffectPrimitive({
       }
     }
 
-    const normalizedIntensity = MathUtils.clamp(intensity, 0, 1)
-    const targetOpacity = 1 - (normalizedIntensity * visibility * 0.98)
-    const targetBlendOpacity = normalizedIntensity * visibility * 0.85
+    const normalizedIntensity = MathUtils.clamp(settings.intensity, 0, 1)
+    const targetOpacity = MathUtils.lerp(1, settings.opacity, normalizedIntensity * visibility)
+    const targetBlendOpacity = normalizedIntensity * visibility
 
     opacityUniform.value = MathUtils.damp(
       opacityUniform.value,
@@ -6535,12 +6970,12 @@ function TorchLensFlareEffectPrimitive({
         delta
       )
     }
-    glareSizeUniform.value = 0.03 + (normalizedIntensity * 0.16)
-    flareSizeUniform.value = 0.002 + (normalizedIntensity * 0.008)
-    ghostScaleUniform.value = 0.12 + (normalizedIntensity * 0.18)
-    haloScaleUniform.value = 0.16 + (normalizedIntensity * 0.18)
+    glareSizeUniform.value = settings.glareSize
+    flareSizeUniform.value = settings.flareSize
+    ghostScaleUniform.value = settings.ghostScale
+    haloScaleUniform.value = settings.haloScale
     colorGainUniform.value.copy(FIRE_COLOR).multiplyScalar(
-      (0.2 + (normalizedIntensity * 1.2)) *
+      settings.intensity *
       Math.sqrt(AUTHORED_LIGHTING_SOURCE_SCALE)
     )
   })
@@ -6551,10 +6986,10 @@ function TorchLensFlareEffectPrimitive({
 }
 
 function TorchLensFlare({
-  intensity,
+  settings,
   layout
 }: {
-  intensity: number
+  settings: LensFlareSettings
   layout: MazeLayout
 }) {
   if (layout.lights.length === 0) {
@@ -6563,7 +6998,7 @@ function TorchLensFlare({
 
   return (
     <TorchLensFlareEffectPrimitive
-      intensity={intensity}
+      settings={settings}
       mazeLights={layout.lights}
     />
   )
@@ -7454,6 +7889,7 @@ function Scene({
             width: number
           } | null
           rawAtlas: string[] | null
+          rawRgbEAtlas: string[] | null
         } | null
       }
     }
@@ -7652,7 +8088,12 @@ function Scene({
           processedCubeUvRgbE,
           rawAtlas: captureCubeTextureAtlasDataUrls(gl, captureTarget.texture, size, {
             applyColorSpaceTransform: false
-          })
+          }),
+          rawRgbEAtlas: captureCubeTextureEncodedAtlasDataUrls(
+            gl,
+            captureTarget.texture,
+            size
+          )
         }
       } finally {
         scene.background = savedBackground
@@ -7941,11 +8382,11 @@ function Scene({
         iblContributionIntensity={getEnabledContributionIntensity(visualSettings.iblContribution)}
         layout={layout}
         lightmapContributionIntensity={getEnabledContributionIntensity(visualSettings.lightmapContribution)}
+        probeDebugMode={visualSettings.probeDebugMode}
         reflectionProbeCoefficients={reflectionProbeCoefficients}
         reflectionProbeDepthTextures={reflectionProbeDepthTextures}
         reflectionContributionIntensity={getEnabledContributionIntensity(visualSettings.reflectionContribution)}
         reflectionProbeTextures={reflectionProbeTextures}
-        showReflectionProbes={visualSettings.showReflectionProbes}
       />
       <EffectComposer
         enableNormalPass
@@ -7994,10 +8435,7 @@ function Scene({
         ) : null}
         <BillboardCompositePass />
         {bloomActive ? (
-          <BloomEffectPrimitive
-            intensity={visualSettings.bloom.intensity}
-            kernelSize={visualSettings.bloom.kernelSize}
-          />
+          <BloomEffectPrimitive settings={visualSettings.bloom} />
         ) : null}
         {visualSettings.anamorphic.enabled ? (
           <AnamorphicEffectPrimitive settings={visualSettings.anamorphic} />
@@ -8007,12 +8445,12 @@ function Scene({
             bokehScale={visualSettings.depthOfField.bokehScale}
             focalLength={visualSettings.depthOfField.focalLength}
             focusDistance={visualSettings.depthOfField.focusDistance}
-            resolutionScale={0.25}
+            resolutionScale={visualSettings.depthOfField.resolutionScale}
           />
         ) : null}
         {lensFlareActive ? (
           <TorchLensFlare
-            intensity={visualSettings.lensFlare.intensity}
+            settings={visualSettings.lensFlare}
             layout={layout}
           />
         ) : null}
@@ -8067,12 +8505,16 @@ function VisualControls({
   controlsOpen,
   onDepthOfFieldSettingChange,
   onEffectSettingChange,
+  onLensFlareSettingChange,
+  onProbeDebugModeChange,
   onResetAnamorphicSettings,
   onResetAmbientOcclusionMode,
   onResetBloomSettings,
   onResetBooleanSetting,
   onResetDepthOfFieldSettings,
   onResetEffectSetting,
+  onResetLensFlareSettings,
+  onResetProbeDebugMode,
   onResetScalarSetting,
   onResetSsrSettings,
   onResetToneMapping,
@@ -8094,12 +8536,16 @@ function VisualControls({
     effect: GenericEffectSettingKey,
     patch: Partial<EffectSettings>
   ) => void
+  onLensFlareSettingChange: (patch: Partial<LensFlareSettings>) => void
+  onProbeDebugModeChange: (value: ProbeDebugMode) => void
   onResetAnamorphicSettings: () => void
   onResetAmbientOcclusionMode: () => void
   onResetBloomSettings: () => void
   onResetBooleanSetting: (key: BooleanSettingKey) => void
   onResetDepthOfFieldSettings: () => void
   onResetEffectSetting: (effect: GenericEffectSettingKey) => void
+  onResetLensFlareSettings: () => void
+  onResetProbeDebugMode: () => void
   onResetScalarSetting: (key: ScalarSettingKey) => void
   onResetSsrSettings: () => void
   onResetToneMapping: () => void
@@ -8143,7 +8589,6 @@ function VisualControls({
     min: number
     step: number
   }> = [
-    { key: 'lensFlare', label: 'Lens Flares', min: 0, max: 1, step: 0.001 },
     { key: 'volumetricLighting', label: 'Volumetric Fog', min: 0, max: 1, step: 0.01 },
     { key: 'vignette', label: 'Vignette', min: 0, max: 1, step: 0.05 }
   ]
@@ -8156,11 +8601,7 @@ function VisualControls({
         key={effectControl.key}
       >
         <output>
-          {effectSettings.enabled
-            ? effectControl.key === 'lensFlare'
-              ? effectSettings.intensity.toFixed(3)
-              : effectSettings.intensity.toFixed(2)
-            : 'off'}
+          {effectSettings.enabled ? effectSettings.intensity.toFixed(2) : 'off'}
         </output>
         <label className="visual-effect-label">
           <input
@@ -8337,20 +8778,32 @@ function VisualControls({
         />
           </div>
 
-          <div className="visual-control-row">
-        <output>{visualSettings.showReflectionProbes ? 'on' : 'off'}</output>
-        <ResettableLabel onReset={() => onResetBooleanSetting('showReflectionProbes')}>
-          Show Reflection Probes
+          <label className="visual-control-row">
+        <output>
+          {PROBE_DEBUG_MODE_OPTIONS.find(
+            (option) => option.key === visualSettings.probeDebugMode
+          )?.label ?? visualSettings.probeDebugMode}
+        </output>
+        <ResettableLabel onReset={onResetProbeDebugMode}>
+          Probe Debug
         </ResettableLabel>
-        <input
-          aria-label="Show Reflection Probes"
-          checked={visualSettings.showReflectionProbes}
+        <select
+          aria-label="Probe Debug"
           onChange={(event) => {
-            onBooleanSettingChange('showReflectionProbes', event.target.checked)
+            onProbeDebugModeChange(event.target.value as ProbeDebugMode)
           }}
-          type="checkbox"
-        />
-          </div>
+          value={visualSettings.probeDebugMode}
+        >
+          {PROBE_DEBUG_MODE_OPTIONS.map((option) => (
+            <option
+              key={option.key}
+              value={option.key}
+            >
+              {option.label}
+            </option>
+          ))}
+        </select>
+          </label>
 
           <label className="visual-control-row">
         <output>
@@ -8521,6 +8974,69 @@ function VisualControls({
           ))}
         </select>
           </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.bloom.threshold.toFixed(2)}</output>
+        <ResettableLabel onReset={onResetBloomSettings}>
+          Bloom Threshold
+        </ResettableLabel>
+        <input
+          aria-label="Bloom Threshold"
+          disabled={!visualSettings.bloom.enabled}
+          max={2}
+          min={0}
+          onChange={(event) => {
+            onBloomSettingChange({
+              threshold: Number(event.target.value)
+            })
+          }}
+          step={0.01}
+          type="range"
+          value={visualSettings.bloom.threshold}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.bloom.smoothing.toFixed(2)}</output>
+        <ResettableLabel onReset={onResetBloomSettings}>
+          Bloom Smoothing
+        </ResettableLabel>
+        <input
+          aria-label="Bloom Smoothing"
+          disabled={!visualSettings.bloom.enabled}
+          max={1}
+          min={0}
+          onChange={(event) => {
+            onBloomSettingChange({
+              smoothing: Number(event.target.value)
+            })
+          }}
+          step={0.01}
+          type="range"
+          value={visualSettings.bloom.smoothing}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.bloom.resolutionScale.toFixed(2)}x</output>
+        <ResettableLabel onReset={onResetBloomSettings}>
+          Bloom Resolution
+        </ResettableLabel>
+        <input
+          aria-label="Bloom Resolution"
+          disabled={!visualSettings.bloom.enabled}
+          max={1}
+          min={0.1}
+          onChange={(event) => {
+            onBloomSettingChange({
+              resolutionScale: Number(event.target.value)
+            })
+          }}
+          step={0.05}
+          type="range"
+          value={visualSettings.bloom.resolutionScale}
+        />
+          </label>
         </>
       ) : null}
 
@@ -8603,6 +9119,27 @@ function VisualControls({
           value={visualSettings.depthOfField.focalLength}
         />
           </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.depthOfField.resolutionScale.toFixed(2)}x</output>
+        <ResettableLabel onReset={onResetDepthOfFieldSettings}>
+          DOF Resolution
+        </ResettableLabel>
+        <input
+          aria-label="DOF Resolution"
+          disabled={!visualSettings.depthOfField.enabled}
+          max={1}
+          min={0.1}
+          onChange={(event) => {
+            onDepthOfFieldSettingChange({
+              resolutionScale: Number(event.target.value)
+            })
+          }}
+          step={0.05}
+          type="range"
+          value={visualSettings.depthOfField.resolutionScale}
+        />
+          </label>
         </>
       ) : null}
 
@@ -8632,8 +9169,302 @@ function VisualControls({
         </>
       ) : null}
 
-      {activeTab === 'flares' ? renderEffectControl(
-        effectControls.find((effectControl) => effectControl.key === 'lensFlare')!
+      {activeTab === 'flares' ? (
+        <>
+          <div className="visual-control-row">
+        <output>
+          {visualSettings.lensFlare.enabled
+            ? visualSettings.lensFlare.intensity.toFixed(3)
+            : 'off'}
+        </output>
+        <label className="visual-effect-label">
+          <input
+            checked={visualSettings.lensFlare.enabled}
+            onChange={(event) => {
+              onLensFlareSettingChange({
+                enabled: event.target.checked
+              })
+            }}
+            type="checkbox"
+          />
+          <ResettableLabel onReset={onResetLensFlareSettings}>
+            Lens Flares
+          </ResettableLabel>
+        </label>
+        <input
+          aria-label="Lens Flares Intensity"
+          disabled={!visualSettings.lensFlare.enabled}
+          max={0.1}
+          min={0}
+          onChange={(event) => {
+            onLensFlareSettingChange({
+              intensity: Number(event.target.value)
+            })
+          }}
+          step={0.0005}
+          type="range"
+          value={visualSettings.lensFlare.intensity}
+        />
+          </div>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.lensFlare.opacity.toFixed(2)}</output>
+        <ResettableLabel onReset={onResetLensFlareSettings}>
+          Flare Opacity
+        </ResettableLabel>
+        <input
+          aria-label="Flare Opacity"
+          disabled={!visualSettings.lensFlare.enabled}
+          max={1}
+          min={0}
+          onChange={(event) => {
+            onLensFlareSettingChange({
+              opacity: Number(event.target.value)
+            })
+          }}
+          step={0.01}
+          type="range"
+          value={visualSettings.lensFlare.opacity}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.lensFlare.flareSize.toFixed(4)}</output>
+        <ResettableLabel onReset={onResetLensFlareSettings}>
+          Flare Size
+        </ResettableLabel>
+        <input
+          aria-label="Flare Size"
+          disabled={!visualSettings.lensFlare.enabled}
+          max={0.05}
+          min={0}
+          onChange={(event) => {
+            onLensFlareSettingChange({
+              flareSize: Number(event.target.value)
+            })
+          }}
+          step={0.0005}
+          type="range"
+          value={visualSettings.lensFlare.flareSize}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.lensFlare.glareSize.toFixed(3)}</output>
+        <ResettableLabel onReset={onResetLensFlareSettings}>
+          Glare Size
+        </ResettableLabel>
+        <input
+          aria-label="Glare Size"
+          disabled={!visualSettings.lensFlare.enabled}
+          max={0.4}
+          min={0}
+          onChange={(event) => {
+            onLensFlareSettingChange({
+              glareSize: Number(event.target.value)
+            })
+          }}
+          step={0.005}
+          type="range"
+          value={visualSettings.lensFlare.glareSize}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.lensFlare.ghostScale.toFixed(3)}</output>
+        <ResettableLabel onReset={onResetLensFlareSettings}>
+          Ghost Scale
+        </ResettableLabel>
+        <input
+          aria-label="Ghost Scale"
+          disabled={!visualSettings.lensFlare.enabled}
+          max={1}
+          min={0}
+          onChange={(event) => {
+            onLensFlareSettingChange({
+              ghostScale: Number(event.target.value)
+            })
+          }}
+          step={0.01}
+          type="range"
+          value={visualSettings.lensFlare.ghostScale}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.lensFlare.haloScale.toFixed(3)}</output>
+        <ResettableLabel onReset={onResetLensFlareSettings}>
+          Halo Scale
+        </ResettableLabel>
+        <input
+          aria-label="Halo Scale"
+          disabled={!visualSettings.lensFlare.enabled}
+          max={1}
+          min={0}
+          onChange={(event) => {
+            onLensFlareSettingChange({
+              haloScale: Number(event.target.value)
+            })
+          }}
+          step={0.01}
+          type="range"
+          value={visualSettings.lensFlare.haloScale}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.lensFlare.flareShape.toFixed(3)}</output>
+        <ResettableLabel onReset={onResetLensFlareSettings}>
+          Flare Shape
+        </ResettableLabel>
+        <input
+          aria-label="Flare Shape"
+          disabled={!visualSettings.lensFlare.enabled}
+          max={1}
+          min={0}
+          onChange={(event) => {
+            onLensFlareSettingChange({
+              flareShape: Number(event.target.value)
+            })
+          }}
+          step={0.01}
+          type="range"
+          value={visualSettings.lensFlare.flareShape}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.lensFlare.flareSpeed.toFixed(3)}</output>
+        <ResettableLabel onReset={onResetLensFlareSettings}>
+          Flare Speed
+        </ResettableLabel>
+        <input
+          aria-label="Flare Speed"
+          disabled={!visualSettings.lensFlare.enabled}
+          max={0.1}
+          min={0}
+          onChange={(event) => {
+            onLensFlareSettingChange({
+              flareSpeed: Number(event.target.value)
+            })
+          }}
+          step={0.001}
+          type="range"
+          value={visualSettings.lensFlare.flareSpeed}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.lensFlare.starPoints}</output>
+        <ResettableLabel onReset={onResetLensFlareSettings}>
+          Star Points
+        </ResettableLabel>
+        <input
+          aria-label="Star Points"
+          disabled={!visualSettings.lensFlare.enabled}
+          max={12}
+          min={3}
+          onChange={(event) => {
+            onLensFlareSettingChange({
+              starPoints: Number(event.target.value)
+            })
+          }}
+          step={1}
+          type="range"
+          value={visualSettings.lensFlare.starPoints}
+        />
+          </label>
+
+          <div className="visual-control-row">
+        <output>{visualSettings.lensFlare.animated ? 'on' : 'off'}</output>
+        <label className="visual-effect-label">
+          <input
+            checked={visualSettings.lensFlare.animated}
+            onChange={(event) => {
+              onLensFlareSettingChange({
+                animated: event.target.checked
+              })
+            }}
+            type="checkbox"
+          />
+          <ResettableLabel onReset={onResetLensFlareSettings}>
+            Animated
+          </ResettableLabel>
+        </label>
+          </div>
+
+          <div className="visual-control-row">
+        <output>{visualSettings.lensFlare.anamorphic ? 'on' : 'off'}</output>
+        <label className="visual-effect-label">
+          <input
+            checked={visualSettings.lensFlare.anamorphic}
+            onChange={(event) => {
+              onLensFlareSettingChange({
+                anamorphic: event.target.checked
+              })
+            }}
+            type="checkbox"
+          />
+          <ResettableLabel onReset={onResetLensFlareSettings}>
+            Flare Anamorphic
+          </ResettableLabel>
+        </label>
+          </div>
+
+          <div className="visual-control-row">
+        <output>{visualSettings.lensFlare.aditionalStreaks ? 'on' : 'off'}</output>
+        <label className="visual-effect-label">
+          <input
+            checked={visualSettings.lensFlare.aditionalStreaks}
+            onChange={(event) => {
+              onLensFlareSettingChange({
+                aditionalStreaks: event.target.checked
+              })
+            }}
+            type="checkbox"
+          />
+          <ResettableLabel onReset={onResetLensFlareSettings}>
+            Extra Streaks
+          </ResettableLabel>
+        </label>
+          </div>
+
+          <div className="visual-control-row">
+        <output>{visualSettings.lensFlare.secondaryGhosts ? 'on' : 'off'}</output>
+        <label className="visual-effect-label">
+          <input
+            checked={visualSettings.lensFlare.secondaryGhosts}
+            onChange={(event) => {
+              onLensFlareSettingChange({
+                secondaryGhosts: event.target.checked
+              })
+            }}
+            type="checkbox"
+          />
+          <ResettableLabel onReset={onResetLensFlareSettings}>
+            Secondary Ghosts
+          </ResettableLabel>
+        </label>
+          </div>
+
+          <div className="visual-control-row">
+        <output>{visualSettings.lensFlare.starBurst ? 'on' : 'off'}</output>
+        <label className="visual-effect-label">
+          <input
+            checked={visualSettings.lensFlare.starBurst}
+            onChange={(event) => {
+              onLensFlareSettingChange({
+                starBurst: event.target.checked
+              })
+            }}
+            type="checkbox"
+          />
+          <ResettableLabel onReset={onResetLensFlareSettings}>
+            Star Burst
+          </ResettableLabel>
+        </label>
+          </div>
+        </>
       ) : null}
 
       {activeTab === 'ssr' ? (
@@ -8724,6 +9555,121 @@ function VisualControls({
           value={visualSettings.ssr.resolutionScale}
         />
           </label>
+
+          <label className="visual-control-row">
+        <output>
+          {SSR_OUTPUT_OPTIONS.find(
+            (option) => option.key === visualSettings.ssr.output
+          )?.label ?? visualSettings.ssr.output}
+        </output>
+        <ResettableLabel onReset={onResetSsrSettings}>
+          SSR Output
+        </ResettableLabel>
+        <select
+          aria-label="SSR Output"
+          disabled={!visualSettings.ssr.enabled}
+          onChange={(event) => {
+            onSsrSettingChange({
+              output: event.target.value as SSRPassOutputMode
+            })
+          }}
+          value={visualSettings.ssr.output}
+        >
+          {SSR_OUTPUT_OPTIONS.map((option) => (
+            <option
+              key={option.key}
+              value={option.key}
+            >
+              {option.label}
+            </option>
+          ))}
+        </select>
+          </label>
+
+          <div className="visual-control-row">
+        <output>{visualSettings.ssr.blur ? 'on' : 'off'}</output>
+        <label className="visual-effect-label">
+          <input
+            checked={visualSettings.ssr.blur}
+            disabled={!visualSettings.ssr.enabled}
+            onChange={(event) => {
+              onSsrSettingChange({ blur: event.target.checked })
+            }}
+            type="checkbox"
+          />
+          <ResettableLabel onReset={onResetSsrSettings}>
+            SSR Blur
+          </ResettableLabel>
+        </label>
+          </div>
+
+          <div className="visual-control-row">
+        <output>{visualSettings.ssr.bouncing ? 'on' : 'off'}</output>
+        <label className="visual-effect-label">
+          <input
+            checked={visualSettings.ssr.bouncing}
+            disabled={!visualSettings.ssr.enabled}
+            onChange={(event) => {
+              onSsrSettingChange({ bouncing: event.target.checked })
+            }}
+            type="checkbox"
+          />
+          <ResettableLabel onReset={onResetSsrSettings}>
+            SSR Bouncing
+          </ResettableLabel>
+        </label>
+          </div>
+
+          <div className="visual-control-row">
+        <output>{visualSettings.ssr.distanceAttenuation ? 'on' : 'off'}</output>
+        <label className="visual-effect-label">
+          <input
+            checked={visualSettings.ssr.distanceAttenuation}
+            disabled={!visualSettings.ssr.enabled}
+            onChange={(event) => {
+              onSsrSettingChange({ distanceAttenuation: event.target.checked })
+            }}
+            type="checkbox"
+          />
+          <ResettableLabel onReset={onResetSsrSettings}>
+            SSR Distance Attenuation
+          </ResettableLabel>
+        </label>
+          </div>
+
+          <div className="visual-control-row">
+        <output>{visualSettings.ssr.fresnel ? 'on' : 'off'}</output>
+        <label className="visual-effect-label">
+          <input
+            checked={visualSettings.ssr.fresnel}
+            disabled={!visualSettings.ssr.enabled}
+            onChange={(event) => {
+              onSsrSettingChange({ fresnel: event.target.checked })
+            }}
+            type="checkbox"
+          />
+          <ResettableLabel onReset={onResetSsrSettings}>
+            SSR Fresnel
+          </ResettableLabel>
+        </label>
+          </div>
+
+          <div className="visual-control-row">
+        <output>{visualSettings.ssr.infiniteThick ? 'on' : 'off'}</output>
+        <label className="visual-effect-label">
+          <input
+            checked={visualSettings.ssr.infiniteThick}
+            disabled={!visualSettings.ssr.enabled}
+            onChange={(event) => {
+              onSsrSettingChange({ infiniteThick: event.target.checked })
+            }}
+            type="checkbox"
+          />
+          <ResettableLabel onReset={onResetSsrSettings}>
+            SSR Infinite Thick
+          </ResettableLabel>
+        </label>
+          </div>
         </>
       ) : null}
 
@@ -8815,6 +9761,25 @@ function VisualControls({
           step={1}
           type="range"
           value={visualSettings.anamorphic.samples}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.anamorphic.colorGain.toFixed(2)}x</output>
+        <ResettableLabel onReset={onResetAnamorphicSettings}>
+          Anamorphic Color Gain
+        </ResettableLabel>
+        <input
+          aria-label="Anamorphic Color Gain"
+          disabled={!visualSettings.anamorphic.enabled}
+          max={4}
+          min={0}
+          onChange={(event) => {
+            onAnamorphicSettingChange({ colorGain: Number(event.target.value) })
+          }}
+          step={0.05}
+          type="range"
+          value={visualSettings.anamorphic.colorGain}
         />
           </label>
         </>
@@ -8982,6 +9947,23 @@ export default function App() {
     }))
   }
 
+  const onLensFlareSettingChange = (patch: Partial<LensFlareSettings>) => {
+    setVisualSettings((current) => ({
+      ...current,
+      lensFlare: {
+        ...current.lensFlare,
+        ...patch
+      }
+    }))
+  }
+
+  const onProbeDebugModeChange = (value: ProbeDebugMode) => {
+    setVisualSettings((current) => ({
+      ...current,
+      probeDebugMode: value
+    }))
+  }
+
   const onToneMappingChange = (value: ToneMappingMode) => {
     setVisualSettings((current) => ({
       ...current,
@@ -9126,6 +10108,23 @@ export default function App() {
     onAmbientOcclusionModeChange(defaults.ambientOcclusionMode)
   }
 
+  const onResetLensFlareSettings = () => {
+    const defaults = createDefaultVisualSettings()
+
+    setVisualSettings((current) => ({
+      ...current,
+      lensFlare: {
+        ...defaults.lensFlare
+      }
+    }))
+  }
+
+  const onResetProbeDebugMode = () => {
+    const defaults = createDefaultVisualSettings()
+
+    onProbeDebugModeChange(defaults.probeDebugMode)
+  }
+
   const onResetBooleanSetting = (key: BooleanSettingKey) => {
     const defaults = createDefaultVisualSettings()
 
@@ -9179,12 +10178,16 @@ export default function App() {
         onBloomSettingChange={onBloomSettingChange}
         onDepthOfFieldSettingChange={onDepthOfFieldSettingChange}
         onEffectSettingChange={onEffectSettingChange}
+        onLensFlareSettingChange={onLensFlareSettingChange}
+        onProbeDebugModeChange={onProbeDebugModeChange}
         onResetAnamorphicSettings={onResetAnamorphicSettings}
         onResetAmbientOcclusionMode={onResetAmbientOcclusionMode}
         onResetBloomSettings={onResetBloomSettings}
         onResetBooleanSetting={onResetBooleanSetting}
         onResetDepthOfFieldSettings={onResetDepthOfFieldSettings}
         onResetEffectSetting={onResetEffectSetting}
+        onResetLensFlareSettings={onResetLensFlareSettings}
+        onResetProbeDebugMode={onResetProbeDebugMode}
         onResetScalarSetting={onResetScalarSetting}
         onResetSsrSettings={onResetSsrSettings}
         onResetToneMapping={onResetToneMapping}

@@ -145,7 +145,7 @@
 - Disabling `Surface Lightmap` visibly removes the baked surface-lightmap contribution from materials that use those lightmaps while leaving the underlying geometry visible.
 - Enabling `Volumetric Lightmap` visibly adds local-probe diffuse or irradiance contribution on participating lit PBR geometry.
 - Disabling `Reflection Intensity` visibly removes local-probe reflection contribution from materials that otherwise use it.
-- The debug panel exposes a checkbox, disabled by default, that draws a sphere at each maze reflection-probe position using that probe's captured reflection texture.
+- The debug panel exposes a probe-debug dropdown, defaulting to `None`, with `Reflection`, `Volumetric Lightmap`, and `Shadow Map` visualization modes.
 - The debug panel `Volumetric Lightmap` enabled toggle defaults to `off`.
 - Double-clicking any debug-panel label resets that control to its authored default value.
 - The debug panel does not expose obsolete atmosphere or sun-direction controls.
@@ -262,15 +262,15 @@
 - The debug controls panel can be opened and closed with backquote.
 - The debug controls panel exposes exposure.
 - The debug controls panel exposes numbered tabs selectable by keyboard shortcuts `1` through `9`.
-- The default debug tab exposes the core scene-lighting controls, including the active tone mapper, `Show Reflection Probes`, `Surface Lightmap`, `Volumetric Lightmap`, and `Reflection Intensity`.
-- The `Show Reflection Probes` control appears above `Tone Mapper`.
+- The default debug tab exposes the core scene-lighting controls, including the active tone mapper, `Probe Debug`, `Surface Lightmap`, `Volumetric Lightmap`, and `Reflection Intensity`.
+- The `Probe Debug` control appears above `Tone Mapper`.
 - The `Surface Lightmap`, `Volumetric Lightmap`, and `Reflection Intensity` checkbox-plus-slider controls each occupy one line in the same style as other effect rows.
 - Separate debug tabs exist for Ambient Occlusion, Bloom, Depth of Field, Lens Flares, SSR, Volumetric Fog, and Anamorphic.
 - The ambient-occlusion tab exposes mode, intensity, and radius.
-- The bloom tab exposes enabled state and all useful bloom parameters, including kernel size.
-- The depth-of-field tab exposes enabled state and all useful depth-of-field parameters, including `focusDistance`, `focalLength`, and `bokehScale`.
-- The lens-flare tab exposes enabled state and all useful flare parameters needed to tune visibility and opacity.
-- The SSR tab exposes enabled state and the core canonical tuning parameters needed to tune its documented implementation, including opacity, distance, thickness, and resolution scale.
+- The bloom tab exposes enabled state and all useful bloom parameters, including intensity, threshold, smoothing, resolution scale, and kernel size.
+- The depth-of-field tab exposes enabled state and all useful depth-of-field parameters, including `focusDistance`, `focalLength`, `bokehScale`, and resolution scale.
+- The lens-flare tab exposes enabled state and all useful flare parameters needed to tune visibility and opacity, including flare size, glare size, ghost scale, halo scale, star-point count, and the wrapped effect's animated and anamorphic toggles.
+- The SSR tab exposes enabled state and the core canonical tuning parameters needed to tune its documented implementation, including opacity, distance, thickness, resolution scale, and pass output mode.
 - The volumetric-fog tab exposes enabled state and the core fog parameters needed to tune its probe-lit volume implementation, including amount and noise frequency.
 - The anamorphic tab exposes enabled state and the core anamorphic parameters needed to tune the live effect, including intensity, threshold, scale, and sample count.
 - The debug controls panel exposes a toggle for reflection-probe visualization.

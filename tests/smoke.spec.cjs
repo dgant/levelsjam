@@ -200,7 +200,7 @@ async function waitForBrightFrame(
 }
 
 async function setSlider(page, label, value) {
-  await page.getByRole('slider', { name: label }).evaluate((element, nextValue) => {
+  await page.getByRole('slider', { exact: true, name: label }).evaluate((element, nextValue) => {
     const descriptor = Object.getOwnPropertyDescriptor(
       HTMLInputElement.prototype,
       'value'
@@ -212,7 +212,7 @@ async function setSlider(page, label, value) {
 }
 
 async function setCheckbox(page, label, enabled) {
-  const checkbox = page.getByRole('checkbox', { name: label })
+  const checkbox = page.getByRole('checkbox', { exact: true, name: label })
 
   if (enabled) {
     await checkbox.check()
@@ -332,17 +332,17 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByRole('slider', { name: 'Surface Lightmap' })).toHaveValue('1')
     await expect(page.getByLabel('Volumetric Lightmap Enabled')).toBeVisible()
     await expect(page.getByLabel('Volumetric Lightmap Enabled')).not.toBeChecked()
-    await expect(page.getByRole('slider', { name: 'Volumetric Lightmap' })).toHaveValue('0')
+    await expect(page.getByRole('slider', { name: 'Volumetric Lightmap' })).toHaveValue('1')
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeVisible()
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeChecked()
     await expect(page.getByRole('slider', { name: 'Reflection Intensity' })).toHaveValue('1')
-    await expect(page.getByLabel('Show Reflection Probes')).toBeVisible()
+    await expect(page.getByLabel('Probe Debug', { exact: true })).toBeVisible()
     await page.keyboard.press('Digit7')
     await expect(page.getByRole('slider', { name: 'Volumetric Fog Intensity' })).toBeVisible()
     await page.keyboard.press('Digit1')
     await expect(page.getByRole('slider', { name: 'Exposure' })).toBeVisible()
 
-    await setCheckbox(page, 'Show Reflection Probes', true)
+    await page.getByLabel('Probe Debug', { exact: true }).selectOption('reflection')
     await expect
       .poll(
         async () => page.evaluate(() => ({
@@ -363,8 +363,11 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         visualizationState: {
           depthTest: true,
           depthWrite: true,
+          mode: 'reflection',
           toneMapped: true,
-          uniformTextureUUID: expect.any(String),
+          uniformTextureUUIDs: {
+            probeCubeUvMap: expect.any(String)
+          },
           visible: true
         }
       })
@@ -377,9 +380,9 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       })
     )
     expect(
-      probeVisualizationState.visualizationState.uniformTextureUUID
+      probeVisualizationState.visualizationState.uniformTextureUUIDs.probeCubeUvMap
     ).toBe(probeVisualizationState.probeTextureState.processedTextureUUID)
-    await setCheckbox(page, 'Show Reflection Probes', false)
+    await page.getByLabel('Probe Debug', { exact: true }).selectOption('none')
   })
 
   await timedStep(timingProfile, 'reflection-captures', async () => {
