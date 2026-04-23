@@ -105,8 +105,71 @@
 [x] In the debug settings (and code) replace references to the current lightmaps/IBL with "Surface Lightmap" and "Volumetric Lightmap" as appropriate (use your best judgment)
 [x] Move "Show Reflection Probes" above Tone Mapper.
 [x] Lens flares are completely invisible at max slider intensity (why is 0.02 the max?)
-[] SSR looks completely wrong. I think you should rip out whatever implementation you have and redo it from a canonical working example, while referencing the documentation. 
+[x] SSR looks completely wrong. I think you should rip out whatever implementation you have and redo it from a canonical working example, while referencing the documentation.
 [x] Volumetric fog looks completely wrong. Reimplement it starting from a canonical working example, while referencing the documentation. Use the probes as the light source for the fog
 [x] Add separate tabs in the visual controls for each of the post process effects (SSAO, bloom, dof, flares, ssr, fog). Remove their settings from the default tab. For each tab, include all settings for that post process effect as sliders/checkboxes/dropdowns. Use your best judgment for what would constitute a nice UI for testing out the different values for these, and what ranges would let me use them as intended. Use our current defaults or otherwise reasonable defaults (the settings likely already have defaults you can take). Number each tab so I can choose it via hotkey with numbers 1-9. All settings should be applied immediately on being changed; you have had a habit of making sliders only take effect after disabling/enabling an effect, and you need to avoid that style and make the sliders work instantaneously.
-[] Add the three.js Anamorphic post process effect with its own debug tab. Again, refer to the canonical working example and the documentation
-[] Delete all unused code and experiments and logs that we no longer produce. Do a general cleanup of anything unused.
+[x] Change these default post process settings (in-game only; baking should not apply any post processing):
+Bloom Enabled, 1.0
+Bloom Kernel Huge
+Bloom threshold 0.7
+Bloom Smoothing 0.5
+Bloom Resolution 0.25x
+Lens Flares Enabled 0.1
+Flare Opacity 1.0
+Flare Size 0.05
+Glare Size 0
+Ghost Scale 0
+Flare Shape 0.05
+Animated off
+Flare Anamorphic on
+Extra Streaks off
+Secondary Ghosts off
+Star Burst off
+Ambient Occlusion: N8AO
+Ambient Occlusion Radius: 1m
+Vignette: Enabled, 0.6
+[x] Figure out why the reflection probes are black on 4 of 6 sides and fix them
+[x] Debug shadow map probes should show a color that's clamp(0, 1, shadow depth / 10m)
+[x] The volumetric lightmaps do not make any physical sense right now. The directions the debug probes show light coming from have no correlation with where lights actually are. There's one probe with a bright face pointing towards an outer wall of the maze where no light is coming. One probe with a black face facing a light. I suspect the angles are screwed up. You should test this with a decisive scenario that verifies that volumetric lightmaps capture light accurately from the correct directions, and then apply the light correctly, in the correct directions. Verify that lights are correctly occluded by geometry during volumetric lightmap capture, and that volumetric lightmaps are correctly occluded when applied to geometry
+[x] Baked light should apply a physical inverse square falloff with no maximum distance
+[x] The light provided by the torches is extremely red, almost monochromatic. Cut the saturation of the light color by 75% and tint it slightly more orange-red than just red. Make sure we are not double-tinting, in the sense of tinting both the baked light and then also tinting the lightmap when we apply it.
+[x] New game rules. These supercede all previous player movement/collision rules. Update the spec accordingly.
+Minotaur is a turn-based game that takes place on a grid with edges between cells. Game logic should be in a headless rules engine whose updates are published as updates in the 3D three.js world representation.
+
+Cells may contain any number of items and one character, which may be a player or a monster. Players and monsters can move between grid cells that do not have an obstacle (like a wall) between them. Each turn the player moves, then each active monster moves according to that monster's movement rules.
+
+Player controls:
+W or up: Move one cell forward in the current camera direction
+D or down: Move one cell backward in the current camera direction
+A/S or left/right: Rotate the camera 90 degrees in the specified direction. Rotating does not consume a turn.
+
+Animate player and character movement. Each player move or camera rotation should take 250ms. After the player moves, other characters movement animates simultaneously, and their moves also take 250ms. Buffer the player's inputs and consume the next available input whenever it's the player's turn to move. For example, if the player presses W, then before the animation to move finishes, presses A and W, the player should complete their turn, then on their next turn, rotate left 90 degrees and move forward one space in that direction
+
+The player does not have a 3D model. Each other character has a 3D model in public/models:
+Werewolf: awil_werewolf.zip -- should be scaled proportionally to fit inside a 1.6m cube and positioned with its bottom center at the bottom-center of its tile
+Spider: dopepopes_zkumonga.zip -- should be scaled proportionally to fit inside a 1.4m cube, and (depending on if it's a left-wall or right-wall following spider), rotated 45 degrees and positioned such that it with one side of its base along the wall it's following and the other side along the floor. The goal is to display the spider walking along the left or right wall as appropriate. I'll probably need to correct your initial placement but give it a good try
+Minotaur: minotaur.zip -- should be scaled proportionally to fit inside a 1.8m cube and positioned with its bottom 25cm below the bottom-center of its tile
+
+If the player would attempt to move into a cell with a monster, or vice versa, this kills the player, which is implemented by fading to black as the movement animates, then resetting all state of the current maze, putting the player back at their position and direction at the last checkpoint (currently the entrance position fof the maze), then fading back in over two seconds.
+
+After the player moves, each monster moves. They should move in the same order each turn. Monsters can see in any straight line of cells uninterrupted by walls. Each monster begins asleep. If the monster is asleep, and sees the player, it wakes up, which allows it to move on the following turn.
+Minotaur: Each of the minotaur's turns, if the minotaur can see the player, it records the direction towards the player. If the minotaur is awake, it attempts to move in the last-recorded direction. If it can not move due to hitting a wall or gate, it goes to sleep.
+Spider: Each spider can be either a left-wall or a right-wall spider. Each turn, if the spider is awake, it moves one cell following the (left or right) wall.
+Werewolf: On each turn where the werewolf is awake, and if it did not move on the previous turn, it takes one step along the current shortest legal path towards the player. If there are two or more potential cells that would be equally short, it prefers whichever cell would be next along its previous path. If there is no such cell, it prefers moving in the same d irection it was moving in before if that leads to one of the potential cells. Otherwise, it chooses arbitrarily.
+
+Whenever a monster would move, rotate its model to face the direction of its upcoming move (250ms, only if needed), then animate its movement, then turn it to face the direction it would move if it were its turn to move again (250ms, only if needed)
+
+Regenerate the mazes, and give each one randomly placed minotaur, wolf, spider (on different tiles).
+[x] Pressing 1 detaches the camera from the player and allows you to move freely with WASD/mouselook controls, with no collisions, with Q to go up and E to go down
+[x] Add a credits modal which appears when you press C and closes when you press any key. It should feature a centered header "Credits" followed by a the following (with more to be added later):
+  [x] "Minotaur" (https://skfb.ly/6TK77) by yanbelmont is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
+  [x] "Dopepope's zKUMONGA" (https://skfb.ly/pIBZW) by AllThingsSaurus is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
+  [x] "AWIL Werewolf" (https://skfb.ly/orBtB) by Spinnee is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
+  [x] "Head of a Bull" (https://skfb.ly/6TOXX) by Kirk Hiatt is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
+  [x] "Metal Gate" (https://skfb.ly/oK7QR) by i bull your wife is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
+  [x] "Bronze Sword Mycean" (https://skfb.ly/6RZxG) by Ryoce is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
+[x] Set FOG_EXTINCTION_SCALE to 1.0
+[x] Set the Fog Lighting Strength slider range to 0 - 2.0
+[x] I would expect SSR to only apply reflections to reflective surfaces, with some appropriate respect for specularity/metalness/roughness, but instead it seemt to apply to EVERYTHING, even the sky. Figure out how this is supposed to be correctly applied, referencing both a canonical example, the documentation, and the source code, and then do it.
+[x] Bloom has very nasty banding. See if there's a principled elegant fix to this. Keep it simple, if so.
+[x] Right now lens flares are always impossible to see even with jacked-up settings. So revert the lens flare changes from the last batch of changes, and start again. We want to ensure that lights behind walls or monsters are not candidates for lens flares. Billboards and sconces should be ignored and not ray-tested.

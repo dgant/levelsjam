@@ -19,6 +19,7 @@ const requestedMazeIds = (
   .split(',')
   .map((mazeId) => mazeId.trim())
   .filter(Boolean)
+let probeSphericalHarmonics = null
 
 function writeAtlasArtifacts(outputDirectory, label, atlas) {
   fs.mkdirSync(outputDirectory, { recursive: true })
@@ -45,115 +46,30 @@ function writeDataUrlPng(filePath, dataUrl) {
   )
 }
 
-function directionForFaceUv(faceIndex, u, v) {
-  const px = (u * 2) - 1
-  const py = (v * 2) - 1
-
-  switch (faceIndex) {
-    case 0:
-      return normalize([1, -py, -px])
-    case 1:
-      return normalize([-1, -py, px])
-    case 2:
-      return normalize([px, 1, py])
-    case 3:
-      return normalize([px, -1, -py])
-    case 4:
-      return normalize([px, -py, 1])
-    default:
-      return normalize([-px, -py, -1])
-  }
-}
-
-function normalize(vector) {
-  const length = Math.hypot(vector[0], vector[1], vector[2]) || 1
-  return [vector[0] / length, vector[1] / length, vector[2] / length]
-}
-
-function cubeTexelSolidAngle(u, v, size) {
-  const invSize = 1 / size
-  const x0 = ((2 * (u + 0)) * invSize) - 1
-  const y0 = ((2 * (v + 0)) * invSize) - 1
-  const x1 = ((2 * (u + 1)) * invSize) - 1
-  const y1 = ((2 * (v + 1)) * invSize) - 1
-
-  const areaElement = (x, y) => Math.atan2(x * y, Math.sqrt((x * x) + (y * y) + 1))
-
-  return (
-    areaElement(x0, y0) -
-    areaElement(x0, y1) -
-    areaElement(x1, y0) +
-    areaElement(x1, y1)
-  )
-}
-
-function decodeRgbE8(r, g, b, a) {
-  if (a <= 0) {
-    return [0, 0, 0]
-  }
-
-  const exponent = a - 128
-  const scale = 2 ** exponent
-
-  return [
-    (r / 255) * scale,
-    (g / 255) * scale,
-    (b / 255) * scale
-  ]
-}
-
 function computeVolumetricLightmapCoefficients(rawRgbEAtlas) {
-  const basisWeights = [
-    ([x, y, z]) => 0.282095,
-    ([x, y, z]) => 0.488603 * x,
-    ([x, y, z]) => 0.488603 * y,
-    ([x, y, z]) => 0.488603 * z
-  ]
-  const coefficients = basisWeights.map(() => [0, 0, 0])
-  let totalWeight = 0
+  if (!probeSphericalHarmonics) {
+    throw new Error('Probe spherical harmonics helpers were not loaded')
+  }
 
-  for (let faceIndex = 0; faceIndex < rawRgbEAtlas.length; faceIndex += 1) {
-    const png = PNG.sync.read(
-      Buffer.from(rawRgbEAtlas[faceIndex].replace(/^data:image\/png;base64,/, ''), 'base64')
+  const faces = rawRgbEAtlas.map((faceDataUrl) =>
+    PNG.sync.read(
+      Buffer.from(faceDataUrl.replace(/^data:image\/png;base64,/, ''), 'base64')
     )
+  )
 
-    for (let row = 0; row < png.height; row += 1) {
-      for (let column = 0; column < png.width; column += 1) {
-        const pixelIndex = ((row * png.width) + column) * 4
-        const color = decodeRgbE8(
-          png.data[pixelIndex],
-          png.data[pixelIndex + 1],
-          png.data[pixelIndex + 2],
-          png.data[pixelIndex + 3]
-        )
-        const direction = directionForFaceUv(
-          faceIndex,
-          (column + 0.5) / png.width,
-          (row + 0.5) / png.height
-        )
-        const weight = cubeTexelSolidAngle(column, row, png.width)
+  return probeSphericalHarmonics.computeVolumetricLightmapCoefficientsFromPixels(
+    faces,
+    (face, column, row) => {
+      const pixelIndex = ((row * face.width) + column) * 4
 
-        totalWeight += weight
-
-        basisWeights.forEach((basisWeight, basisIndex) => {
-          const basis = basisWeight(direction) * weight
-          coefficients[basisIndex][0] += color[0] * basis
-          coefficients[basisIndex][1] += color[1] * basis
-          coefficients[basisIndex][2] += color[2] * basis
-        })
-      }
+      return probeSphericalHarmonics.decodeRgbE8(
+        face.data[pixelIndex],
+        face.data[pixelIndex + 1],
+        face.data[pixelIndex + 2],
+        face.data[pixelIndex + 3]
+      )
     }
-  }
-
-  if (totalWeight > 0) {
-    for (const coefficient of coefficients) {
-      coefficient[0] /= totalWeight
-      coefficient[1] /= totalWeight
-      coefficient[2] /= totalWeight
-    }
-  }
-
-  return coefficients
+  )
 }
 
 function waitForPort(port, timeoutMs) {
@@ -347,6 +263,8 @@ async function captureMazeReflectionArtifacts(page, maze, artifactRoot) {
 }
 
 async function main() {
+  probeSphericalHarmonics = await import('../src/lib/probeSphericalHarmonics.js')
+
   const {
     MAZES
   } = await import('../src/data/mazes/index.js')

@@ -1,7 +1,7 @@
 import {
   DepthOfField,
   EffectComposer,
-  LensFlareEffect as PostLensFlareEffectImpl,
+  LensFlareEffect as PostLensFlareEffect,
   N8AO,
   SSAO,
   ToneMapping,
@@ -10,6 +10,7 @@ import {
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
 import {
   BasicShadowMap,
+  Box3,
   BoxGeometry,
   Camera as ThreeCamera,
   CanvasTexture,
@@ -24,9 +25,11 @@ import {
   DoubleSide,
   EquirectangularReflectionMapping,
   Euler,
+  FloatType,
   Float32BufferAttribute,
   Group,
   HalfFloatType,
+  ImageBitmapLoader,
   LinearFilter,
   LinearMipmapLinearFilter,
   MathUtils,
@@ -67,6 +70,7 @@ import {
   Vector3,
   Vector4,
   WebGLRenderTarget,
+  WebGLRenderer,
   WebGLCubeRenderTarget
 } from 'three'
 import {
@@ -79,15 +83,16 @@ import {
   useState
 } from 'react'
 import {
-  BloomEffect,
   BlendFunction,
   Effect,
   EffectAttribute,
-  KernelSize,
+  EffectPass,
   Pass,
   ToneMappingMode as PostToneMappingMode
 } from 'postprocessing'
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js'
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { UnrealBloomPass as ThreeUnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { SSRPass as ThreeSSRPass } from 'three/addons/postprocessing/SSRPass.js'
 import {
   AUTHORED_LIGHTING_SOURCE_SCALE,
@@ -128,6 +133,15 @@ import {
   buildGroundReflectionProbeRects,
   getReflectionProbeBlendForPosition
 } from './lib/reflectionProbeBlending.js'
+import {
+  applyTurnAction,
+  createInitialTurnState,
+  resetTurnStateToCheckpoint,
+  type CardinalDirection,
+  type TurnAction,
+  type TurnMonster,
+  type TurnState
+} from './lib/turnRules.js'
 
 declare const __GIT_REVISION__: string
 declare const __GIT_REVISION_TIMESTAMP__: string
@@ -136,6 +150,11 @@ const assetBase = import.meta.env.BASE_URL
 const ENVIRONMENT_URL = `${assetBase}textures/environment/overcast_soil_1k.hdr`
 const FIRE_FLIPBOOK_URL =
   `${assetBase}textures/fire/CampFire_l_nosmoke_front_Loop_01_4K_6x6.png`
+const MONSTER_MODEL_URLS = {
+  minotaur: `${assetBase}models/minotaur/scene.gltf`,
+  spider: `${assetBase}models/dopepopes_zkumonga/scene.gltf`,
+  werewolf: `${assetBase}models/awil_werewolf/scene.gltf`
+} as const
 const PUDDLE_TEXTURE_URLS = {
   ao: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_AO.jpg`,
   color: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_Diffuse.jpg`,
@@ -188,12 +207,14 @@ const FIRE_FLIPBOOK_CROP_WIDTH =
   FIRE_FLIPBOOK_FRAME_CROP.maxX - FIRE_FLIPBOOK_FRAME_CROP.minX
 const FIRE_FLIPBOOK_CROP_HEIGHT =
   FIRE_FLIPBOOK_FRAME_CROP.maxY - FIRE_FLIPBOOK_FRAME_CROP.minY
-const FIRE_COLOR = new Color('#ffb168')
+const FIRE_COLOR = new Color('#d3a987')
 const BLACK_COLOR = new Color(0, 0, 0)
 const EMPTY_RUNTIME_LIGHTMAP_DATA_URL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aW4YAAAAASUVORK5CYII='
 const FIRE_BILLBOARD_INTENSITY_SCALE =
   AUTHORED_LIGHTING_SOURCE_SCALE / TORCH_BASE_CANDELA
+const LENS_FLARE_INTENSITY_SCALE = 4
+const LENS_FLARE_OCCLUSION_MARGIN = 0.05
 const LIGHTMAP_AMBIENT_TINT = new Color(1, 1, 1)
 const TORCH_LIGHTMAP_TINT = FIRE_COLOR.clone()
 const TORCH_BILLBOARD_LAYER = 1
@@ -218,12 +239,16 @@ const MAZE_GROUND_PATCH_OFFSET_Y = 0.002
 const REFLECTION_PROBE_RENDER_SIZE = 32
 const REFLECTION_PROBE_AMBIENT_RENDER_SIZE = 24
 const REFLECTION_PROBE_FAR = 48
+const REFLECTION_PROBE_LOAD_CONCURRENCY = 8
 const REFLECTION_PROBE_STARTUP_DELAY_MS = 5000
 const REFLECTION_PROBE_STARTUP_CAPTURE_DELAY_MS = 250
 const REFLECTION_PROBE_BACKGROUND_CAPTURE_DELAY_MS = 1000
 const REFLECTION_PROBE_EMISSIVE_RADIUS = 0.16
 const REFLECTION_PROBE_EMISSIVE_SCALE = 2
 const FOG_VOLUME_HEIGHT = 6
+const FOG_EXTINCTION_SCALE = 1
+const DEFAULT_VOLUMETRIC_AMBIENT_HEX = '#8f949e'
+const DEFAULT_VOLUMETRIC_FOG_DISTANCE = 10
 const EFFECT_EPSILON = 0.0001
 const MAX_PHYSICS_SUBSTEPS = 10
 const MIN_LOADING_OVERLAY_MS = 200
@@ -320,20 +345,36 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   outputColor = vec4(inputColor.rgb + (streak * colorGain * intensity), inputColor.a);
 }
 `
+const ditherEffectShader = `
+float interleavedGradientNoise(vec2 position) {
+  vec3 magic = vec3(0.06711056, 0.00583715, 52.9829189);
+  return fract(magic.z * fract(dot(position, magic.xy)));
+}
+
+void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
+  float noise = interleavedGradientNoise(gl_FragCoord.xy) - 0.5;
+  outputColor = vec4(inputColor.rgb + (noise / 255.0), inputColor.a);
+}
+`
 const fogVolumeEffectShader = `
 uniform mat4 cameraProjectionMatrixInverse;
 uniform mat4 cameraWorldMatrix;
 uniform vec3 cameraWorldPosition;
 uniform float density;
 uniform vec3 environmentFogColor;
+uniform float fogDistance;
+uniform float groundHeight;
+uniform float heightFalloff;
+uniform float lightingStrength;
 uniform float noiseFrequency;
+uniform float noiseStrength;
 uniform vec4 probeAmbientBounds;
 uniform vec2 probeAmbientGrid;
 uniform sampler2D probeAmbientTexture;
+uniform float rayStepCount;
 uniform float time;
 uniform float useProbeAmbientTexture;
-uniform vec3 volumeMax;
-uniform vec3 volumeMin;
+uniform float volumeHeight;
 
 float hash(vec3 p) {
   return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
@@ -377,41 +418,41 @@ vec3 sampleFogAmbientColor(vec3 worldPosition) {
     return environmentFogColor;
   }
 
-  float u = 0.5;
-  float v = 0.5;
+  vec2 gridMax = max(probeAmbientGrid - vec2(1.0), vec2(0.0));
+  vec2 gridPosition = vec2(0.0);
 
   if (probeAmbientGrid.x > 1.5) {
-    float tx = clamp(
+    gridPosition.x = clamp(
       (worldPosition.x - probeAmbientBounds.x) / max(probeAmbientBounds.z, 0.0001),
       0.0,
       1.0
-    );
-    u = ((tx * (probeAmbientGrid.x - 1.0)) + 0.5) / probeAmbientGrid.x;
+    ) * gridMax.x;
   }
 
   if (probeAmbientGrid.y > 1.5) {
-    float tz = clamp(
+    gridPosition.y = clamp(
       (worldPosition.z - probeAmbientBounds.y) / max(probeAmbientBounds.w, 0.0001),
       0.0,
       1.0
-    );
-    v = ((tz * (probeAmbientGrid.y - 1.0)) + 0.5) / probeAmbientGrid.y;
+    ) * gridMax.y;
   }
 
-  return texture2D(probeAmbientTexture, vec2(u, v)).rgb;
-}
+  vec2 baseIndex = floor(gridPosition);
+  vec2 nextIndex = min(baseIndex + vec2(1.0), gridMax);
+  vec2 blend = smoothstep(vec2(0.0), vec2(1.0), fract(gridPosition));
+  vec2 texelSize = 1.0 / max(probeAmbientGrid, vec2(1.0));
+  vec2 uv00 = (baseIndex + vec2(0.5)) * texelSize;
+  vec2 uv10 = vec2((nextIndex.x + 0.5) * texelSize.x, uv00.y);
+  vec2 uv01 = vec2(uv00.x, (nextIndex.y + 0.5) * texelSize.y);
+  vec2 uv11 = (nextIndex + vec2(0.5)) * texelSize;
+  vec3 c00 = texture2D(probeAmbientTexture, uv00).rgb;
+  vec3 c10 = texture2D(probeAmbientTexture, uv10).rgb;
+  vec3 c01 = texture2D(probeAmbientTexture, uv01).rgb;
+  vec3 c11 = texture2D(probeAmbientTexture, uv11).rgb;
+  vec3 cx0 = mix(c00, c10, blend.x);
+  vec3 cx1 = mix(c01, c11, blend.x);
 
-bool intersectBox(vec3 rayOrigin, vec3 rayDirection, vec3 boxMin, vec3 boxMax, out float tNear, out float tFar) {
-  vec3 inverseDirection = 1.0 / max(abs(rayDirection), vec3(0.0001)) * sign(rayDirection);
-  vec3 t0 = (boxMin - rayOrigin) * inverseDirection;
-  vec3 t1 = (boxMax - rayOrigin) * inverseDirection;
-  vec3 tMin = min(t0, t1);
-  vec3 tMax = max(t0, t1);
-
-  tNear = max(max(tMin.x, tMin.y), tMin.z);
-  tFar = min(min(tMax.x, tMax.y), tMax.z);
-
-  return tFar > max(tNear, 0.0);
+  return mix(cx0, cx1, blend.y);
 }
 
 vec3 reconstructWorldPosition(vec2 uv, float sceneDepth) {
@@ -434,21 +475,13 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
   vec3 rayOrigin = cameraWorldPosition;
   vec3 rayDirection = reconstructWorldDirection(uv);
   float tNear = 0.0;
-  float tFar = 0.0;
-
-  if (!intersectBox(rayOrigin, rayDirection, volumeMin, volumeMax, tNear, tFar)) {
-    outputColor = inputColor;
-    return;
-  }
-
-  tNear = max(tNear, 0.0);
   float sceneDistance = 1.0e20;
 
   if (depth < 0.999999) {
     sceneDistance = length(reconstructWorldPosition(uv, depth) - rayOrigin);
   }
 
-  float segmentEnd = min(tFar, sceneDistance);
+  float segmentEnd = min(sceneDistance, max(fogDistance, 0.0));
 
   if (segmentEnd <= tNear) {
     outputColor = inputColor;
@@ -456,26 +489,63 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
   }
 
   float pathLength = segmentEnd - tNear;
-  vec3 samplePosition = rayOrigin + (rayDirection * (tNear + (pathLength * 0.5)));
-  vec3 ambientColor = sampleFogAmbientColor(samplePosition);
-  float ambientLuminance = dot(ambientColor, vec3(0.2126, 0.7152, 0.0722));
-  float heightFade = 1.0 - smoothstep(volumeMin.y, volumeMax.y, samplePosition.y);
-  vec3 noisePoint = vec3(
-    samplePosition.x * 0.08 * noiseFrequency,
-    (samplePosition.y * 0.12 * noiseFrequency) - (time * 0.1),
-    samplePosition.z * 0.08 * noiseFrequency
-  );
-  float densityNoise = mix(0.45, 1.0, noise(noisePoint));
-  float fogFactor = 1.0 - exp(
-    -pathLength *
-    max(0.0, density) *
-    densityNoise *
-    (0.18 + (ambientLuminance * 0.35)) *
-    (0.4 + (heightFade * 0.6))
-  );
-  fogFactor = clamp(fogFactor, 0.0, 0.95);
+  float clampedStepCount = clamp(rayStepCount, 1.0, 24.0);
+  float stepLength = pathLength / clampedStepCount;
+  float transmittance = 1.0;
+  vec3 accumulatedScattering = vec3(0.0);
+  float rayJitter = hash(vec3((uv * vec2(171.0, 137.0)) + 0.123, 0.37));
 
-  outputColor = vec4(mix(inputColor.rgb, ambientColor, fogFactor), inputColor.a);
+  for (int stepIndex = 0; stepIndex < 24; stepIndex += 1) {
+    if (float(stepIndex) >= clampedStepCount) {
+      break;
+    }
+
+    float sampleDistance = tNear + (stepLength * (float(stepIndex) + rayJitter));
+    vec3 samplePosition = rayOrigin + (rayDirection * sampleDistance);
+    float sampleHeight = samplePosition.y - groundHeight;
+
+    if (sampleHeight < 0.0 || sampleHeight > volumeHeight) {
+      continue;
+    }
+
+    vec3 ambientColor =
+      sampleFogAmbientColor(samplePosition) * max(0.0, lightingStrength);
+    float normalizedHeight = clamp(
+      sampleHeight / max(volumeHeight, 0.0001),
+      0.0,
+      1.0
+    );
+    float heightDensity = pow(
+      max(1.0 - normalizedHeight, 0.0001),
+      max(heightFalloff, 0.0001)
+    );
+    float densityNoise = 1.0;
+
+    if (noiseFrequency > 0.0001) {
+      vec3 noisePoint = vec3(
+        samplePosition.x / noiseFrequency,
+        (samplePosition.y / noiseFrequency) - (time * 0.1),
+        samplePosition.z / noiseFrequency
+      );
+      densityNoise = mix(
+        1.0,
+        mix(0.45, 1.0, noise(noisePoint)),
+        clamp(noiseStrength, 0.0, 1.0)
+      );
+    }
+    float extinction = max(0.0, density) * heightDensity * densityNoise;
+    float stepTransmittance = exp(-extinction * stepLength);
+    float scattering = 1.0 - stepTransmittance;
+
+    accumulatedScattering += ambientColor * scattering * transmittance;
+    transmittance *= stepTransmittance;
+
+    if (transmittance <= 0.01) {
+      break;
+    }
+  }
+
+  outputColor = vec4((inputColor.rgb * transmittance) + accumulatedScattering, inputColor.a);
 }
 `
 
@@ -580,22 +650,22 @@ type MovementSettings = {
   maxHorizontalSpeedMph: number
 }
 
-const BLOOM_KERNEL_SIZES: Record<BloomKernelSizeKey, KernelSize> = {
-  'very-small': KernelSize.VERY_SMALL,
-  small: KernelSize.SMALL,
-  medium: KernelSize.MEDIUM,
-  large: KernelSize.LARGE,
-  'very-large': KernelSize.VERY_LARGE,
-  huge: KernelSize.HUGE
+const BLOOM_UNREAL_RADII: Record<BloomKernelSizeKey, number> = {
+  'very-small': 0.08,
+  small: 0.16,
+  medium: 0.28,
+  large: 0.42,
+  'very-large': 0.62,
+  huge: 0.88
 }
 
 const BLOOM_RESOLUTION_SCALES: Record<BloomKernelSizeKey, number> = {
-  'very-small': 0.35,
-  small: 0.4,
-  medium: 0.5,
-  large: 0.65,
-  'very-large': 0.8,
-  huge: 1
+  'very-small': 1,
+  small: 0.7,
+  medium: 0.45,
+  large: 0.28,
+  'very-large': 0.18,
+  huge: 0.1
 }
 
 const BLOOM_KERNEL_OPTIONS: Array<{
@@ -625,8 +695,12 @@ const VISUAL_CONTROL_TABS: Array<{
   { hotkey: '8', key: 'anamorphic', label: 'Anamorphic' }
 ]
 
-const DEFAULT_AO_RADIUS_METERS = 1.25
+const DEFAULT_AO_RADIUS_METERS = 1
 const DEFAULT_VOLUMETRIC_NOISE_FREQUENCY = 2
+const DEFAULT_VOLUMETRIC_NOISE_STRENGTH = 0.55
+const DEFAULT_VOLUMETRIC_HEIGHT_FALLOFF = 1.35
+const DEFAULT_VOLUMETRIC_LIGHTING_STRENGTH = 0.35
+const DEFAULT_VOLUMETRIC_STEP_COUNT = 16
 const GIT_REVISION = __GIT_REVISION__
 const GIT_REVISION_TIMESTAMP = __GIT_REVISION_TIMESTAMP__
 const PROBE_DEBUG_MODE_OPTIONS: Array<{ key: ProbeDebugMode, label: string }> = [
@@ -660,8 +734,14 @@ type VisualSettings = {
   depthOfField: DepthOfFieldSettings
   movement: MovementSettings
   ssr: SSRSettings
+  volumetricAmbientHex: string
+  volumetricDistance: number
+  volumetricHeightFalloff: number
+  volumetricLightingStrength: number
   volumetricLighting: EffectSettings
   volumetricNoiseFrequency: number
+  volumetricNoiseStrength: number
+  volumetricStepCount: number
   vignette: EffectSettings
 }
 
@@ -679,7 +759,12 @@ type ScalarSettingKey =
   | 'iblContributionIntensity'
   | 'lightmapContributionIntensity'
   | 'reflectionContributionIntensity'
+  | 'volumetricDistance'
+  | 'volumetricHeightFalloff'
+  | 'volumetricLightingStrength'
   | 'volumetricNoiseFrequency'
+  | 'volumetricNoiseStrength'
+  | 'volumetricStepCount'
 
 type PbrMaps = {
   aoMap?: Texture
@@ -942,6 +1027,12 @@ class AnamorphicEffectImpl extends Effect {
   }
 }
 
+class DitherEffectImpl extends Effect {
+  constructor() {
+    super('DitherEffect', ditherEffectShader)
+  }
+}
+
 class FogVolumeEffectImpl extends Effect {
   constructor() {
     super('FogVolumeEffect', fogVolumeEffectShader, {
@@ -952,14 +1043,19 @@ class FogVolumeEffectImpl extends Effect {
         ['cameraWorldPosition', new Uniform(new Vector3())],
         ['density', new Uniform(0)],
         ['environmentFogColor', new Uniform(DEFAULT_FOG_IBL_COLOR.clone())],
+        ['fogDistance', new Uniform(DEFAULT_VOLUMETRIC_FOG_DISTANCE)],
+        ['groundHeight', new Uniform(GROUND_Y)],
+        ['heightFalloff', new Uniform(DEFAULT_VOLUMETRIC_HEIGHT_FALLOFF)],
+        ['lightingStrength', new Uniform(DEFAULT_VOLUMETRIC_LIGHTING_STRENGTH)],
         ['noiseFrequency', new Uniform(DEFAULT_VOLUMETRIC_NOISE_FREQUENCY)],
+        ['noiseStrength', new Uniform(DEFAULT_VOLUMETRIC_NOISE_STRENGTH)],
         ['probeAmbientBounds', new Uniform(new Vector4())],
         ['probeAmbientGrid', new Uniform(new Vector2())],
         ['probeAmbientTexture', new Uniform<Texture | null>(null)],
+        ['rayStepCount', new Uniform(DEFAULT_VOLUMETRIC_STEP_COUNT)],
         ['time', new Uniform(0)],
         ['useProbeAmbientTexture', new Uniform(0)],
-        ['volumeMax', new Uniform(new Vector3(GROUND_SIZE * 0.5, GROUND_Y + FOG_VOLUME_HEIGHT, GROUND_SIZE * 0.5))],
-        ['volumeMin', new Uniform(new Vector3(GROUND_SIZE * -0.5, GROUND_Y, GROUND_SIZE * -0.5))]
+        ['volumeHeight', new Uniform(FOG_VOLUME_HEIGHT)]
       ])
     })
   }
@@ -984,8 +1080,28 @@ class FogVolumeEffectImpl extends Effect {
     this.uniforms.get('environmentFogColor').value.copy(value)
   }
 
+  set fogDistance(value: number) {
+    this.uniforms.get('fogDistance').value = value
+  }
+
+  set groundHeight(value: number) {
+    this.uniforms.get('groundHeight').value = value
+  }
+
+  set heightFalloff(value: number) {
+    this.uniforms.get('heightFalloff').value = value
+  }
+
+  set lightingStrength(value: number) {
+    this.uniforms.get('lightingStrength').value = value
+  }
+
   set noiseFrequency(value: number) {
     this.uniforms.get('noiseFrequency').value = value
+  }
+
+  set noiseStrength(value: number) {
+    this.uniforms.get('noiseStrength').value = value
   }
 
   set probeAmbientBounds(value: Vector4) {
@@ -1000,12 +1116,20 @@ class FogVolumeEffectImpl extends Effect {
     this.uniforms.get('probeAmbientTexture').value = value
   }
 
+  set rayStepCount(value: number) {
+    this.uniforms.get('rayStepCount').value = value
+  }
+
   set time(value: number) {
     this.uniforms.get('time').value = value
   }
 
   set useProbeAmbientTexture(value: number) {
     this.uniforms.get('useProbeAmbientTexture').value = value
+  }
+
+  set volumeHeight(value: number) {
+    this.uniforms.get('volumeHeight').value = value
   }
 }
 
@@ -1021,7 +1145,7 @@ function createDefaultVisualSettings(): VisualSettings {
     },
     ambientOcclusionIntensity: 1,
     ambientOcclusionRadius: DEFAULT_AO_RADIUS_METERS,
-    ambientOcclusionMode: 'off',
+    ambientOcclusionMode: 'n8ao',
     exposureStops: DEFAULT_EXPOSURE_STOPS,
     iblContribution: {
       enabled: false,
@@ -1033,18 +1157,18 @@ function createDefaultVisualSettings(): VisualSettings {
     },
     lensFlare: {
       aditionalStreaks: false,
-      animated: true,
-      anamorphic: false,
-      enabled: false,
-      flareShape: 0.08,
-      flareSize: 0.0025,
+      animated: false,
+      anamorphic: true,
+      enabled: true,
+      flareShape: 0.05,
+      flareSize: 0.05,
       flareSpeed: 0.01,
-      ghostScale: 0.14,
-      glareSize: 0.03,
+      ghostScale: 0,
+      glareSize: 0,
       haloScale: 0.16,
-      intensity: 0,
+      intensity: 0.1,
       opacity: 1,
-      secondaryGhosts: true,
+      secondaryGhosts: false,
       starBurst: false,
       starPoints: 6
     },
@@ -1055,12 +1179,12 @@ function createDefaultVisualSettings(): VisualSettings {
     },
     toneMapping: 'agx',
     bloom: {
-      enabled: false,
-      intensity: 0.7,
-      kernelSize: 'large',
-      resolutionScale: BLOOM_RESOLUTION_SCALES.large,
-      smoothing: 0,
-      threshold: 0.05
+      enabled: true,
+      intensity: 1,
+      kernelSize: 'huge',
+      resolutionScale: 0.25,
+      smoothing: 0.5,
+      threshold: 0.7
     },
     depthOfField: {
       bokehScale: 0,
@@ -1089,9 +1213,15 @@ function createDefaultVisualSettings(): VisualSettings {
       resolutionScale: 0.75,
       thickness: 0.018
     },
+    volumetricAmbientHex: DEFAULT_VOLUMETRIC_AMBIENT_HEX,
+    volumetricDistance: DEFAULT_VOLUMETRIC_FOG_DISTANCE,
+    volumetricHeightFalloff: DEFAULT_VOLUMETRIC_HEIGHT_FALLOFF,
+    volumetricLightingStrength: DEFAULT_VOLUMETRIC_LIGHTING_STRENGTH,
     volumetricLighting: { enabled: false, intensity: 0 },
     volumetricNoiseFrequency: DEFAULT_VOLUMETRIC_NOISE_FREQUENCY,
-    vignette: { enabled: false, intensity: 0.4 }
+    volumetricNoiseStrength: DEFAULT_VOLUMETRIC_NOISE_STRENGTH,
+    volumetricStepCount: DEFAULT_VOLUMETRIC_STEP_COUNT,
+    vignette: { enabled: true, intensity: 0.6 }
   }
 }
 
@@ -1182,7 +1312,7 @@ vec2 probeBlendGetUV( vec3 direction, float face ) {
   return 0.5 * ( uv + 1.0 );
 }
 
-vec3 probeBlendBilinearCubeUV(
+vec4 probeBlendBilinearCubeUV(
   sampler2D envMap,
   vec3 direction,
   float mipInt,
@@ -1208,9 +1338,9 @@ vec3 probeBlendBilinearCubeUV(
   uv.y *= texelHeight;
 
   #ifdef texture2DGradEXT
-    return texture2DGradEXT( envMap, uv, vec2( 0.0 ), vec2( 0.0 ) ).rgb;
+    return texture2DGradEXT( envMap, uv, vec2( 0.0 ), vec2( 0.0 ) );
   #else
-    return texture2D( envMap, uv ).rgb;
+    return texture2D( envMap, uv );
   #endif
 }
 
@@ -1243,7 +1373,7 @@ vec4 probeBlendTextureCubeUV(
   float mip = clamp( probeBlendRoughnessToMip( roughness ), -2.0, maxMip );
   float mipF = fract( mip );
   float mipInt = floor( mip );
-  vec3 color0 = probeBlendBilinearCubeUV(
+  vec4 color0 = probeBlendBilinearCubeUV(
     envMap,
     sampleDir,
     mipInt,
@@ -1253,10 +1383,10 @@ vec4 probeBlendTextureCubeUV(
   );
 
   if ( mipF == 0.0 ) {
-    return vec4( color0, 1.0 );
+    return color0;
   }
 
-  vec3 color1 = probeBlendBilinearCubeUV(
+  vec4 color1 = probeBlendBilinearCubeUV(
     envMap,
     sampleDir,
     mipInt + 1.0,
@@ -1265,7 +1395,7 @@ vec4 probeBlendTextureCubeUV(
     maxMip
   );
 
-  return vec4( mix( color0, color1, mipF ), 1.0 );
+  return mix( color0, color1, mipF );
 }
 `
 
@@ -1454,7 +1584,7 @@ vec3 reconstructProbeIrradiance(
   float basisL1 = 0.488603 * normalizedDirection.x;
   float basisL2 = 0.488603 * normalizedDirection.y;
   float basisL3 = 0.488603 * normalizedDirection.z;
-  float bandKernelL0 = PI;
+  float bandKernelL0 = 3.141592653589793;
   float bandKernelL1 = 2.09439510239;
 
   return max(
@@ -1463,7 +1593,7 @@ vec3 reconstructProbeIrradiance(
     ( coeffL1 * basisL1 * bandKernelL1 ) +
     ( coeffL2 * basisL2 * bandKernelL1 ) +
     ( coeffL3 * basisL3 * bandKernelL1 )
-  ) * ( 4.0 * PI );
+  ) * 12.566370614359172;
 }
 
 vec3 sampleProbeBlendDiffuse(
@@ -2289,6 +2419,50 @@ function computeAverageHdrColor(texture: Texture | null, intensity = 1) {
   ).multiplyScalar(intensity)
 }
 
+function normalizeHexColor(
+  value: string,
+  fallback = DEFAULT_VOLUMETRIC_AMBIENT_HEX
+) {
+  const trimmed = value.trim()
+  const prefixed = trimmed.startsWith('#') ? trimmed : `#${trimmed}`
+
+  return /^#[0-9a-fA-F]{6}$/.test(prefixed)
+    ? prefixed.toLowerCase()
+    : fallback
+}
+
+function colorFromHex(
+  value: string,
+  fallback = DEFAULT_VOLUMETRIC_AMBIENT_HEX
+) {
+  return new Color(normalizeHexColor(value, fallback))
+}
+
+function getMazeCellWorldPosition(
+  maze: MazeLayout['maze'],
+  cell: { x: number; y: number },
+  y = GROUND_Y
+) {
+  return new Vector3(
+    -((maze.width * MAZE_CELL_SIZE) / 2) + (MAZE_CELL_SIZE / 2) + (cell.x * MAZE_CELL_SIZE),
+    y,
+    -((maze.height * MAZE_CELL_SIZE) / 2) + (MAZE_CELL_SIZE / 2) + (cell.y * MAZE_CELL_SIZE)
+  )
+}
+
+function directionToYaw(direction: CardinalDirection) {
+  switch (direction) {
+    case 'east':
+      return -Math.PI / 2
+    case 'south':
+      return Math.PI
+    case 'west':
+      return Math.PI / 2
+    default:
+      return 0
+  }
+}
+
 function getPmremCubeSize(texture: Texture | null | undefined) {
   const image = texture?.image as
     | {
@@ -2376,17 +2550,27 @@ function getCubeTextureFaceSize(texture: Texture | null | undefined) {
 }
 
 function loadRuntimeProbeCubeUvTexture(url: string) {
-  const loader = new TextureLoader()
+  const loader = new ImageBitmapLoader()
+
+  loader.setOptions({
+    colorSpaceConversion: 'none',
+    imageOrientation: 'flipY',
+    premultiplyAlpha: 'none'
+  })
 
   return new Promise<Texture>((resolve, reject) => {
     loader.load(
       url,
-      (texture) => {
+      (imageBitmap) => {
+        const texture = new Texture(imageBitmap)
+
         texture.colorSpace = NoColorSpace
+        texture.flipY = false
         texture.generateMipmaps = false
         texture.magFilter = LinearFilter
         texture.mapping = CubeUVReflectionMapping
         texture.minFilter = LinearFilter
+        texture.premultiplyAlpha = false
         texture.needsUpdate = true
         resolve(texture)
       },
@@ -3082,24 +3266,43 @@ function useStandardPbrTextures(urls: StandardPbrTextureUrls, repeat: number) {
 
 function useFireFlipbookTexture() {
   const maxAnisotropy = useThree((state) => state.gl.capabilities.getMaxAnisotropy())
-  const texture = useLoader(TextureLoader, FIRE_FLIPBOOK_URL)
+  const [texture, setTexture] = useState<Texture | null>(null)
 
   useEffect(() => {
-    texture.colorSpace = SRGBColorSpace
-    texture.wrapS = RepeatWrapping
-    texture.wrapT = RepeatWrapping
-    texture.repeat.set(
-      FIRE_FLIPBOOK_CROP_WIDTH / FIRE_FLIPBOOK_GRID,
-      FIRE_FLIPBOOK_CROP_HEIGHT / FIRE_FLIPBOOK_GRID
-    )
-    texture.offset.set(
-      FIRE_FLIPBOOK_FRAME_CROP.minX / FIRE_FLIPBOOK_GRID,
-      1 -
-        ((1 + FIRE_FLIPBOOK_FRAME_CROP.maxY) / FIRE_FLIPBOOK_GRID)
-    )
-    texture.anisotropy = Math.min(maxAnisotropy, 8)
-    texture.needsUpdate = true
-  }, [maxAnisotropy, texture])
+    let cancelled = false
+    let loadedTexture: Texture | null = null
+    const loader = new TextureLoader()
+
+    loader.load(FIRE_FLIPBOOK_URL, (nextTexture) => {
+      if (cancelled) {
+        nextTexture.dispose()
+        return
+      }
+
+      loadedTexture = nextTexture
+      nextTexture.colorSpace = SRGBColorSpace
+      nextTexture.wrapS = RepeatWrapping
+      nextTexture.wrapT = RepeatWrapping
+      nextTexture.repeat.set(
+        FIRE_FLIPBOOK_CROP_WIDTH / FIRE_FLIPBOOK_GRID,
+        FIRE_FLIPBOOK_CROP_HEIGHT / FIRE_FLIPBOOK_GRID
+      )
+      nextTexture.offset.set(
+        FIRE_FLIPBOOK_FRAME_CROP.minX / FIRE_FLIPBOOK_GRID,
+        1 -
+          ((1 + FIRE_FLIPBOOK_FRAME_CROP.maxY) / FIRE_FLIPBOOK_GRID)
+      )
+      nextTexture.anisotropy = Math.min(maxAnisotropy, 8)
+      nextTexture.needsUpdate = true
+      setTexture(nextTexture)
+    })
+
+    return () => {
+      cancelled = true
+      loadedTexture?.dispose()
+      setTexture(null)
+    }
+  }, [maxAnisotropy])
 
   return texture
 }
@@ -3786,9 +3989,9 @@ function EnvironmentLighting({
           const depthTarget = nextDepthTargets[probeIndex]
           const target = nextTargets[probeIndex]
 
-          if (ambientColor) {
-            publishedAmbientColors[probeIndex] = ambientColor.clone()
-          }
+          publishedAmbientColors[probeIndex] = (
+            ambientColor ?? fogAmbientColor
+          ).clone()
           if (coefficients) {
             publishedCoefficients[probeIndex] = coefficients.map((coefficient) => (
               [...coefficient]
@@ -3801,6 +4004,11 @@ function EnvironmentLighting({
             publishedTextures[probeIndex] = target.texture
           }
         }
+        const loadedProbeCount = publishedTextures.reduce(
+          (count, texture) => count + Number(Boolean(texture)),
+          0
+        )
+        const probesComplete = loadedProbeCount === probeCount
 
         reflectionProbeDepthTargets.current = nextDepthTargets
         reflectionProbeTargets.current = nextTargets
@@ -3843,28 +4051,26 @@ function EnvironmentLighting({
               .map((probe) => probe.index)
               .filter((probeIndex) => !startupProbeIndices.includes(probeIndex))
           ]
-          let loadIndex = 0
+          const pendingProbeIndices = [...loadOrder]
+          let activeProbeLoads = 0
+          let finished = false
 
-          const loadNextProbe = async () => {
-            if (cancelled) {
+          const finishLoading = () => {
+            if (finished) {
               return
             }
 
-            const probeIndex = loadOrder[loadIndex]
+            finished = true
+            disposeProbeTargets(previousTargets)
+            disposeProbeTargets(previousRawTargets)
+            publishReflectionProbeState()
+          }
 
-            if (probeIndex === undefined) {
-              disposeProbeTargets(previousTargets)
-              disposeProbeTargets(previousRawTargets)
-              publishReflectionProbeState()
-              return
-            }
-
-            loadIndex += 1
+          const loadProbe = async (probeIndex: number) => {
             const manifestProbe = manifest.probes.find((probe) => probe.index === probeIndex)
 
             if (!manifestProbe) {
               publishReflectionProbeState()
-              loadHandle = window.setTimeout(loadNextProbe, 0)
               return
             }
 
@@ -3907,15 +4113,49 @@ function EnvironmentLighting({
               : fogAmbientColor.clone()
 
             publishReflectionProbeState()
-            loadHandle = window.setTimeout(
-              loadNextProbe,
-              startupProbeIndices.every((startupProbeIndex) => Boolean(nextTargets[startupProbeIndex]))
-                ? 16
-                : 0
-            )
           }
 
-          void loadNextProbe()
+          const scheduleProbeLoads = () => {
+            if (cancelled) {
+              return
+            }
+
+            while (
+              activeProbeLoads < REFLECTION_PROBE_LOAD_CONCURRENCY &&
+              pendingProbeIndices.length > 0
+            ) {
+              const probeIndex = pendingProbeIndices.shift()
+
+              if (probeIndex === undefined) {
+                continue
+              }
+
+              activeProbeLoads += 1
+              void loadProbe(probeIndex)
+                .catch((error) => {
+                  console.error(error)
+                })
+                .finally(() => {
+                  activeProbeLoads -= 1
+
+                  if (cancelled) {
+                    return
+                  }
+
+                  if (
+                    pendingProbeIndices.length === 0 &&
+                    activeProbeLoads === 0
+                  ) {
+                    finishLoading()
+                    return
+                  }
+
+                  loadHandle = window.setTimeout(scheduleProbeLoads, 0)
+                })
+            }
+          }
+
+          scheduleProbeLoads()
         } catch (error) {
           console.error(error)
           scene.userData.reflectionProbeState = buildReflectionProbeState(
@@ -4621,11 +4861,13 @@ function TorchBillboard({
       }
     }
 
-    texture.offset.x =
-      (column + FIRE_FLIPBOOK_FRAME_CROP.minX) / FIRE_FLIPBOOK_GRID
-    texture.offset.y =
-      1 -
-      ((row + FIRE_FLIPBOOK_FRAME_CROP.maxY) / FIRE_FLIPBOOK_GRID)
+    if (texture) {
+      texture.offset.x =
+        (column + FIRE_FLIPBOOK_FRAME_CROP.minX) / FIRE_FLIPBOOK_GRID
+      texture.offset.y =
+        1 -
+        ((row + FIRE_FLIPBOOK_FRAME_CROP.maxY) / FIRE_FLIPBOOK_GRID)
+    }
 
     if (material.current) {
       const billboardMaterial = material.current.material as {
@@ -4637,6 +4879,10 @@ function TorchBillboard({
       )
     }
   })
+
+  if (!texture) {
+    return null
+  }
 
   return (
     <group
@@ -4655,12 +4901,12 @@ function TorchBillboard({
         userData={{
           debugIndex: seed - 1,
           debugRole: 'torch-billboard',
-          lensflare: 'no-occlusion'
+          lensflare: 'ignore-occlusion'
         }}
       >
         <planeGeometry args={[TORCH_BILLBOARD_SIZE, TORCH_BILLBOARD_SIZE]} />
         <meshBasicMaterial
-          alphaTest={0.005}
+          alphaTest={0.03}
           color={new Color(1, 1, 1)}
           depthWrite
           map={texture}
@@ -4858,7 +5104,7 @@ void main() {
   vec4 baseColor = texture2D(inputBuffer, vUv);
   vec4 billboardColor = texture2D(billboardBuffer, vUv);
 
-  if (billboardColor.a <= 0.0001) {
+  if (billboardColor.a <= 0.01) {
     gl_FragColor = baseColor;
     return;
   }
@@ -4871,10 +5117,9 @@ void main() {
     return;
   }
 
-  gl_FragColor = vec4(
-    mix(baseColor.rgb, billboardColor.rgb, billboardColor.a),
-    max(baseColor.a, billboardColor.a)
-  );
+  vec3 billboardEmission = billboardColor.rgb * billboardColor.a;
+
+  gl_FragColor = vec4(baseColor.rgb + billboardEmission, 1.0);
 }
 `
 
@@ -5034,16 +5279,26 @@ function SconceMesh({
 }
 
 function FogVolume({
-  environmentFogColor,
+  ambientColor,
+  fogDistance,
+  heightFalloff,
   layout,
+  lightingStrength,
   noiseFrequency,
+  noiseStrength,
+  rayStepCount,
   reflectionProbeAmbientColors,
   visible,
   volumeIntensity
 }: {
-  environmentFogColor: Color
+  ambientColor: Color
+  fogDistance: number
+  heightFalloff: number
   layout: MazeLayout
+  lightingStrength: number
   noiseFrequency: number
+  noiseStrength: number
+  rayStepCount: number
   reflectionProbeAmbientColors: Color[]
   visible: boolean
   volumeIntensity: number
@@ -5078,16 +5333,16 @@ function FogVolume({
       return null
     }
 
-    const data = new Uint8Array(probeCount * 4)
+    const data = new Float32Array(probeCount * 4)
 
     for (let index = 0; index < probeCount; index += 1) {
       const color = reflectionProbeAmbientColors[index] ?? DEFAULT_FOG_IBL_COLOR
       const offset = index * 4
 
-      data[offset] = Math.round(MathUtils.clamp(color.r, 0, 1) * 255)
-      data[offset + 1] = Math.round(MathUtils.clamp(color.g, 0, 1) * 255)
-      data[offset + 2] = Math.round(MathUtils.clamp(color.b, 0, 1) * 255)
-      data[offset + 3] = 255
+      data[offset] = color.r
+      data[offset + 1] = color.g
+      data[offset + 2] = color.b
+      data[offset + 3] = 1
     }
 
     const texture = new DataTexture(
@@ -5095,9 +5350,10 @@ function FogVolume({
       layout.maze.width,
       layout.maze.height,
       RGBAFormat,
-      UnsignedByteType
+      FloatType
     )
 
+    texture.colorSpace = NoColorSpace
     texture.generateMipmaps = false
     texture.magFilter = LinearFilter
     texture.minFilter = LinearFilter
@@ -5109,23 +5365,34 @@ function FogVolume({
   }, [layout.maze.height, layout.maze.width, reflectionProbeAmbientColors])
 
   useEffect(() => {
-    effect.density = visible ? volumeIntensity : 0
-    effect.environmentFogColor = environmentFogColor
+    effect.density = visible ? volumeIntensity * FOG_EXTINCTION_SCALE : 0
+    effect.environmentFogColor = ambientColor
+    effect.fogDistance = fogDistance
+    effect.groundHeight = GROUND_Y
+    effect.heightFalloff = heightFalloff
+    effect.lightingStrength = lightingStrength
     effect.noiseFrequency = noiseFrequency
+    effect.noiseStrength = noiseStrength
     effect.probeAmbientBounds = probeBounds
     effect.probeAmbientGrid = probeGrid
     effect.probeAmbientTexture = probeAmbientTexture
+    effect.rayStepCount = rayStepCount
     effect.useProbeAmbientTexture = Boolean(probeAmbientTexture) ? 1 : 0
+    effect.volumeHeight = FOG_VOLUME_HEIGHT
     scene.userData.fogEffectState = {
       density: visible ? volumeIntensity : 0,
+      fogDistance,
       environmentFogColor: [
-        environmentFogColor.r,
-        environmentFogColor.g,
-        environmentFogColor.b
+        ambientColor.r,
+        ambientColor.g,
+        ambientColor.b
       ],
       hasProbeAmbientTexture: Boolean(probeAmbientTexture),
+      heightFalloff,
+      lightingStrength,
       meshCount: visible ? 1 : 0,
       noiseFrequency,
+      noiseStrength,
       probeAmbientBounds: [
         probeBounds.x,
         probeBounds.y,
@@ -5136,15 +5403,21 @@ function FogVolume({
         probeGrid.x,
         probeGrid.y
       ],
+      rayStepCount,
       useProbeAmbientTexture: Boolean(probeAmbientTexture) ? 1 : 0
     }
   }, [
+    ambientColor,
     effect,
-    environmentFogColor,
+    fogDistance,
+    heightFalloff,
+    lightingStrength,
     noiseFrequency,
+    noiseStrength,
     probeAmbientTexture,
     probeBounds,
     probeGrid,
+    rayStepCount,
     scene,
     visible,
     volumeIntensity
@@ -5203,6 +5476,7 @@ function ReflectionProbeVisualization({
 
           material = (
             <shaderMaterial
+              key={`${probe.id}:${mode}:reflection`}
               depthTest
               depthWrite
               fragmentShader={createProcessedReflectionProbeSphereFragmentShader()
@@ -5213,6 +5487,11 @@ function ReflectionProbeVisualization({
               toneMapped
               uniforms={{
                 probeCubeUvMap: { value: texture }
+              }}
+              onUpdate={(material) => {
+                material.depthTest = true
+                material.depthWrite = true
+                material.toneMapped = true
               }}
               vertexShader={`
                 varying vec3 vProbeDirection;
@@ -5233,6 +5512,7 @@ function ReflectionProbeVisualization({
 
           material = (
             <shaderMaterial
+              key={`${probe.id}:${mode}:volumetric-lightmap`}
               depthTest
               depthWrite
               fragmentShader={createVolumetricLightmapProbeSphereFragmentShader()}
@@ -5243,6 +5523,11 @@ function ReflectionProbeVisualization({
                 coeffL1: { value: new Vector3(...coefficients[1]) },
                 coeffL2: { value: new Vector3(...coefficients[2]) },
                 coeffL3: { value: new Vector3(...coefficients[3]) }
+              }}
+              onUpdate={(material) => {
+                material.depthTest = true
+                material.depthWrite = true
+                material.toneMapped = true
               }}
               vertexShader={`
                 varying vec3 vProbeDirection;
@@ -5263,6 +5548,7 @@ function ReflectionProbeVisualization({
 
           material = (
             <shaderMaterial
+              key={`${probe.id}:${mode}:shadow-map`}
               depthTest
               depthWrite
               fragmentShader={createShadowProbeSphereFragmentShader()}
@@ -5270,6 +5556,11 @@ function ReflectionProbeVisualization({
               toneMapped
               uniforms={{
                 probeDepthMap: { value: depthTexture }
+              }}
+              onUpdate={(material) => {
+                material.depthTest = true
+                material.depthWrite = true
+                material.toneMapped = true
               }}
               vertexShader={`
                 varying vec3 vProbeDirection;
@@ -5284,18 +5575,22 @@ function ReflectionProbeVisualization({
         }
 
         return (
-          <mesh
-            key={probe.id}
+          <group
+            key={`${probe.id}:${mode}`}
             position={[probe.position.x, probe.position.y, probe.position.z]}
-            userData={{
-              debugIndex: index,
-              debugRole: 'reflection-probe-visual',
-              probeDebugMode: mode
-            }}
           >
-            <sphereGeometry args={[0.18, 16, 16]} />
-            {material}
-          </mesh>
+            <mesh
+              renderOrder={1000}
+              userData={{
+                debugIndex: index,
+                debugRole: 'reflection-probe-visual',
+                probeDebugMode: mode
+              }}
+            >
+              <sphereGeometry args={[0.34, 20, 20]} />
+              {material}
+            </mesh>
+          </group>
         )
       })}
     </>
@@ -5599,6 +5894,8 @@ uniform vec3 coeffL3;
 
 varying vec3 vProbeDirection;
 
+const float PI = 3.141592653589793;
+
 vec3 reconstructProbeRadiance(
   vec3 direction,
   vec3 basisCoeffL0,
@@ -5659,9 +5956,9 @@ void main() {
   float distanceToSurface = decodePackedDistance(
     textureCube( probeDepthMap, normalize( vProbeDirection ) )
   );
-  float normalizedDistance = clamp( distanceToSurface / ${REFLECTION_PROBE_FAR.toFixed(1)}, 0.0, 1.0 );
+  float visibleDistance = clamp( distanceToSurface / 10.0, 0.0, 1.0 );
 
-  gl_FragColor = vec4( vec3( normalizedDistance ), 1.0 );
+  gl_FragColor = vec4( vec3( visibleDistance ), 1.0 );
   #include <colorspace_fragment>
 }
 `
@@ -6581,46 +6878,403 @@ function SceneGeometry({
   )
 }
 
+function MonsterModel({
+  monster
+}: {
+  monster: TurnMonster
+}) {
+  const [model, setModel] = useState<Group | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const loader = new GLTFLoader()
+
+    loader.load(
+      MONSTER_MODEL_URLS[monster.type],
+      (gltf) => {
+        if (cancelled) {
+          return
+        }
+
+        const clone = gltf.scene.clone(true)
+
+        clone.traverse((object) => {
+          if (object instanceof Mesh) {
+            object.castShadow = true
+            object.receiveShadow = true
+            object.userData.debugRole = 'monster'
+            object.userData.monsterType = monster.type
+          }
+        })
+        setModel(clone)
+      },
+      undefined,
+      (error) => {
+        if (!cancelled) {
+          console.error(error)
+        }
+      }
+    )
+
+    return () => {
+      cancelled = true
+      setModel(null)
+    }
+  }, [monster.type])
+  const transform = useMemo(() => {
+    if (!model) {
+      return null
+    }
+
+    const bounds = new Box3().setFromObject(model)
+    const size = new Vector3()
+    const center = new Vector3()
+
+    bounds.getSize(size)
+    bounds.getCenter(center)
+    const targetSize =
+      monster.type === 'minotaur'
+        ? 1.8
+        : monster.type === 'spider'
+          ? 1.4
+          : 1.6
+    const maxDimension = Math.max(size.x, size.y, size.z, 0.0001)
+    const scale = targetSize / maxDimension
+
+    return {
+      modelOffset: new Vector3(
+        -center.x * scale,
+        (-bounds.min.y * scale) + (monster.type === 'minotaur' ? -0.25 : 0),
+        -center.z * scale
+      ),
+      modelRotationZ:
+        monster.type === 'spider'
+          ? (monster.hand === 'left' ? Math.PI / 4 : -Math.PI / 4)
+          : 0,
+      scale
+    }
+  }, [model, monster.hand, monster.type])
+
+  if (!model || !transform) {
+    return null
+  }
+
+  return (
+    <primitive
+      object={model}
+      position={[
+        transform.modelOffset.x,
+        transform.modelOffset.y,
+        transform.modelOffset.z
+      ]}
+      rotation-z={transform.modelRotationZ}
+      scale={transform.scale}
+    />
+  )
+}
+
+function MonsterActor({
+  layout,
+  monster
+}: {
+  layout: MazeLayout
+  monster: TurnMonster
+}) {
+  const group = useRef<Group>(null)
+  const targetPosition = useMemo(
+    () => getMazeCellWorldPosition(layout.maze, monster.cell, GROUND_Y),
+    [layout.maze, monster.cell.x, monster.cell.y]
+  )
+  const targetYaw = directionToYaw(monster.direction)
+
+  useEffect(() => {
+    if (!group.current) {
+      return
+    }
+
+    if (group.current.userData.initialized) {
+      return
+    }
+
+    group.current.position.copy(targetPosition)
+    group.current.rotation.y = targetYaw
+    group.current.userData.initialized = true
+  }, [targetPosition, targetYaw])
+
+  useFrame((_, delta) => {
+    if (!group.current) {
+      return
+    }
+
+    const alpha = Math.min(1, delta / 0.25)
+
+    group.current.position.lerp(targetPosition, alpha)
+    group.current.rotation.y = MathUtils.damp(
+      group.current.rotation.y,
+      targetYaw,
+      14,
+      delta
+    )
+  })
+
+  return (
+    <group
+      ref={group}
+      userData={{
+        debugRole: 'monster',
+        monsterId: monster.id,
+        monsterType: monster.type
+      }}
+    >
+      <MonsterModel monster={monster} />
+    </group>
+  )
+}
+
+function MonsterActors({
+  layout,
+  turnState
+}: {
+  layout: MazeLayout
+  turnState: TurnState
+}) {
+  return (
+    <>
+      {turnState.monsters.map((monster) => (
+        <MonsterActor
+          key={monster.id}
+          layout={layout}
+          monster={monster}
+        />
+      ))}
+    </>
+  )
+}
+
+class ThreeComposerCompatPass<TThreePass extends {
+  dispose: () => void
+  needsSwap?: boolean
+  render: (
+    renderer: WebGLRenderer,
+    writeBuffer: WebGLRenderTarget,
+    readBuffer: WebGLRenderTarget,
+    deltaTime?: number,
+    stencilTest?: boolean
+  ) => void
+  renderToScreen?: boolean
+  setSize: (width: number, height: number) => void
+}> extends Pass {
+  inner: TThreePass
+
+  constructor(name: string, inner: TThreePass) {
+    super(name)
+    this.inner = inner
+    this.needsSwap = inner.needsSwap ?? true
+  }
+
+  override render(
+    renderer: WebGLRenderer,
+    inputBuffer: WebGLRenderTarget,
+    outputBuffer: WebGLRenderTarget,
+    deltaTime?: number,
+    stencilTest?: boolean
+  ) {
+    this.inner.renderToScreen = this.renderToScreen
+    this.inner.render(renderer, outputBuffer, inputBuffer, deltaTime, stencilTest)
+  }
+
+  override setSize(width: number, height: number) {
+    this.inner.setSize(width, height)
+  }
+
+  override dispose() {
+    this.inner.dispose()
+  }
+}
+
+class ThreeBloomCompatPass<TThreePass extends {
+  dispose: () => void
+  render: (
+    renderer: WebGLRenderer,
+    writeBuffer: WebGLRenderTarget,
+    readBuffer: WebGLRenderTarget,
+    deltaTime?: number,
+    stencilTest?: boolean
+  ) => void
+  renderToScreen?: boolean
+  setSize: (width: number, height: number) => void
+}> extends Pass {
+  inner: TThreePass
+  copyCamera: OrthographicCamera
+  copyMaterial: ShaderMaterial
+  copyScene: ThreeScene
+  copyQuad: Mesh
+  tempRenderTarget: WebGLRenderTarget
+
+  constructor(name: string, inner: TThreePass) {
+    super(name)
+    this.inner = inner
+    this.needsSwap = true
+    this.copyCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1)
+    this.copyMaterial = new ShaderMaterial({
+      depthTest: false,
+      depthWrite: false,
+      fragmentShader: `
+uniform sampler2D inputBuffer;
+varying vec2 vUv;
+
+void main() {
+  gl_FragColor = texture2D(inputBuffer, vUv);
+}
+`,
+      uniforms: {
+        inputBuffer: new Uniform<Texture | null>(null)
+      },
+      vertexShader: `
+varying vec2 vUv;
+
+void main() {
+  vUv = uv;
+  gl_Position = vec4(position.xy, 0.0, 1.0);
+}
+`
+    })
+    this.copyQuad = new Mesh(new PlaneGeometry(2, 2), this.copyMaterial)
+    this.copyScene = new ThreeScene()
+    this.copyScene.add(this.copyQuad)
+    this.tempRenderTarget = new WebGLRenderTarget(1, 1, {
+      depthBuffer: false,
+      format: RGBAFormat,
+      magFilter: LinearFilter,
+      minFilter: LinearFilter
+    })
+  }
+
+  override render(
+    renderer: WebGLRenderer,
+    inputBuffer: WebGLRenderTarget,
+    outputBuffer: WebGLRenderTarget,
+    deltaTime?: number,
+    stencilTest?: boolean
+  ) {
+    const previousAutoClear = renderer.autoClear
+
+    renderer.autoClear = false
+    this.copyMaterial.uniforms.inputBuffer.value = inputBuffer.texture
+    renderer.setRenderTarget(this.tempRenderTarget)
+    renderer.render(this.copyScene, this.copyCamera)
+
+    this.inner.renderToScreen = false
+    this.inner.render(
+      renderer,
+      outputBuffer,
+      this.tempRenderTarget,
+      deltaTime,
+      stencilTest
+    )
+
+    this.copyMaterial.uniforms.inputBuffer.value = this.tempRenderTarget.texture
+    renderer.setRenderTarget(this.renderToScreen ? null : outputBuffer)
+    renderer.render(this.copyScene, this.copyCamera)
+    renderer.autoClear = previousAutoClear
+  }
+
+  override setSize(width: number, height: number) {
+    this.inner.setSize(width, height)
+    this.tempRenderTarget.setSize(width, height)
+  }
+
+  override dispose() {
+    this.inner.dispose()
+    this.copyMaterial.dispose()
+    this.copyQuad.geometry.dispose()
+    this.tempRenderTarget.dispose()
+  }
+}
+
 function BloomEffectPrimitive({
   settings
 }: {
   settings: BloomSettings
 }) {
-  const {
-    intensity,
-    kernelSize,
-    resolutionScale,
-    smoothing,
-    threshold
-  } = settings
-  const effect = useMemo(
+  const size = useThree((state) => state.size)
+  const bloomPass = useMemo(
     () =>
-      new BloomEffect({
-        intensity,
-        kernelSize: BLOOM_KERNEL_SIZES[kernelSize],
-        luminanceSmoothing: smoothing,
-        luminanceThreshold: threshold,
-        mipmapBlur: false,
-        resolutionScale
-      }),
-    [intensity, kernelSize, resolutionScale, smoothing, threshold]
+      new ThreeUnrealBloomPass(
+        new Vector2(
+          Math.max(1, Math.round(size.width * settings.resolutionScale)),
+          Math.max(1, Math.round(size.height * settings.resolutionScale))
+        ),
+        settings.intensity,
+        BLOOM_UNREAL_RADII[settings.kernelSize],
+        settings.threshold
+      ),
+    []
+  )
+  const wrappedPass = useMemo(
+    () => new ThreeBloomCompatPass('UnrealBloomCompatPass', bloomPass),
+    [bloomPass]
   )
 
   useEffect(() => {
-    effect.intensity = intensity
-    effect.luminanceMaterial.threshold = threshold
-    effect.luminanceMaterial.smoothing = smoothing
-    effect.resolution.scale = resolutionScale
-  }, [effect, intensity, resolutionScale, smoothing, threshold])
+    bloomPass.enabled = settings.enabled
+    bloomPass.strength = settings.intensity
+    bloomPass.radius = MathUtils.clamp(
+      BLOOM_UNREAL_RADII[settings.kernelSize] + (settings.smoothing * 0.35),
+      0,
+      1
+    )
+    bloomPass.threshold = settings.threshold
+    bloomPass.setSize(
+      Math.max(1, Math.round(size.width * settings.resolutionScale)),
+      Math.max(1, Math.round(size.height * settings.resolutionScale))
+    )
+  }, [
+    bloomPass,
+    settings.enabled,
+    settings.intensity,
+    settings.kernelSize,
+    settings.resolutionScale,
+    settings.smoothing,
+    settings.threshold,
+    size.height,
+    size.width
+  ])
 
-  useEffect(() => () => effect.dispose(), [effect])
+  useEffect(() => () => wrappedPass.dispose(), [wrappedPass])
 
-  return (
-    <primitive
-      key={kernelSize}
-      object={effect as unknown as Effect}
-    />
-  )
+  return <primitive object={wrappedPass} />
+}
+
+function isSsrReflectiveMesh(object: Mesh) {
+  const role = object.userData?.debugRole
+
+  if (
+    role === 'torch-billboard' ||
+    role === 'reflection-probe-visual' ||
+    role === 'global-fog-volume'
+  ) {
+    return false
+  }
+
+  const materials = Array.isArray(object.material)
+    ? object.material
+    : [object.material]
+
+  return materials.some((material) => {
+    if (
+      !(material instanceof ThreeMeshPhysicalMaterial) &&
+      !(material instanceof ThreeMeshStandardMaterial)
+    ) {
+      return false
+    }
+
+    const metalness = typeof material.metalness === 'number' ? material.metalness : 0
+    const roughness = typeof material.roughness === 'number' ? material.roughness : 1
+    const hasReflectionSource = Boolean(material.envMap) || Boolean(material.userData?.probeBlendDebug)
+
+    return hasReflectionSource && (metalness > 0.05 || roughness < 0.65)
+  })
 }
 
 function SSRPassPrimitive({
@@ -6639,13 +7293,31 @@ function SSRPassPrimitive({
         height: size.height,
         renderer: gl,
         scene,
-        selects: null,
+        selects: [],
         width: size.width
       }),
     [camera, gl, scene]
   )
+  const wrappedPass = useMemo(
+    () => new ThreeComposerCompatPass('SsrComposerCompatPass', pass),
+    [pass]
+  )
 
   useEffect(() => {
+    const selects: Mesh[] = []
+
+    scene.traverse((object) => {
+      if (!(object instanceof Mesh) || !isSsrReflectiveMesh(object)) {
+        return
+      }
+
+      selects.push(object)
+    })
+
+    // three.js SSRPass uses `selects` as its documented selective-reflection
+    // path; keeping this list PBR-only prevents sky, billboards, and helpers
+    // from contaminating the SSR g-buffer.
+    pass.selects = selects
     pass.blur = settings.blur
     pass.bouncing = settings.bouncing
     pass.distanceAttenuation = settings.distanceAttenuation
@@ -6661,10 +7333,10 @@ function SSRPassPrimitive({
     pass.thickness = settings.thickness
   }, [
     pass,
+    scene,
     settings.blur,
     settings.bouncing,
     settings.distanceAttenuation,
-    pass,
     settings.enabled,
     settings.fresnel,
     settings.infiniteThick,
@@ -6679,9 +7351,9 @@ function SSRPassPrimitive({
     pass.setSize(size.width, size.height)
   }, [pass, size.height, size.width])
 
-  useEffect(() => () => pass.dispose(), [pass])
+  useEffect(() => () => wrappedPass.dispose(), [wrappedPass])
 
-  return <primitive object={pass} />
+  return <primitive object={wrappedPass} />
 }
 
 function AnamorphicEffectPrimitive({
@@ -6785,20 +7457,31 @@ function ExposureEffectPrimitive({
   return <primitive object={effect as unknown as Effect} />
 }
 
-function TorchLensFlareEffectPrimitive({
+function DitherEffectPrimitive() {
+  const effect = useMemo(() => new DitherEffectImpl(), [])
+
+  useEffect(() => () => effect.dispose(), [effect])
+
+  return <primitive object={effect as unknown as Effect} />
+}
+
+function TorchLensFlare({
   settings,
-  mazeLights
+  layout
 }: {
   settings: LensFlareSettings
-  mazeLights: MazeLayout['lights']
+  layout: MazeLayout
 }) {
   const camera = useThree((state) => state.camera)
   const raycaster = useThree((state) => state.raycaster)
   const scene = useThree((state) => state.scene)
   const size = useThree((state) => state.size)
+  const activeLensPosition = useMemo(() => new Vector3(), [])
+  const projectedPosition = useMemo(() => new Vector3(), [])
+  const raycasterPosition = useMemo(() => new Vector2(), [])
   const lensPositions = useMemo(
     () =>
-      mazeLights.map(
+      layout.lights.map(
         (mazeLight) =>
           new Vector3(
             mazeLight.torchPosition.x,
@@ -6806,24 +7489,19 @@ function TorchLensFlareEffectPrimitive({
             mazeLight.torchPosition.z
           )
       ),
-    [mazeLights]
-  )
-  const projectedPosition = useMemo(() => new Vector3(), [])
-  const selectedProjectedPosition = useMemo(() => new Vector3(), [])
-  const raycasterPosition = useMemo(() => new Vector2(), [])
-  const lensRaycasterMask = useMemo(
-    () => ((1 << 0) | (1 << TORCH_BILLBOARD_LAYER)),
-    []
+    [layout.lights]
   )
   const effect = useMemo(
-    () => {
-      const nextEffect = new PostLensFlareEffectImpl({
+    () =>
+      new PostLensFlareEffect({
         aditionalStreaks: settings.aditionalStreaks,
         animated: settings.animated,
         anamorphic: settings.anamorphic,
         blendFunction: BlendFunction.NORMAL,
-        colorGain: new Color(0, 0, 0),
-        enabled: true,
+        colorGain: FIRE_COLOR.clone().multiplyScalar(
+          Math.sqrt(AUTHORED_LIGHTING_SOURCE_SCALE)
+        ),
+        enabled: settings.enabled,
         flareShape: settings.flareShape,
         flareSize: settings.flareSize,
         flareSpeed: settings.flareSpeed,
@@ -6832,61 +7510,82 @@ function TorchLensFlareEffectPrimitive({
         haloScale: settings.haloScale,
         lensDirtTexture: null,
         lensPosition: new Vector3(),
-        opacity: settings.opacity,
+        opacity: 1,
         screenRes: new Vector2(size.width, size.height),
         secondaryGhosts: settings.secondaryGhosts,
         starBurst: settings.starBurst,
         starPoints: settings.starPoints
-      })
-
-      nextEffect.blendMode.opacity.value = 0
-      return nextEffect
-    },
-    [
-      settings.aditionalStreaks,
-      settings.animated,
-      settings.anamorphic,
-      settings.flareShape,
-      settings.flareSize,
-      settings.flareSpeed,
-      settings.ghostScale,
-      settings.glareSize,
-      settings.haloScale,
-      settings.opacity,
-      settings.secondaryGhosts,
-      settings.starBurst,
-      settings.starPoints,
-      size.height,
-      size.width
-    ]
+      }),
+    []
+  )
+  const occlusionOpacityUniform = useMemo(
+    () => effect.uniforms.get('opacity') as Uniform<number> | undefined,
+    [effect]
+  )
+  const lensPositionUniform = useMemo(
+    () => effect.uniforms.get('lensPosition') as Uniform<Vector3> | undefined,
+    [effect]
+  )
+  const screenResUniform = useMemo(
+    () => effect.uniforms.get('screenRes') as Uniform<Vector2> | undefined,
+    [effect]
+  )
+  const pass = useMemo(
+    () => new EffectPass(camera as ThreeCamera, effect),
+    [camera, effect]
   )
 
-  useFrame((_, delta) => {
-    const blendOpacityUniform = effect.blendMode?.opacity
-    const lensUniform = effect.uniforms.get('lensPosition')
-    const opacityUniform = effect.uniforms.get('opacity')
-    const colorGainUniform = effect.uniforms.get('colorGain')
+  useEffect(() => {
+    const enabledUniform = effect.uniforms.get('enabled')
     const glareSizeUniform = effect.uniforms.get('glareSize')
     const flareSizeUniform = effect.uniforms.get('flareSize')
-    const ghostScaleUniform = effect.uniforms.get('ghostScale')
+    const flareSpeedUniform = effect.uniforms.get('flareSpeed')
+    const flareShapeUniform = effect.uniforms.get('flareShape')
+    const animatedUniform = effect.uniforms.get('animated')
+    const anamorphicUniform = effect.uniforms.get('anamorphic')
     const haloScaleUniform = effect.uniforms.get('haloScale')
-    const screenResUniform = effect.uniforms.get('screenRes')
+    const secondaryGhostsUniform = effect.uniforms.get('secondaryGhosts')
+    const aditionalStreaksUniform = effect.uniforms.get('aditionalStreaks')
+    const ghostScaleUniform = effect.uniforms.get('ghostScale')
+    const starBurstUniform = effect.uniforms.get('starBurst')
+    const starPointsUniform = effect.uniforms.get('starPoints')
+    const colorGainUniform = effect.uniforms.get('colorGain')
 
-    if (
-      !lensUniform ||
-      !opacityUniform ||
-      !colorGainUniform ||
-      !glareSizeUniform ||
-      !flareSizeUniform ||
-      !ghostScaleUniform ||
-      !haloScaleUniform ||
-      !screenResUniform
-    ) {
+    effect.blendMode.opacity.value = MathUtils.clamp(
+      settings.intensity * LENS_FLARE_INTENSITY_SCALE,
+      0,
+      1
+    )
+    if (enabledUniform) enabledUniform.value = settings.enabled
+    if (glareSizeUniform) glareSizeUniform.value = settings.glareSize
+    if (flareSizeUniform) flareSizeUniform.value = settings.flareSize
+    if (flareSpeedUniform) flareSpeedUniform.value = settings.flareSpeed
+    if (flareShapeUniform) flareShapeUniform.value = settings.flareShape
+    if (animatedUniform) animatedUniform.value = settings.animated
+    if (anamorphicUniform) anamorphicUniform.value = settings.anamorphic
+    if (haloScaleUniform) haloScaleUniform.value = settings.haloScale
+    if (secondaryGhostsUniform) secondaryGhostsUniform.value = settings.secondaryGhosts
+    if (aditionalStreaksUniform) aditionalStreaksUniform.value = settings.aditionalStreaks
+    if (ghostScaleUniform) ghostScaleUniform.value = settings.ghostScale
+    if (starBurstUniform) starBurstUniform.value = settings.starBurst
+    if (starPointsUniform) starPointsUniform.value = settings.starPoints
+    if (colorGainUniform) {
+      colorGainUniform.value.copy(
+        FIRE_COLOR.clone().multiplyScalar(Math.sqrt(AUTHORED_LIGHTING_SOURCE_SCALE))
+      )
+    }
+  }, [effect, settings])
+
+  useEffect(() => {
+    if (!screenResUniform) {
       return
     }
-
     screenResUniform.value.set(size.width, size.height)
+  }, [screenResUniform, size.height, size.width])
+
+  useFrame((_, delta) => {
     let bestLensScore = Number.POSITIVE_INFINITY
+    let bestLensPosition: Vector3 | null = null
 
     for (const lensPosition of lensPositions) {
       projectedPosition.copy(lensPosition).project(camera)
@@ -6904,113 +7603,109 @@ function TorchLensFlareEffectPrimitive({
         (projectedPosition.x * projectedPosition.x) +
         (projectedPosition.y * projectedPosition.y)
 
+      raycasterPosition.set(projectedPosition.x, projectedPosition.y)
+      raycaster.setFromCamera(raycasterPosition, camera)
+
+      const intersections = raycaster.intersectObjects(scene.children, true)
+      const distanceToLight = camera.position.distanceTo(lensPosition)
+      let occluded = false
+
+      for (const intersection of intersections) {
+        const hitObject = intersection.object
+
+        if (
+          hitObject.userData?.debugRole === 'torch-lens-flare' ||
+          hitObject.userData?.debugRole === 'reflection-probe-visual' ||
+          hitObject.userData?.debugRole === 'global-fog-volume' ||
+          hitObject.userData?.debugRole === 'torch-billboard' ||
+          hitObject.userData?.debugRole === 'sconce-body' ||
+          hitObject.userData?.lensflare === 'ignore-occlusion'
+        ) {
+          continue
+        }
+
+        if (intersection.distance >= distanceToLight - LENS_FLARE_OCCLUSION_MARGIN) {
+          break
+        }
+
+        if (hitObject instanceof Mesh) {
+          const candidateMaterial = Array.isArray(hitObject.material)
+            ? hitObject.material[0]
+            : hitObject.material
+
+          if (
+            candidateMaterial &&
+            'transparent' in candidateMaterial &&
+            candidateMaterial.transparent &&
+            'opacity' in candidateMaterial &&
+            typeof candidateMaterial.opacity === 'number' &&
+            candidateMaterial.opacity < 0.95
+          ) {
+            continue
+          }
+        }
+
+        occluded = true
+        break
+      }
+
+      if (occluded) {
+        continue
+      }
+
       if (lensScore >= bestLensScore) {
         continue
       }
 
       bestLensScore = lensScore
-      selectedProjectedPosition.copy(projectedPosition)
+      bestLensPosition = lensPosition
     }
 
-    if (!Number.isFinite(bestLensScore)) {
-      opacityUniform.value = MathUtils.damp(opacityUniform.value, 1, 18, delta)
-      if (blendOpacityUniform) {
-        blendOpacityUniform.value = MathUtils.damp(blendOpacityUniform.value, 0, 18, delta)
-      }
-      return
+    if (bestLensPosition) {
+      activeLensPosition.copy(bestLensPosition)
     }
 
-    lensUniform.value.set(selectedProjectedPosition.x, selectedProjectedPosition.y)
-    raycasterPosition.set(selectedProjectedPosition.x, selectedProjectedPosition.y)
-    const previousRaycasterMask = raycaster.layers.mask
-    raycaster.layers.mask = lensRaycasterMask
-    raycaster.setFromCamera(raycasterPosition, camera)
+    const nextHasVisibleLens = Boolean(bestLensPosition) && settings.enabled
+    const visibilityTarget = nextHasVisibleLens ? 1 - settings.opacity : 1
 
-    let visibility = 1
-    const hitObject = raycaster.intersectObjects(scene.children, true)[0]?.object
-    raycaster.layers.mask = previousRaycasterMask
-
-    if (hitObject && hitObject !== camera) {
-      if (hitObject.userData?.lensflare === 'no-occlusion') {
-        visibility = 1
-      } else if (hitObject instanceof Mesh) {
-        const material = Array.isArray(hitObject.material)
-          ? hitObject.material[0]
-          : hitObject.material
-
-        if (material?.uniforms?._transmission?.value > 0.2) {
-          visibility = 0.8
-        } else if (material?._transmission && material._transmission > 0.2) {
-          visibility = 0.8
-        } else if (material?.transparent) {
-          visibility = Math.max(0, 1 - (material.opacity ?? 1))
-        } else {
-          visibility = 0
-        }
-      } else {
-        visibility = 0
-      }
+    if (nextHasVisibleLens && lensPositionUniform) {
+      projectedPosition.copy(activeLensPosition).project(camera)
+      lensPositionUniform.value.set(projectedPosition.x, projectedPosition.y, 0)
     }
 
-    const normalizedIntensity = MathUtils.clamp(settings.intensity, 0, 1)
-    const targetOpacity = MathUtils.lerp(1, settings.opacity, normalizedIntensity * visibility)
-    const targetBlendOpacity = normalizedIntensity * visibility
-
-    opacityUniform.value = MathUtils.damp(
-      opacityUniform.value,
-      targetOpacity,
-      18,
-      delta
-    )
-    if (blendOpacityUniform) {
-      blendOpacityUniform.value = MathUtils.damp(
-        blendOpacityUniform.value,
-        targetBlendOpacity,
-        18,
+    if (occlusionOpacityUniform) {
+      occlusionOpacityUniform.value = MathUtils.damp(
+        occlusionOpacityUniform.value,
+        visibilityTarget,
+        12,
         delta
       )
     }
-    glareSizeUniform.value = settings.glareSize
-    flareSizeUniform.value = settings.flareSize
-    ghostScaleUniform.value = settings.ghostScale
-    haloScaleUniform.value = settings.haloScale
-    colorGainUniform.value.copy(FIRE_COLOR).multiplyScalar(
-      settings.intensity *
-      Math.sqrt(AUTHORED_LIGHTING_SOURCE_SCALE)
-    )
   })
 
-  useEffect(() => () => effect.dispose(), [effect])
+  useEffect(() => {
+    return () => {
+      pass.dispose()
+      effect.dispose()
+    }
+  }, [effect, pass])
 
-  return <primitive object={effect as unknown as Effect} />
-}
-
-function TorchLensFlare({
-  settings,
-  layout
-}: {
-  settings: LensFlareSettings
-  layout: MazeLayout
-}) {
-  if (layout.lights.length === 0) {
-    return null
-  }
-
-  return (
-    <TorchLensFlareEffectPrimitive
-      settings={settings}
-      mazeLights={layout.lights}
-    />
-  )
+  return <primitive object={pass as unknown as Pass} />
 }
 
 function FlightRig({
   controlsOpen,
+  layout,
   movementSettings,
+  setTurnState,
+  turnState,
   wallBounds
 }: {
   controlsOpen: boolean
+  layout: MazeLayout
   movementSettings: MovementSettings
+  setTurnState: (value: TurnState | ((current: TurnState) => TurnState)) => void
+  turnState: TurnState
   wallBounds: ReturnType<typeof getWallBounds>
 }) {
   const camera = useThree((state) => state.camera)
@@ -7036,6 +7731,15 @@ function FlightRig({
   const intendedPosition = useRef(new Vector3())
   const yaw = useRef(0)
   const pitch = useRef(0)
+  const freeCamera = useRef(false)
+  const inputQueue = useRef<TurnAction[]>([])
+  const turnStateRef = useRef(turnState)
+  const playerAnimation = useRef<{
+    from: TurnState
+    killed: boolean
+    startedAt: number
+    to: TurnState
+  } | null>(null)
   const isPointerLocked = useRef(false)
   const up = useMemo(() => new Vector3(0, 1, 0), [])
   const resolvedMovementSettings = useMemo(
@@ -7053,15 +7757,28 @@ function FlightRig({
   )
 
   useEffect(() => {
-    const spawnPosition = getPlayerSpawnPosition()
-    const cameraPosition = getCameraPosition(spawnPosition)
+    turnStateRef.current = turnState
+  }, [turnState])
+
+  useEffect(() => {
+    const spawnPosition = getMazeCellWorldPosition(
+      layout.maze,
+      turnState.player.cell,
+      GROUND_Y
+    )
+    const cameraPosition = new Vector3(
+      spawnPosition.x,
+      GROUND_Y + PLAYER_EYE_HEIGHT,
+      spawnPosition.z
+    )
 
     camera.rotation.order = 'YXZ'
     camera.position.set(cameraPosition.x, cameraPosition.y, cameraPosition.z)
-    camera.quaternion.setFromEuler(cameraEuler.set(0, 0, 0, 'YXZ'))
-    yaw.current = 0
+    yaw.current = directionToYaw(turnState.player.direction)
+    camera.quaternion.setFromEuler(cameraEuler.set(0, yaw.current, 0, 'YXZ'))
     pitch.current = 0
-  }, [camera])
+    playerPosition.current.copy(spawnPosition)
+  }, [camera, layout.maze, turnState.player.cell, turnState.player.direction])
 
   useEffect(() => {
     const updateRotation = () => {
@@ -7081,7 +7798,7 @@ function FlightRig({
     }
 
     const onMouseMove = (event: MouseEvent) => {
-      if (!isPointerLocked.current) {
+      if (!isPointerLocked.current || !freeCamera.current) {
         return
       }
 
@@ -7094,7 +7811,7 @@ function FlightRig({
     }
 
     const onPointerDown = (event: PointerEvent) => {
-      if (controlsOpen) {
+      if (controlsOpen || !freeCamera.current) {
         return
       }
 
@@ -7131,6 +7848,16 @@ function FlightRig({
         return
       }
 
+      if (event.code === 'Digit1') {
+        event.preventDefault()
+        freeCamera.current = !freeCamera.current
+        keys.current = {}
+        if (!freeCamera.current && document.pointerLockElement === canvas) {
+          document.exitPointerLock()
+        }
+        return
+      }
+
       if (POINTER_UNLOCK_CODES.has(event.code) || event.key === 'Meta') {
         if (document.pointerLockElement === canvas) {
           document.exitPointerLock()
@@ -7139,8 +7866,30 @@ function FlightRig({
         return
       }
 
+      if (!freeCamera.current) {
+        const queuedAction =
+          event.code === 'KeyW' || event.code === 'ArrowUp'
+            ? 'move-forward'
+            : event.code === 'KeyD' || event.code === 'ArrowDown'
+              ? 'move-backward'
+              : event.code === 'KeyA' || event.code === 'ArrowLeft'
+                ? 'rotate-left'
+                : event.code === 'KeyS' || event.code === 'ArrowRight'
+                  ? 'rotate-right'
+                  : null
+
+        if (queuedAction) {
+          event.preventDefault()
+          inputQueue.current.push(queuedAction)
+          keys.current[event.code] = false
+          return
+        }
+      }
+
       if (
         event.code === 'Space' ||
+        event.code === 'KeyQ' ||
+        event.code === 'KeyE' ||
         event.code === 'KeyW' ||
         event.code === 'KeyA' ||
         event.code === 'KeyS' ||
@@ -7624,6 +8373,7 @@ function FlightRig({
         return scene.userData.reflectionProbeState ?? null
       },
       setView: (cameraPosition, target) => {
+        freeCamera.current = true
         playerPosition.current.set(
           cameraPosition[0],
           cameraPosition[1] - PLAYER_EYE_HEIGHT,
@@ -7657,147 +8407,92 @@ function FlightRig({
   }, [camera, gl, scene])
 
   useFrame((_, delta) => {
+    if (!freeCamera.current) {
+      if (!playerAnimation.current && inputQueue.current.length > 0) {
+        const action = inputQueue.current.shift()
+
+        if (action) {
+          const result = applyTurnAction(layout.maze, turnStateRef.current, action)
+
+          playerAnimation.current = {
+            from: result.previous,
+            killed: result.killed,
+            startedAt: performance.now(),
+            to: result.state
+          }
+          if (result.killed) {
+            document.body.dataset.playerDead = 'true'
+          }
+        }
+      }
+
+      const activeAnimation = playerAnimation.current
+      let displayState = turnStateRef.current
+      let animationAlpha = 1
+
+      if (activeAnimation) {
+        animationAlpha = Math.min(
+          1,
+          (performance.now() - activeAnimation.startedAt) / 250
+        )
+        displayState = activeAnimation.to
+
+        if (animationAlpha >= 1) {
+          const finalState = activeAnimation.killed
+            ? resetTurnStateToCheckpoint(activeAnimation.to)
+            : activeAnimation.to
+
+          turnStateRef.current = finalState
+          setTurnState(finalState)
+          playerAnimation.current = null
+
+          if (activeAnimation.killed) {
+            window.setTimeout(() => {
+              delete document.body.dataset.playerDead
+            }, 2000)
+          }
+        }
+      }
+
+      const fromCell =
+        activeAnimation?.from.player.cell ?? displayState.player.cell
+      const toCell = displayState.player.cell
+      const fromPosition = getMazeCellWorldPosition(layout.maze, fromCell, GROUND_Y + PLAYER_EYE_HEIGHT)
+      const toPosition = getMazeCellWorldPosition(layout.maze, toCell, GROUND_Y + PLAYER_EYE_HEIGHT)
+      const fromYaw = directionToYaw(
+        activeAnimation?.from.player.direction ?? displayState.player.direction
+      )
+      const toYaw = directionToYaw(displayState.player.direction)
+      const yawDelta = Math.atan2(Math.sin(toYaw - fromYaw), Math.cos(toYaw - fromYaw))
+
+      camera.position.lerpVectors(fromPosition, toPosition, animationAlpha)
+      yaw.current = fromYaw + (yawDelta * animationAlpha)
+      pitch.current = 0
+      camera.quaternion.setFromEuler(cameraEuler.set(0, yaw.current, 0, 'YXZ'))
+      camera.updateMatrixWorld()
+      return
+    }
+
     camera.getWorldDirection(forward.current)
-    forward.current.y = 0
     if (forward.current.lengthSq() > 0) {
       forward.current.normalize()
     } else {
       forward.current.copy(defaultMoveDirection)
     }
-
     right.current.crossVectors(forward.current, up).normalize()
-    const maxPhysicsStep =
-      0.25 /
-      Math.max(
-        resolvedMovementSettings.maxHorizontalSpeed,
-        resolvedMovementSettings.maxVerticalSpeed,
-        resolvedMovementSettings.maxFallSpeed
-      ) /
-      3
-    let deltaRemaining = Math.min(maxPhysicsStep * MAX_PHYSICS_SUBSTEPS, delta)
-
-    while (deltaRemaining > 0) {
-      const deltaStep = Math.min(deltaRemaining, maxPhysicsStep)
-      deltaRemaining -= deltaStep
-
-      keyboardLocal.current.set(
-        Number(Boolean(keys.current.KeyD)) - Number(Boolean(keys.current.KeyA)),
-        0,
-        Number(Boolean(keys.current.KeyW)) - Number(Boolean(keys.current.KeyS))
-      )
-      if (keyboardLocal.current.lengthSq() > 1) {
-        keyboardLocal.current.normalize()
-      }
-
-      decelLocal.current.set(
-        velocity.current.dot(right.current),
-        0,
-        velocity.current.dot(forward.current)
-      ).clampLength(0, 1)
-
-      decelLocal.current.x = decelLocal.current.x > 0
-        ? Math.max(0, decelLocal.current.x - Math.max(0, keyboardLocal.current.x))
-        : Math.min(0, decelLocal.current.x - Math.min(0, keyboardLocal.current.x))
-      decelLocal.current.z = decelLocal.current.z > 0
-        ? Math.max(0, decelLocal.current.z - Math.max(0, keyboardLocal.current.z))
-        : Math.min(0, decelLocal.current.z - Math.min(0, keyboardLocal.current.z))
-
-      decelWorld.current
-        .copy(right.current)
-        .multiplyScalar(-decelLocal.current.x)
-        .addScaledVector(forward.current, -decelLocal.current.z)
-
-      accelWorld.current
-        .copy(right.current)
-        .multiplyScalar(keyboardLocal.current.x)
-        .addScaledVector(forward.current, keyboardLocal.current.z)
-      if (accelWorld.current.lengthSq() > 1) {
-        accelWorld.current.normalize()
-      }
-
-      velocity.current.addScaledVector(
-        decelWorld.current,
-        deltaStep *
-          (
-            resolvedMovementSettings.maxHorizontalSpeed *
-            resolvedMovementSettings.maxHorizontalSpeed /
-            (2 * resolvedMovementSettings.horizontalDecelerationDistance)
-          )
-      )
-      velocity.current.addScaledVector(
-        accelWorld.current,
-        deltaStep *
-          (
-            resolvedMovementSettings.maxHorizontalSpeed *
-            resolvedMovementSettings.maxHorizontalSpeed /
-            (2 * resolvedMovementSettings.horizontalAccelerationDistance)
-          )
-      )
-
-      const horizontalSpeed = Math.hypot(velocity.current.x, velocity.current.z)
-      if (horizontalSpeed > resolvedMovementSettings.maxHorizontalSpeed) {
-        const scale = resolvedMovementSettings.maxHorizontalSpeed / horizontalSpeed
-        velocity.current.x *= scale
-        velocity.current.z *= scale
-      }
-
-      velocity.current.y = updateVerticalVelocity(
-        velocity.current.y,
-        grounded.current,
-        Boolean(keys.current.Space),
-        deltaStep,
-        resolvedMovementSettings
-      )
-
-      intendedPosition.current
-        .copy(playerPosition.current)
-        .addScaledVector(velocity.current, deltaStep)
-
-      const collision = resolvePlayerCollision(
-        {
-          x: playerPosition.current.x,
-          y: playerPosition.current.y,
-          z: playerPosition.current.z
-        },
-        {
-          x: intendedPosition.current.x,
-          y: intendedPosition.current.y,
-          z: intendedPosition.current.z
-        },
-        { wallBounds }
-      )
-
-      if (collision.position.y !== intendedPosition.current.y) {
-        velocity.current.y = 0
-      }
-
-      for (const normal of collision.collisions.wallNormals) {
-        const dot =
-          (velocity.current.x * normal.x) +
-          (velocity.current.y * normal.y) +
-          (velocity.current.z * normal.z)
-
-        if (dot >= 0) {
-          continue
-        }
-
-        velocity.current.addScaledVector(
-          new Vector3(normal.x, normal.y, normal.z),
-          -dot
-        )
-      }
-
-      grounded.current = collision.grounded && !keys.current.Space
-      playerPosition.current.set(
-        collision.position.x,
-        collision.position.y,
-        collision.position.z
-      )
+    keyboardLocal.current.set(
+      Number(Boolean(keys.current.KeyD)) - Number(Boolean(keys.current.KeyA)),
+      Number(Boolean(keys.current.KeyQ)) - Number(Boolean(keys.current.KeyE)),
+      Number(Boolean(keys.current.KeyW)) - Number(Boolean(keys.current.KeyS))
+    )
+    if (keyboardLocal.current.lengthSq() > 1) {
+      keyboardLocal.current.normalize()
     }
-
-    const cameraPosition = getCameraPosition(playerPosition.current)
-
-    camera.position.set(cameraPosition.x, cameraPosition.y, cameraPosition.z)
+    camera.position
+      .addScaledVector(right.current, keyboardLocal.current.x * resolvedMovementSettings.maxHorizontalSpeed * delta)
+      .addScaledVector(up, keyboardLocal.current.y * resolvedMovementSettings.maxHorizontalSpeed * delta)
+      .addScaledVector(forward.current, keyboardLocal.current.z * resolvedMovementSettings.maxHorizontalSpeed * delta)
+    camera.updateMatrixWorld()
   }, -1)
 
   return null
@@ -7817,6 +8512,13 @@ function Scene({
   visualSettings: VisualSettings
 }) {
   recordStartupMarker('sceneRenderStartedAt')
+  const [turnState, setTurnState] = useState<TurnState>(() =>
+    createInitialTurnState(layout.maze)
+  )
+
+  useEffect(() => {
+    setTurnState(createInitialTurnState(layout.maze))
+  }, [layout.maze])
 
   useEffect(() => {
     recordStartupMarker('sceneMountedAt')
@@ -7826,7 +8528,7 @@ function Scene({
   const gl = useThree((state) => state.gl)
   const scene = useThree((state) => state.scene)
   const [environmentTexture, setEnvironmentTexture] = useState<Texture | null>(null)
-  const [environmentFogColor, setEnvironmentFogColor] = useState(() => DEFAULT_FOG_IBL_COLOR.clone())
+  const [, setEnvironmentFogColor] = useState(() => DEFAULT_FOG_IBL_COLOR.clone())
   const [reflectionProbeAmbientColors, setReflectionProbeAmbientColors] = useState<Color[]>([])
   const [reflectionProbeCoefficients, setReflectionProbeCoefficients] = useState<Array<ProbeIrradianceCoefficients | null>>([])
   const [reflectionProbeDepthTextures, setReflectionProbeDepthTextures] = useState<CubeTexture[]>([])
@@ -7841,11 +8543,16 @@ function Scene({
         getFogState?: () => {
           density: number | null
           environmentFogColor: [number, number, number] | null
+          fogDistance: number | null
           hasProbeAmbientTexture: boolean
+          heightFalloff: number | null
+          lightingStrength: number | null
           meshCount: number
           noiseFrequency: number | null
+          noiseStrength: number | null
           probeAmbientBounds: [number, number, number, number] | null
           probeAmbientGrid: [number, number] | null
+          rayStepCount: number | null
           useProbeAmbientTexture: number | null
         } | null
         setDebugVisible?: (
@@ -7926,11 +8633,16 @@ function Scene({
       return scene.userData.fogEffectState ?? {
         density: null,
         environmentFogColor: null,
+        fogDistance: null,
         hasProbeAmbientTexture: false,
+        heightFalloff: null,
+        lightingStrength: null,
         meshCount: 0,
         noiseFrequency: null,
+        noiseStrength: null,
         probeAmbientBounds: null,
         probeAmbientGrid: null,
+        rayStepCount: null,
         useProbeAmbientTexture: null
       }
     }
@@ -8361,6 +9073,10 @@ function Scene({
   const bloomActive = isEffectActive(visualSettings.bloom)
   const depthOfFieldActive = isDepthOfFieldActive(visualSettings.depthOfField)
   const lensFlareActive = isEffectActive(visualSettings.lensFlare)
+  const fogAmbientColor = useMemo(
+    () => colorFromHex(visualSettings.volumetricAmbientHex),
+    [visualSettings.volumetricAmbientHex]
+  )
   const vignetteActive = isEffectActive(visualSettings.vignette)
 
   return (
@@ -8387,6 +9103,10 @@ function Scene({
         reflectionProbeDepthTextures={reflectionProbeDepthTextures}
         reflectionContributionIntensity={getEnabledContributionIntensity(visualSettings.reflectionContribution)}
         reflectionProbeTextures={reflectionProbeTextures}
+      />
+      <MonsterActors
+        layout={layout}
+        turnState={turnState}
       />
       <EffectComposer
         enableNormalPass
@@ -8425,9 +9145,14 @@ function Scene({
         ) : null}
         {visualSettings.volumetricLighting.enabled ? (
           <FogVolume
-            environmentFogColor={environmentFogColor}
+            ambientColor={fogAmbientColor}
+            fogDistance={visualSettings.volumetricDistance}
+            heightFalloff={visualSettings.volumetricHeightFalloff}
             layout={layout}
+            lightingStrength={visualSettings.volumetricLightingStrength}
             noiseFrequency={visualSettings.volumetricNoiseFrequency}
+            noiseStrength={visualSettings.volumetricNoiseStrength}
+            rayStepCount={visualSettings.volumetricStepCount}
             reflectionProbeAmbientColors={reflectionProbeAmbientColors}
             visible={visualSettings.volumetricLighting.enabled}
             volumeIntensity={visualSettings.volumetricLighting.intensity}
@@ -8464,10 +9189,14 @@ function Scene({
           mode={TONE_MAPPING_MODES[visualSettings.toneMapping]}
           resolution={256}
         />
+        <DitherEffectPrimitive />
       </EffectComposer>
       <FlightRig
         controlsOpen={controlsOpen}
+        layout={layout}
         movementSettings={visualSettings.movement}
+        setTurnState={setTurnState}
+        turnState={turnState}
         wallBounds={getWallBounds(layout)}
       />
       <PerformanceBenchmarkBridge />
@@ -8497,6 +9226,68 @@ function ResettableLabel({
   )
 }
 
+function FogAmbientColorControl({
+  onChange,
+  onReset,
+  value
+}: {
+  onChange: (value: string) => void
+  onReset: () => void
+  value: string
+}) {
+  const [draftValue, setDraftValue] = useState(value)
+
+  useEffect(() => {
+    setDraftValue(value)
+  }, [value])
+
+  const commitDraftValue = () => {
+    const normalized = normalizeHexColor(draftValue, value)
+
+    setDraftValue(normalized)
+    onChange(normalized)
+  }
+
+  return (
+    <div className="visual-control-row">
+      <output>{value.toUpperCase()}</output>
+      <ResettableLabel onReset={onReset}>
+        Fog Ambient Color
+      </ResettableLabel>
+      <div className="visual-inline-controls">
+        <input
+          aria-label="Fog Ambient Color Hex"
+          className="visual-color-text-input"
+          onBlur={commitDraftValue}
+          onChange={(event) => {
+            setDraftValue(event.target.value)
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              commitDraftValue()
+            }
+          }}
+          spellCheck={false}
+          type="text"
+          value={draftValue}
+        />
+        <input
+          aria-label="Fog Ambient Color Picker"
+          onChange={(event) => {
+            const normalized = normalizeHexColor(event.target.value, value)
+
+            setDraftValue(normalized)
+            onChange(normalized)
+          }}
+          type="color"
+          value={normalizeHexColor(value)}
+        />
+      </div>
+    </div>
+  )
+}
+
 function VisualControls({
   onAnamorphicSettingChange,
   onAmbientOcclusionModeChange,
@@ -8505,6 +9296,7 @@ function VisualControls({
   controlsOpen,
   onDepthOfFieldSettingChange,
   onEffectSettingChange,
+  onFogAmbientHexChange,
   onLensFlareSettingChange,
   onProbeDebugModeChange,
   onResetAnamorphicSettings,
@@ -8513,6 +9305,7 @@ function VisualControls({
   onResetBooleanSetting,
   onResetDepthOfFieldSettings,
   onResetEffectSetting,
+  onResetFogAmbientHex,
   onResetLensFlareSettings,
   onResetProbeDebugMode,
   onResetScalarSetting,
@@ -8536,6 +9329,7 @@ function VisualControls({
     effect: GenericEffectSettingKey,
     patch: Partial<EffectSettings>
   ) => void
+  onFogAmbientHexChange: (value: string) => void
   onLensFlareSettingChange: (patch: Partial<LensFlareSettings>) => void
   onProbeDebugModeChange: (value: ProbeDebugMode) => void
   onResetAnamorphicSettings: () => void
@@ -8544,6 +9338,7 @@ function VisualControls({
   onResetBooleanSetting: (key: BooleanSettingKey) => void
   onResetDepthOfFieldSettings: () => void
   onResetEffectSetting: (effect: GenericEffectSettingKey) => void
+  onResetFogAmbientHex: () => void
   onResetLensFlareSettings: () => void
   onResetProbeDebugMode: () => void
   onResetScalarSetting: (key: ScalarSettingKey) => void
@@ -8958,8 +9753,10 @@ function VisualControls({
           aria-label="Bloom Kernel"
           disabled={!visualSettings.bloom.enabled}
           onChange={(event) => {
+            const kernelSize = event.target.value as BloomKernelSizeKey
             onBloomSettingChange({
-              kernelSize: event.target.value as BloomKernelSizeKey
+              kernelSize,
+              resolutionScale: BLOOM_RESOLUTION_SCALES[kernelSize]
             })
           }}
           value={visualSettings.bloom.kernelSize}
@@ -9146,15 +9943,42 @@ function VisualControls({
       {activeTab === 'fog' ? (
         <>
           {renderEffectControl(effectControls.find((effectControl) => effectControl.key === 'volumetricLighting')!)}
+          <FogAmbientColorControl
+            onChange={onFogAmbientHexChange}
+            onReset={onResetFogAmbientHex}
+            value={visualSettings.volumetricAmbientHex}
+          />
+
           <label className="visual-control-row">
-        <output>{visualSettings.volumetricNoiseFrequency.toFixed(2)}x</output>
+        <output>{visualSettings.volumetricDistance.toFixed(1)}m</output>
+        <ResettableLabel onReset={() => onResetScalarSetting('volumetricDistance')}>
+          Fog Distance
+        </ResettableLabel>
+        <input
+          aria-label="Fog Distance"
+          max={40}
+          min={0}
+          onChange={(event) => {
+            onScalarSettingChange(
+              'volumetricDistance',
+              Number(event.target.value)
+            )
+          }}
+          step={0.5}
+          type="range"
+          value={visualSettings.volumetricDistance}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.volumetricNoiseFrequency.toFixed(2)}m</output>
         <ResettableLabel onReset={() => onResetScalarSetting('volumetricNoiseFrequency')}>
           Fog Noise Frequency
         </ResettableLabel>
         <input
           aria-label="Fog Noise Frequency"
-          max={8}
-          min={0.25}
+          max={10}
+          min={0}
           onChange={(event) => {
             onScalarSettingChange(
               'volumetricNoiseFrequency',
@@ -9164,6 +9988,90 @@ function VisualControls({
           step={0.05}
           type="range"
           value={visualSettings.volumetricNoiseFrequency}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.volumetricNoiseStrength.toFixed(2)}</output>
+        <ResettableLabel onReset={() => onResetScalarSetting('volumetricNoiseStrength')}>
+          Fog Noise Strength
+        </ResettableLabel>
+        <input
+          aria-label="Fog Noise Strength"
+          max={1}
+          min={0}
+          onChange={(event) => {
+            onScalarSettingChange(
+              'volumetricNoiseStrength',
+              Number(event.target.value)
+            )
+          }}
+          step={0.01}
+          type="range"
+          value={visualSettings.volumetricNoiseStrength}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.volumetricHeightFalloff.toFixed(2)}</output>
+        <ResettableLabel onReset={() => onResetScalarSetting('volumetricHeightFalloff')}>
+          Fog Height Falloff
+        </ResettableLabel>
+        <input
+          aria-label="Fog Height Falloff"
+          max={4}
+          min={0.1}
+          onChange={(event) => {
+            onScalarSettingChange(
+              'volumetricHeightFalloff',
+              Number(event.target.value)
+            )
+          }}
+          step={0.05}
+          type="range"
+          value={visualSettings.volumetricHeightFalloff}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.volumetricLightingStrength.toFixed(2)}x</output>
+        <ResettableLabel onReset={() => onResetScalarSetting('volumetricLightingStrength')}>
+          Fog Lighting Strength
+        </ResettableLabel>
+        <input
+          aria-label="Fog Lighting Strength"
+          max={2}
+          min={0}
+          onChange={(event) => {
+            onScalarSettingChange(
+              'volumetricLightingStrength',
+              Number(event.target.value)
+            )
+          }}
+          step={0.01}
+          type="range"
+          value={visualSettings.volumetricLightingStrength}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.volumetricStepCount.toFixed(0)}</output>
+        <ResettableLabel onReset={() => onResetScalarSetting('volumetricStepCount')}>
+          Fog Step Count
+        </ResettableLabel>
+        <input
+          aria-label="Fog Step Count"
+          max={24}
+          min={1}
+          onChange={(event) => {
+            onScalarSettingChange(
+              'volumetricStepCount',
+              Number(event.target.value)
+            )
+          }}
+          step={1}
+          type="range"
+          value={visualSettings.volumetricStepCount}
         />
           </label>
         </>
@@ -9788,8 +10696,46 @@ function VisualControls({
   )
 }
 
+function CreditsModal({
+  open
+}: {
+  open: boolean
+}) {
+  if (!open) {
+    return null
+  }
+
+  return (
+    <div className="credits-modal" role="dialog" aria-modal="true" aria-label="Credits">
+      <div className="credits-panel">
+        <h2>Credits</h2>
+        <p>
+          "Minotaur" (<a href="https://skfb.ly/6TK77">https://skfb.ly/6TK77</a>) by yanbelmont is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
+        </p>
+        <p>
+          "Dopepope's zKUMONGA" (<a href="https://skfb.ly/pIBZW">https://skfb.ly/pIBZW</a>) by AllThingsSaurus is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
+        </p>
+        <p>
+          "AWIL Werewolf" (<a href="https://skfb.ly/orBtB">https://skfb.ly/orBtB</a>) by Spinnee is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
+        </p>
+        <p>
+          "Head of a Bull" (<a href="https://skfb.ly/6TOXX">https://skfb.ly/6TOXX</a>) by Kirk Hiatt is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
+        </p>
+        <p>
+          "Metal Gate" (<a href="https://skfb.ly/oK7QR">https://skfb.ly/oK7QR</a>) by i bull your wife is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
+        </p>
+        <p>
+          "Bronze Sword Mycean" (<a href="https://skfb.ly/6RZxG">https://skfb.ly/6RZxG</a>) by Ryoce is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
+        </p>
+        <small>Press any key to close.</small>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [controlsOpen, setControlsOpen] = useState(false)
+  const [creditsOpen, setCreditsOpen] = useState(false)
   const [fps, setFps] = useState(0)
   const [overlayVisible, setOverlayVisible] = useState(true)
   const requestedMazeId = useMemo(
@@ -9835,9 +10781,21 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (creditsOpen) {
+        event.preventDefault()
+        setCreditsOpen(false)
+        return
+      }
+
       if (event.code === OVERLAY_TOGGLE_CODE) {
         event.preventDefault()
         setOverlayVisible((visible) => !visible)
+        return
+      }
+
+      if (event.code === 'KeyC') {
+        event.preventDefault()
+        setCreditsOpen(true)
         return
       }
 
@@ -9853,7 +10811,7 @@ export default function App() {
     return () => {
       window.removeEventListener('keydown', onKeyDown)
     }
-  }, [])
+  }, [creditsOpen])
 
   const onScalarSettingChange = (key: ScalarSettingKey, value: number) => {
     setVisualSettings((current) => {
@@ -9954,6 +10912,13 @@ export default function App() {
         ...current.lensFlare,
         ...patch
       }
+    }))
+  }
+
+  const onFogAmbientHexChange = (value: string) => {
+    setVisualSettings((current) => ({
+      ...current,
+      volumetricAmbientHex: normalizeHexColor(value, current.volumetricAmbientHex)
     }))
   }
 
@@ -10119,6 +11084,12 @@ export default function App() {
     }))
   }
 
+  const onResetFogAmbientHex = () => {
+    const defaults = createDefaultVisualSettings()
+
+    onFogAmbientHexChange(defaults.volumetricAmbientHex)
+  }
+
   const onResetProbeDebugMode = () => {
     const defaults = createDefaultVisualSettings()
 
@@ -10170,6 +11141,7 @@ export default function App() {
         </div>
       ) : null}
       <LoadingOverlay complete={sceneLoaded} />
+      <CreditsModal open={creditsOpen} />
       <VisualControls
         controlsOpen={controlsOpen}
         onAnamorphicSettingChange={onAnamorphicSettingChange}
@@ -10178,6 +11150,7 @@ export default function App() {
         onBloomSettingChange={onBloomSettingChange}
         onDepthOfFieldSettingChange={onDepthOfFieldSettingChange}
         onEffectSettingChange={onEffectSettingChange}
+        onFogAmbientHexChange={onFogAmbientHexChange}
         onLensFlareSettingChange={onLensFlareSettingChange}
         onProbeDebugModeChange={onProbeDebugModeChange}
         onResetAnamorphicSettings={onResetAnamorphicSettings}
@@ -10186,6 +11159,7 @@ export default function App() {
         onResetBooleanSetting={onResetBooleanSetting}
         onResetDepthOfFieldSettings={onResetDepthOfFieldSettings}
         onResetEffectSetting={onResetEffectSetting}
+        onResetFogAmbientHex={onResetFogAmbientHex}
         onResetLensFlareSettings={onResetLensFlareSettings}
         onResetProbeDebugMode={onResetProbeDebugMode}
         onResetScalarSetting={onResetScalarSetting}

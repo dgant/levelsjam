@@ -212,14 +212,11 @@ async function setSlider(page, label, value) {
 }
 
 async function setCheckbox(page, label, enabled) {
-  const checkbox = page.getByRole('checkbox', { exact: true, name: label })
-
-  if (enabled) {
-    await checkbox.check()
-    return
-  }
-
-  await checkbox.uncheck()
+  await page.getByRole('checkbox', { exact: true, name: label }).evaluate((element, nextEnabled) => {
+    if (element.checked !== Boolean(nextEnabled)) {
+      element.click()
+    }
+  }, enabled)
 }
 
 test('loads the maze scene and exposes working debug/render controls', async ({ page }) => {
@@ -339,6 +336,9 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByLabel('Probe Debug', { exact: true })).toBeVisible()
     await page.keyboard.press('Digit7')
     await expect(page.getByRole('slider', { name: 'Volumetric Fog Intensity' })).toBeVisible()
+    await expect(page.getByLabel('Fog Ambient Color Hex')).toHaveValue('#8f949e')
+    await expect(page.getByLabel('Fog Ambient Color Picker')).toHaveValue('#8f949e')
+    await expect(page.getByRole('slider', { name: 'Fog Distance' })).toHaveValue('10')
     await page.keyboard.press('Digit1')
     await expect(page.getByRole('slider', { name: 'Exposure' })).toBeVisible()
 

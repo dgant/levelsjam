@@ -13,6 +13,25 @@ function copyDirectory(sourcePath, targetPath) {
   fs.cpSync(sourcePath, targetPath, { recursive: true, force: true })
 }
 
+function removeZipFiles(targetPath) {
+  if (!fs.existsSync(targetPath)) {
+    return
+  }
+
+  for (const entry of fs.readdirSync(targetPath, { withFileTypes: true })) {
+    const entryPath = path.join(targetPath, entry.name)
+
+    if (entry.isDirectory()) {
+      removeZipFiles(entryPath)
+      continue
+    }
+
+    if (entry.name.toLowerCase().endsWith('.zip')) {
+      fs.rmSync(entryPath, { force: true })
+    }
+  }
+}
+
 for (const { sourcePath, targetPath } of [
   {
     sourcePath: path.join(distDir, 'assets'),
@@ -23,10 +42,18 @@ for (const { sourcePath, targetPath } of [
     targetPath: path.join(rootDir, 'maze-data')
   },
   {
+    sourcePath: path.join(publicDir, 'models'),
+    targetPath: path.join(rootDir, 'models')
+  },
+  {
     sourcePath: path.join(publicDir, 'textures'),
     targetPath: path.join(rootDir, 'textures')
   }
 ]) {
   removeTarget(targetPath)
   copyDirectory(sourcePath, targetPath)
+
+  if (targetPath === path.join(rootDir, 'models')) {
+    removeZipFiles(targetPath)
+  }
 }

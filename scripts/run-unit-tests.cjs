@@ -13,8 +13,10 @@ const testFiles = [
   'tests/maze.test.js',
   'tests/player-collision.test.js',
   'tests/player-motion.test.js',
+  'tests/probe-spherical-harmonics.test.js',
   'tests/reflection-probe-blending.test.js',
-  'tests/scene-layout.test.js'
+  'tests/scene-layout.test.js',
+  'tests/turn-rules.test.js'
 ]
 const perFileThresholdsMs = {
   'tests/billboard.test.js': 3_000,
@@ -22,8 +24,10 @@ const perFileThresholdsMs = {
   'tests/maze.test.js': 14_000,
   'tests/player-collision.test.js': 3_000,
   'tests/player-motion.test.js': 3_000,
+  'tests/probe-spherical-harmonics.test.js': 3_000,
   'tests/reflection-probe-blending.test.js': 3_000,
-  'tests/scene-layout.test.js': 3_000
+  'tests/scene-layout.test.js': 3_000,
+  'tests/turn-rules.test.js': 3_000
 }
 
 function formatMilliseconds(value) {

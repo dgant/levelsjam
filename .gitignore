@@ -5,6 +5,8 @@ playwright-report/
 test-results/
 logs/
 test-artifacts/
+models/**/*.zip
+public/models/**/*.zip
 preview-server*.log
 .preview-pid
 .vite-dev-server.json

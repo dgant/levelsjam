@@ -1,7 +1,7 @@
 # How To Work On This Project
 
 ## Current State
-The repository contains a runnable browser game prototype for GitHub Pages. The intended build serves a three.js scene with immediate mouse-look, WASD movement, hold-space vertical thrust, a local Poly Haven `overcast_soil` HDRI used for the visible skybox, an infinite `puddle-ground` base plane plus a maze-local lit floor patch, one randomly selected persisted maze built from `stone-wall-29` wall meshes, maze-mounted metal sconces with animated torch billboards, baked per-maze torch lightmaps, static local reflection probes for in-maze specular response, and a backquote visual-controls panel with exposure, `Surface Lightmap`, `Volumetric Lightmap`, `Reflection Intensity`, ambient-occlusion mode, tone-mapper, post-effect controls, and build metadata in the FPS overlay.
+The repository contains a runnable browser game prototype for GitHub Pages. The intended build serves a three.js scene with turn-based grid movement, a `1` free-camera inspection toggle, a `C` credits modal, a local Poly Haven `overcast_soil` HDRI used for the visible skybox, an infinite `puddle-ground` base plane plus a maze-local lit floor patch, one randomly selected persisted maze built from `stone-wall-29` wall meshes, maze-mounted metal sconces with asynchronously loaded animated torch billboards, baked per-maze torch lightmaps, static local reflection probes for in-maze specular response, volumetric-lightmap probe data, and a backquote visual-controls panel with exposure, `Surface Lightmap`, `Volumetric Lightmap`, `Reflection Intensity`, ambient-occlusion mode, tone-mapper, post-effect controls, and build metadata in the FPS overlay.
 The initial `MINOTAUR` loading shell now appears directly from inline HTML in [index.html](/E:/p/levelsjam/index.html) before the React bundle finishes booting.
 The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutRuntime.ts](/E:/p/levelsjam/src/lib/sceneLayoutRuntime.ts) so the main app bundle stays small, while Node tests and scripts continue to use the synchronous [sceneLayout.js](/E:/p/levelsjam/src/lib/sceneLayout.js) path.
 
@@ -39,12 +39,15 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify the main page renders the 3D scene without console errors.
 - Verify the loading overlay appears with `MINOTAUR` and `Entering the labyrinth...` before the scene fades in.
 - If you change the loading overlay markup or styling, update both the inline bootstrap shell in [index.html](/E:/p/levelsjam/index.html) and the React overlay in [App.tsx](/E:/p/levelsjam/src/App.tsx) so the immediate first paint and the live app stay visually aligned.
-- Verify `W`, `A`, `S`, and `D` move the camera.
+- Verify `W` and `D` move the player one grid cell forward or backward relative to the current camera direction.
+- Verify `A`, `S`, left-arrow, and right-arrow rotate the player camera by 90 degrees without consuming a turn.
+- Verify pressing `1` toggles free-camera inspection mode, where `WASD` moves freely, mouse-look is detached from the player, and `Q`/`E` move vertically.
+- Verify pressing `C` opens the credits modal and any subsequent key closes it.
 - Verify the top-right overlay shows the active maze ID, Git revision, and revision timestamp.
 - Verify `F9` toggles the top-right overlay.
 - Verify the ground, walls, and sconces are using their full requested PBR material stacks when the current task calls for full-fidelity rendering rather than compatibility simplification.
 - Verify mouse movement changes view direction after an explicit click locks the pointer to the canvas.
-- Verify holding `Space` applies upward thrust and releasing it stops the ascent.
+- Verify the legacy continuous jetpack controls are not part of the primary turn-based movement mode.
 - Verify the player starts 1 meter above the ground plane.
 - Verify ground contact is stable: the character should rest on collision instead of popping upward and falling again in a loop.
 - Verify the player collides with maze walls and can slide along them instead of repeatedly stopping on corners.
@@ -132,7 +135,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Treat the temporary `test:perf` disablement as intentional until the static baked-lightmap torch-lighting evaluation ends.
 - Keep `npm run test:unit` under 20 seconds.
 - Keep the prepared smoke startup phase under 1 minute after a single `npm run build:pages`, and keep the total benchmarked smoke runner under 3 minutes while deeper render assertions remain split into slower integration specs.
-- Latest measured benchmark on April 20, 2026: `npm run build:pages` took about `7.9s`; `npm run test:unit` reported about `9.9s`; `npm run test:smoke:runner` took about `95.0s` after a prepared `build:pages`; the smoke startup phase was about `54.0s`; the current benchmarked smoke hot spots are `startup` at about `54.0s`, `reflection-captures` at about `32.6s`, and `debug-controls` at about `6.3s`; `npm run test:render:integration:runner` took about `2.3m`; and `npm run test:perf:runner` remains intentionally skipped during the static baked-lightmap evaluation.
+- Latest measured benchmark on April 23, 2026: `npm run build:pages` took about `11.0s`; `npm run test:unit` reported about `8.9s`; `npm run test:smoke:runner` took about `61.0s` after a prepared `build:pages`; the smoke loading-complete marker was about `3.7s`; the current benchmarked smoke hot spots are `reflection-captures` at about `25.0s`, `debug-controls` at about `23.3s`, and `startup` at about `12.4s`; `npm run test:render:integration:runner` took about `4.6m`; `npm run test:probe-occlusion:runner` took about `45.6s`; and `npm run test:perf:runner` remains intentionally skipped during the static baked-lightmap evaluation.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.

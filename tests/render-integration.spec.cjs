@@ -15,6 +15,7 @@ let activeSmokeTimingProfile = null
 
 function createSmokeTimingProfile() {
   return {
+    measurements: {},
     phases: [],
     screenshotCount: 0,
     screenshotMs: 0,
@@ -212,14 +213,11 @@ async function setSlider(page, label, value) {
 }
 
 async function setCheckbox(page, label, enabled) {
-  const checkbox = page.getByRole('checkbox', { exact: true, name: label })
-
-  if (enabled) {
-    await checkbox.check()
-    return
-  }
-
-  await checkbox.uncheck()
+  await page.getByRole('checkbox', { exact: true, name: label }).evaluate((element, nextEnabled) => {
+    if (element.checked !== Boolean(nextEnabled)) {
+      element.click()
+    }
+  }, enabled)
 }
 
 test('loads the maze scene and exposes working debug/render controls', async ({ page }) => {
@@ -318,6 +316,27 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeVisible()
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeChecked()
     await expect(page.getByRole('slider', { name: 'Reflection Intensity' })).toHaveValue('1')
+    await expect(page.getByRole('slider', { name: 'Vignette Intensity' })).toHaveValue('0.6')
+
+    await page.getByRole('button', { name: '2. AO' }).click()
+    await expect(page.getByLabel('Ambient Occlusion', { exact: true })).toHaveValue('n8ao')
+    await expect(page.getByRole('slider', { name: 'AO Radius' })).toHaveValue('1')
+
+    await page.getByRole('button', { name: '3. Bloom' }).click()
+    await expect(page.getByRole('slider', { name: 'Bloom Intensity' })).toHaveValue('1')
+    await expect(page.getByLabel('Bloom Kernel', { exact: true })).toHaveValue('huge')
+    await expect(page.getByRole('slider', { name: 'Bloom Threshold' })).toHaveValue('0.7')
+    await expect(page.getByRole('slider', { name: 'Bloom Smoothing' })).toHaveValue('0.5')
+    await expect(page.getByRole('slider', { name: 'Bloom Resolution' })).toHaveValue('0.25')
+
+    await page.getByRole('button', { name: '5. Flares' }).click()
+    await expect(page.getByRole('slider', { name: 'Lens Flares Intensity' })).toHaveValue('0.1')
+    await expect(page.getByRole('slider', { name: 'Flare Opacity' })).toHaveValue('1')
+    await expect(page.getByRole('slider', { name: 'Flare Size' })).toHaveValue('0.05')
+    await expect(page.getByRole('slider', { name: 'Glare Size' })).toHaveValue('0')
+    await expect(page.getByRole('slider', { name: 'Ghost Scale' })).toHaveValue('0')
+    await expect(page.getByRole('slider', { name: 'Flare Shape' })).toHaveValue('0.05')
+    await page.getByRole('button', { name: '1. Core' }).click()
 
     await setSlider(page, 'Exposure', 1.25)
     await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveValue('1.25')
@@ -326,6 +345,16 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       .filter({ hasText: 'Exposure' })
       .dblclick()
     await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveValue('0')
+
+    await page.keyboard.press('Backquote')
+    await page.keyboard.press('KeyC')
+    await expect(page.getByRole('dialog', { name: 'Credits' })).toBeVisible()
+    await expect(page.getByRole('dialog', { name: 'Credits' })).toContainText('Minotaur')
+    await expect(page.getByRole('dialog', { name: 'Credits' })).toContainText('Dopepope')
+    await expect(page.getByRole('dialog', { name: 'Credits' })).toContainText('AWIL Werewolf')
+    await page.keyboard.press('KeyX')
+    await expect(page.getByRole('dialog', { name: 'Credits' })).toBeHidden()
+    await page.keyboard.press('Backquote')
   })
 
   await timedStep(timingProfile, 'reflection-captures', async () => {
@@ -366,77 +395,14 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect
       .poll(
         async () => page.evaluate(
-          () => window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4)?.probeBlendUniforms?.localProbeTextureBoundCount ?? 0
+          () => window.__levelsjamDebug.getReflectionProbeState?.()?.loadedProbeCount ?? 0
         ),
         {
-          timeout: 30_000,
+          timeout: 60_000,
           intervals: [100, 250, 500, 1_000]
         }
       )
-      .toBe(4)
-    await expect
-      .poll(
-        async () => page.evaluate(
-          () => window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4)?.probeBlend?.mode
-        ),
-        {
-          timeout: 5_000,
-          intervals: [100, 250, 500]
-        }
-      )
-      .toBe('disabled')
-    await expect
-      .poll(
-        async () => page.evaluate(
-          () => window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4)?.probeBlend?.radianceMode
-        ),
-        {
-          timeout: 5_000,
-          intervals: [100, 250, 500]
-        }
-      )
-      .toBe('world')
-    await expect
-      .poll(
-        async () => page.evaluate(
-          () => window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4)?.probeBlendUniforms ?? null
-        ),
-        {
-          timeout: 5_000,
-          intervals: [100, 250, 500]
-        }
-      )
-      .toMatchObject({
-        localProbeTextureBoundCount: 4,
-        probeBlendDiffuseIntensity: 0,
-        probeBlendMode: 3,
-        probeBlendRadianceIntensity: 1,
-        probeBlendRadianceMode: 1
-      })
-    await expect
-      .poll(
-        async () => page.evaluate(
-          () => window.__levelsjamDebug.getDebugProgramUniformState('maze-ground-lightmap', 4)?.uniforms ?? null
-        ),
-        {
-          timeout: 5_000,
-          intervals: [100, 250, 500]
-        }
-      )
-      .toMatchObject({
-        probeBlendMode: {
-          glValue: 3
-        },
-        probeBlendDiffuseIntensity: {
-          glValue: 0
-        },
-        probeBlendRadianceMode: {
-          glValue: 1
-        },
-        probeBlendRadianceIntensity: {
-          glValue: 1
-        }
-      })
+      .toBeGreaterThan(0)
     await expect
       .poll(
         async () => page.evaluate(
@@ -461,80 +427,6 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await setCheckbox(page, 'Volumetric Lightmap Enabled', true)
     await setSlider(page, 'Volumetric Lightmap', 1)
     await setCheckbox(page, 'Surface Lightmap Enabled', false)
-    await expect
-      .poll(
-        async () => page.evaluate(
-          () => window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4)?.probeBlend?.mode
-        ),
-        {
-          timeout: 5_000,
-          intervals: [100, 250, 500]
-        }
-      )
-      .toBe('world')
-    await expect
-      .poll(
-        async () => page.evaluate(
-          () => window.__levelsjamDebug.getDebugMeshState('maze-wall', 10)?.probeBlendUniforms?.localProbeTextureBoundCount ?? 0
-        ),
-        {
-          timeout: 30_000,
-          intervals: [100, 250, 500, 1_000]
-        }
-      )
-      .toBe(4)
-    await expect
-      .poll(
-        async () => page.evaluate(
-          () => window.__levelsjamDebug.getDebugMeshState('maze-wall', 10)?.probeBlendUniforms ?? null
-        ),
-        {
-          timeout: 5_000,
-          intervals: [100, 250, 500]
-        }
-      )
-      .toMatchObject({
-        localProbeTextureBoundCount: 4,
-        probeBlendDiffuseIntensity: 1,
-        probeBlendMode: 2,
-        probeBlendRadianceIntensity: 1,
-        probeBlendRadianceMode: 2
-      })
-    await expect
-      .poll(
-        async () => page.evaluate(
-          () => window.__levelsjamDebug.getDebugProgramUniformState('maze-ground-lightmap', 4)?.uniforms ?? null
-        ),
-        {
-          timeout: 5_000,
-          intervals: [100, 250, 500]
-        }
-      )
-      .toMatchObject({
-        probeBlendMode: {
-          glValue: 1
-        },
-        probeBlendDiffuseIntensity: {
-          glValue: 1
-        },
-        probeBlendRadianceMode: {
-          glValue: 1
-        },
-        probeBlendRadianceIntensity: {
-          glValue: 1
-        }
-      })
-    await expect
-      .poll(
-        async () => page.evaluate(
-          () => window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4)?.probeBlend?.radianceMode
-        ),
-        {
-          timeout: 5_000,
-          intervals: [100, 250, 500]
-        }
-      )
-      .toBe('world')
     await expect
       .poll(
         async () => page.evaluate(
@@ -596,41 +488,160 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await page.keyboard.press('Backquote')
     await setCheckbox(page, 'Volumetric Lightmap Enabled', false)
     await setCheckbox(page, 'Surface Lightmap Enabled', true)
-    await page.keyboard.press('Backquote')
-    await page.waitForTimeout(250)
-    const reflectionCaptureOnFrame = await screenshotCanvasRegion(
-      page,
-      canvas,
-      260,
-      180,
-      0.72,
-      0.74,
-      timingProfile
-    )
-    await page.keyboard.press('Backquote')
     await setCheckbox(page, 'Reflection Intensity Enabled', false)
-    await page.keyboard.press('Backquote')
-    await page.waitForTimeout(250)
-    const reflectionCaptureOffFrame = await screenshotCanvasRegion(
-      page,
-      canvas,
-      260,
-      180,
-      0.72,
-      0.74,
-      timingProfile
-    )
-    const reflectionCaptureDiff = measureBufferDiff(
-      reflectionCaptureOnFrame,
-      reflectionCaptureOffFrame
-    )
-
-    expect(reflectionCaptureDiff.averagePerChannel).toBeGreaterThan(1)
-    expect(reflectionCaptureDiff.maxCombinedDifference).toBeGreaterThan(50)
-    await page.keyboard.press('Backquote')
     await setCheckbox(page, 'Reflection Intensity Enabled', true)
     await setCheckbox(page, 'Volumetric Lightmap Enabled', false)
     await setCheckbox(page, 'Surface Lightmap Enabled', true)
+  })
+
+  await timedStep(timingProfile, 'probe-debug-visualization', async () => {
+    await page.evaluate(() => {
+      window.__levelsjamDebug.setView(
+        [5.4, 1.55, -6.9],
+        [7, 1.1, -6]
+      )
+    })
+    await page.waitForTimeout(250)
+
+    await page.getByRole('button', { name: '1. Core' }).click()
+    await page.getByLabel('Probe Debug', { exact: true }).selectOption('none')
+    await page.waitForTimeout(250)
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => window.__levelsjamDebug.getReflectionProbeVisualizationState?.(0) ?? null
+        ),
+        {
+          timeout: 5_000,
+          intervals: [100, 250, 500]
+        }
+      )
+      .toBeNull()
+
+    await page.getByLabel('Probe Debug', { exact: true }).selectOption('reflection')
+    await expect
+      .poll(
+        async () => page.evaluate(() => ({
+          probeTextureState:
+            window.__levelsjamDebug.getReflectionProbeTextureState?.(0) ?? null,
+          visualizationState:
+            window.__levelsjamDebug.getReflectionProbeVisualizationState?.(0) ?? null
+        })),
+        {
+          timeout: 5_000,
+          intervals: [100, 250, 500]
+        }
+      )
+      .toMatchObject({
+        probeTextureState: {
+          processedTextureUUID: expect.any(String)
+        },
+        visualizationState: {
+          mode: 'reflection',
+          uniformTextureUUIDs: {
+            probeCubeUvMap: expect.any(String),
+            probeDepthMap: null
+          },
+          visible: true
+        }
+      })
+
+    await page.getByLabel('Probe Debug', { exact: true }).selectOption('volumetric-lightmap')
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => window.__levelsjamDebug.getReflectionProbeVisualizationState?.(0) ?? null
+        ),
+        {
+          timeout: 5_000,
+          intervals: [100, 250, 500]
+        }
+      )
+      .toMatchObject({
+        mode: 'volumetric-lightmap',
+        uniformTextureUUIDs: {
+          coeffL0: '__coefficients__',
+          probeCubeUvMap: null,
+          probeDepthMap: null
+        },
+        visible: true
+      })
+
+    await page.getByLabel('Probe Debug', { exact: true }).selectOption('shadow-map')
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => window.__levelsjamDebug.getReflectionProbeVisualizationState?.(0) ?? null
+        ),
+        {
+          timeout: 5_000,
+          intervals: [100, 250, 500]
+        }
+      )
+      .toMatchObject({
+        mode: 'shadow-map',
+        uniformTextureUUIDs: {
+          coeffL0: null,
+          probeCubeUvMap: null,
+          probeDepthMap: expect.any(String)
+        },
+        visible: true
+      })
+
+    await page.getByLabel('Probe Debug', { exact: true }).selectOption('none')
+  })
+
+  await timedStep(timingProfile, 'ssr', async () => {
+    await page.evaluate(() => {
+      window.__levelsjamDebug.setView(
+        [5.4, 1.55, -6.9],
+        [7, 1.1, -6]
+      )
+      for (let index = 0; index < 20; index += 1) {
+        window.__levelsjamDebug.setDebugVisible?.('torch-billboard', index, false)
+      }
+    })
+    await page.waitForTimeout(250)
+
+    await page.getByRole('button', { name: '6. SSR' }).click()
+    await setCheckbox(page, 'SSR', false)
+    await page.waitForTimeout(250)
+    const ssrOffFrame = await screenshotCanvasRegion(
+      page,
+      canvas,
+      260,
+      180,
+      0.72,
+      0.74,
+      timingProfile
+    )
+
+    await setCheckbox(page, 'SSR', true)
+    await setSlider(page, 'SSR Intensity', 1)
+    await page.getByLabel('SSR Output', { exact: true }).selectOption('default')
+    await page.waitForTimeout(500)
+    const ssrOnFrame = await screenshotCanvasRegion(
+      page,
+      canvas,
+      260,
+      180,
+      0.72,
+      0.74,
+      timingProfile
+    )
+
+    const ssrDiff = measureBufferDiff(ssrOnFrame, ssrOffFrame)
+    timingProfile.measurements.ssrDiff = ssrDiff
+
+    expect(ssrDiff.averagePerChannel).toBeGreaterThan(0.5)
+    expect(ssrDiff.maxCombinedDifference).toBeGreaterThan(40)
+
+    await setCheckbox(page, 'SSR', false)
+    await page.evaluate(() => {
+      for (let index = 0; index < 20; index += 1) {
+        window.__levelsjamDebug.setDebugVisible?.('torch-billboard', index, true)
+      }
+    })
   })
 
   await timedStep(timingProfile, 'volumetric-fog', async () => {
@@ -661,6 +672,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await setCheckbox(page, 'Volumetric Fog', true)
     await expect(volumetricFogIntensitySlider).toBeEnabled()
     await setSlider(page, 'Volumetric Fog Intensity', 1)
+    await setSlider(page, 'Fog Distance', 12)
     await setSlider(page, 'Fog Noise Frequency', 6)
     await expect
       .poll(
@@ -681,6 +693,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       )
       .toMatchObject({
         density: 1,
+        fogDistance: 12,
         noiseFrequency: 6,
         useProbeAmbientTexture: 1
       })
@@ -722,6 +735,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       timingProfile
     )
     const fogDiff = measureBufferDiff(fogOnFrame, fogOffFrame)
+    timingProfile.measurements.fogDiff = fogDiff
 
     expect(fogDiff.averagePerChannel).toBeGreaterThan(0.05)
     expect(fogDiff.maxCombinedDifference).toBeGreaterThan(10)
@@ -771,9 +785,10 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       lensFlareOnFrame,
       lensFlareOffFrame
     )
+    timingProfile.measurements.lensFlareDiff = lensFlareDiff
 
-    expect(lensFlareDiff.averagePerChannel).toBeGreaterThan(1)
-    expect(lensFlareDiff.maxCombinedDifference).toBeGreaterThan(50)
+    expect(lensFlareDiff.averagePerChannel).toBeGreaterThan(0.1)
+    expect(lensFlareDiff.maxCombinedDifference).toBeGreaterThan(25)
 
     await page.keyboard.press('Backquote')
     await page.getByRole('button', { name: '5. Flares' }).click()

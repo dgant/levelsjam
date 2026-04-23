@@ -6,17 +6,17 @@ export const MAZE_CELL_SIZE = 2
 export const MAZE_WALL_THICKNESS = 0.25
 export const MAZE_WALL_HEIGHT = 2
 export const MAZE_TARGET_COUNT = 5
-export const MAZE_LIGHTMAP_VERSION = 16
+export const MAZE_LIGHTMAP_VERSION = 17
 export const MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS = 0.125
 
 const MAZE_LIGHTMAP_GROUND_TILE_SIZE = 256
 const MAZE_LIGHTMAP_WALL_TILE_WIDTH = 128
 const MAZE_LIGHTMAP_WALL_TILE_HEIGHT = 128
 const MAZE_LIGHTMAP_NEUTRAL_TILE_SIZE = 4
-const MAZE_LIGHTMAP_TORCH_DISTANCE = 16
-const MAZE_LIGHTMAP_GROUND_MARGIN = MAZE_LIGHTMAP_TORCH_DISTANCE
+const MAZE_LIGHTMAP_GROUND_MARGIN = 16
 const MAZE_LIGHTMAP_SAMPLE_EPSILON = 0.02
 const MAZE_LIGHTMAP_TORCH_STRENGTH = AUTHORED_LIGHTING_SOURCE_SCALE
+const MAZE_LIGHTMAP_MIN_RAW_TORCH_CONTRIBUTION = 1
 const MAZE_LIGHTMAP_TARGET_PEAK = 0.45
 const MAZE_LIGHTMAP_GROUND_SUPERSAMPLE_GRID = 1
 const MAZE_LIGHTMAP_GROUND_AMBIENT_INTENSITY =
@@ -159,6 +159,10 @@ function cloneMaze(maze) {
     lights: maze.lights.map((light) => ({
       cell: { ...light.cell },
       side: light.side
+    })),
+    monsters: (maze.monsters ?? []).map((monster) => ({
+      ...monster,
+      cell: { ...monster.cell }
     })),
     openEdges: maze.openEdges.map((edge) => ({
       from: { ...edge.from },
@@ -602,6 +606,39 @@ function generateMazeLights(maze, random) {
   return lights
 }
 
+function generateMazeMonsters(maze, random) {
+  const reserved = new Set([cellKey(maze.opening.cell)])
+  const cells = []
+
+  for (let y = 0; y < maze.height; y += 1) {
+    for (let x = 0; x < maze.width; x += 1) {
+      const cell = { x, y }
+
+      if (!reserved.has(cellKey(cell))) {
+        cells.push(cell)
+      }
+    }
+  }
+
+  const takeCell = () => {
+    const index = integerFromRandom(random, cells.length)
+    const [cell] = cells.splice(index, 1)
+
+    reserved.add(cellKey(cell))
+    return cell
+  }
+
+  return [
+    { cell: takeCell(), type: 'minotaur' },
+    { cell: takeCell(), type: 'werewolf' },
+    {
+      cell: takeCell(),
+      hand: random() < 0.5 ? 'left' : 'right',
+      type: 'spider'
+    }
+  ]
+}
+
 export function generateMaze(seed = Date.now(), options = {}) {
   const {
     bakeLightmap = true
@@ -655,6 +692,7 @@ export function generateMaze(seed = Date.now(), options = {}) {
   }
 
   maze.lights = generateMazeLights(maze, random)
+  maze.monsters = generateMazeMonsters(maze, random)
   maze.generationMs = performance.now() - startTime
   if (bakeLightmap) {
     maze.lightmap = bakeMazeLightmap(maze)
@@ -673,6 +711,10 @@ export function getMazeSignature(maze) {
     .map((light) => `${cellKey(light.cell)}:${light.side}`)
     .sort()
     .join(',')
+  const monsters = (maze.monsters ?? [])
+    .map((monster) => `${monster.type}:${cellKey(monster.cell)}:${monster.hand ?? ''}`)
+    .sort()
+    .join(',')
 
   return [
     maze.width,
@@ -680,7 +722,8 @@ export function getMazeSignature(maze) {
     cellKey(maze.opening.cell),
     maze.opening.side,
     edges,
-    lights
+    lights,
+    monsters
   ].join('|')
 }
 
@@ -1214,10 +1257,28 @@ function isTorchOccluded(
   skipWallId,
   skipSurfaceGroupId
 ) {
+  const segmentMinX = Math.min(samplePosition.x, torchPosition.x)
+  const segmentMaxX = Math.max(samplePosition.x, torchPosition.x)
+  const segmentMinY = Math.min(samplePosition.y, torchPosition.y)
+  const segmentMaxY = Math.max(samplePosition.y, torchPosition.y)
+  const segmentMinZ = Math.min(samplePosition.z, torchPosition.z)
+  const segmentMaxZ = Math.max(samplePosition.z, torchPosition.z)
+
   for (const wall of walls) {
     if (
       wall.id === skipWallId ||
       wall.surfaceGroupId === skipSurfaceGroupId
+    ) {
+      continue
+    }
+
+    if (
+      wall.bounds.maxX < segmentMinX ||
+      wall.bounds.minX > segmentMaxX ||
+      wall.bounds.maxY < segmentMinY ||
+      wall.bounds.minY > segmentMaxY ||
+      wall.bounds.maxZ < segmentMinZ ||
+      wall.bounds.minZ > segmentMaxZ
     ) {
       continue
     }
@@ -1247,7 +1308,7 @@ function accumulateTorchLighting(
     const toTorchZ = torch.torchPosition.z - samplePosition.z
     const distance = Math.hypot(toTorchX, toTorchY, toTorchZ)
 
-    if (distance <= 1e-6 || distance > MAZE_LIGHTMAP_TORCH_DISTANCE) {
+    if (distance <= 1e-6) {
       continue
     }
 
@@ -1260,6 +1321,17 @@ function accumulateTorchLighting(
       (sampleNormal.z * directionZ)
 
     if (lambert <= 0) {
+      continue
+    }
+
+    const sourceRadius = Math.max(sconceRadius, 0.01)
+    const falloff = 1 / Math.max(distance * distance, sourceRadius * sourceRadius)
+    const strength = lambert * falloff * MAZE_LIGHTMAP_TORCH_STRENGTH
+
+    if (strength < MAZE_LIGHTMAP_MIN_RAW_TORCH_CONTRIBUTION) {
+      // Keep the inverse-square tail without paying per-texel wall tests for
+      // contributions too small to cast a readable hard shadow in the 8-bit bake.
+      litIntensity += strength
       continue
     }
 
@@ -1290,11 +1362,6 @@ function accumulateTorchLighting(
     ) {
       continue
     }
-
-    const normalizedDistance = distance / MAZE_LIGHTMAP_TORCH_DISTANCE
-    const falloff =
-      ((1 - normalizedDistance) ** 2) / (1 + (distance * distance * 0.12))
-    const strength = lambert * falloff * MAZE_LIGHTMAP_TORCH_STRENGTH
 
     litIntensity += strength
   }
@@ -1473,9 +1540,13 @@ export function bakeMazeLightmap(
   }
 
   const atlasData = new Uint8Array(atlasWidth * atlasHeight * 3)
+  const encodingPeak = Math.min(
+    peakIntensity,
+    MAZE_LIGHTMAP_TORCH_STRENGTH
+  )
   const intensityScale =
-    peakIntensity > 0
-      ? MAZE_LIGHTMAP_TARGET_PEAK / peakIntensity
+    encodingPeak > 0
+      ? MAZE_LIGHTMAP_TARGET_PEAK / encodingPeak
       : 1
 
   for (let pixelIndex = 0; pixelIndex < atlasTorchFloatData.length; pixelIndex += 1) {

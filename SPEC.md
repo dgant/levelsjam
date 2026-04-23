@@ -38,6 +38,7 @@
 - Each torch billboard is square and its width matches its wall clearance so the flame quad never clips into the wall behind it.
 - Each torch billboard uses the linked source flipbook asset rather than a procedurally generated placeholder.
 - Each torch billboard uses the local committed `CampFire_l_nosmoke_front_Loop_01_4K_6x6.png` atlas copied from the linked source asset.
+- The 4K torch flipbook atlas loads asynchronously after the maze scene can mount so the loading overlay is not blocked by the largest billboard texture.
 - Each torch billboard uses a 6x6 fire flipbook atlas.
 - Each torch billboard animation plays eight times faster than the previous 4-second loop.
 - Each torch billboard uses an unlit material.
@@ -62,6 +63,8 @@
 - The runtime material path applies the shared torch tint to baked scalar torch lightmaps after sampling, so warm torch color is preserved without RGB quantization banding.
 - Each baked maze lightmap is normalized to preserve headroom instead of clipping bright torch-adjacent texels to full white during bake generation.
 - Each baked maze lightmap uses supersampled texel evaluation so torch gradients on walls and the maze floor patch are smoother than a single-sample bake.
+- Baked torch lighting uses physical inverse-square falloff across all represented lightmapped surfaces without an authored hard maximum distance cutoff.
+- Baked torch lighting clamps only the mathematical point-light singularity at the finite torch source radius needed for numerical stability.
 - Each baked maze wall-face lightmap uses a higher texel density than the current base wall-material textures require for albedo detail.
 - Each baked maze wall-face lightmap uses `128x128` texels per wall face.
 - Each baked maze floor-patch lightmap uses a higher texel density than the previous full-ground bake.
@@ -77,6 +80,7 @@
 - Reflection probes are captured during the offline maze-lighting pipeline and are not recaptured during ordinary runtime page load or debug-slider interaction.
 - Each persisted maze ships runtime-loadable reflection-probe assets derived from the offline bake rather than generating those assets in the browser from the live scene.
 - Each persisted maze ships runtime-loadable volumetric-lightmap probe assets derived from the offline bake rather than generating those assets in the browser from the live scene.
+- Runtime reflection-probe asset loading continues beyond the startup-ready subset quickly enough that the current maze's local reflections, probe IBL, and probe-debug tools become usable across the whole maze without a minute-long wait.
 - Each persisted maze ships inspectable offline reflection-probe and volumetric-lightmap artifacts under `logs/lightmap-artifacts`.
 - Each offline reflection probe stores a `32x32` raw cubemap capture.
 - Each offline reflection probe stores a processed runtime reflection texture derived from that raw cubemap.
@@ -93,11 +97,53 @@
 - Reflection probe debug visualization displays the actual processed local reflection source used by the runtime shading path directly on the debug spheres so a human can inspect what reflective materials are sampling in-game.
 - Reflection probe debug visualization renders as ordinary non-colliding scene geometry rather than as a separately composited overlay so it can be compared directly against the lit scene.
 - Reflection probe debug visualization remains bound to the actual processed local reflection source used by the runtime shading path and otherwise follows the same exposure and post-tonemapping presentation path as the rest of the scene.
+- Reflection probe debug visualization remains plainly visible and mode-distinct from ordinary gameplay viewpoints instead of hiding inside maze geometry or requiring an exact camera placement to notice.
 - Reflection probe debugging exposes an on-demand geometry-only cubemap capture against a black background so capture-stage maze visibility can be verified independently from later probe filtering or beauty-pass shading.
 - The top of each wall sconce aligns to the bottom of its torch billboard by default so the flame billboard does not appear to float above the fixture.
 - Screen-space ambient occlusion controls visibly affect the scene when enabled.
 - Lens flares, SSR, and volumetric fog remain visually stable as their intensity controls increase and must not black out the scene.
+- Lens flares do not appear for fully occluded lights.
+- Lens flares use a stable visible torch candidate that is on screen and unoccluded rather than flickering between arbitrary torches frame to frame.
 - The player collides with the ground plane and the walls.
+- The primary game rules are turn-based grid rules driven by a headless rules engine.
+- The headless rules engine publishes discrete state updates that the three.js scene animates over the authored movement durations.
+- The maze grid stores walls and gates as obstacles on edges between cells.
+- Each cell may contain any number of items and at most one character.
+- Characters are either the player or monsters.
+- A character may move between adjacent cells only when the shared edge has no blocking obstacle.
+- Each player move consumes one turn, then every active monster resolves its turn in a stable order.
+- Player rotation does not consume a turn.
+- Player movement and rotation animations last `250ms`.
+- Monster movement animations last `250ms`.
+- The player has no rendered character model.
+- Player inputs are buffered and consumed in order when the rules engine is ready for the next player action.
+- Pressing `W` or `ArrowUp` queues a one-cell forward move in the current camera direction.
+- Pressing `D` or `ArrowDown` queues a one-cell backward move in the current camera direction.
+- Pressing `A`, `S`, `ArrowLeft`, or `ArrowRight` queues a `90` degree camera rotation in the corresponding horizontal direction.
+- If the player attempts to move into a cell containing a monster, the player dies.
+- If a monster attempts to move into the player cell, the player dies.
+- Player death fades the viewport to black during the movement animation, resets the current maze state to the last checkpoint, and fades back in over `2s`.
+- The current checkpoint is the maze entrance position and entrance-facing direction.
+- Each generated maze places one minotaur, one werewolf, and one spider on distinct non-player tiles.
+- Each monster begins asleep.
+- A sleeping monster that sees the player in an uninterrupted straight cardinal line wakes up and becomes eligible to move on its following turn.
+- The minotaur records the cardinal direction toward the player on each turn where it can see the player.
+- An awake minotaur attempts to move one cell in its last recorded player direction.
+- A minotaur that cannot move because of a wall or gate goes to sleep.
+- Each spider is either a left-wall-following spider or a right-wall-following spider.
+- An awake spider moves one cell according to its configured wall-following rule.
+- An awake werewolf that did not move on the previous monster turn moves one step along a shortest legal path toward the player.
+- If multiple shortest werewolf path steps are tied, the werewolf prefers the next step from its previous path, then a step continuing its previous movement direction, then any remaining tied step.
+- Monster models rotate to face their upcoming move before moving when a rotation is required.
+- After moving, monster models rotate to face the direction they would move if their next turn were resolved immediately.
+- The werewolf model loads from `public/models/awil_werewolf.zip`, scales proportionally to fit a `1.6m` cube, and places its bottom center at the tile bottom-center.
+- The spider model loads from `public/models/dopepopes_zkumonga.zip`, scales proportionally to fit a `1.4m` cube, and is placed as a wall-walking spider with its base oriented along the configured wall and floor.
+- The minotaur model loads from `public/models/minotaur.zip`, scales proportionally to fit a `1.8m` cube, and places its bottom `0.25m` below the tile bottom-center.
+- Pressing `1` toggles a free-camera inspection mode that detaches the camera from the player.
+- Free-camera inspection mode uses WASD plus mouse look, has no collisions, and maps `Q` to move down and `E` to move up.
+- Pressing `C` opens a centered credits modal.
+- The credits modal closes on any key press while it is open.
+- The credits modal lists the required model credits and license links.
 - The character collision volume is a capsule that is 1.75 meters tall and 0.25 meters in radius.
 - The player spawns 1 meter above the ground plane.
 - The camera eye height remains derived from the character capsule.
@@ -110,6 +156,7 @@
 - Gravity applies at 1g.
 - Jetpack thrust applies at 1.25g so the net upward acceleration is 0.25g while `Space` is held.
 - Player movement uses fixed physics substeps derived from the character radius and configured speed limits.
+- The legacy continuous first-person movement and collision parameters are preserved only for free-camera inspection or debug compatibility where explicitly used.
 - Horizontal movement magnitude is stored as a scalar rather than a persistent world-space vector.
 - Horizontal movement is applied in the current camera-relative input direction.
 - Movement input that opposes current horizontal motion uses the deceleration rate instead of the acceleration rate.
@@ -119,18 +166,26 @@
 - The scene uses `postprocessing` Depth of Field.
 - The scene uses `n8ao` instead of the previous SSAO effect.
 - The scene includes screen-space reflections driven by the official three.js `SSRPass` implementation adapted into the current postprocessing stack.
-- The scene includes a full-maze volumetric fog volume that spans the ground footprint from 0 to 6 meters in altitude.
+- The scene includes a universal volumetric fog field that can appear throughout the playable world rather than only inside a fixed horizontal box.
+- The volumetric fog uses a configurable camera-relative fog distance, defaulting to `10m` and capped at `40m`, to limit raymarch distance instead of relying on a fixed world-space fog box.
+- The volumetric fog height response remains based on world altitude from ground level to `6m`.
 - The scene does not render per-torch cone meshes as the volumetric-fog implementation.
 - The volumetric fog renders as a dense full-maze haze volume rather than as a sparse set of obvious slices or cones.
+- The volumetric fog uses smooth local-lighting interpolation rather than hard per-cell probe steps.
+- The volumetric fog avoids obvious vertical or horizontal raymarch banding under ordinary gameplay viewpoints.
 - The scene does not use God Rays.
 - The debug controls include an anamorphic tab backed by a live WebGL post effect derived from the official three.js anamorphic implementation.
-- Bloom, Depth of Field, Lens Flares, SSR, Ambient Occlusion, and Vignette default to disabled.
+- Bloom defaults to enabled with intensity `1.0`, kernel `Huge`, threshold `0.7`, smoothing `0.5`, and resolution scale `0.25x`.
+- Depth of Field defaults to disabled.
+- Lens Flares default to enabled with intensity `0.1`, opacity `1.0`, flare size `0.05`, glare size `0`, ghost scale `0`, flare shape `0.05`, animated mode off, anamorphic mode on, extra streaks off, secondary ghosts off, and star burst off.
+- SSR defaults to disabled.
+- Ambient Occlusion defaults to `N8AO` with a radius of `1m`.
+- Vignette defaults to enabled with intensity `0.6`.
 - Bloom, Depth of Field, Lens Flares, and SSR store zero-strength defaults so enabling them at zero does not transiently flash a nonzero effect.
 - The debug panel exposure control defaults to `0.0`.
 - The debug panel exposes a `Surface Lightmap` enabled toggle and scalar slider that control the baked surface-lightmap contribution on participating materials.
 - The debug panel exposes a `Volumetric Lightmap` enabled toggle and scalar slider that control the baked local-probe diffuse or irradiance contribution on participating materials.
 - The debug panel exposes a `Reflection Intensity` enabled toggle and scalar slider that control the local-probe reflection contribution on participating materials.
-- The debug panel lens flare control adjusts the effect using the lens flare opacity parameter rather than an arbitrary color-gain multiplier.
 - The debug panel lens flare control provides useful adjustment very close to zero rather than jumping immediately to an over-bright flare.
 - The debug panel SSR intensity control is clamped to a maximum of `1.0`.
 - The debug panel exposes an ambient-occlusion mode dropdown with working `Off`, `N8AO`, and `SSAO` modes.
@@ -146,8 +201,14 @@
 - Enabling `Volumetric Lightmap` visibly adds local-probe diffuse or irradiance contribution on participating lit PBR geometry.
 - Disabling `Reflection Intensity` visibly removes local-probe reflection contribution from materials that otherwise use it.
 - The debug panel exposes a probe-debug dropdown, defaulting to `None`, with `Reflection`, `Volumetric Lightmap`, and `Shadow Map` visualization modes.
+- Each `Probe Debug` mode produces a visibly distinct in-scene result that represents the actual runtime reflection source, volumetric-lightmap source, or probe shadow data rather than an inert or black placeholder sphere.
+- Probe-debug geometry renders without added wireframe overlays that obscure the captured content.
 - The debug panel `Volumetric Lightmap` enabled toggle defaults to `off`.
 - Double-clicking any debug-panel label resets that control to its authored default value.
+- The debug panel fog tab exposes an editable fog ambient color through both a hex input and a color picker.
+- The debug panel fog tab exposes fog distance in meters with a `0m` to `40m` range and a default of `10m`.
+- The debug panel fog noise-frequency control operates in meters over a `0m` to `10m` range.
+- The debug panel fog lighting-strength control ranges from `0` to `2.0`.
 - The debug panel does not expose obsolete atmosphere or sun-direction controls.
 - The page shows an FPS counter in the top-right corner together with the current Git revision and revision timestamp.
 - The top-right overlay also shows the active maze ID.
@@ -201,6 +262,11 @@
 - Maze wall materials do not add direct runtime scene-environment diffuse lighting on top of their baked diffuse lightmaps.
 - Lightmapped maze walls and the baked maze floor patch do not receive direct runtime global-HDRI diffuse lighting; their diffuse ambient comes from the baked surface lightmap plus any explicitly enabled local volumetric-lightmap contribution.
 - Reflection probe captures, processed reflection-probe textures, and baked lightmaps remain raw lighting captures and are not tone-mapped or manually re-scaled for runtime use, debug previews, or exported inspection artifacts.
+- Reflection probe debug spheres must not show black or unrelated faces when the underlying captured probe contains scene geometry and lit surfaces.
+- Debug shadow-map probe visualization displays grayscale `clamp(0, 1, shadowDepthMeters / 10m)`.
+- Volumetric-lightmap debug probes represent incoming light direction: a bright side indicates light arriving from that direction.
+- Volumetric-lightmap capture preserves the direction of incoming light and probe-space occlusion by maze geometry.
+- Volumetric-lightmap application uses the captured directional data in the same coordinate convention used by capture.
 - Reflective and semi-reflective materials read from the shared environment consistently, with the nearest local maze reflection probe taking precedence over the global HDRI for in-maze specular.
 - Enabling `Volumetric Lightmap` allows lit PBR maze geometry, including walls, to receive additive probe-driven local diffuse lighting without implicitly changing the baked surface-lightmap contribution.
 - Disabling `Surface Lightmap` while enabling `Volumetric Lightmap` allows baked maze geometry to be inspected in a pure probe-driven volumetric-lightmap mode without any baked surface-lightmap contribution.
@@ -224,6 +290,7 @@
 - The torch billboards are excluded from SSAO so ambient occlusion only affects the opaque maze geometry.
 - The torch billboards remain correctly depth-occluded by opaque maze geometry even though they are composited after the opaque AO and SSR inputs.
 - Screen-space reflections apply only to the scene's PBR materials rather than to unlit or transparent billboard materials.
+- Screen-space reflections select reflective PBR surfaces through the documented three.js `SSRPass` selection path rather than applying to the skybox, unlit billboards, debug geometry, or non-reflective helpers.
 - Screen-space reflections remain visually stable and do not blow out reflections relative to the rest of the lighting stack.
 - Screen-space reflections follow the official three.js documented pass implementation rather than a repository-local custom effect whose behavior diverges from the upstream reference.
 - The baked torch lighting and the torch billboards read as a matched fire source rather than independent unrelated elements.
@@ -247,7 +314,9 @@
 - Increasing or decreasing lens-flare opacity produces a visible corresponding change in the flare.
 - Enabling lens flares at a small nonzero value does not black out the frame.
 - Enabling lens flares with an intensity of `0` behaves as a visual no-op.
-- Lens flares apply to the set of visible torch lights rather than jumping between arbitrary lights frame to frame.
+- Lens flares apply to a stable selected visible torch light rather than jumping between arbitrary lights frame to frame.
+- Lens-flare visibility rejects torch lights that are occluded by maze walls or monsters.
+- Lens-flare occlusion ray tests ignore torch billboards and sconce fixture meshes.
 - Lens-flare bokeh and ghosts remain translucent and additive rather than appearing as opaque black or opaque solid sprites.
 - Lens-flare controls expose the actual high-impact flare parameters with ranges that allow meaningful adjustment near zero as well as visibly strong flares at the top of the range.
 - Increasing or decreasing volumetric fog or smoke parameters produces a visible corresponding change in the full-scene fog volume.
@@ -255,8 +324,20 @@
 - Volumetric fog samples its lighting from the nearest available local volumetric-lightmap probes and falls back to the authored HDRI outside probe coverage.
 - Volumetric fog follows the structure of the official three.js volumetric-lighting example while remaining adapted to the current WebGL render stack and local probe-lighting inputs.
 - Disabling local probe-driven diffuse lighting on scene materials does not disable volumetric fog's probe-fed lighting path.
+- Volumetric fog responds immediately to debug-panel parameter changes without requiring the effect to be toggled off and on again.
+- Volumetric fog does not converge over time into a white sky wash or otherwise diverge as probe data finishes loading.
+- Volumetric fog does not re-solve against partially loaded probe-ambient data in a way that visibly degrades over several seconds after the effect is enabled.
 - Enabling Depth of Field with a `0` bokeh scale behaves as a visual no-op.
 - The page does not show speculative branding captions, launcher buttons, or click-to-enter copy.
+
+## Credits
+- The credits modal header is `Credits`.
+- The credits modal includes `"Minotaur" (https://skfb.ly/6TK77) by yanbelmont is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
+- The credits modal includes `"Dopepope's zKUMONGA" (https://skfb.ly/pIBZW) by AllThingsSaurus is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
+- The credits modal includes `"AWIL Werewolf" (https://skfb.ly/orBtB) by Spinnee is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
+- The credits modal includes `"Head of a Bull" (https://skfb.ly/6TOXX) by Kirk Hiatt is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
+- The credits modal includes `"Metal Gate" (https://skfb.ly/oK7QR) by i bull your wife is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
+- The credits modal includes `"Bronze Sword Mycean" (https://skfb.ly/6RZxG) by Ryoce is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
 
 ## Debug Controls
 - The debug controls panel can be opened and closed with backquote.
@@ -272,6 +353,7 @@
 - The lens-flare tab exposes enabled state and all useful flare parameters needed to tune visibility and opacity, including flare size, glare size, ghost scale, halo scale, star-point count, and the wrapped effect's animated and anamorphic toggles.
 - The SSR tab exposes enabled state and the core canonical tuning parameters needed to tune its documented implementation, including opacity, distance, thickness, resolution scale, and pass output mode.
 - The volumetric-fog tab exposes enabled state and the core fog parameters needed to tune its probe-lit volume implementation, including amount and noise frequency.
+- The volumetric-fog tab also exposes the high-impact density-shaping parameters needed to tune the current implementation, including noise strength, height falloff, lighting strength, and ray-march step count.
 - The anamorphic tab exposes enabled state and the core anamorphic parameters needed to tune the live effect, including intensity, threshold, scale, and sample count.
 - The debug controls panel exposes a toggle for reflection-probe visualization.
 - The debug controls panel lays out each control row on one line in value-label-control order.
@@ -312,6 +394,8 @@
 - The automated browser performance test remains disabled until the temporary static baked-lightmap torch-lighting evaluation ends.
 - Automated browser smoke coverage verifies that the baked maze lightmap is present and contributes visible lighting.
 - Automated render-integration coverage verifies that the volumetric-lightmap toggle changes the diffuse probe-lighting path without breaking scene visibility.
+- Automated render-integration coverage verifies that the `Probe Debug` modes produce visibly different in-scene probe outputs instead of inert or identical frames.
+- Automated render-integration coverage verifies that enabling SSR changes a reflective in-maze crop in the live rendered frame.
 - Automated render-integration coverage verifies that volumetric fog responds immediately to its live controls and uses probe-fed lighting without breaking fog visibility.
 - Automated render-integration coverage verifies that double-clicking a debug-panel label resets the associated control to its authored default.
 - Automated render-integration coverage verifies that reflection-probe debug visualization shows captured maze walls and respects wall occlusion of torch emitters.

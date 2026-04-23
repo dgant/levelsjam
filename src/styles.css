@@ -19,6 +19,22 @@ body {
   overflow: hidden;
 }
 
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+  background: #000;
+  opacity: 0;
+  transition: opacity 2s ease;
+}
+
+body[data-player-dead='true']::after {
+  opacity: 1;
+  transition-duration: 250ms;
+}
+
 .app-shell {
   width: 100%;
   height: 100%;
@@ -150,6 +166,51 @@ body {
   pointer-events: none;
 }
 
+.credits-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 68%);
+  color: #f5edda;
+}
+
+.credits-panel {
+  width: min(720px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 28px;
+  background: rgb(8 11 16 / 94%);
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 18px;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 55%);
+}
+
+.credits-panel h2 {
+  margin: 0 0 18px;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+}
+
+.credits-panel p {
+  margin: 0 0 12px;
+  line-height: 1.45;
+}
+
+.credits-panel a {
+  color: #f1c878;
+}
+
+.credits-panel small {
+  display: block;
+  margin-top: 18px;
+  text-align: center;
+  color: rgb(245 237 218 / 70%);
+}
+
 .visual-controls {
   position: fixed;
   top: 12px;
@@ -240,4 +301,31 @@ body {
   align-items: center;
   gap: 8px;
   white-space: nowrap;
+}
+
+.visual-inline-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.visual-color-text-input {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  background: rgb(10 15 23 / 92%);
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 10px;
+  color: inherit;
+  font: inherit;
+}
+
+.visual-inline-controls input[type='color'] {
+  width: 2.6rem;
+  height: 2rem;
+  padding: 0;
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 10px;
 }

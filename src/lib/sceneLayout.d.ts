@@ -55,6 +55,11 @@ export type MazeLayout = {
     }
     height: number
     id: string
+    monsters?: Array<{
+      cell: { x: number; y: number }
+      hand?: 'left' | 'right'
+      type: 'minotaur' | 'spider' | 'werewolf'
+    }>
     width: number
   }
   reflectionProbes: Array<{

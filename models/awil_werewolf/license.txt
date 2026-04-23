@@ -1,0 +1,11 @@
+Model Information:
+* title:	AWIL Werewolf
+* source:	https://sketchfab.com/3d-models/awil-werewolf-9cdcdaa801a94acdb09ddcebb8bd3719
+* author:	Spinnee (https://sketchfab.com/Spinnee)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "AWIL Werewolf" (https://sketchfab.com/3d-models/awil-werewolf-9cdcdaa801a94acdb09ddcebb8bd3719) by Spinnee (https://sketchfab.com/Spinnee) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
