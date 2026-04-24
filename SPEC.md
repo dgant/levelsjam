@@ -156,6 +156,7 @@
 - When the player enters the trophy cell without already holding the trophy, the trophy is picked up and attached to the first-person camera rig in the left hand.
 - Held sword and trophy meshes remain visible in first person at their authored hand positions after pickup until they are consumed, dropped, or the maze resets.
 - If the player would die by intersecting a monster while holding the sword, the monster dies instead, the sword is consumed, and the death fade plays to white before restoring gameplay.
+- The sword-strike fade animates to white over `125ms`, then fades from white back to the camera view over `125ms`, without flashing or transitioning through black.
 - A maze is beaten only when the player acquires the trophy and exits the maze while still holding it.
 - Characters are either the player or monsters.
 - A character may move between adjacent cells only when the shared edge has no blocking obstacle.
@@ -423,6 +424,7 @@
 ## Debug Controls
 - The debug controls panel can be opened and closed with backquote.
 - The debug controls panel exposes exposure.
+- The debug controls panel exposes the camera field of view as a live slider with a maximum of `120` degrees.
 - The debug controls panel exposes numbered tabs selectable by keyboard shortcuts `1` through `9`, with `0` selecting the Solution tab.
 - The default debug tab exposes the core scene-lighting controls, including the active tone mapper, `Probe Debug`, `Surface Lightmap`, `Volumetric Lightmap`, and `Reflection Intensity`.
 - The `Probe Debug` control appears above `Tone Mapper`.

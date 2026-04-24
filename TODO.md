@@ -238,3 +238,5 @@ Regenerate the mazes, and give each one randomly placed minotaur, wolf, spider (
  [x] Add a Vignette tab to the debug window, move the vignette controls there, and add Vignette Noise Period and Vignette Noise Intensity (and apply them) and a Exposure Noise Intensity. Default the intensities to zero for now. The idea is to create a nervous flickering effect
  [x] Double the monster screen shake intensity
  [x] Apply DOF before bloom and after the billboard pass
+[x] Add a camera FOV slider to the debug controls, going up to 120
+[x] The camera fade when slaying a monster should be 125ms in, 125ms out. And right now it fades to white, then jumps to black and fades back to the camera view. That jump to black shouldn't exist; it should just fade white and back

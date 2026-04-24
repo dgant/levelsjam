@@ -334,6 +334,20 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     })
 
     await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveValue('0')
+    await expect(page.getByRole('slider', { name: 'Camera FOV' })).toHaveValue('60')
+    await expect(page.getByRole('slider', { name: 'Camera FOV' })).toHaveAttribute('max', '120')
+    await setSlider(page, 'Camera FOV', 100)
+    await expect(page.getByRole('slider', { name: 'Camera FOV' })).toHaveValue('100')
+    await expect
+      .poll(
+        async () => canvas.getAttribute('data-camera-fov'),
+        {
+          timeout: 2_000,
+          intervals: [50, 100, 250]
+        }
+      )
+      .toBe('100.00')
+    await setSlider(page, 'Camera FOV', 60)
     await expect(page.getByLabel('Surface Lightmap Enabled')).toBeVisible()
     await expect(page.getByLabel('Surface Lightmap Enabled')).toBeChecked()
     await expect(page.getByRole('slider', { name: 'Surface Lightmap' })).toHaveValue('1')
@@ -351,6 +365,33 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByRole('slider', { name: 'Fog Distance' })).toHaveValue('12')
     await page.keyboard.press('Digit1')
     await expect(page.getByRole('slider', { name: 'Exposure' })).toBeVisible()
+
+    const swordStrikeFadeStyles = await page.evaluate(async () => {
+      const readOverlay = () => {
+        const style = getComputedStyle(document.body, '::after')
+
+        return {
+          backgroundColor: style.backgroundColor,
+          opacity: style.opacity,
+          transitionDuration: style.transitionDuration
+        }
+      }
+
+      document.body.dataset.playerEffect = 'sword-strike'
+      await new Promise((resolve) => requestAnimationFrame(resolve))
+      const fadeIn = readOverlay()
+      document.body.dataset.playerEffect = 'sword-strike-out'
+      await new Promise((resolve) => requestAnimationFrame(resolve))
+      const fadeOut = readOverlay()
+      delete document.body.dataset.playerEffect
+
+      return { fadeIn, fadeOut }
+    })
+
+    expect(swordStrikeFadeStyles.fadeIn.backgroundColor).toBe('rgb(255, 255, 255)')
+    expect(swordStrikeFadeStyles.fadeIn.transitionDuration).toBe('0.125s')
+    expect(swordStrikeFadeStyles.fadeOut.backgroundColor).toBe('rgb(255, 255, 255)')
+    expect(swordStrikeFadeStyles.fadeOut.transitionDuration).toBe('0.125s')
 
     await page.getByLabel('Probe Debug', { exact: true }).selectOption('reflection')
     await expect

@@ -38,7 +38,13 @@ body[data-player-effect='death']::after {
 body[data-player-effect='sword-strike']::after {
   background: #fff;
   opacity: 1;
-  transition-duration: 250ms;
+  transition-duration: 125ms;
+}
+
+body[data-player-effect='sword-strike-out']::after {
+  background: #fff;
+  opacity: 0;
+  transition-duration: 125ms;
 }
 
 .app-shell {

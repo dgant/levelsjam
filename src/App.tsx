@@ -1038,6 +1038,7 @@ type VisualSettings = {
   ambientOcclusionMode: AmbientOcclusionMode
   ambientOcclusionRadius: number
   exposureStops: number
+  cameraFov: number
   iblContribution: LightingContributionSettings
   lightmapContribution: LightingContributionSettings
   lensFlare: LensFlareSettings
@@ -1068,6 +1069,7 @@ type VisualSettingsPatch = Partial<{
   bloom: Partial<BloomSettings>
   depthOfField: Partial<DepthOfFieldSettings>
   exposureStops: number
+  cameraFov: number
   iblContribution: Partial<LightingContributionSettings>
   lensFlare: Partial<LensFlareSettings>
   lightmapContribution: Partial<LightingContributionSettings>
@@ -1098,6 +1100,7 @@ type BooleanSettingKey =
 type ScalarSettingKey =
   | 'ambientOcclusionIntensity'
   | 'ambientOcclusionRadius'
+  | 'cameraFov'
   | 'exposureStops'
   | 'iblContributionIntensity'
   | 'lightmapContributionIntensity'
@@ -1590,6 +1593,7 @@ function createDefaultVisualSettings(): VisualSettings {
     ambientOcclusionIntensity: 1,
     ambientOcclusionRadius: DEFAULT_AO_RADIUS_METERS,
     ambientOcclusionMode: 'n8ao',
+    cameraFov: 60,
     exposureStops: DEFAULT_EXPOSURE_STOPS,
     iblContribution: {
       enabled: false,
@@ -1702,6 +1706,9 @@ function applyVisualSettingsPatch(
     ...(patch.exposureStops === undefined
       ? null
       : { exposureStops: patch.exposureStops }),
+    ...(patch.cameraFov === undefined
+      ? null
+      : { cameraFov: patch.cameraFov }),
     ...(patch.probeDebugMode === undefined
       ? null
       : { probeDebugMode: patch.probeDebugMode }),
@@ -5757,27 +5764,44 @@ function LoadingOverlay({
 }
 
 function RendererSettings({
+  cameraFov,
   composerEnabled,
   exposureStops,
   toneMapping
 }: {
+  cameraFov: number
   composerEnabled: boolean
   exposureStops: number
   toneMapping: ToneMappingMode
 }) {
+  const camera = useThree((state) => state.camera)
   const gl = useThree((state) => state.gl)
 
   useEffect(() => {
     const exposure = getRendererExposure(exposureStops)
+    const nextFov = MathUtils.clamp(cameraFov, 1, 120)
+
+    if ('isPerspectiveCamera' in camera && camera.isPerspectiveCamera) {
+      const perspectiveCamera = camera as ThreeCamera & {
+        fov: number
+        updateProjectionMatrix: () => void
+      }
+
+      if (Math.abs(perspectiveCamera.fov - nextFov) > 0.001) {
+        perspectiveCamera.fov = nextFov
+        perspectiveCamera.updateProjectionMatrix()
+      }
+    }
 
     gl.toneMapping = composerEnabled
       ? NoToneMapping
       : RENDERER_TONE_MAPPING_MODES[toneMapping]
     gl.toneMappingExposure = composerEnabled ? 1 : exposure
+    gl.domElement.dataset.cameraFov = nextFov.toFixed(2)
     gl.domElement.dataset.rendererExposure = exposure.toFixed(6)
     gl.domElement.dataset.rendererExposureStops = exposureStops.toFixed(2)
     gl.domElement.dataset.toneMapping = toneMapping
-  }, [composerEnabled, exposureStops, gl, toneMapping])
+  }, [camera, cameraFov, composerEnabled, exposureStops, gl, toneMapping])
 
   return null
 }
@@ -10962,6 +10986,7 @@ function FlightRig({
     startedAt: number
     to: TurnState
   } | null>(null)
+  const playerEffectClearTimeout = useRef<number | null>(null)
   const isPointerLocked = useRef(false)
   const up = useMemo(() => new Vector3(0, 1, 0), [])
   const cameraShakeOffset = useRef(new Vector3())
@@ -11877,6 +11902,10 @@ function FlightRig({
             to: result.state
           }
           if (result.playerEffect === 'death' || result.playerEffect === 'sword-strike') {
+            if (playerEffectClearTimeout.current !== null) {
+              window.clearTimeout(playerEffectClearTimeout.current)
+              playerEffectClearTimeout.current = null
+            }
             document.body.dataset.playerEffect = result.playerEffect
           }
         }
@@ -11907,9 +11936,27 @@ function FlightRig({
             activeAnimation.playerEffect === 'death' ||
             activeAnimation.playerEffect === 'sword-strike'
           ) {
-            window.setTimeout(() => {
-              delete document.body.dataset.playerEffect
-            }, 2000)
+            if (playerEffectClearTimeout.current !== null) {
+              window.clearTimeout(playerEffectClearTimeout.current)
+              playerEffectClearTimeout.current = null
+            }
+
+            if (activeAnimation.playerEffect === 'sword-strike') {
+              document.body.dataset.playerEffect = 'sword-strike-out'
+              playerEffectClearTimeout.current = window.setTimeout(() => {
+                if (document.body.dataset.playerEffect === 'sword-strike-out') {
+                  delete document.body.dataset.playerEffect
+                }
+                playerEffectClearTimeout.current = null
+              }, 150)
+            } else {
+              playerEffectClearTimeout.current = window.setTimeout(() => {
+                if (document.body.dataset.playerEffect === 'death') {
+                  delete document.body.dataset.playerEffect
+                }
+                playerEffectClearTimeout.current = null
+              }, 2000)
+            }
           }
 
           if (replayActive.current && replayQueue.current.length === 0) {
@@ -11997,6 +12044,17 @@ function FlightRig({
 
   useEffect(() => {
     return () => {
+      if (playerEffectClearTimeout.current !== null) {
+        window.clearTimeout(playerEffectClearTimeout.current)
+        playerEffectClearTimeout.current = null
+      }
+      if (
+        document.body.dataset.playerEffect === 'death' ||
+        document.body.dataset.playerEffect === 'sword-strike' ||
+        document.body.dataset.playerEffect === 'sword-strike-out'
+      ) {
+        delete document.body.dataset.playerEffect
+      }
       onReplayActiveChange(false)
       setDisplayedOpenGateIds([])
     }
@@ -13324,6 +13382,24 @@ function VisualControls({
           step={0.25}
           type="range"
           value={visualSettings.exposureStops}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.cameraFov.toFixed(0)}°</output>
+        <ResettableLabel onReset={() => onResetScalarSetting('cameraFov')}>
+          Camera FOV
+        </ResettableLabel>
+        <input
+          aria-label="Camera FOV"
+          max={120}
+          min={30}
+          onChange={(event) => {
+            onScalarSettingChange('cameraFov', Number(event.target.value))
+          }}
+          step={1}
+          type="range"
+          value={visualSettings.cameraFov}
         />
           </label>
 
@@ -15574,7 +15650,7 @@ export default function App() {
         <Canvas
           camera={{
             far: 400,
-            fov: 60,
+            fov: visualSettings.cameraFov,
             near: 0.1,
             position: [
               PLAYER_SPAWN_POSITION.x,
@@ -15598,6 +15674,7 @@ export default function App() {
           shadows
         >
           <RendererSettings
+            cameraFov={visualSettings.cameraFov}
             composerEnabled={composerEnabled}
             exposureStops={visualSettings.exposureStops}
             toneMapping={visualSettings.toneMapping}
