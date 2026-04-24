@@ -881,7 +881,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   ).toBe(true)
   expect(
     [...resourceUrls].some((url) =>
-      url.includes('CampFire_l_nosmoke_front_Loop_01_4K_6x6.png')
+      url.includes('CampFire_l_nosmoke_front_Loop_01_4K_6x6')
     )
   ).toBe(true)
   expect(

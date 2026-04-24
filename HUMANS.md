@@ -72,12 +72,13 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify the visible skybox brightness tracks the same calibrated HDRI path as the environment lighting.
 - Verify the ground, maze walls, and sconces load the committed PBR texture packs instead of preview images.
 - Verify the torch billboard uses the linked flipbook asset rather than a generated placeholder atlas.
-- Verify the torch billboard uses the linked `CampFire_l_nosmoke_front_Loop_01_4K_6x6.png` atlas.
+- Verify the torch billboard uses the runtime-cropped atlas derived from the linked `CampFire_l_nosmoke_front_Loop_01_4K_6x6.png` source atlas, preserving the 4K source frame detail while avoiding unused transparent margins at startup.
 - Verify each sconce renders with the requested `metal-13` PBR textures rather than a debug material.
 - Verify the sconces are visibly readable outside the maze walls rather than disappearing into the surface behind them.
 - Verify the torch billboards animate and stay camera-facing even on walls whose parent groups are rotated.
 - Verify the visible flame fills the square billboard, that the billboard width matches its wall clearance, and that the billboard bottom edge is flush with the sconce top.
 - Verify each persisted maze includes baked torch lightmap data.
+- Verify the browser runtime requests `surface-lightmap-rgbe.png` for surface lightmaps and does not request `surface-lightmap.bin` during ordinary page load.
 - Verify the baked lightmap visibly affects the maze walls and the maze-local lit floor patch in the rendered scene.
 - Verify the infinite base ground remains present outside the lit floor patch.
 - Verify baked wall lighting in a wall-facing view, not only in a broad maze overview where the floor can dominate the image.
@@ -94,6 +95,8 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify the reflection-probe spheres directly display the processed local reflection source used by in-game materials and visibly show nearby maze geometry and torch reflections rather than a black sphere, an empty sphere, or a nearly all-sky capture.
 - Verify the reflection-probe spheres render as ordinary non-colliding scene geometry rather than as an overlay, so they depth-test against the scene and follow the same exposure path as the rest of the frame.
 - Verify `window.__levelsjamDebug.getReflectionProbeState()` reports a nonzero probe count and becomes `ready: true` after load.
+- Verify `window.__levelsjamDebug.getReflectionProbeState()` reports no more than the bounded resident probe limit after startup has stabilized.
+- Verify `window.__levelsjamDebug.getReflectionProbeState()` reports the startup volumetric probe count separately from the resident reflection probe count; nearby volumetric probes may exceed the reflection resident limit because they load coefficient/depth data rather than specular reflection textures.
 - For deeper probe debugging, call `window.__levelsjamDebug.captureReflectionProbeAtlas(probeIndex, size)` in the browser console to get six PNG data URLs for the exact raw captured cubemap faces.
 - For deeper runtime-reflection debugging, call `window.__levelsjamDebug.captureReflectionProbeProcessedAtlas(probeIndex, size)` in the browser console to get six PNG data URLs for the processed probe texture that reflective materials actually sample in-game.
 - For direct source-binding debugging, call `window.__levelsjamDebug.getReflectionProbeTextureState(probeIndex)` to inspect the exact runtime raw and processed probe texture UUIDs bound for that probe.
@@ -149,12 +152,13 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify recorded maze solutions include action lists, move counts, observed-cell counts, and the visibility-limited solution marker.
 - Verify maze load, instantiate, uninstantiate, unload, reload, and reinstantiate work repeatedly without leaving stale GPU assets or scene objects behind.
 - Benchmark startup with `npm run bench:startup` and test duration with `npm run bench:tests` before handoff.
+- Run `npm run test:perf:runner` after startup or asset-loading changes; it includes a live RAF startup gate that catches lightmap/probe/postprocessing stalls missed by the steady-state render-cost benchmark and a full solution-replay render-budget gate.
 - Inspect `logs/latest-test-benchmark.json`, `logs/latest-unit-test-profile.json`, `logs/latest-smoke-profile.json`, and `logs/latest-render-integration-profile.json` after `npm run bench:tests` so the slowest scripts and browser-test phases are identified from measurements rather than guessed.
 - Treat duration regressions as blocking issues.
 - Keep `npm run test:unit` under 20 seconds.
-- Keep `npm run test:perf:runner` under 1 minute, and expect it to benchmark the initial gameplay view after all monsters have rendered rather than only a cheap static camera angle.
+- Keep `npm run test:perf:runner` under 1 minute, and expect it to benchmark the initial gameplay view after all monsters have rendered and the recorded solution replay rather than only a cheap static camera angle.
 - Keep the prepared smoke startup phase under 1 minute after a single `npm run build:pages`, and keep the total benchmarked smoke runner under 3 minutes while deeper render assertions remain split into slower integration specs.
-- Latest measured benchmark on April 24, 2026: `npm run build:pages` took about `19.3s`; `npm run test:unit` reported about `2.5s`; `npm run test:perf:runner` reported about `11.3s`; `npm run test:smoke:runner` reported about `34.2s`; `npm run test:render:integration:runner` reported about `9.0s`; `npm run test:maze:runner` previously reported about `11.5s` with an `11.9s` wall total; and `npm run ensure:mazes` previously took about `4.9m`, dominated by `export:maze-probes` at about `4.5m` for all 245 persisted probe captures.
+- Latest measured benchmark on April 24, 2026: `npm run build:pages` took about `19.2s`; `npm run test:unit` reported about `2.2s`; `npm run test:perf:runner` reported about `42.5s`; `npm run test:smoke:runner` reported about `37.5s`; `npm run test:render:integration:runner` reported about `10.0s`; `npm run test:maze:runner` previously reported about `11.5s` with an `11.9s` wall total; and `npm run ensure:mazes` previously took about `4.9m`, dominated by `export:maze-probes` at about `4.5m` for all 245 persisted probe captures.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.

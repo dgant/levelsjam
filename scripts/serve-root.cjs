@@ -10,6 +10,7 @@ const contentTypes = new Map([
   ['.html', 'text/html; charset=utf-8'],
   ['.js', 'text/javascript; charset=utf-8'],
   ['.json', 'application/json; charset=utf-8'],
+  ['.bin', 'application/octet-stream'],
   ['.png', 'image/png'],
   ['.svg', 'image/svg+xml'],
   ['.webp', 'image/webp']
@@ -29,7 +30,7 @@ const server = http.createServer((request, response) => {
     return
   }
 
-  fs.readFile(filePath, (error, file) => {
+  fs.stat(filePath, (error, stats) => {
     if (error) {
       response.writeHead(error.code === 'ENOENT' ? 404 : 500).end('Not found')
       return
@@ -37,9 +38,11 @@ const server = http.createServer((request, response) => {
 
     const extension = path.extname(filePath)
     response.writeHead(200, {
+      'Content-Length': stats.size,
       'Content-Type': contentTypes.get(extension) ?? 'application/octet-stream'
     })
-    response.end(file)
+
+    fs.createReadStream(filePath).pipe(response)
   })
 })
 

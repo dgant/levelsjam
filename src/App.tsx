@@ -31,6 +31,7 @@ import {
   FrontSide,
   Group,
   HalfFloatType,
+  ImageBitmapLoader,
   LinearFilter,
   LinearMipmapLinearFilter,
   Material,
@@ -79,6 +80,7 @@ import {
 import {
   Suspense,
   startTransition,
+  useCallback,
   useEffect,
   useMemo,
   type RefObject,
@@ -89,6 +91,7 @@ import {
 import {
   BlendFunction,
   Effect,
+  EffectComposer as PostEffectComposer,
   EffectAttribute,
   EffectPass,
   Pass,
@@ -158,7 +161,7 @@ declare const __GIT_REVISION_TIMESTAMP__: string
 const assetBase = import.meta.env.BASE_URL
 const ENVIRONMENT_URL = `${assetBase}textures/environment/overcast_soil_1k.hdr`
 const FIRE_FLIPBOOK_URL =
-  `${assetBase}textures/fire/CampFire_l_nosmoke_front_Loop_01_4K_6x6.png`
+  `${assetBase}textures/runtime/fire/CampFire_l_nosmoke_front_Loop_01_4K_6x6_cropped.png`
 const MONSTER_MODEL_URLS = {
   minotaur: `${assetBase}models/minotaur-runtime/scene.gltf`,
   spider: `${assetBase}models/pbr_jumping_spider_monster/scene.gltf`,
@@ -175,19 +178,19 @@ const PUDDLE_TEXTURE_URLS = {
   normal: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_Normal.jpg`
 }
 const WALL_TEXTURE_URLS = {
-  ao: `${assetBase}textures/stone-wall-29/stonewall_29-1K/stonewall_29_ambientocclusion-1K.png`,
-  color: `${assetBase}textures/stone-wall-29/stonewall_29-1K/stonewall_29_basecolor-1K.png`,
-  height: `${assetBase}textures/stone-wall-29/stonewall_29-1K/stonewall_29_height-1K.png`,
-  normal: `${assetBase}textures/stone-wall-29/stonewall_29-1K/stonewall_29_normal-1K.png`,
-  roughness: `${assetBase}textures/stone-wall-29/stonewall_29-1K/stonewall_29_roughness-1K.png`
+  ao: `${assetBase}textures/runtime/stone-wall-29/stonewall_29_ambientocclusion-1K.png`,
+  color: `${assetBase}textures/runtime/stone-wall-29/stonewall_29_basecolor-1K.png`,
+  height: `${assetBase}textures/runtime/stone-wall-29/stonewall_29_height-1K.png`,
+  normal: `${assetBase}textures/runtime/stone-wall-29/stonewall_29_normal-1K.png`,
+  roughness: `${assetBase}textures/runtime/stone-wall-29/stonewall_29_roughness-1K.png`
 }
 const METAL_TEXTURE_URLS = {
-  ao: `${assetBase}textures/metal-13/metal_13-1K/metal_13_ambientocclusion-1K.png`,
-  color: `${assetBase}textures/metal-13/metal_13-1K/metal_13_basecolor-1K.png`,
-  height: `${assetBase}textures/metal-13/metal_13-1K/metal_13_height-1K.png`,
+  ao: `${assetBase}textures/runtime/metal-13/metal_13_ambientocclusion-1K.png`,
+  color: `${assetBase}textures/runtime/metal-13/metal_13_basecolor-1K.png`,
+  height: `${assetBase}textures/runtime/metal-13/metal_13_height-1K.png`,
   metallic: `${assetBase}textures/metal-13/metal_13-1K/metal_13_metallic-1K.png`,
-  normal: `${assetBase}textures/metal-13/metal_13-1K/metal_13_normal-1K.png`,
-  roughness: `${assetBase}textures/metal-13/metal_13-1K/metal_13_roughness-1K.png`
+  normal: `${assetBase}textures/runtime/metal-13/metal_13_normal-1K.png`,
+  roughness: `${assetBase}textures/runtime/metal-13/metal_13_roughness-1K.png`
 }
 const LOOK_SENSITIVITY = 0.003
 const MAX_PITCH = Math.PI / 2 - 0.05
@@ -211,10 +214,10 @@ const FIRE_FLIPBOOK_GRID = 6
 const FIRE_FLIPBOOK_FRAME_COUNT = FIRE_FLIPBOOK_GRID * FIRE_FLIPBOOK_GRID
 const FIRE_FLIPBOOK_DURATION_SECONDS = 0.5
 const FIRE_FLIPBOOK_FRAME_CROP = {
-  maxX: 0.6187683284457478,
-  maxY: 0.8123167155425219,
-  minX: 0.25806451612903225,
-  minY: 0.18621700879765396
+  maxX: 1,
+  maxY: 1,
+  minX: 0,
+  minY: 0
 } as const
 const FIRE_FLIPBOOK_CROP_WIDTH =
   FIRE_FLIPBOOK_FRAME_CROP.maxX - FIRE_FLIPBOOK_FRAME_CROP.minX
@@ -248,6 +251,186 @@ function recordStartupMarker(name: string) {
 
   document.body.dataset[name] = performance.now().toFixed(1)
 }
+
+const MATERIAL_TEXTURE_PROPERTY_NAMES = [
+  'alphaMap',
+  'aoMap',
+  'bumpMap',
+  'clearcoatMap',
+  'clearcoatNormalMap',
+  'clearcoatRoughnessMap',
+  'displacementMap',
+  'emissiveMap',
+  'envMap',
+  'iridescenceMap',
+  'iridescenceThicknessMap',
+  'lightMap',
+  'map',
+  'metalnessMap',
+  'normalMap',
+  'roughnessMap',
+  'sheenColorMap',
+  'sheenRoughnessMap',
+  'specularColorMap',
+  'specularIntensityMap',
+  'transmissionMap'
+] as const
+const SCENE_RENDER_WARM_OBJECTS_PER_FRAME = 8
+
+function collectSceneMaterialTextures(scene: ThreeScene) {
+  const textures: Texture[] = []
+  const seenTextureIds = new Set<string>()
+
+  scene.traverse((object) => {
+    const materialOrMaterials = (object as { material?: Material | Material[] }).material
+
+    if (!materialOrMaterials) {
+      return
+    }
+
+    const materials = Array.isArray(materialOrMaterials)
+      ? materialOrMaterials
+      : [materialOrMaterials]
+
+    for (const material of materials) {
+      const materialRecord = material as Material & Record<string, unknown>
+
+      for (const propertyName of MATERIAL_TEXTURE_PROPERTY_NAMES) {
+        const value = materialRecord[propertyName]
+
+        if (value instanceof Texture && !seenTextureIds.has(value.uuid)) {
+          seenTextureIds.add(value.uuid)
+          textures.push(value)
+        }
+      }
+    }
+  })
+
+  return textures
+}
+
+function waitForNextAnimationFrame() {
+  return new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve())
+  })
+}
+
+async function warmSceneTextures(
+  gl: WebGLRenderer,
+  scene: ThreeScene,
+  isCancelled: () => boolean
+) {
+  const textures = collectSceneMaterialTextures(scene)
+
+  for (const texture of textures) {
+    if (isCancelled()) {
+      return
+    }
+
+    gl.initTexture(texture)
+    await waitForNextAnimationFrame()
+  }
+}
+
+function collectSceneRenderableObjects(scene: ThreeScene) {
+  const objects: Mesh[] = []
+
+  scene.traverse((object) => {
+    const maybeMesh = object as Mesh
+
+    if (maybeMesh.isMesh && maybeMesh.material) {
+      objects.push(maybeMesh)
+    }
+  })
+
+  return objects
+}
+
+async function warmSceneRenderables(
+  gl: WebGLRenderer,
+  scene: ThreeScene,
+  camera: ThreeCamera,
+  isCancelled: () => boolean
+) {
+  const objects = collectSceneRenderableObjects(scene)
+  const visibility = objects.map((object) => object.visible)
+
+  try {
+    for (const object of objects) {
+      object.visible = false
+    }
+
+    for (let objectIndex = 0; objectIndex < objects.length; objectIndex += 1) {
+      if (isCancelled()) {
+        return
+      }
+
+      const object = objects[objectIndex]
+      object.visible = true
+      gl.render(scene, camera)
+      object.visible = false
+
+      if ((objectIndex + 1) % SCENE_RENDER_WARM_OBJECTS_PER_FRAME === 0) {
+        await waitForNextAnimationFrame()
+      }
+    }
+
+    await waitForNextAnimationFrame()
+  } finally {
+    objects.forEach((object, index) => {
+      object.visible = visibility[index] ?? object.visible
+    })
+  }
+}
+
+async function warmEffectComposer(
+  composer: PostEffectComposer | null,
+  isCancelled: () => boolean
+) {
+  if (!composer || isCancelled()) {
+    return
+  }
+
+  const passes = (
+    composer as PostEffectComposer & {
+      passes?: Array<{ enabled: boolean }>
+    }
+  ).passes ?? []
+  const enabledStates = passes.map((pass) => pass.enabled)
+
+  try {
+    if (passes.length === 0) {
+      composer.render(0)
+      await waitForNextAnimationFrame()
+      return
+    }
+
+    for (let passIndex = 0; passIndex < passes.length; passIndex += 1) {
+      if (isCancelled()) {
+        return
+      }
+
+      passes.forEach((pass, index) => {
+        pass.enabled = index === 0 || index === passIndex
+      })
+      composer.render(0)
+      await waitForNextAnimationFrame()
+    }
+
+    if (!isCancelled()) {
+      passes.forEach((pass, index) => {
+        pass.enabled = enabledStates[index] ?? pass.enabled
+      })
+      composer.render(0)
+      await waitForNextAnimationFrame()
+    }
+  } finally {
+    passes.forEach((pass, index) => {
+      pass.enabled = enabledStates[index] ?? pass.enabled
+    })
+  }
+}
+
 const MAZE_GROUND_PATCH_OFFSET_Y = 0.002
 const REFLECTION_PROBE_RENDER_SIZE = 32
 const REFLECTION_PROBE_AMBIENT_RENDER_SIZE = 24
@@ -262,6 +445,7 @@ const REFLECTION_PROBE_STARTUP_CAPTURE_DELAY_MS = 250
 const REFLECTION_PROBE_BACKGROUND_CAPTURE_DELAY_MS = 1000
 const REFLECTION_PROBE_EMISSIVE_RADIUS = 0.16
 const REFLECTION_PROBE_EMISSIVE_SCALE = 2
+const STARTUP_VOLUMETRIC_PROBE_READY_RADIUS = 12
 const FOG_VOLUME_HEIGHT = 6
 const FOG_EXTINCTION_SCALE = 1
 const DEFAULT_VOLUMETRIC_AMBIENT_HEX = '#8f949e'
@@ -1186,9 +1370,12 @@ type ProbeBlendShader = Shader & {
 }
 
 type MaterialShaderPatchConfig = {
+  lightMapEncoding?: LightmapTextureEncoding
   lightMapAmbientTint?: Color
   lightMapTorchTint?: Color
 }
+
+type LightmapTextureEncoding = 'linear' | 'rgbe8'
 
 type WallMaterialContinuumStepKey =
   | 'basic-white'
@@ -2501,6 +2688,57 @@ vec3 getIBLRadiance( const in vec3 viewDir, const in vec3 normal, const in float
 #endif
 `
 
+const LEVELSJAM_LIGHTS_FRAGMENT_MAPS = `
+#if defined( RE_IndirectDiffuse )
+
+\t#ifdef USE_LIGHTMAP
+
+\t\tvec4 lightMapTexel = texture2D( lightMap, vLightMapUv );
+
+\t\t#ifdef LEVELSJAM_LIGHTMAP_RGBE8
+\t\t\tfloat lightMapExponent = lightMapTexel.a * 255.0 - 128.0;
+\t\t\tvec3 lightMapColor = lightMapTexel.a <= 0.0
+\t\t\t\t? vec3( 0.0 )
+\t\t\t\t: lightMapTexel.rgb * exp2( lightMapExponent );
+\t\t#else
+\t\t\tvec3 lightMapColor = lightMapTexel.rgb;
+\t\t#endif
+
+\t\tvec3 lightMapIrradiance = lightMapColor * lightMapIntensity;
+
+\t\tirradiance += lightMapIrradiance;
+
+\t#endif
+
+\t#if defined( USE_ENVMAP ) && defined( STANDARD ) && defined( ENVMAP_TYPE_CUBE_UV )
+
+\t\tiblIrradiance += getIBLIrradiance( geometryNormal );
+
+\t#endif
+
+#endif
+
+#if defined( USE_ENVMAP ) && defined( RE_IndirectSpecular )
+
+\t#ifdef USE_ANISOTROPY
+
+\t\tradiance += getIBLAnisotropyRadiance( geometryViewDir, geometryNormal, material.roughness, material.anisotropyB, material.anisotropy );
+
+\t#else
+
+\t\tradiance += getIBLRadiance( geometryViewDir, geometryNormal, material.roughness );
+
+\t#endif
+
+\t#ifdef USE_CLEARCOAT
+
+\t\tclearcoatRadiance += getIBLRadiance( geometryViewDir, geometryClearcoatNormal, material.clearcoatRoughness );
+
+\t#endif
+
+#endif
+`
+
 function updateProbeBlendShaderUniforms(
   shader: ProbeBlendShader | null,
   probeBlend: ProbeBlendConfig,
@@ -2801,6 +3039,7 @@ function getProbeBlendUpdateKey(
   patchConfig: MaterialShaderPatchConfig
 ) {
   return JSON.stringify({
+    lightMapEncoding: patchConfig.lightMapEncoding ?? 'linear',
     lightMapAmbientTint: patchConfig.lightMapAmbientTint
       ? [
           patchConfig.lightMapAmbientTint.r,
@@ -2885,10 +3124,12 @@ function getProbeBlendProgramKey(
   const usesTintedLightMap =
     Boolean(patchConfig.lightMapAmbientTint) ||
     Boolean(patchConfig.lightMapTorchTint)
+  const lightMapEncoding = patchConfig.lightMapEncoding ?? 'linear'
 
   return [
     'probe-blend-v4',
     usesTintedLightMap ? 'lightmap-tint' : 'plain',
+    `lightmap-${lightMapEncoding}`,
     probeBlend.mode,
     activeRadianceMode,
     probeBlend.vlmMode ?? 'disabled'
@@ -2982,6 +3223,10 @@ function patchProbeBlendMaterialShader(
   const shaderFeatureDefines = usesLocalRadiance
     ? '#define PROBE_BLEND_ENABLE_LOCAL_RADIANCE 1'
     : ''
+  const lightMapFeatureDefines =
+    currentPatchConfig.lightMapEncoding === 'rgbe8'
+      ? '#define LEVELSJAM_LIGHTMAP_RGBE8 1\n'
+      : ''
 
   probeBlendShader.uniforms.lightMapAmbientTint = new Uniform(BLACK_COLOR.clone())
   probeBlendShader.uniforms.lightMapTorchTint = new Uniform(WHITE_COLOR.clone())
@@ -3074,10 +3319,14 @@ function patchProbeBlendMaterialShader(
 \t#include <project_vertex>`
       )
   probeBlendShader.fragmentShader =
-    `${shaderFeatureDefines}\nuniform vec3 lightMapAmbientTint;\nuniform vec3 lightMapTorchTint;\nuniform float probeBlendDiffuseIntensity;\nuniform float probeBlendRadianceIntensity;\nvarying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
+    `${shaderFeatureDefines}\n${lightMapFeatureDefines}uniform vec3 lightMapAmbientTint;\nuniform vec3 lightMapTorchTint;\nuniform float probeBlendDiffuseIntensity;\nuniform float probeBlendRadianceIntensity;\nvarying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
       .replace(
         '#include <envmap_physical_pars_fragment>',
         PROBE_BLEND_SHADER_CHUNK
+      )
+      .replace(
+        '#include <lights_fragment_maps>',
+        LEVELSJAM_LIGHTS_FRAGMENT_MAPS
       )
 
   material.userData.probeBlendShaderDebug = {
@@ -3888,10 +4137,12 @@ function useProbeBlendMaterialShader(
       const usesTintedLightMap =
         Boolean(currentPatchConfig.lightMapAmbientTint) ||
         Boolean(currentPatchConfig.lightMapTorchTint)
+      const lightMapEncoding = currentPatchConfig.lightMapEncoding ?? 'linear'
 
       return [
         'probe-blend-v4',
         usesTintedLightMap ? 'lightmap-tint' : 'plain',
+        `lightmap-${lightMapEncoding}`,
         currentProbeBlend.mode,
         activeRadianceMode,
         currentProbeBlend.vlmMode ?? 'disabled'
@@ -4374,9 +4625,9 @@ function useFireFlipbookTexture() {
   useEffect(() => {
     let cancelled = false
     let loadedTexture: Texture | null = null
-    const loader = new TextureLoader()
+    let loadedBitmap: ImageBitmap | null = null
 
-    loader.load(FIRE_FLIPBOOK_URL, (nextTexture) => {
+    const configureTexture = (nextTexture: Texture) => {
       if (cancelled) {
         nextTexture.dispose()
         return
@@ -4384,6 +4635,9 @@ function useFireFlipbookTexture() {
 
       loadedTexture = nextTexture
       nextTexture.colorSpace = SRGBColorSpace
+      nextTexture.generateMipmaps = false
+      nextTexture.magFilter = LinearFilter
+      nextTexture.minFilter = LinearFilter
       nextTexture.wrapS = RepeatWrapping
       nextTexture.wrapT = RepeatWrapping
       nextTexture.repeat.set(
@@ -4398,11 +4652,43 @@ function useFireFlipbookTexture() {
       nextTexture.anisotropy = Math.min(maxAnisotropy, 8)
       nextTexture.needsUpdate = true
       setTexture(nextTexture)
-    })
+    }
+
+    if ('createImageBitmap' in window) {
+      const loader = new ImageBitmapLoader()
+      loader.setOptions({
+        colorSpaceConversion: 'none',
+        imageOrientation: 'none',
+        premultiplyAlpha: 'none'
+      })
+      loader.load(
+        FIRE_FLIPBOOK_URL,
+        (bitmap) => {
+          if (cancelled) {
+            bitmap.close()
+            return
+          }
+
+          loadedBitmap = bitmap
+          configureTexture(new Texture(bitmap))
+        },
+        undefined,
+        () => {
+          if (cancelled) {
+            return
+          }
+
+          new TextureLoader().load(FIRE_FLIPBOOK_URL, configureTexture)
+        }
+      )
+    } else {
+      new TextureLoader().load(FIRE_FLIPBOOK_URL, configureTexture)
+    }
 
     return () => {
       cancelled = true
       loadedTexture?.dispose()
+      loadedBitmap?.close()
       setTexture(null)
     }
   }, [maxAnisotropy])
@@ -4702,6 +4988,380 @@ function useGroundLightmapTexture(
   return texture
 }
 
+function getLightmapBytesPerPixel(encoding: MazeLightmap['encoding'] = 'rgb16f') {
+  if (encoding === 'rgb16f') {
+    return 6
+  }
+
+  if (encoding === 'rgbe8') {
+    return 4
+  }
+
+  return 3
+}
+
+function hasLightmapRectData(
+  data: Uint8Array,
+  atlasWidth: number,
+  rect: LightmapRect,
+  encoding: MazeLightmap['encoding'] = 'rgb16f'
+) {
+  if (rect.width <= 0 || rect.height <= 0 || atlasWidth <= 0) {
+    return false
+  }
+
+  const bytesPerPixel = getLightmapBytesPerPixel(encoding)
+  const lastPixelIndex =
+    (((rect.y + rect.height - 1) * atlasWidth) + rect.x + rect.width - 1)
+  return data.byteLength >= ((lastPixelIndex + 1) * bytesPerPixel)
+}
+
+function hasLightmapAtlasData(
+  data: Uint8Array,
+  atlasWidth: number,
+  atlasHeight: number,
+  encoding: MazeLightmap['encoding'] = 'rgb16f'
+) {
+  return (
+    atlasWidth > 0 &&
+    atlasHeight > 0 &&
+    data.byteLength >= atlasWidth * atlasHeight * getLightmapBytesPerPixel(encoding)
+  )
+}
+
+function createBlackLightmapTexture(options: {
+  encoding?: LightmapTextureEncoding
+  flipY?: boolean
+} = {}) {
+  const encoding = options.encoding ?? 'linear'
+  const texture =
+    encoding === 'rgbe8'
+      ? new DataTexture(
+        new Uint8Array([0, 0, 0, 0]),
+        1,
+        1,
+        RGBAFormat,
+        UnsignedByteType
+      )
+      : new DataTexture(
+        new Uint16Array([
+          0,
+          0,
+          0,
+          DataUtils.toHalfFloat(1)
+        ]),
+        1,
+        1,
+        RGBAFormat,
+        HalfFloatType
+      )
+  texture.colorSpace = NoColorSpace
+  texture.flipY = options.flipY ?? false
+  texture.generateMipmaps = false
+  texture.magFilter = LinearFilter
+  texture.minFilter = LinearFilter
+  texture.wrapS = ClampToEdgeWrapping
+  texture.wrapT = ClampToEdgeWrapping
+  texture.needsUpdate = true
+  return texture
+}
+
+function createLightmapAtlasTexture(
+  data: Uint8Array,
+  atlasWidth: number,
+  atlasHeight: number,
+  encoding: MazeLightmap['encoding'] = 'rgb16f'
+) {
+  if (!hasLightmapAtlasData(data, atlasWidth, atlasHeight, encoding)) {
+    return createBlackLightmapTexture()
+  }
+
+  const pixelCount = atlasWidth * atlasHeight
+  const outputData = new Uint16Array(pixelCount * 4)
+  const alphaHalfFloat = DataUtils.toHalfFloat(1)
+
+  if (encoding === 'rgb16f') {
+    const sourceData = new Uint16Array(
+      data.buffer,
+      data.byteOffset,
+      Math.floor(data.byteLength / 2)
+    )
+
+    for (let pixelIndex = 0; pixelIndex < pixelCount; pixelIndex += 1) {
+      const sourceOffset = pixelIndex * 3
+      const destinationOffset = pixelIndex * 4
+
+      outputData[destinationOffset] = sourceData[sourceOffset] ?? 0
+      outputData[destinationOffset + 1] = sourceData[sourceOffset + 1] ?? 0
+      outputData[destinationOffset + 2] = sourceData[sourceOffset + 2] ?? 0
+      outputData[destinationOffset + 3] = alphaHalfFloat
+    }
+  } else {
+    for (let pixelIndex = 0; pixelIndex < pixelCount; pixelIndex += 1) {
+      const destinationOffset = pixelIndex * 4
+      const decoded =
+        encoding === 'rgbe8'
+          ? decodeRgbE8(
+            data[pixelIndex * 4],
+            data[(pixelIndex * 4) + 1],
+            data[(pixelIndex * 4) + 2],
+            data[(pixelIndex * 4) + 3]
+          )
+          : [
+            (data[pixelIndex * 3] ?? 0) / 255,
+            (data[(pixelIndex * 3) + 1] ?? 0) / 255,
+            (data[(pixelIndex * 3) + 2] ?? 0) / 255
+          ]
+
+      outputData[destinationOffset] = DataUtils.toHalfFloat(decoded[0] ?? 0)
+      outputData[destinationOffset + 1] = DataUtils.toHalfFloat(decoded[1] ?? 0)
+      outputData[destinationOffset + 2] = DataUtils.toHalfFloat(decoded[2] ?? 0)
+      outputData[destinationOffset + 3] = alphaHalfFloat
+    }
+  }
+
+  const texture = new DataTexture(
+    outputData,
+    atlasWidth,
+    atlasHeight,
+    RGBAFormat,
+    HalfFloatType
+  )
+  texture.colorSpace = NoColorSpace
+  texture.flipY = false
+  texture.generateMipmaps = false
+  texture.magFilter = LinearFilter
+  texture.minFilter = LinearFilter
+  texture.wrapS = ClampToEdgeWrapping
+  texture.wrapT = ClampToEdgeWrapping
+  texture.needsUpdate = true
+  return texture
+}
+
+function useMazeLightmapAtlasTexture(
+  lightmap: MazeLightmap,
+  lightmapBytes: Uint8Array
+) {
+  const texture = useMemo(
+    () =>
+      createLightmapAtlasTexture(
+        lightmapBytes,
+        lightmap.atlasWidth,
+        lightmap.atlasHeight,
+        lightmap.encoding ?? 'rgbe8'
+      ),
+    [lightmap, lightmapBytes]
+  )
+
+  texture.channel = 1
+
+  useEffect(
+    () => () => {
+      texture.dispose()
+    },
+    [texture]
+  )
+
+  return texture
+}
+
+function getRuntimeSurfaceLightmapAtlasUrl(lightmap: MazeLightmap) {
+  if (!lightmap.atlasUrl) {
+    return null
+  }
+
+  if (
+    lightmap.encoding === 'rgb16f' &&
+    lightmap.atlasUrl.endsWith('/surface-lightmap.bin')
+  ) {
+    return lightmap.atlasUrl.replace(/surface-lightmap\.bin$/, 'surface-lightmap-rgbe.png')
+  }
+
+  if (
+    lightmap.encoding === 'rgb16f' &&
+    lightmap.atlasUrl.endsWith('surface-lightmap.bin')
+  ) {
+    return lightmap.atlasUrl.replace(/surface-lightmap\.bin$/, 'surface-lightmap-rgbe.png')
+  }
+
+  return lightmap.atlasUrl
+}
+
+function getRuntimeSurfaceLightmapEncoding(lightmap: MazeLightmap) {
+  const imageUrl = getRuntimeSurfaceLightmapAtlasUrl(lightmap)
+
+  return imageUrl?.endsWith('surface-lightmap-rgbe.png') || lightmap.encoding === 'rgbe8'
+    ? 'rgbe8'
+    : 'linear'
+}
+
+function configureLightmapTexture(texture: Texture) {
+  texture.channel = 1
+  texture.colorSpace = NoColorSpace
+  texture.flipY = false
+  texture.generateMipmaps = false
+  texture.magFilter = LinearFilter
+  texture.minFilter = LinearFilter
+  texture.wrapS = ClampToEdgeWrapping
+  texture.wrapT = ClampToEdgeWrapping
+  texture.needsUpdate = true
+  return texture
+}
+
+async function loadRgbEImageDataTexture(url: string) {
+  const response = await fetch(url)
+
+  if (!response.ok) {
+    throw new Error(`Failed to load surface lightmap texture: ${response.status}`)
+  }
+
+  const blob = await response.blob()
+  const image = await createImageBitmap(blob)
+
+  try {
+    const canvas = document.createElement('canvas')
+    canvas.width = image.width
+    canvas.height = image.height
+    const context = canvas.getContext('2d', {
+      alpha: true,
+      colorSpace: 'srgb',
+      willReadFrequently: true
+    })
+
+    if (!context) {
+      throw new Error('Failed to create surface lightmap decode canvas')
+    }
+
+    context.drawImage(image, 0, 0)
+    const imageData = context.getImageData(0, 0, image.width, image.height)
+    const texture = new DataTexture(
+      new Uint8Array(imageData.data),
+      image.width,
+      image.height,
+      RGBAFormat,
+      UnsignedByteType
+    )
+
+    return configureLightmapTexture(texture)
+  } finally {
+    image.close()
+  }
+}
+
+function useSurfaceLightmapAtlasTexture(lightmap: MazeLightmap) {
+  const initialEncoding = getRuntimeSurfaceLightmapEncoding(lightmap)
+  const [state, setState] = useState<{
+    encoding: LightmapTextureEncoding
+    ready: boolean
+    texture: Texture
+  }>(() => ({
+    encoding: initialEncoding,
+    ready: false,
+    texture: createBlackLightmapTexture({ encoding: initialEncoding })
+  }))
+
+  useEffect(
+    () => {
+      let cancelled = false
+      const imageUrl = getRuntimeSurfaceLightmapAtlasUrl(lightmap)
+      const imageEncoding = getRuntimeSurfaceLightmapEncoding(lightmap)
+
+      setState((current) => ({
+        encoding: imageEncoding,
+        ready: false,
+        texture: current.texture
+      }))
+
+      const load = async () => {
+        if (typeof lightmap.dataBase64 === 'string' && lightmap.dataBase64.length > 0) {
+          return {
+            encoding: 'linear' as const,
+            texture: createLightmapAtlasTexture(
+              decodeBase64Bytes(lightmap.dataBase64),
+              lightmap.atlasWidth,
+              lightmap.atlasHeight,
+              lightmap.encoding ?? 'rgbe8'
+            )
+          }
+        }
+
+        if (
+          imageUrl &&
+          (imageUrl.endsWith('surface-lightmap-rgbe.png') || lightmap.encoding === 'rgbe8')
+        ) {
+          return {
+            encoding: 'rgbe8' as const,
+            texture: await loadRgbEImageDataTexture(resolveMazeDataUrl(imageUrl))
+          }
+        }
+
+        if (imageUrl) {
+          const response = await fetch(resolveMazeDataUrl(imageUrl))
+
+          if (!response.ok) {
+            throw new Error(`Failed to load surface lightmap bytes: ${response.status}`)
+          }
+
+          return {
+            encoding: 'linear' as const,
+            texture: createLightmapAtlasTexture(
+              new Uint8Array(await response.arrayBuffer()),
+              lightmap.atlasWidth,
+              lightmap.atlasHeight,
+              lightmap.encoding ?? 'rgbe8'
+            )
+          }
+        }
+
+        return {
+          encoding: imageEncoding,
+          texture: createBlackLightmapTexture({ encoding: imageEncoding })
+        }
+      }
+
+      void load()
+        .then((nextState) => {
+          if (cancelled) {
+            nextState.texture.dispose()
+            return
+          }
+
+          setState({
+            encoding: nextState.encoding,
+            ready: true,
+            texture: nextState.texture
+          })
+        })
+        .catch((error) => {
+          console.error(error)
+          if (!cancelled) {
+            setState({
+              encoding: imageEncoding,
+              ready: false,
+              texture: createBlackLightmapTexture({ encoding: imageEncoding })
+            })
+          }
+        })
+
+      return () => {
+        cancelled = true
+      }
+    },
+    [lightmap]
+  )
+
+  state.texture.channel = 1
+
+  useEffect(
+    () => () => {
+      state.texture.dispose()
+    },
+    [state.texture]
+  )
+
+  return state
+}
+
 function createLightmapFaceTexture(
   data: Uint8Array,
   atlasWidth: number,
@@ -4712,6 +5372,10 @@ function createLightmapFaceTexture(
     mirrorX?: boolean
   } = {}
 ) {
+  if (!hasLightmapRectData(data, atlasWidth, rect, encoding)) {
+    return createBlackLightmapTexture({ flipY: options.flipY ?? true })
+  }
+
   if (encoding === 'rgb16f') {
     const sourceData = new Uint16Array(
       data.buffer,
@@ -4830,8 +5494,9 @@ function createLightmapFaceTexture(
 
 function createGroundPatchGeometry(
   rect: GroundPatchRect,
-  groundBounds: MazeLightmap['groundBounds']
+  lightmap: MazeLightmap
 ) {
+  const groundBounds = lightmap.groundBounds
   const geometry = new PlaneGeometry(rect.width, rect.depth, 1, 1)
   const positions = geometry.getAttribute('position')
   const mapUvs: number[] = []
@@ -4844,8 +5509,15 @@ function createGroundPatchGeometry(
     const worldZ = rect.centerZ - localY
     const mapU = (worldX + (GROUND_SIZE / 2)) / GROUND_SIZE
     const mapV = 1 - ((worldZ + (GROUND_SIZE / 2)) / GROUND_SIZE)
-    const lightmapU = (worldX - groundBounds.minX) / groundBounds.width
-    const lightmapV = 1 - ((worldZ - groundBounds.minZ) / groundBounds.depth)
+    const localLightmapU = (worldX - groundBounds.minX) / groundBounds.width
+    const localLightmapV = 1 - ((worldZ - groundBounds.minZ) / groundBounds.depth)
+    const [lightmapU, lightmapV] = mapLightmapRectUvToAtlas(
+      lightmap.groundRect,
+      lightmap.atlasWidth,
+      lightmap.atlasHeight,
+      localLightmapU,
+      localLightmapV
+    )
 
     mapUvs.push(mapU, mapV)
     lightmapUvs.push(lightmapU, lightmapV)
@@ -4856,66 +5528,55 @@ function createGroundPatchGeometry(
   return geometry
 }
 
-function createWallGeometry() {
-  const geometry = new BoxGeometry(WALL_LENGTH, WALL_HEIGHT, WALL_WIDTH)
-  const uv = geometry.getAttribute('uv')
+function mapLightmapRectUvToAtlas(
+  rect: LightmapRect,
+  atlasWidth: number,
+  atlasHeight: number,
+  localU: number,
+  localV: number,
+  options: { mirrorX?: boolean } = {}
+) {
+  const rectU = options.mirrorX ? 1 - localU : localU
+  const u = (rect.x + 0.5 + (rectU * Math.max(0, rect.width - 1))) / atlasWidth
+  const v = (rect.y + 0.5 + (localV * Math.max(0, rect.height - 1))) / atlasHeight
 
-  geometry.setAttribute('uv1', uv.clone())
-  return geometry
+  return [u, v] as const
 }
 
-function useWallLightmapTextures(
-  lightmap: MazeLightmap,
-  lightmapBytes: Uint8Array,
-  wallId: string
-) {
-  const textures = useMemo(() => {
-    const rects = lightmap.wallRects[wallId]
+function createWallGeometry(lightmap: MazeLightmap, wallId: string) {
+  const geometry = new BoxGeometry(WALL_LENGTH, WALL_HEIGHT, WALL_WIDTH)
+  const uv = geometry.getAttribute('uv')
+  const uv1 = new Float32Array(uv.count * 2)
+  const rects = lightmap.wallRects[wallId]
 
-    return {
-      neutral: createLightmapFaceTexture(
-        lightmapBytes,
+  for (const group of geometry.groups) {
+    const materialIndex = group.materialIndex ?? 0
+    const rect =
+      materialIndex === 4
+        ? rects?.pz ?? lightmap.neutralRect
+        : materialIndex === 5
+          ? rects?.nz ?? lightmap.neutralRect
+          : lightmap.neutralRect
+    const mirrorX = materialIndex === 5
+
+    for (let index = group.start; index < group.start + group.count; index += 1) {
+      const vertexIndex = geometry.index?.getX(index) ?? index
+      const [atlasU, atlasV] = mapLightmapRectUvToAtlas(
+        rect,
         lightmap.atlasWidth,
-        lightmap.neutralRect,
-        lightmap.encoding ?? 'rgbe8'
-      ),
-      // BoxGeometry's local -Z face UVs are mirrored horizontally relative to +Z.
-      nz: createLightmapFaceTexture(
-        lightmapBytes,
-        lightmap.atlasWidth,
-        rects.nz,
-        lightmap.encoding ?? 'rgbe8',
-        {
-          flipY: false,
-          mirrorX: true
-        }
-      ),
-      pz: createLightmapFaceTexture(
-        lightmapBytes,
-        lightmap.atlasWidth,
-        rects.pz,
-        lightmap.encoding ?? 'rgbe8',
-        {
-          flipY: false
-        }
+        lightmap.atlasHeight,
+        uv.getX(vertexIndex),
+        uv.getY(vertexIndex),
+        { mirrorX }
       )
+
+      uv1[vertexIndex * 2] = atlasU
+      uv1[(vertexIndex * 2) + 1] = atlasV
     }
-  }, [lightmap, lightmapBytes, wallId])
+  }
 
-  textures.neutral.channel = 1
-  textures.nz.channel = 1
-  textures.pz.channel = 1
-
-  useEffect(
-    () => () => {
-      textures.neutral.dispose()
-      textures.nz.dispose()
-      textures.pz.dispose()
-    },
-    [textures]
-  )
-
-  return textures
+  geometry.setAttribute('uv1', new Float32BufferAttribute(uv1, 2))
+  return geometry
 }
 
 function createWallMaterialContinuumStepMaterial(
@@ -5186,6 +5847,7 @@ function EnvironmentLighting({
   onReflectionProbeTexturesChange: (textures: Texture[]) => void
 }) {
   const gl = useThree((state) => state.gl)
+  const camera = useThree((state) => state.camera)
   const scene = useThree((state) => state.scene)
   const hdrTexture = useLoader(HDRLoader, ENVIRONMENT_URL)
   const pmremGenerator = useMemo(() => new PMREMGenerator(gl), [gl])
@@ -5333,6 +5995,23 @@ function EnvironmentLighting({
         })()
       )
     )
+    const startupVolumetricProbeIndices = Array.from(
+      new Set([
+        ...startupProbeIndices,
+        ...layout.reflectionProbes
+          .map((_, probeIndex) => probeIndex)
+          .filter(
+            (probeIndex) =>
+              getDistanceToPriorityPosition(probeIndex) <=
+              (STARTUP_VOLUMETRIC_PROBE_READY_RADIUS ** 2)
+          )
+          .sort(
+            (leftProbeIndex, rightProbeIndex) =>
+              getDistanceToPriorityPosition(leftProbeIndex) -
+              getDistanceToPriorityPosition(rightProbeIndex)
+          )
+      ])
+    )
 
     if (!layout.maze.id.startsWith('debug-')) {
       const previousDepthTargets = reflectionProbeDepthTargets.current
@@ -5350,6 +6029,7 @@ function EnvironmentLighting({
       let publishHandle = 0
       let latestCaptureSceneState = getReflectionCaptureSceneState(scene, layout)
       const startupProbeIndexSet = new Set(startupProbeIndices)
+      const startupVolumetricProbeIndexSet = new Set(startupVolumetricProbeIndices)
 
       const disposeProbeTargets = (
         targets: Array<{ dispose: () => void; texture: Texture }>
@@ -5368,6 +6048,11 @@ function EnvironmentLighting({
           (count, target) => count + Number(Boolean(target)),
           0
         )
+        const loadedVolumetricProbeCount = startupVolumetricProbeIndices.reduce(
+          (count, probeIndex) =>
+            count + Number(Boolean(nextDepthTargets[probeIndex] && nextProbeCoefficients[probeIndex])),
+          0
+        )
 
         return {
           activeProbeId: null,
@@ -5377,6 +6062,7 @@ function EnvironmentLighting({
             Math.max(startupProbeIndices.length, REFLECTION_PROBE_RUNTIME_RESIDENT_LIMIT)
           ),
           loadedProbeCount,
+          loadedVolumetricProbeCount,
           priorityProbeIndices: [...startupProbeIndices],
           probeCaptureCounts: [],
           probeMetrics: [],
@@ -5401,10 +6087,17 @@ function EnvironmentLighting({
             probeCount,
             Math.max(startupProbeIndices.length, REFLECTION_PROBE_RUNTIME_RESIDENT_LIMIT)
           ),
+          startupVolumetricProbeCount: startupVolumetricProbeIndices.length,
+          startupVolumetricProbeIndices: [...startupVolumetricProbeIndices],
           textureMemoryBudgetBytes: REFLECTION_PROBE_RUNTIME_TEXTURE_MEMORY_BUDGET_BYTES,
           ready:
             startupProbeIndices.length > 0 &&
-            startupProbeIndices.every((probeIndex) => Boolean(nextTargets[probeIndex]))
+            startupProbeIndices.every((probeIndex) => Boolean(nextTargets[probeIndex])) &&
+            startupVolumetricProbeIndices.every(
+              (probeIndex) =>
+                Boolean(nextDepthTargets[probeIndex]) &&
+                Boolean(nextProbeCoefficients[probeIndex])
+            )
         }
       }
 
@@ -5523,13 +6216,13 @@ function EnvironmentLighting({
             ])
           )
           const requestedResidentProbeIndexSet = new Set(requestedResidentProbeIndices)
-          const pendingStartupProbeIndices = [...startupProbeIndices]
+          const pendingStartupProbeIndices = [...startupVolumetricProbeIndices]
           const pendingBackgroundProbeIndices = manifest.probes
             .map((probe) => probe.index)
             .filter(
               (probeIndex) =>
                 requestedResidentProbeIndexSet.has(probeIndex) &&
-                !startupProbeIndexSet.has(probeIndex)
+                !startupVolumetricProbeIndexSet.has(probeIndex)
             )
           let activeProbeLoads = 0
           let finished = false
@@ -5554,17 +6247,20 @@ function EnvironmentLighting({
               return
             }
 
+            const shouldLoadReflectionTexture = requestedResidentProbeIndexSet.has(probeIndex)
             const [processedTexture, depthTexture] = await Promise.all([
-              loadRuntimeProbeCubeUvTexture(
-                resolveMazeDataUrl(manifestProbe.processedCubeUvRgbE)
-              ),
+              shouldLoadReflectionTexture
+                ? loadRuntimeProbeCubeUvTexture(
+                    resolveMazeDataUrl(manifestProbe.processedCubeUvRgbE)
+                  )
+                : Promise.resolve(null),
               loadRuntimeProbeDepthCubeTexture(
                 manifestProbe.depthFaces.map((depthFace) => resolveMazeDataUrl(depthFace))
               )
             ])
 
             if (cancelled) {
-              processedTexture.dispose()
+              processedTexture?.dispose()
               depthTexture.dispose()
               return
             }
@@ -5573,9 +6269,11 @@ function EnvironmentLighting({
               dispose: () => depthTexture.dispose(),
               texture: depthTexture
             }
-            nextTargets[probeIndex] = {
-              dispose: () => processedTexture.dispose(),
-              texture: processedTexture
+            if (processedTexture) {
+              nextTargets[probeIndex] = {
+                dispose: () => processedTexture.dispose(),
+                texture: processedTexture
+              }
             }
             nextProbeCoefficients[probeIndex] = (
               Array.isArray(manifestProbe.coefficients) &&
@@ -5594,8 +6292,16 @@ function EnvironmentLighting({
 
             scene.userData.reflectionProbeState = buildReflectionProbeState(latestCaptureSceneState)
 
-            if (startupProbeIndexSet.has(probeIndex)) {
+            const startupVolumetricReady = startupVolumetricProbeIndices.every(
+              (candidateProbeIndex) =>
+                Boolean(nextDepthTargets[candidateProbeIndex]) &&
+                Boolean(nextProbeCoefficients[candidateProbeIndex])
+            )
+
+            if (startupProbeIndexSet.has(probeIndex) || startupVolumetricReady) {
               schedulePublishedProbeState(true)
+            } else {
+              schedulePublishedProbeState(false)
             }
           }
 
@@ -6165,8 +6871,9 @@ function GroundPatchMesh({
   debugIndex,
   environmentTexture,
   environmentIntensity,
-  groundBounds,
   groundLightmapTexture,
+  lightmap,
+  lightmapTextureEncoding,
   lightmapContributionIntensity,
   maps,
   probeBlend,
@@ -6176,8 +6883,9 @@ function GroundPatchMesh({
   debugIndex: number
   environmentTexture: Texture | null
   environmentIntensity: number
-  groundBounds: MazeLightmap['groundBounds']
   groundLightmapTexture: Texture
+  lightmap: MazeLightmap
+  lightmapTextureEncoding: LightmapTextureEncoding
   lightmapContributionIntensity: number
   maps: PbrMaps
   probeBlend: ProbeBlendConfig
@@ -6185,8 +6893,8 @@ function GroundPatchMesh({
   surfaceLightmapsEnabled: boolean
 }) {
   const geometry = useMemo(
-    () => createGroundPatchGeometry(rect, groundBounds),
-    [groundBounds, rect]
+    () => createGroundPatchGeometry(rect, lightmap),
+    [lightmap, rect]
   )
 
   useEffect(
@@ -6201,9 +6909,10 @@ function GroundPatchMesh({
         surfaceLightmapsEnabled
           ? LIGHTMAP_AMBIENT_TINT.clone().multiplyScalar(lightmapContributionIntensity)
           : BLACK_COLOR,
+      lightMapEncoding: lightmapTextureEncoding,
       lightMapTorchTint: TORCH_LIGHTMAP_TINT
     }),
-    [lightmapContributionIntensity, surfaceLightmapsEnabled]
+    [lightmapContributionIntensity, lightmapTextureEncoding, surfaceLightmapsEnabled]
   )
 
   return (
@@ -6241,6 +6950,7 @@ function Ground({
   layout,
   lightmapContributionIntensity,
   groundLightmapTexture,
+  lightmapTextureEncoding,
   probeDepthAtlasTextures,
   probeCoefficientTextures,
   reflectionContributionIntensity,
@@ -6254,6 +6964,7 @@ function Ground({
   layout: MazeLayout
   lightmapContributionIntensity: number
   groundLightmapTexture: Texture
+  lightmapTextureEncoding: LightmapTextureEncoding
   probeDepthAtlasTextures: ProbeDepthAtlasTextures
   probeCoefficientTextures: [Texture, Texture, Texture, Texture]
   reflectionContributionIntensity: number
@@ -6298,9 +7009,10 @@ function Ground({
               debugIndex={index}
               environmentTexture={environmentTexture}
               environmentIntensity={environmentIntensity}
-              groundBounds={layout.maze.lightmap.groundBounds}
               groundLightmapTexture={groundLightmapTexture}
               key={rect.id}
+              lightmap={layout.maze.lightmap}
+              lightmapTextureEncoding={lightmapTextureEncoding}
               lightmapContributionIntensity={lightmapContributionIntensity}
               maps={puddle}
               probeBlend={buildProbeBlendConfig(
@@ -7127,6 +7839,7 @@ function ReflectionProbeDebugOverlay({
   visible: boolean
 }) {
   const gl = useThree((state) => state.gl)
+  const camera = useThree((state) => state.camera)
   const scene = useThree((state) => state.scene)
 
   useEffect(() => {
@@ -7990,7 +8703,8 @@ function MazeWalls({
   iblContributionIntensity,
   layout,
   lightmapContributionIntensity,
-  lightmapBytes,
+  lightmapTexture,
+  lightmapTextureEncoding,
   probeDepthAtlasTextures,
   probeCoefficientTextures,
   reflectionContributionIntensity,
@@ -8003,7 +8717,8 @@ function MazeWalls({
   iblContributionIntensity: number
   layout: MazeLayout
   lightmapContributionIntensity: number
-  lightmapBytes: Uint8Array
+  lightmapTexture: Texture
+  lightmapTextureEncoding: LightmapTextureEncoding
   probeDepthAtlasTextures: ProbeDepthAtlasTextures
   probeCoefficientTextures: [Texture, Texture, Texture, Texture]
   reflectionContributionIntensity: number
@@ -8023,7 +8738,8 @@ function MazeWalls({
           iblContributionIntensity={iblContributionIntensity}
           key={mazeWall.id}
           lightmap={layout.maze.lightmap}
-          lightmapBytes={lightmapBytes}
+          lightmapTexture={lightmapTexture}
+          lightmapTextureEncoding={lightmapTextureEncoding}
           layout={layout}
           lightmapContributionIntensity={lightmapContributionIntensity}
           mazeWall={mazeWall}
@@ -8114,7 +8830,8 @@ function MazeWallMesh({
   environmentIntensity,
   iblContributionIntensity,
   lightmap,
-  lightmapBytes,
+  lightmapTexture,
+  lightmapTextureEncoding,
   layout,
   lightmapContributionIntensity,
   mazeWall,
@@ -8131,7 +8848,8 @@ function MazeWallMesh({
   environmentIntensity: number
   iblContributionIntensity: number
   lightmap: MazeLightmap
-  lightmapBytes: Uint8Array
+  lightmapTexture: Texture
+  lightmapTextureEncoding: LightmapTextureEncoding
   layout: MazeLayout
   lightmapContributionIntensity: number
   mazeWall: MazeLayout['walls'][number]
@@ -8144,14 +8862,9 @@ function MazeWallMesh({
   wallIndex: number
   wallMaterialMaps: PbrMaps
 }) {
-  const lightmapTextures = useWallLightmapTextures(
-    lightmap,
-    lightmapBytes,
-    mazeWall.id
-  )
   const geometry = useMemo(
-    () => createWallGeometry(),
-    []
+    () => createWallGeometry(lightmap, mazeWall.id),
+    [lightmap, mazeWall.id]
   )
   const reflectionProbeBlend = useMemo(
     () =>
@@ -8204,9 +8917,10 @@ function MazeWallMesh({
         surfaceLightmapsEnabled
           ? LIGHTMAP_AMBIENT_TINT.clone().multiplyScalar(lightmapContributionIntensity)
           : BLACK_COLOR,
+      lightMapEncoding: lightmapTextureEncoding,
       lightMapTorchTint: TORCH_LIGHTMAP_TINT
     }),
-    [lightmapContributionIntensity, surfaceLightmapsEnabled]
+    [lightmapContributionIntensity, lightmapTextureEncoding, surfaceLightmapsEnabled]
   )
   const probeBlend = useMemo(
     () =>
@@ -8280,67 +8994,12 @@ function MazeWallMesh({
         object={geometry}
       />
       <WallFaceMaterial
-        attach="material-0"
+        attach="material"
         environmentIntensity={envMapIntensity}
         environmentTexture={environmentTexture}
-        lightMap={surfaceLightmapsEnabled ? lightmapTextures.neutral : undefined}
+        lightMap={surfaceLightmapsEnabled ? lightmapTexture : undefined}
         lightMapIntensity={lightMapIntensity}
-        materialKey={`${wallFaceMaterialBaseKey}:material-0`}
-        maps={wallMaterialMaps}
-        patchConfig={faceMaterialPatchConfig}
-        probeBlend={probeBlend}
-      />
-      <WallFaceMaterial
-        attach="material-1"
-        environmentIntensity={envMapIntensity}
-        environmentTexture={environmentTexture}
-        lightMap={surfaceLightmapsEnabled ? lightmapTextures.neutral : undefined}
-        lightMapIntensity={lightMapIntensity}
-        materialKey={`${wallFaceMaterialBaseKey}:material-1`}
-        maps={wallMaterialMaps}
-        patchConfig={faceMaterialPatchConfig}
-        probeBlend={probeBlend}
-      />
-      <WallFaceMaterial
-        attach="material-2"
-        environmentIntensity={envMapIntensity}
-        environmentTexture={environmentTexture}
-        lightMap={surfaceLightmapsEnabled ? lightmapTextures.neutral : undefined}
-        lightMapIntensity={lightMapIntensity}
-        materialKey={`${wallFaceMaterialBaseKey}:material-2`}
-        maps={wallMaterialMaps}
-        patchConfig={faceMaterialPatchConfig}
-        probeBlend={probeBlend}
-      />
-      <WallFaceMaterial
-        attach="material-3"
-        environmentIntensity={envMapIntensity}
-        environmentTexture={environmentTexture}
-        lightMap={surfaceLightmapsEnabled ? lightmapTextures.neutral : undefined}
-        lightMapIntensity={lightMapIntensity}
-        materialKey={`${wallFaceMaterialBaseKey}:material-3`}
-        maps={wallMaterialMaps}
-        patchConfig={faceMaterialPatchConfig}
-        probeBlend={probeBlend}
-      />
-      <WallFaceMaterial
-        attach="material-4"
-        environmentIntensity={envMapIntensity}
-        environmentTexture={environmentTexture}
-        lightMap={surfaceLightmapsEnabled ? lightmapTextures.pz : undefined}
-        lightMapIntensity={lightMapIntensity}
-        materialKey={`${wallFaceMaterialBaseKey}:material-4`}
-        maps={wallMaterialMaps}
-        patchConfig={faceMaterialPatchConfig}
-        probeBlend={probeBlend}
-      />
-      <WallFaceMaterial
-        attach="material-5"
-        environmentIntensity={envMapIntensity}
-        environmentTexture={environmentTexture}
-        lightMap={surfaceLightmapsEnabled ? lightmapTextures.nz : undefined}
-        lightMapIntensity={lightMapIntensity}
-        materialKey={`${wallFaceMaterialBaseKey}:material-5`}
+        materialKey={wallFaceMaterialBaseKey}
         maps={wallMaterialMaps}
         patchConfig={faceMaterialPatchConfig}
         probeBlend={probeBlend}
@@ -8363,6 +9022,7 @@ function SceneGeometry({
   reflectionProbeDepthTextures,
   reflectionContributionIntensity,
   reflectionProbeTextures,
+  surfaceLightmap,
   turnState
 }: {
   environmentTexture: Texture | null
@@ -8378,11 +9038,13 @@ function SceneGeometry({
   reflectionProbeDepthTextures: CubeTexture[]
   reflectionContributionIntensity: number
   reflectionProbeTextures: Texture[]
+  surfaceLightmap: {
+    encoding: LightmapTextureEncoding
+    ready: boolean
+    texture: Texture
+  }
   turnState: TurnState
 }) {
-  const lightmapBytes = useMazeLightmapBytes(layout.maze.lightmap)
-  const groundLightmapTexture = useGroundLightmapTexture(layout.maze.lightmap, lightmapBytes)
-
   return (
     <>
       <Ground
@@ -8391,7 +9053,8 @@ function SceneGeometry({
         iblContributionIntensity={iblContributionIntensity}
         layout={layout}
         lightmapContributionIntensity={lightmapContributionIntensity}
-        groundLightmapTexture={groundLightmapTexture}
+        groundLightmapTexture={surfaceLightmap.texture}
+        lightmapTextureEncoding={surfaceLightmap.encoding}
         probeDepthAtlasTextures={probeDepthAtlasTextures}
         probeCoefficientTextures={probeCoefficientTextures}
         reflectionContributionIntensity={reflectionContributionIntensity}
@@ -8405,7 +9068,8 @@ function SceneGeometry({
         iblContributionIntensity={iblContributionIntensity}
         layout={layout}
         lightmapContributionIntensity={lightmapContributionIntensity}
-        lightmapBytes={lightmapBytes}
+        lightmapTexture={surfaceLightmap.texture}
+        lightmapTextureEncoding={surfaceLightmap.encoding}
         probeDepthAtlasTextures={probeDepthAtlasTextures}
         probeCoefficientTextures={probeCoefficientTextures}
         reflectionContributionIntensity={reflectionContributionIntensity}
@@ -10521,6 +11185,7 @@ function FlightRig({
           }
           complete?: boolean
           loadedProbeCount?: number
+          loadedVolumetricProbeCount?: number
           priorityProbeIndices?: number[]
           probeCaptureCounts?: Array<{
             billboard: number
@@ -10538,6 +11203,8 @@ function FlightRig({
           requestedResidentProbeIndices?: number[]
           residentProbeLimit?: number
           ready: boolean
+          startupVolumetricProbeCount?: number
+          startupVolumetricProbeIndices?: number[]
           textureMemoryBudgetBytes?: number
         } | null
         getReflectionProbeTextureState?: (probeIndex: number) => {
@@ -11269,6 +11936,7 @@ function Scene({
   }, [])
 
   const gl = useThree((state) => state.gl)
+  const camera = useThree((state) => state.camera)
   const scene = useThree((state) => state.scene)
   const [environmentTexture, setEnvironmentTexture] = useState<Texture | null>(null)
   const [, setEnvironmentFogColor] = useState(() => DEFAULT_FOG_IBL_COLOR.clone())
@@ -11277,6 +11945,8 @@ function Scene({
   const [reflectionProbeDepthTextures, setReflectionProbeDepthTextures] = useState<CubeTexture[]>([])
   const [reflectionProbeRawTextures, setReflectionProbeRawTextures] = useState<Texture[]>([])
   const [reflectionProbeTextures, setReflectionProbeTextures] = useState<Texture[]>([])
+  const surfaceLightmap = useSurfaceLightmapAtlasTexture(layout.maze.lightmap)
+  const composerRef = useRef<PostEffectComposer | null>(null)
   const environmentIntensity = BAKED_ENVIRONMENT_INTENSITY
   const playerWorldPosition = useMemo(
     () => getMazeCellWorldPosition(layout.maze, turnState.player.cell, GROUND_Y),
@@ -11287,18 +11957,80 @@ function Scene({
     [displayedOpenGateIds]
   )
 
-  useFrame(() => {
-    if (hasReportedBasicAssetsReady.current) {
-      return
+  useEffect(() => {
+    let cancelled = false
+    let rafId = 0
+
+    const compileScene = async () => {
+      recordStartupMarker('sceneTextureWarmStartedAt')
+      await warmSceneTextures(gl, scene, () => cancelled)
+
+      if (cancelled) {
+        return
+      }
+
+      recordStartupMarker('sceneTextureWarmCompleteAt')
+      recordStartupMarker('sceneCompileStartedAt')
+
+      gl.compile(scene, camera)
+
+      if (cancelled) {
+        return
+      }
+
+      if (cancelled || hasReportedBasicAssetsReady.current) {
+        return
+      }
+
+      recordStartupMarker('sceneCompileCompleteAt')
+      recordStartupMarker('sceneRenderWarmStartedAt')
+      await warmSceneRenderables(gl, scene, camera, () => cancelled)
+
+      if (cancelled || hasReportedBasicAssetsReady.current) {
+        return
+      }
+
+      recordStartupMarker('sceneRenderWarmCompleteAt')
+      recordStartupMarker('scenePostWarmStartedAt')
+      await warmEffectComposer(composerRef.current, () => cancelled)
+
+      if (cancelled || hasReportedBasicAssetsReady.current) {
+        return
+      }
+
+      recordStartupMarker('scenePostWarmCompleteAt')
+      hasReportedBasicAssetsReady.current = true
+      onAssetsReady()
     }
 
-    if (!getReflectionCaptureSceneState(scene, layout).ready) {
-      return
+    const waitForSceneObjects = () => {
+      if (cancelled || hasReportedBasicAssetsReady.current) {
+        return
+      }
+
+      const probeState = scene.userData.reflectionProbeState as
+        | { ready?: boolean }
+        | undefined
+
+      if (
+        !surfaceLightmap.ready ||
+        !getReflectionCaptureSceneState(scene, layout).ready ||
+        !probeState?.ready
+      ) {
+        rafId = window.requestAnimationFrame(waitForSceneObjects)
+        return
+      }
+
+      void compileScene()
     }
 
-    hasReportedBasicAssetsReady.current = true
-    onAssetsReady()
-  }, -100)
+    rafId = window.requestAnimationFrame(waitForSceneObjects)
+
+    return () => {
+      cancelled = true
+      window.cancelAnimationFrame(rafId)
+    }
+  }, [camera, gl, layout, onAssetsReady, scene, surfaceLightmap.ready])
 
   useEffect(() => {
     const globalWindow = window as Window & {
@@ -12070,6 +12802,7 @@ function Scene({
         reflectionProbeDepthTextures={reflectionProbeDepthTextures}
         reflectionContributionIntensity={getEnabledContributionIntensity(visualSettings.reflectionContribution)}
         reflectionProbeTextures={reflectionProbeTextures}
+        surfaceLightmap={surfaceLightmap}
         turnState={turnState}
       />
       <MonsterActors
@@ -12086,9 +12819,11 @@ function Scene({
         reflectionProbeTextures={reflectionProbeTextures}
         turnState={turnState}
       />
+      {composerEnabled ? (
       <EffectComposer
         enableNormalPass
         multisampling={0}
+        ref={composerRef}
         resolutionScale={0.5}
       >
         {visualSettings.ssr.enabled ? (
@@ -12171,6 +12906,7 @@ function Scene({
         />
         <DitherEffectPrimitive />
       </EffectComposer>
+      ) : null}
       <FlightRig
         controlsOpen={controlsOpen}
         layout={layout}
@@ -14481,10 +15217,10 @@ export default function App() {
     }
   }, [visualSettings])
 
-  const onAssetsReady = () => {
+  const onAssetsReady = useCallback(() => {
     recordStartupMarker('sceneAssetsReadyAt')
     setSceneLoaded(true)
-  }
+  }, [])
 
   if (!mazeLayout) {
     return (
@@ -14567,9 +15303,11 @@ export default function App() {
             ]
           }}
           dpr={[1, 2]}
+          frameloop={sceneLoaded ? 'always' : 'never'}
           gl={{ antialias: true }}
           onCreated={({ gl }) => {
             recordStartupMarker('canvasCreatedAt')
+            gl.debug.checkShaderErrors = false
             gl.outputColorSpace = SRGBColorSpace
             gl.toneMapping = NoToneMapping
             gl.toneMappingExposure = 1

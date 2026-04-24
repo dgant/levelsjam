@@ -24,7 +24,7 @@ function replaceMazeLightmapWithRuntimeAssetUrls(maze) {
       ...maze.lightmap,
       atlasUrl:
         maze.lightmap.encoding === 'rgb16f'
-          ? `${maze.id}/surface-lightmap.bin`
+          ? `${maze.id}/surface-lightmap-rgbe.png`
           : `${maze.id}/surface-lightmap.png`,
       dataBase64: undefined
     }

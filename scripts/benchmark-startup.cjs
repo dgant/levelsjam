@@ -5,7 +5,7 @@ const { PNG } = require('pngjs')
 
 const rootDir = path.resolve(__dirname, '..')
 const devServerCommand = [process.execPath, ['scripts/dev-server.cjs', 'start']]
-const url = process.env.LEVELSJAM_DEV_URL ?? 'http://127.0.0.1:4273/'
+const url = process.env.LEVELSJAM_DEV_URL ?? 'http://127.0.0.1:5173/'
 
 function runNodeScript(command, args) {
   const result = spawnSync(command, args, {
