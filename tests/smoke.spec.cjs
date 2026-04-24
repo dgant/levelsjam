@@ -474,6 +474,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
           probeBlend: {
             diffuseIntensity: 0,
             mode: 'disabled',
+            probeDepthAtlasCount: 6,
             radianceIntensity: 1,
             radianceMode: 'world'
           },
@@ -508,6 +509,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
           probeBlend: {
             diffuseIntensity: 1,
             mode: 'disabled',
+            probeDepthAtlasCount: 6,
             radianceIntensity: 1,
             radianceMode: 'world'
           },
@@ -577,6 +579,22 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await setCheckbox(page, 'Reflection Intensity Enabled', true)
     await setCheckbox(page, 'Volumetric Lightmap Enabled', false)
     await setCheckbox(page, 'Surface Lightmap Enabled', true)
+    await page.keyboard.press('7')
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => window.__levelsjamDebug.getFogState?.() ?? null
+        ),
+        {
+          timeout: 5_000,
+          intervals: [100, 250, 500]
+        }
+      )
+      .toMatchObject({
+        noiseFrequency: 10,
+        noisePeriod: 5,
+        useProbeAmbientTexture: 0
+      })
   })
 
   expect(consoleErrors).toEqual([])

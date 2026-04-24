@@ -364,6 +364,7 @@
 - Enabling lens flares at a small nonzero value does not black out the frame.
 - Enabling lens flares with an intensity of `0` behaves as a visual no-op.
 - Lens flares apply to a stable selected visible torch light rather than jumping between arbitrary lights frame to frame.
+- Lens flares support up to five simultaneously visible torch lights and combine those flares additively.
 - Lens-flare visibility rejects torch lights that are occluded by maze walls or monsters.
 - Lens-flare occlusion ray tests ignore torch billboards and sconce fixture meshes.
 - Lens-flare bokeh and ghosts remain translucent and additive rather than appearing as opaque black or opaque solid sprites.
@@ -372,6 +373,7 @@
 - Enabling volumetric fog with an intensity of `0` behaves as a visual no-op.
 - Increasing volumetric fog intensity toward `1.0` with a dark fog color and fog distance shorter than the visible scene depth can strongly attenuate distant scene color rather than remaining barely perceptible.
 - Volumetric fog samples its lighting only from the nearest available local volumetric-lightmap probes and otherwise falls back to black.
+- Volumetric fog samples its procedural noise field across space and time, with a configurable noise period from `0s` to `10s` and a default of `5s`.
 - Volumetric fog follows the structure of the official three.js volumetric-lighting example while remaining adapted to the current WebGL render stack and local probe-lighting inputs.
 - Disabling local probe-driven diffuse lighting on scene materials does not disable volumetric fog's probe-fed lighting path.
 - Volumetric fog responds immediately to debug-panel parameter changes without requiring the effect to be toggled off and on again.
