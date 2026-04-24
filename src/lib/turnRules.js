@@ -447,6 +447,9 @@ function resolveMonsterTurn(maze, openEdges, visibilityEdges, monster, playerCel
   if (sawPlayer) {
     nextMonster.awake = true
     nextMonster.lastSeenDirection = directionBetween(monster.cell, playerCell)
+    if (nextMonster.lastSeenDirection) {
+      nextMonster.direction = nextMonster.lastSeenDirection
+    }
   }
 
   if (!wasAwake) {

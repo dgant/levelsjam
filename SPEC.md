@@ -42,7 +42,8 @@
 - Each torch billboard is square and its width matches its wall clearance so the flame quad never clips into the wall behind it.
 - Each torch billboard uses the linked source flipbook asset rather than a procedurally generated placeholder.
 - Each torch billboard uses the local committed `CampFire_l_nosmoke_front_Loop_01_4K_6x6.png` atlas copied from the linked source asset.
-- The 4K torch flipbook atlas loads asynchronously after the maze scene can mount so the loading overlay is not blocked by the largest billboard texture.
+- The 4K torch flipbook atlas is the runtime source for flame billboards rather than a cropped or downsampled derivative.
+- The 4K torch flipbook atlas loads asynchronously after the loading overlay is eligible to fade so the largest billboard texture does not create startup animation stalls.
 - Each torch billboard uses a 6x6 fire flipbook atlas.
 - Each torch billboard animation plays eight times faster than the previous 4-second loop.
 - Each torch billboard uses an unlit material.
@@ -85,10 +86,12 @@
 - Reflection probes are captured during the offline maze-lighting pipeline and are not recaptured during ordinary runtime page load or debug-slider interaction.
 - Each persisted maze ships runtime-loadable reflection-probe assets derived from the offline bake rather than generating those assets in the browser from the live scene.
 - Each persisted maze ships runtime-loadable volumetric-lightmap probe assets derived from the offline bake rather than generating those assets in the browser from the live scene.
-- Runtime reflection-probe asset loading keeps a bounded resident working set prioritized around the player's current position instead of accumulating every probe in the maze.
-- Runtime reflection-probe asset loading must not continue in the background until all maze probes are resident if doing so would create avoidable GPU memory pressure or frame-time collapse.
+- Runtime reflection-probe asset loading keeps a bounded resident working set prioritized around the player's current position instead of exceeding the authored resident budget.
+- The current resident reflection-probe budget is large enough for every probe in a current `7x7` maze, so probe-debug visualization can show all active maze probes while still enforcing the texture-memory ceiling.
+- Runtime reflection-probe asset loading must not continue in the background beyond the resident budget if doing so would create avoidable GPU memory pressure or frame-time collapse.
 - Runtime probe residency must be exposed through debug state so automated tests can assert that the loaded probe count stays within the authored resident budget.
 - Volumetric-lightmap probe coefficients and probe-depth visibility data are packed into runtime atlases so materials and fog do not need one sampler per probe.
+- Runtime volumetric-lightmap coefficient and probe-depth data for every probe in the active maze is available to surface materials, volumetric fog, and probe-debug visualization.
 - Each persisted maze ships inspectable offline reflection-probe and volumetric-lightmap artifacts under `logs/lightmap-artifacts`.
 - Each offline reflection probe stores a `32x32` raw cubemap capture.
 - Each offline reflection probe stores an HDR processed runtime reflection texture derived from that raw cubemap.
@@ -96,11 +99,14 @@
 - Each offline volumetric-lightmap probe stores HDR directional lighting data that is separate from the reflection texture and is intended for diffuse probe lighting rather than specular reflections.
 - Reflection probes and volumetric-lightmap probes share the same probe positions, local areas of influence, and capture-time occluders.
 - Diffuse volumetric-lightmap shading is evaluated per pixel rather than from one constant probe blend per mesh.
+- Diffuse volumetric-lightmap shading visibly contributes to surface materials when its runtime intensity is nonzero.
+- Local reflection probes visibly contribute to reflective surface materials when their runtime intensity is nonzero.
 - Geometry that lives primarily inside a maze cell, such as monsters and cell-ground surfaces, evaluates diffuse volumetric-lightmap shading from the current probe plus the four cardinally adjacent probes.
 - Geometry that spans a boundary between maze cells, such as maze walls and wall-mounted sconces, evaluates diffuse volumetric-lightmap shading from the eight closest probes around that boundary.
 - Volumetric-lightmap diffuse shading blends probe influence continuously across surface position so adjacent surfaces do not show hard probe-selection seams.
 - Volumetric-lightmap diffuse shading uses the baked probe depth or shadow data at runtime to reject probe contributions that are occluded from the shaded point by maze geometry.
 - Volumetric fog lighting uses the baked probe depth or shadow data at runtime to reject probe contributions that are occluded from the fog sample point by maze geometry.
+- Volumetric fog blends volumetric-lightmap probes continuously at maze edges instead of creating seams through probe positions or cell boundaries.
 - Maze generation writes lightmap diagnostic artifact textures to a non-source-controlled inspection directory so a human can review the baked wall and floor outputs.
 - Maze artifact generation also writes per-maze reflection-probe capture dumps into the same non-source-controlled inspection directory so a human can inspect the exact runtime cubemap faces used by local reflections.
 - Each maze artifact directory includes raw, processed-runtime, and geometry-only reflection-probe face PNGs for every probe rather than storing those probe diagnostics in a separate unrelated artifact tree.
@@ -113,6 +119,7 @@
 - Reflection probe debug visualization renders as ordinary non-colliding scene geometry rather than as a separately composited overlay so it can be compared directly against the lit scene.
 - Reflection probe debug visualization remains bound to the actual processed local reflection source used by the runtime shading path and otherwise follows the same exposure and post-tonemapping presentation path as the rest of the scene.
 - Reflection probe debug visualization remains plainly visible and mode-distinct from ordinary gameplay viewpoints instead of hiding inside maze geometry or requiring an exact camera placement to notice.
+- Probe debug visualization can show reflection-probe, volumetric-lightmap, or probe-depth/shadow-map data for every active maze probe as applicable to the selected mode.
 - Reflection probe debugging exposes an on-demand geometry-only cubemap capture against a black background so capture-stage maze visibility can be verified independently from later probe filtering or beauty-pass shading.
 - The top of each wall sconce aligns to the bottom of its torch billboard by default so the flame billboard does not appear to float above the fixture.
 - The authored torch light color is `10 * #FF7E00` in HDR linear lighting space.
@@ -133,15 +140,19 @@
 - Raised gates block player and monster movement exactly like walls.
 - Raised gates do not block monster line of sight to the player.
 - Each gate uses the `metal_gate` model, flipped upside down, scaled to fill the `2m x 2m` cell edge opening, and animated from underground to above ground over `250ms` when opening or closing.
+- Every gate state change published by the rules engine is animated by sliding between the underground open position and the above-ground closed position, including state changes that occur before and after player moves.
+- Gate animations run in parallel with player and monster movement animations rather than teleporting or disappearing between turns.
 - The runtime uses offline-resized `512x512` gate textures instead of the oversized source textures.
 - Each cell may contain any number of items and at most one character.
 - Each maze contains one sword on a random unoccupied cell.
 - Each maze contains one trophy on the unoccupied cell with the greatest path distance from the entrance.
 - The sword uses the `bronze_sword_mycean` model, scaled proportionally to a `1m` length, and starts tip-down with the tip slightly below the ground.
+- The sword mesh is oriented upside down when placed in the maze, with its tip pointing into the ground.
 - The trophy uses the `head_of_a_bull` model, scaled proportionally to `0.5m` tall, and starts resting on the ground in its cell.
 - The trophy runtime model uses an offline-resized texture set instead of the source asset's oversized `8k` texture so loading the page does not allocate hundreds of megabytes for a small prop.
 - When the player enters the sword cell without already holding a sword, the sword is picked up and attached to the first-person camera rig in the right hand.
 - When the player enters the trophy cell without already holding the trophy, the trophy is picked up and attached to the first-person camera rig in the left hand.
+- Held sword and trophy meshes remain visible in first person at their authored hand positions after pickup until they are consumed, dropped, or the maze resets.
 - If the player would die by intersecting a monster while holding the sword, the monster dies instead, the sword is consumed, and the death fade plays to white before restoring gameplay.
 - A maze is beaten only when the player acquires the trophy and exits the maze while still holding it.
 - Characters are either the player or monsters.
@@ -166,6 +177,7 @@
 - A sleeping monster that sees the player in an uninterrupted straight cardinal line wakes up and becomes eligible to move on its following turn.
 - The minotaur records the cardinal direction toward the player on each turn where it can see the player.
 - An awake minotaur attempts to move one cell in its last recorded player direction.
+- A minotaur that sees the player after the player rounds a corner keeps tracking the player and does not go dormant merely because the previous movement direction is obsolete.
 - A minotaur that cannot move because of a wall or gate goes to sleep.
 - Each spider is either a left-wall-following spider or a right-wall-following spider.
 - An awake spider moves one cell according to its configured wall-following rule.
@@ -180,6 +192,7 @@
 - The werewolf runtime model loads from an offline-joined asset derived from `public/models/awil_werewolf.zip`, preserves the authored PBR texture set, and reduces the source asset's static over-split skinned meshes to a single regular mesh.
 - Monster GLTF materials preserve their authored PBR texture and material inputs where those inputs load successfully.
 - Monster GLTF materials participate in the local volumetric-lightmap diffuse path and the local reflection-probe specular path.
+- Awake minotaurs and werewolves face the player during idle, rotation, and movement animations.
 - Pressing `1` toggles a free-camera inspection mode that detaches the camera from the player.
 - Free-camera inspection mode uses WASD plus mouse look, has no collisions, supports the arrow keys as movement aliases, and maps `E` to move down and `Q` to move up.
 - Pressing `C` opens a centered credits modal.
@@ -277,7 +290,7 @@
 - The initial loading shell becomes visible in under 1 second from navigation start on the project’s enforced startup benchmark.
 - The loading overlay shows an `h1` with the text `MINOTAUR`.
 - The loading overlay shows an `h2` with the text `Entering the labyrinth...`.
-- The loading overlay animates the trailing dots on the subtitle through `1`, `2`, `3`, `1`, `2`, `3` at 0.25 second intervals.
+- The loading overlay animates the trailing dots on the subtitle through `.`, `..`, `...`, and a blank ellipsis slot at 0.25 second intervals.
 - The loading-overlay dot animation does not rely on JavaScript timers and remains visually smooth while the app bundle and maze payload load.
 - The animated ellipsis aligns on the same baseline as the rest of the loading subtitle text instead of floating higher than the letters.
 - The loading subtitle keeps a consistent total width while the trailing dots animate.
@@ -357,6 +370,8 @@
 - Runtime gameplay falls back to black rather than to environment lighting when baked surface lightmaps or volumetric-lightmap data are absent.
 - Positive exposure values darken the rendered image by stops and negative values brighten it by stops.
 - The renderer uses the postprocessing composer path for the default scene as well as for optional post effects, so enabling an effect does not switch the scene onto a different tone-mapping pipeline.
+- The postprocessing order is screen-space reflections, ambient occlusion, volumetric fog, translucent torch-billboard composite, depth of field, bloom, anamorphic, lens flares, vignette, exposure, tone mapping, and dithering.
+- Depth of Field runs after the torch-billboard composite and before Bloom.
 - Enabling SSR from the debug panel does not halt rendering or introduce runtime errors.
 - Enabling SSR produces a visible reflection change on reflective scene surfaces.
 - Enabling SSR does not brighten the visible HDRI skybox independently of the reflected surfaces.
@@ -372,6 +387,7 @@
 - Enabling lens flares with an intensity of `0` behaves as a visual no-op.
 - Lens flares apply to a stable selected visible torch light rather than jumping between arbitrary lights frame to frame.
 - Lens flares support up to five simultaneously visible torch lights and combine those flares additively.
+- Multiple lens flares add only their flare contributions together and never add the previous scene color more than once.
 - Lens-flare visibility rejects torch lights that are occluded by maze walls or monsters.
 - Lens-flare occlusion ray tests ignore torch billboards and sconce fixture meshes.
 - Lens-flare bokeh and ghosts remain translucent and additive rather than appearing as opaque black or opaque solid sprites.
@@ -381,6 +397,7 @@
 - Increasing volumetric fog intensity toward `1.0` with a dark fog color and fog distance shorter than the visible scene depth can strongly attenuate distant scene color rather than remaining barely perceptible.
 - Volumetric fog samples its lighting only from the nearest available local volumetric-lightmap probes and otherwise falls back to black.
 - Volumetric fog samples its procedural noise field across space and time, with a configurable noise period from `0s` to `10s` and a default of `5s`.
+- The `Fog Noise Period` control changes visible fog motion over time when fog noise strength is nonzero.
 - Volumetric fog follows the structure of the official three.js volumetric-lighting example while remaining adapted to the current WebGL render stack and local probe-lighting inputs.
 - Disabling local probe-driven diffuse lighting on scene materials does not disable volumetric fog's probe-fed lighting path.
 - Volumetric fog responds immediately to debug-panel parameter changes without requiring the effect to be toggled off and on again.
@@ -403,11 +420,11 @@
 ## Debug Controls
 - The debug controls panel can be opened and closed with backquote.
 - The debug controls panel exposes exposure.
-- The debug controls panel exposes numbered tabs selectable by keyboard shortcuts `1` through `9`.
+- The debug controls panel exposes numbered tabs selectable by keyboard shortcuts `1` through `9`, with `0` selecting the Solution tab.
 - The default debug tab exposes the core scene-lighting controls, including the active tone mapper, `Probe Debug`, `Surface Lightmap`, `Volumetric Lightmap`, and `Reflection Intensity`.
 - The `Probe Debug` control appears above `Tone Mapper`.
 - The `Surface Lightmap`, `Volumetric Lightmap`, and `Reflection Intensity` checkbox-plus-slider controls each occupy one line in the same style as other effect rows.
-- Separate debug tabs exist for Ambient Occlusion, Bloom, Depth of Field, Lens Flares, SSR, Volumetric Fog, and Anamorphic.
+- Separate debug tabs exist for Ambient Occlusion, Bloom, Depth of Field, Lens Flares, SSR, Volumetric Fog, Vignette, and Anamorphic.
 - The ambient-occlusion tab exposes mode, intensity, and radius.
 - The bloom tab exposes enabled state and all useful bloom parameters, including intensity, threshold, smoothing, resolution scale, and kernel size.
 - The depth-of-field tab exposes enabled state and all useful depth-of-field parameters, including `focusDistance`, `focalLength`, `bokehScale`, and resolution scale.
@@ -415,6 +432,8 @@
 - The SSR tab exposes enabled state and the core canonical tuning parameters needed to tune its documented implementation, including opacity, distance, thickness, resolution scale, and pass output mode.
 - The volumetric-fog tab exposes enabled state and the core fog parameters needed to tune its probe-lit volume implementation, including amount and noise frequency.
 - The volumetric-fog tab also exposes the high-impact density-shaping parameters needed to tune the current implementation, including noise strength, height falloff, lighting strength, and ray-march step count.
+- The vignette tab exposes enabled state, vignette intensity, vignette noise period, vignette noise intensity, and exposure noise intensity, with both noise intensities defaulting to zero.
+- Vignette and exposure noise controls apply immediately and can produce a nervous flicker effect when set above zero.
 - The anamorphic tab exposes enabled state and the core anamorphic parameters needed to tune the live effect, including intensity, threshold, scale, and sample count.
 - The debug controls panel exposes a toggle for reflection-probe visualization.
 - The debug controls panel lays out each control row on one line in value-label-control order.
@@ -433,7 +452,7 @@
 - The Vite development server starts without regenerating maze runtime data; maze runtime data is generated by the offline maze, build, or asset-preparation paths.
 - The loading overlay remains visible until general scene assets, surface lightmaps, and all volumetric-lightmap coefficient/depth probe data within 12 meters of the player's starting position are loaded.
 - Startup probe loading keeps specular reflection textures bounded to the authored resident-probe limit even when more nearby volumetric-lightmap probes are loaded for diffuse lighting and fog occlusion.
-- The runtime warms scene textures, visible mesh programs, and the post-processing composer before the loading overlay becomes eligible to fade out so first gameplay frames do not absorb shader compilation or texture-upload stalls.
+- The runtime warms scene textures and compiles visible mesh programs before the loading overlay becomes eligible to fade out, then continues lower-priority render/composer warmup in small yielded chunks so startup remains responsive.
 - Runtime surface lightmaps are loaded from the inspectable RGBE PNG payload for browser startup, while the raw binary HDR lightmap remains an artifact for tooling and debugging.
 - The frame rate remains stable during ordinary movement and camera motion.
 - The automated browser performance test covers the default user-visible scene after runtime probe residency has stabilized, not only an early startup state with optional effects disabled.

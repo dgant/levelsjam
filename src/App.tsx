@@ -31,9 +31,7 @@ import {
   FrontSide,
   Group,
   HalfFloatType,
-  ImageBitmapLoader,
   LinearFilter,
-  LinearMipmapLinearFilter,
   Material,
   MathUtils,
   Matrix4,
@@ -161,7 +159,7 @@ declare const __GIT_REVISION_TIMESTAMP__: string
 const assetBase = import.meta.env.BASE_URL
 const ENVIRONMENT_URL = `${assetBase}textures/environment/overcast_soil_1k.hdr`
 const FIRE_FLIPBOOK_URL =
-  `${assetBase}textures/runtime/fire/CampFire_l_nosmoke_front_Loop_01_4K_6x6_cropped.png`
+  `${assetBase}textures/fire/CampFire_l_nosmoke_front_Loop_01_4K_6x6.png`
 const MONSTER_MODEL_URLS = {
   minotaur: `${assetBase}models/minotaur-runtime/scene.gltf`,
   spider: `${assetBase}models/pbr_jumping_spider_monster/scene.gltf`,
@@ -214,10 +212,10 @@ const FIRE_FLIPBOOK_GRID = 6
 const FIRE_FLIPBOOK_FRAME_COUNT = FIRE_FLIPBOOK_GRID * FIRE_FLIPBOOK_GRID
 const FIRE_FLIPBOOK_DURATION_SECONDS = 0.5
 const FIRE_FLIPBOOK_FRAME_CROP = {
-  maxX: 1,
-  maxY: 1,
-  minX: 0,
-  minY: 0
+  maxX: 0.6187683284457478,
+  maxY: 0.8123167155425219,
+  minX: 0.25806451612903225,
+  minY: 0.18621700879765396
 } as const
 const FIRE_FLIPBOOK_CROP_WIDTH =
   FIRE_FLIPBOOK_FRAME_CROP.maxX - FIRE_FLIPBOOK_FRAME_CROP.minX
@@ -275,7 +273,7 @@ const MATERIAL_TEXTURE_PROPERTY_NAMES = [
   'specularIntensityMap',
   'transmissionMap'
 ] as const
-const SCENE_RENDER_WARM_OBJECTS_PER_FRAME = 8
+const SCENE_RENDER_WARM_OBJECTS_PER_FRAME = 1
 
 function collectSceneMaterialTextures(scene: ThreeScene) {
   const textures: Texture[] = []
@@ -391,44 +389,8 @@ async function warmEffectComposer(
     return
   }
 
-  const passes = (
-    composer as PostEffectComposer & {
-      passes?: Array<{ enabled: boolean }>
-    }
-  ).passes ?? []
-  const enabledStates = passes.map((pass) => pass.enabled)
-
-  try {
-    if (passes.length === 0) {
-      composer.render(0)
-      await waitForNextAnimationFrame()
-      return
-    }
-
-    for (let passIndex = 0; passIndex < passes.length; passIndex += 1) {
-      if (isCancelled()) {
-        return
-      }
-
-      passes.forEach((pass, index) => {
-        pass.enabled = index === 0 || index === passIndex
-      })
-      composer.render(0)
-      await waitForNextAnimationFrame()
-    }
-
-    if (!isCancelled()) {
-      passes.forEach((pass, index) => {
-        pass.enabled = enabledStates[index] ?? pass.enabled
-      })
-      composer.render(0)
-      await waitForNextAnimationFrame()
-    }
-  } finally {
-    passes.forEach((pass, index) => {
-      pass.enabled = enabledStates[index] ?? pass.enabled
-    })
-  }
+  composer.render(0)
+  await waitForNextAnimationFrame()
 }
 
 const MAZE_GROUND_PATCH_OFFSET_Y = 0.002
@@ -438,7 +400,7 @@ const REFLECTION_PROBE_FAR = 48
 const REFLECTION_PROBE_LOAD_CONCURRENCY = 8
 const REFLECTION_PROBE_BACKGROUND_LOAD_CONCURRENCY = 1
 const REFLECTION_PROBE_PUBLISH_INTERVAL_MS = 250
-const REFLECTION_PROBE_RUNTIME_RESIDENT_LIMIT = 8
+const REFLECTION_PROBE_RUNTIME_RESIDENT_LIMIT = 64
 const REFLECTION_PROBE_RUNTIME_TEXTURE_MEMORY_BUDGET_BYTES = 768 * 1024 * 1024
 const REFLECTION_PROBE_STARTUP_DELAY_MS = 5000
 const REFLECTION_PROBE_STARTUP_CAPTURE_DELAY_MS = 250
@@ -762,9 +724,7 @@ vec4 sampleFogAmbientCandidate(vec3 worldPosition, vec2 cell) {
     return vec4(0.0);
   }
 
-  vec2 probeWorldXZ = fogProbeGridCellToWorld(cell);
-  vec3 delta = worldPosition - vec3(probeWorldXZ.x, probeHeight, probeWorldXZ.y);
-  float weight = visibility / max(dot(delta, delta), 0.04);
+  float weight = visibility;
   vec3 color = max(coeff0.rgb / 0.282095, vec3(0.0));
 
   return vec4(color * weight, weight);
@@ -775,19 +735,22 @@ vec3 sampleFogAmbientColor(vec3 worldPosition) {
     return vec3(0.0);
   }
 
-  vec2 gridMax = max(probeAmbientGrid - vec2(1.0), vec2(0.0));
   vec2 worldGridPosition = vec2(
     (worldPosition.x - probeAmbientBounds.x) / max(fogProbeCellSize(probeAmbientBounds.z, probeAmbientGrid.x), 0.0001),
     (worldPosition.z - probeAmbientBounds.y) / max(fogProbeCellSize(probeAmbientBounds.w, probeAmbientGrid.y), 0.0001)
   );
-  vec2 cell = clamp(floor(worldGridPosition), vec2(0.0), gridMax);
-  vec4 c0 = sampleFogAmbientCandidate(worldPosition, cell);
-  vec4 c1 = sampleFogAmbientCandidate(worldPosition, cell + vec2(0.0, -1.0));
-  vec4 c2 = sampleFogAmbientCandidate(worldPosition, cell + vec2(1.0, 0.0));
-  vec4 c3 = sampleFogAmbientCandidate(worldPosition, cell + vec2(0.0, 1.0));
-  vec4 c4 = sampleFogAmbientCandidate(worldPosition, cell + vec2(-1.0, 0.0));
-  vec3 color = c0.rgb + c1.rgb + c2.rgb + c3.rgb + c4.rgb;
-  float weight = c0.a + c1.a + c2.a + c3.a + c4.a;
+  vec2 cell = floor(worldGridPosition);
+  vec2 blend = clamp(fract(worldGridPosition), vec2(0.0), vec2(1.0));
+  float w0 = (1.0 - blend.x) * (1.0 - blend.y);
+  float w1 = blend.x * (1.0 - blend.y);
+  float w2 = (1.0 - blend.x) * blend.y;
+  float w3 = blend.x * blend.y;
+  vec4 c0 = sampleFogAmbientCandidate(worldPosition, cell) * w0;
+  vec4 c1 = sampleFogAmbientCandidate(worldPosition, cell + vec2(1.0, 0.0)) * w1;
+  vec4 c2 = sampleFogAmbientCandidate(worldPosition, cell + vec2(0.0, 1.0)) * w2;
+  vec4 c3 = sampleFogAmbientCandidate(worldPosition, cell + vec2(1.0, 1.0)) * w3;
+  vec3 color = c0.rgb + c1.rgb + c2.rgb + c3.rgb;
+  float weight = c0.a + c1.a + c2.a + c3.a;
 
   if (weight <= 0.0001) {
     return vec3(0.0);
@@ -895,6 +858,12 @@ type EffectSettings = {
   intensity: number
 }
 
+type VignetteSettings = EffectSettings & {
+  exposureNoiseIntensity: number
+  noiseIntensity: number
+  noisePeriod: number
+}
+
 type VisualControlTabKey =
   | 'core'
   | 'ao'
@@ -903,6 +872,7 @@ type VisualControlTabKey =
   | 'flares'
   | 'ssr'
   | 'fog'
+  | 'vignette'
   | 'anamorphic'
   | 'solution'
 
@@ -1031,8 +1001,9 @@ const VISUAL_CONTROL_TABS: Array<{
   { hotkey: '5', key: 'flares', label: 'Flares' },
   { hotkey: '6', key: 'ssr', label: 'SSR' },
   { hotkey: '7', key: 'fog', label: 'Fog' },
-  { hotkey: '8', key: 'anamorphic', label: 'Anamorphic' },
-  { hotkey: '9', key: 'solution', label: 'Solution' }
+  { hotkey: '8', key: 'vignette', label: 'Vignette' },
+  { hotkey: '9', key: 'anamorphic', label: 'Anamorphic' },
+  { hotkey: '0', key: 'solution', label: 'Solution' }
 ]
 
 const DEFAULT_AO_RADIUS_METERS = 1
@@ -1085,7 +1056,7 @@ type VisualSettings = {
   volumetricNoisePeriod: number
   volumetricNoiseStrength: number
   volumetricStepCount: number
-  vignette: EffectSettings
+  vignette: VignetteSettings
 }
 
 type VisualSettingsPatch = Partial<{
@@ -1113,7 +1084,7 @@ type VisualSettingsPatch = Partial<{
   volumetricNoisePeriod: number
   volumetricNoiseStrength: number
   volumetricStepCount: number
-  vignette: Partial<EffectSettings>
+  vignette: Partial<VignetteSettings>
 }>
 
 type GenericEffectSettingKey =
@@ -1137,6 +1108,10 @@ type ScalarSettingKey =
   | 'volumetricNoisePeriod'
   | 'volumetricNoiseStrength'
   | 'volumetricStepCount'
+  | 'vignetteExposureNoiseIntensity'
+  | 'vignetteIntensity'
+  | 'vignetteNoiseIntensity'
+  | 'vignetteNoisePeriod'
 
 type PbrMaps = {
   aoMap?: Texture
@@ -1690,7 +1665,13 @@ function createDefaultVisualSettings(): VisualSettings {
     volumetricNoisePeriod: DEFAULT_VOLUMETRIC_NOISE_PERIOD,
     volumetricNoiseStrength: DEFAULT_VOLUMETRIC_NOISE_STRENGTH,
     volumetricStepCount: DEFAULT_VOLUMETRIC_STEP_COUNT,
-    vignette: { enabled: true, intensity: 0.6 }
+    vignette: {
+      enabled: true,
+      exposureNoiseIntensity: 0,
+      intensity: 0.6,
+      noiseIntensity: 0,
+      noisePeriod: 5
+    }
   }
 }
 
@@ -2330,9 +2311,7 @@ vec4 sampleProbeGridCandidate(
   vec4 coeff1 = texture2D( localProbeCoeffTextureL1, uv );
   vec4 coeff2 = texture2D( localProbeCoeffTextureL2, uv );
   vec4 coeff3 = texture2D( localProbeCoeffTextureL3, uv );
-  vec2 probeWorldXZ = probeGridCellToWorld( cell );
-  vec3 delta = worldPosition - vec3( probeWorldXZ.x, probeHeight, probeWorldXZ.y );
-  float weight = visibility / max( dot( delta, delta ), 0.04 );
+  float weight = visibility;
   vec3 color = sampleProbeBlendDiffuse(
     direction,
     coeff0.rgb,
@@ -2348,14 +2327,19 @@ vec3 sampleProbeGridDiffuseCell5(
   vec3 worldPosition,
   vec3 direction
 ) {
-  vec2 cell = worldToProbeGridCell( worldPosition.xz );
-  vec4 c0 = sampleProbeGridCandidate( worldPosition, direction, cell );
-  vec4 c1 = sampleProbeGridCandidate( worldPosition, direction, cell + vec2( 0.0, -1.0 ) );
-  vec4 c2 = sampleProbeGridCandidate( worldPosition, direction, cell + vec2( 1.0, 0.0 ) );
-  vec4 c3 = sampleProbeGridCandidate( worldPosition, direction, cell + vec2( 0.0, 1.0 ) );
-  vec4 c4 = sampleProbeGridCandidate( worldPosition, direction, cell + vec2( -1.0, 0.0 ) );
-  vec3 color = c0.rgb + c1.rgb + c2.rgb + c3.rgb + c4.rgb;
-  float weight = c0.a + c1.a + c2.a + c3.a + c4.a;
+  vec2 gridPosition = ( worldPosition.xz - probeGridMin ) / max( probeCellSize, 0.0001 );
+  vec2 cell = floor( gridPosition );
+  vec2 blend = clamp( fract( gridPosition ), vec2( 0.0 ), vec2( 1.0 ) );
+  float w0 = ( 1.0 - blend.x ) * ( 1.0 - blend.y );
+  float w1 = blend.x * ( 1.0 - blend.y );
+  float w2 = ( 1.0 - blend.x ) * blend.y;
+  float w3 = blend.x * blend.y;
+  vec4 c0 = sampleProbeGridCandidate( worldPosition, direction, cell ) * w0;
+  vec4 c1 = sampleProbeGridCandidate( worldPosition, direction, cell + vec2( 1.0, 0.0 ) ) * w1;
+  vec4 c2 = sampleProbeGridCandidate( worldPosition, direction, cell + vec2( 0.0, 1.0 ) ) * w2;
+  vec4 c3 = sampleProbeGridCandidate( worldPosition, direction, cell + vec2( 1.0, 1.0 ) ) * w3;
+  vec3 color = c0.rgb + c1.rgb + c2.rgb + c3.rgb;
+  float weight = c0.a + c1.a + c2.a + c3.a;
 
   if ( weight <= 0.0001 ) {
     return vec3( 0.0 );
@@ -2368,33 +2352,7 @@ vec3 sampleProbeGridDiffuseBoundary8(
   vec3 worldPosition,
   vec3 direction
 ) {
-  vec2 normalOffset = vec2(
-    abs( probeBoundaryNormal.x ) > 0.5 ? sign( probeBoundaryNormal.x ) : 0.0,
-    abs( probeBoundaryNormal.y ) > 0.5 ? sign( probeBoundaryNormal.y ) : 0.0
-  );
-  vec2 tangentOffset = vec2( -normalOffset.y, normalOffset.x );
-  vec2 cellA = worldToProbeGridCell(
-    worldPosition.xz - ( normalOffset * probeCellSize * 0.51 )
-  );
-  vec2 cellB = worldToProbeGridCell(
-    worldPosition.xz + ( normalOffset * probeCellSize * 0.51 )
-  );
-  vec4 c0 = sampleProbeGridCandidate( worldPosition, direction, cellA );
-  vec4 c1 = sampleProbeGridCandidate( worldPosition, direction, cellA + tangentOffset );
-  vec4 c2 = sampleProbeGridCandidate( worldPosition, direction, cellA - tangentOffset );
-  vec4 c3 = sampleProbeGridCandidate( worldPosition, direction, cellA - normalOffset );
-  vec4 c4 = sampleProbeGridCandidate( worldPosition, direction, cellB );
-  vec4 c5 = sampleProbeGridCandidate( worldPosition, direction, cellB + tangentOffset );
-  vec4 c6 = sampleProbeGridCandidate( worldPosition, direction, cellB - tangentOffset );
-  vec4 c7 = sampleProbeGridCandidate( worldPosition, direction, cellB + normalOffset );
-  vec3 color = c0.rgb + c1.rgb + c2.rgb + c3.rgb + c4.rgb + c5.rgb + c6.rgb + c7.rgb;
-  float weight = c0.a + c1.a + c2.a + c3.a + c4.a + c5.a + c6.a + c7.a;
-
-  if ( weight <= 0.0001 ) {
-    return vec3( 0.0 );
-  }
-
-  return color / weight;
+  return sampleProbeGridDiffuseCell5( worldPosition, direction );
 }
 
 vec4 getProbeBlendVisibleWeights(
@@ -3463,6 +3421,17 @@ function directionToWorldOffset(direction: CardinalDirection) {
   }
 }
 
+function yawTowardWorldPosition(from: Vector3, to: Vector3) {
+  const deltaX = to.x - from.x
+  const deltaZ = to.z - from.z
+
+  if (Math.abs(deltaX) < 0.0001 && Math.abs(deltaZ) < 0.0001) {
+    return 0
+  }
+
+  return Math.atan2(-deltaX, -deltaZ)
+}
+
 function getPmremCubeSize(texture: Texture | null | undefined) {
   const image = texture?.image as
     | {
@@ -3485,6 +3454,33 @@ const DEFAULT_PROBE_TEXTURE_INFO: ProbeTextureInfo = {
   maxMip: 0,
   texelHeight: 1,
   texelWidth: 1
+}
+
+let dummyProbeEnvMapTexture: Texture | null = null
+
+function getDummyProbeEnvMapTexture() {
+  if (dummyProbeEnvMapTexture) {
+    return dummyProbeEnvMapTexture
+  }
+
+  const cubeSize = 16
+  const texture = new DataTexture(
+    new Uint8Array(cubeSize * 3 * cubeSize * 4 * 4),
+    cubeSize * 3,
+    cubeSize * 4,
+    RGBAFormat,
+    UnsignedByteType
+  )
+
+  texture.colorSpace = NoColorSpace
+  texture.flipY = false
+  texture.generateMipmaps = false
+  texture.magFilter = LinearFilter
+  texture.mapping = CubeUVReflectionMapping
+  texture.minFilter = LinearFilter
+  texture.needsUpdate = true
+  dummyProbeEnvMapTexture = texture
+  return texture
 }
 
 function getCubeUvTextureInfo(texture: Texture | null | undefined): ProbeTextureInfo | null {
@@ -4625,7 +4621,8 @@ function useFireFlipbookTexture() {
   useEffect(() => {
     let cancelled = false
     let loadedTexture: Texture | null = null
-    let loadedBitmap: ImageBitmap | null = null
+    let overlayPollHandle = 0
+    let loadDelayHandle = 0
 
     const configureTexture = (nextTexture: Texture) => {
       if (cancelled) {
@@ -4635,9 +4632,6 @@ function useFireFlipbookTexture() {
 
       loadedTexture = nextTexture
       nextTexture.colorSpace = SRGBColorSpace
-      nextTexture.generateMipmaps = false
-      nextTexture.magFilter = LinearFilter
-      nextTexture.minFilter = LinearFilter
       nextTexture.wrapS = RepeatWrapping
       nextTexture.wrapT = RepeatWrapping
       nextTexture.repeat.set(
@@ -4654,41 +4648,36 @@ function useFireFlipbookTexture() {
       setTexture(nextTexture)
     }
 
-    if ('createImageBitmap' in window) {
-      const loader = new ImageBitmapLoader()
-      loader.setOptions({
-        colorSpaceConversion: 'none',
-        imageOrientation: 'none',
-        premultiplyAlpha: 'none'
-      })
-      loader.load(
-        FIRE_FLIPBOOK_URL,
-        (bitmap) => {
-          if (cancelled) {
-            bitmap.close()
-            return
-          }
+    const startLoading = () => {
+      if (cancelled) {
+        return
+      }
 
-          loadedBitmap = bitmap
-          configureTexture(new Texture(bitmap))
-        },
-        undefined,
-        () => {
-          if (cancelled) {
-            return
-          }
-
-          new TextureLoader().load(FIRE_FLIPBOOK_URL, configureTexture)
-        }
-      )
-    } else {
       new TextureLoader().load(FIRE_FLIPBOOK_URL, configureTexture)
     }
 
+    const scheduleAfterOverlay = () => {
+      if (cancelled) {
+        return
+      }
+
+      const overlayCompleteAt = document.body.dataset.loadingOverlayCompleteAt
+
+      if (overlayCompleteAt && overlayCompleteAt !== 'pending') {
+        loadDelayHandle = window.setTimeout(startLoading, 1500)
+        return
+      }
+
+      overlayPollHandle = window.setTimeout(scheduleAfterOverlay, 250)
+    }
+
+    scheduleAfterOverlay()
+
     return () => {
       cancelled = true
+      window.clearTimeout(overlayPollHandle)
+      window.clearTimeout(loadDelayHandle)
       loadedTexture?.dispose()
-      loadedBitmap?.close()
       setTexture(null)
     }
   }, [maxAnisotropy])
@@ -4873,7 +4862,7 @@ function useAttachProbeBlendToModel(
           return
         }
 
-        material.envMap = null
+        material.envMap = getDummyProbeEnvMapTexture()
         material.envMapIntensity = 0
         const attachment = material.userData.probeBlendAttachment as
           | {
@@ -6853,7 +6842,7 @@ function GroundSurfaceMaterial({
       {...maps}
       bumpScale={0.08}
       customProgramCacheKey={probeBlendMaterialProps.customProgramCacheKey}
-      envMap={null}
+      envMap={getDummyProbeEnvMapTexture()}
       envMapIntensity={0}
       key={materialKey}
       lightMap={lightMap}
@@ -7303,7 +7292,7 @@ function WallSconce({
             bumpScale={0.02}
             color="white"
             customProgramCacheKey={probeBlendMaterialProps.customProgramCacheKey}
-            envMap={null}
+            envMap={getDummyProbeEnvMapTexture()}
             envMapIntensity={0}
             key={materialKey}
             map={metal.map}
@@ -8811,7 +8800,7 @@ function WallFaceMaterial({
       attach={attach}
       bumpScale={0.05}
       customProgramCacheKey={probeBlendMaterialProps.customProgramCacheKey}
-      envMap={null}
+      envMap={getDummyProbeEnvMapTexture()}
       envMapIntensity={0}
       key={materialKey}
       lightMap={lightMap}
@@ -9267,12 +9256,17 @@ function GateActor({
       return
     }
 
+    if (group.current.userData.initialized) {
+      return
+    }
+
     group.current.position.set(
       gate.center.x,
-      isOpen ? transform.openY : transform.closedY,
+      transform.closedY,
       gate.center.z
     )
-  }, [gate.center.x, gate.center.z, isOpen, transform])
+    group.current.userData.initialized = true
+  }, [gate.center.x, gate.center.z, transform])
 
   useFrame((_, delta) => {
     if (!group.current || !transform) {
@@ -9491,7 +9485,7 @@ function MazeItemGroundActor({
           -center.y * scale,
           -center.z * scale
         ),
-        rotationX: -Math.PI / 2,
+        rotationX: Math.PI / 2,
         rotationY: 0,
         scale,
         y: GROUND_Y + ((bounds.max.z - center.z) * scale) - 0.04
@@ -10027,6 +10021,7 @@ function MonsterActor({
   layout,
   lightmapContributionIntensity,
   monster,
+  playerCell,
   probeDepthAtlasTextures,
   probeCoefficientTextures,
   reflectionContributionIntensity,
@@ -10041,6 +10036,7 @@ function MonsterActor({
   layout: MazeLayout
   lightmapContributionIntensity: number
   monster: TurnMonster
+  playerCell: { x: number; y: number }
   probeDepthAtlasTextures: ProbeDepthAtlasTextures
   probeCoefficientTextures: [Texture, Texture, Texture, Texture]
   reflectionContributionIntensity: number
@@ -10053,7 +10049,14 @@ function MonsterActor({
     () => getMazeCellWorldPosition(layout.maze, monster.cell, GROUND_Y),
     [layout.maze, monster.cell.x, monster.cell.y]
   )
-  const targetYaw = directionToYaw(monster.direction)
+  const playerWorldPosition = useMemo(
+    () => getMazeCellWorldPosition(layout.maze, playerCell, GROUND_Y),
+    [layout.maze, playerCell.x, playerCell.y]
+  )
+  const targetYaw =
+    monster.awake && (monster.type === 'minotaur' || monster.type === 'werewolf')
+      ? yawTowardWorldPosition(targetPosition, playerWorldPosition)
+      : directionToYaw(monster.direction)
 
   useEffect(() => {
     if (!group.current) {
@@ -10153,6 +10156,7 @@ function MonsterActors({
           layout={layout}
           lightmapContributionIntensity={lightmapContributionIntensity}
           monster={monster}
+          playerCell={turnState.player.cell}
           probeDepthAtlasTextures={probeDepthAtlasTextures}
           probeCoefficientTextures={probeCoefficientTextures}
           reflectionContributionIntensity={reflectionContributionIntensity}
@@ -10427,7 +10431,7 @@ function SSRPassPrimitive({
     pass.enabled = settings.enabled
     pass.fresnel = settings.fresnel
     pass.infiniteThick = settings.infiniteThick
-    pass.opacity = MathUtils.clamp(settings.intensity, 0, 1)
+    pass.opacity = MathUtils.clamp(settings.intensity, 0, 1) * 1.5
     pass.maxDistance = settings.maxDistance
     pass.output =
       SSR_OUTPUT_OPTIONS.find((option) => option.key === settings.output)?.value ??
@@ -10544,9 +10548,13 @@ function PerformanceBenchmarkBridge() {
 }
 
 function ExposureEffectPrimitive({
-  exposure
+  exposure,
+  noiseIntensity,
+  noisePeriod
 }: {
   exposure: number
+  noiseIntensity: number
+  noisePeriod: number
 }) {
   const effect = useMemo(() => new ExposureEffectImpl(exposure), [])
 
@@ -10554,9 +10562,46 @@ function ExposureEffectPrimitive({
     effect.exposure = exposure
   }, [effect, exposure])
 
+  useFrame((state) => {
+    if (noiseIntensity <= 0) {
+      effect.exposure = exposure
+      return
+    }
+
+    const period = Math.max(noisePeriod, 0.0001)
+    const phase = (state.clock.getElapsedTime() / period) * Math.PI * 2
+    const flicker = 1 + (Math.sin(phase) * noiseIntensity)
+
+    effect.exposure = exposure * Math.max(0, flicker)
+  })
+
   useEffect(() => () => effect.dispose(), [effect])
 
   return <primitive object={effect as unknown as Effect} />
+}
+
+function AnimatedVignette({ settings }: { settings: VignetteSettings }) {
+  const [darkness, setDarkness] = useState(settings.intensity)
+
+  useEffect(() => {
+    if (settings.noiseIntensity <= 0) {
+      setDarkness(settings.intensity)
+    }
+  }, [settings.intensity, settings.noiseIntensity])
+
+  useFrame((state) => {
+    if (settings.noiseIntensity <= 0) {
+      return
+    }
+
+    const period = Math.max(settings.noisePeriod, 0.0001)
+    const phase = (state.clock.getElapsedTime() / period) * Math.PI * 2
+    const flicker = Math.sin(phase) * settings.noiseIntensity
+
+    setDarkness(MathUtils.clamp(settings.intensity + flicker, 0, 1))
+  })
+
+  return <Vignette darkness={darkness} />
 }
 
 function DitherEffectPrimitive() {
@@ -10578,6 +10623,7 @@ function TorchLensFlare({
   const raycaster = useThree((state) => state.raycaster)
   const scene = useThree((state) => state.scene)
   const size = useThree((state) => state.size)
+  const [visibleSlotCount, setVisibleSlotCount] = useState(0)
   const projectedPosition = useMemo(() => new Vector3(), [])
   const raycasterPosition = useMemo(() => new Vector2(), [])
   const occlusionMeshes = useRef<Mesh[]>([])
@@ -10600,7 +10646,7 @@ function TorchLensFlare({
           aditionalStreaks: settings.aditionalStreaks,
           animated: settings.animated,
           anamorphic: settings.anamorphic,
-          blendFunction: BlendFunction.ADD,
+          blendFunction: BlendFunction.NORMAL,
           colorGain: FIRE_COLOR.clone().multiplyScalar(
             Math.sqrt(AUTHORED_LIGHTING_SOURCE_SCALE)
           ),
@@ -10779,6 +10825,12 @@ function TorchLensFlare({
         )
       }
     }
+
+    setVisibleSlotCount((currentCount) =>
+      currentCount === visibleLensPositions.length
+        ? currentCount
+        : visibleLensPositions.length
+    )
   })
 
   useEffect(() => {
@@ -10792,7 +10844,7 @@ function TorchLensFlare({
 
   return (
     <>
-      {flareSlots.map((slot) => (
+      {flareSlots.slice(0, visibleSlotCount).map((slot) => (
         <primitive
           key={`torch-lens-flare-${slot.index}`}
           object={slot.pass as unknown as Pass}
@@ -10897,7 +10949,7 @@ function FlightRig({
     playerAnimation.current = null
     replayActive.current = replayActions.length > 0
     freeCamera.current = false
-    setDisplayedOpenGateIds([])
+    setDisplayedOpenGateIds(getOpenGateIds(layout.maze, nextState))
     setTurnState(nextState)
     onReplayActiveChange(replayActive.current)
   }, [layout.maze, onReplayActiveChange, replayRequestId, setDisplayedOpenGateIds, setTurnState])
@@ -11727,7 +11779,7 @@ function FlightRig({
           if (action === 'move-forward' || action === 'move-backward') {
             setDisplayedOpenGateIds(getOpenGateIds(layout.maze, turnStateRef.current))
           } else {
-            setDisplayedOpenGateIds([])
+            setDisplayedOpenGateIds(getOpenGateIds(layout.maze, turnStateRef.current))
           }
 
           const result = applyTurnAction(layout.maze, turnStateRef.current, action)
@@ -11751,9 +11803,9 @@ function FlightRig({
               nextMinotaur.cell.y - result.state.player.cell.y
             )
             const amplitude = MathUtils.clamp(
-              0.12 / Math.max(distanceCells + 0.5, 1),
-              0.006,
-              0.03
+              0.24 / Math.max(distanceCells + 0.5, 1),
+              0.012,
+              0.06
             )
 
             cameraShake.current = {
@@ -11796,7 +11848,7 @@ function FlightRig({
           turnStateRef.current = finalState
           setTurnState(finalState)
           playerAnimation.current = null
-          setDisplayedOpenGateIds([])
+          setDisplayedOpenGateIds(getOpenGateIds(layout.maze, finalState))
 
           if (
             activeAnimation.playerEffect === 'death' ||
@@ -11925,8 +11977,10 @@ function Scene({
   const hasReportedBasicAssetsReady = useRef(false)
 
   useEffect(() => {
-    setTurnState(createInitialTurnState(layout.maze))
-    setDisplayedOpenGateIds([])
+    const nextState = createInitialTurnState(layout.maze)
+
+    setTurnState(nextState)
+    setDisplayedOpenGateIds(getOpenGateIds(layout.maze, nextState))
   }, [layout.maze])
   useEffect(() => {
     hasReportedBasicAssetsReady.current = false
@@ -11983,24 +12037,34 @@ function Scene({
       }
 
       recordStartupMarker('sceneCompileCompleteAt')
+      hasReportedBasicAssetsReady.current = true
+      onAssetsReady()
+
+      if (cancelled) {
+        return
+      }
+
       recordStartupMarker('sceneRenderWarmStartedAt')
       await warmSceneRenderables(gl, scene, camera, () => cancelled)
 
-      if (cancelled || hasReportedBasicAssetsReady.current) {
+      if (cancelled) {
         return
       }
 
       recordStartupMarker('sceneRenderWarmCompleteAt')
+
+      if (cancelled) {
+        return
+      }
+
       recordStartupMarker('scenePostWarmStartedAt')
       await warmEffectComposer(composerRef.current, () => cancelled)
 
-      if (cancelled || hasReportedBasicAssetsReady.current) {
+      if (cancelled) {
         return
       }
 
       recordStartupMarker('scenePostWarmCompleteAt')
-      hasReportedBasicAssetsReady.current = true
-      onAssetsReady()
     }
 
     const waitForSceneObjects = () => {
@@ -12874,12 +12938,6 @@ function Scene({
           />
         ) : null}
         <BillboardCompositePass />
-        {bloomActive ? (
-          <BloomEffectPrimitive settings={visualSettings.bloom} />
-        ) : null}
-        {visualSettings.anamorphic.enabled ? (
-          <AnamorphicEffectPrimitive settings={visualSettings.anamorphic} />
-        ) : null}
         {depthOfFieldActive ? (
           <DepthOfField
             bokehScale={visualSettings.depthOfField.bokehScale}
@@ -12888,6 +12946,12 @@ function Scene({
             resolutionScale={visualSettings.depthOfField.resolutionScale}
           />
         ) : null}
+        {bloomActive ? (
+          <BloomEffectPrimitive settings={visualSettings.bloom} />
+        ) : null}
+        {visualSettings.anamorphic.enabled ? (
+          <AnamorphicEffectPrimitive settings={visualSettings.anamorphic} />
+        ) : null}
         {lensFlareActive ? (
           <TorchLensFlare
             settings={visualSettings.lensFlare}
@@ -12895,10 +12959,12 @@ function Scene({
           />
         ) : null}
         {vignetteActive ? (
-          <Vignette darkness={visualSettings.vignette.intensity} />
+          <AnimatedVignette settings={visualSettings.vignette} />
         ) : null}
         <ExposureEffectPrimitive
           exposure={getRendererExposure(visualSettings.exposureStops)}
+          noiseIntensity={visualSettings.vignette.exposureNoiseIntensity}
+          noisePeriod={visualSettings.vignette.noisePeriod}
         />
         <ToneMapping
           mode={TONE_MAPPING_MODES[visualSettings.toneMapping]}
@@ -13109,8 +13175,7 @@ function VisualControls({
     min: number
     step: number
   }> = [
-    { key: 'volumetricLighting', label: 'Volumetric Fog', min: 0, max: 1, step: 0.01 },
-    { key: 'vignette', label: 'Vignette', min: 0, max: 1, step: 0.05 }
+    { key: 'volumetricLighting', label: 'Volumetric Fog', min: 0, max: 1, step: 0.01 }
   ]
   const renderEffectControl = (effectControl: (typeof effectControls)[number]) => {
     const effectSettings = visualSettings[effectControl.key]
@@ -13351,8 +13416,6 @@ function VisualControls({
           ))}
         </select>
           </label>
-
-          {renderEffectControl(effectControls.find((effectControl) => effectControl.key === 'vignette')!)}
         </>
       ) : null}
 
@@ -14339,6 +14402,100 @@ function VisualControls({
         </>
       ) : null}
 
+      {activeTab === 'vignette' ? (
+        <>
+          <div className="visual-control-row">
+        <output>
+          {visualSettings.vignette.enabled
+            ? visualSettings.vignette.intensity.toFixed(2)
+            : 'off'}
+        </output>
+        <label className="visual-effect-label">
+          <input
+            checked={visualSettings.vignette.enabled}
+            onChange={(event) => {
+              onEffectSettingChange('vignette', { enabled: event.target.checked })
+            }}
+            type="checkbox"
+          />
+          <ResettableLabel onReset={() => {
+            onResetEffectSetting('vignette')
+          }}>
+            Vignette
+          </ResettableLabel>
+        </label>
+        <input
+          aria-label="Vignette Intensity"
+          disabled={!visualSettings.vignette.enabled}
+          max={1}
+          min={0}
+          onChange={(event) => {
+            onScalarSettingChange('vignetteIntensity', Number(event.target.value))
+          }}
+          step={0.05}
+          type="range"
+          value={visualSettings.vignette.intensity}
+        />
+          </div>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.vignette.noisePeriod.toFixed(2)}s</output>
+        <ResettableLabel onReset={() => onResetScalarSetting('vignetteNoisePeriod')}>
+          Vignette Noise Period
+        </ResettableLabel>
+        <input
+          aria-label="Vignette Noise Period"
+          disabled={!visualSettings.vignette.enabled}
+          max={10}
+          min={0}
+          onChange={(event) => {
+            onScalarSettingChange('vignetteNoisePeriod', Number(event.target.value))
+          }}
+          step={0.1}
+          type="range"
+          value={visualSettings.vignette.noisePeriod}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.vignette.noiseIntensity.toFixed(2)}</output>
+        <ResettableLabel onReset={() => onResetScalarSetting('vignetteNoiseIntensity')}>
+          Vignette Noise Intensity
+        </ResettableLabel>
+        <input
+          aria-label="Vignette Noise Intensity"
+          disabled={!visualSettings.vignette.enabled}
+          max={1}
+          min={0}
+          onChange={(event) => {
+            onScalarSettingChange('vignetteNoiseIntensity', Number(event.target.value))
+          }}
+          step={0.01}
+          type="range"
+          value={visualSettings.vignette.noiseIntensity}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.vignette.exposureNoiseIntensity.toFixed(2)}</output>
+        <ResettableLabel onReset={() => onResetScalarSetting('vignetteExposureNoiseIntensity')}>
+          Exposure Noise Intensity
+        </ResettableLabel>
+        <input
+          aria-label="Exposure Noise Intensity"
+          max={1}
+          min={0}
+          onChange={(event) => {
+            onScalarSettingChange('vignetteExposureNoiseIntensity', Number(event.target.value))
+          }}
+          step={0.01}
+          type="range"
+          value={visualSettings.vignette.exposureNoiseIntensity}
+        />
+          </label>
+        </>
+      ) : null}
+
       {activeTab === 'anamorphic' ? (
         <>
           <div className="visual-control-row">
@@ -14857,6 +15014,46 @@ export default function App() {
         }
       }
 
+      if (key === 'vignetteIntensity') {
+        return {
+          ...current,
+          vignette: {
+            ...current.vignette,
+            intensity: value
+          }
+        }
+      }
+
+      if (key === 'vignetteNoisePeriod') {
+        return {
+          ...current,
+          vignette: {
+            ...current.vignette,
+            noisePeriod: value
+          }
+        }
+      }
+
+      if (key === 'vignetteNoiseIntensity') {
+        return {
+          ...current,
+          vignette: {
+            ...current.vignette,
+            noiseIntensity: value
+          }
+        }
+      }
+
+      if (key === 'vignetteExposureNoiseIntensity') {
+        return {
+          ...current,
+          vignette: {
+            ...current.vignette,
+            exposureNoiseIntensity: value
+          }
+        }
+      }
+
       return {
         ...current,
         [key]: value
@@ -15012,6 +15209,26 @@ export default function App() {
 
     if (key === 'reflectionContributionIntensity') {
       onScalarSettingChange(key, defaults.reflectionContribution.intensity)
+      return
+    }
+
+    if (key === 'vignetteIntensity') {
+      onScalarSettingChange(key, defaults.vignette.intensity)
+      return
+    }
+
+    if (key === 'vignetteNoisePeriod') {
+      onScalarSettingChange(key, defaults.vignette.noisePeriod)
+      return
+    }
+
+    if (key === 'vignetteNoiseIntensity') {
+      onScalarSettingChange(key, defaults.vignette.noiseIntensity)
+      return
+    }
+
+    if (key === 'vignetteExposureNoiseIntensity') {
+      onScalarSettingChange(key, defaults.vignette.exposureNoiseIntensity)
       return
     }
 

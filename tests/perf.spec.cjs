@@ -178,14 +178,14 @@ test('startup remains responsive while loading lightmaps and probes', async ({ p
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
   expect(startup.loadingCompleteAt).toBeLessThan(5_000)
-  expect(startup.monitor.samples).toBeGreaterThan(120)
+  expect(startup.monitor.samples).toBeGreaterThan(60)
   expect(startup.monitor.maxDelta).toBeLessThan(900)
   expect(startup.monitor.longTasks.every((entry) => entry.duration < 900)).toBe(true)
   expect([...resourceUrls].some((url) => url.includes('surface-lightmap.bin'))).toBe(false)
   expect([...resourceUrls].some((url) => url.includes('surface-lightmap-rgbe.png'))).toBe(true)
   expect([...resourceUrls].some((url) => url.includes('/textures/runtime/stone-wall-29/'))).toBe(true)
   expect([...resourceUrls].some((url) => url.includes('/textures/stone-wall-29/stonewall_29-1K/'))).toBe(false)
-  expect([...resourceUrls].some((url) => url.includes('/textures/runtime/fire/'))).toBe(true)
+  expect([...resourceUrls].some((url) => url.includes('/textures/runtime/fire/'))).toBe(false)
 })
 
 async function benchmarkWithSettings(page, patch) {

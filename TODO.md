@@ -212,3 +212,29 @@ Regenerate the mazes, and give each one randomly placed minotaur, wolf, spider (
 [x] When you run npm run dev the first thing it does is... process/copy some maze files? Surely this is something that can be done during maze generation instead, to speed up server startup time, right?
 [x] A crucial smoke/performance test would be to load the page, do "Replay solution", then watch the solution play all the way out until the player successfully exits the maze, and watch it maintain our target fps (currently 144) the whole time (on GPU), with no cheating or hacks. Accept an average FPS that's at least 85% of the target and if less, optimize until hitting it or at least figure out and document exactly where the time is going and why.
 [x] The intro screen must not fade out until all general assets are loaded, and all surface and volumetric lightmaps within 12m of the player's starting position have loaded.
+[x] The intro screen ellipsis animation should go from . to .. to ... to [blank] but I think it just oscillates between .. and ...
+[x] Volumetric lightmaps are being applied to fog but not at all to surfaces. The probes look correct.  But even with volumetric lightmap influence at 4x and exposure at -20, everything is completely black. Reflection probesare also not being applied to surfaces whatsoever
+[x] The monster meshes with reduced triangle counts have a ton of holes in their topology now. You can see through them. Re-apply the tasteful reduction of triangles, but preserve the continuous surfaces so that UVs and normals remain similar and the mesh does not gain any new holes
+[x] The interpolated volumetric lightmaps, as applied to volumetric fog, is discontinuous in cells adjacent to the edge of the maze, having hard seams that go directly through the probe locations. Find a principled way to interpolate light maps and their shadows that avoids this discontinuity.
+[x] Fog Noise Period doesn't seem to do anything. There is no change in the fog over time
+[x] Position the sword mesh upside down
+[x] With reflection debug probes enabled, only the eight probes nearest the start position are visible. Several of the shadow map and volumetric lightmap probes are missing, especially the ones furthest from the start position. Given that volumetric lighting and reflections are both not working, i suspect these are all connected somehow. SOmewhat tangentially, consider (with freedom to choose either way) atlassing the reflection probes like we do the volumetric lightmaps and shadow maps
+[x] Revert all changes you made to the torch billboard texture and loading. They look terrible now and we don't need to save the 4MB that badly
+[x] Increasing the lens flares intensity brightens the entire scene even when no lens flares are visible. I think in achieving multiple lens flares you are incorrectly compositing them. When I said I want the multiple lens flares to be additive, I want the flare contributions to be additive to one another, not for the lens flare pass to add the scene's previous color to itself multiple times which I presume is what's happening.
+[x] The gates are working correctly mechanically in the rules simulation, but are not animating correctly.
+  All gate state changes must be animated. The gate animation can happen in parallel with other animation
+  SOme examples of how this works:
+  Suppose every cell on the map is surrounded by gates.
+  The player starts their intitial turn. There are no monsters here. Before the player moves, all gates surrounding the player should be open. Any gates that were closed, should become open (in the game state), and thus any gates that were closed and are now open, should animate as open  (sliding down below the ground).
+  The player moves. Except for the gate between the previous cell and the current cell, all gates that were adjacent to them before should now be closed. Since they were previously open, they must now animate to closed (sliding up from underground)
+  Two examples of how t his is NOT currently working:
+  - Player moves into a cell with gates. There are no monsters nearby. The gate still appears to be closed, even though the player can move through it
+  - Player is in a cell with gates. The gates erroneously appear to be closed. The player takes a step backwards. During the player's movement, the gates vanish, then suddenly reappear when the player arrives.
+ These are a lot of words but don't overcomplicate it: Player moves cause gates to open and close, and these state changes must be animated by gates sliding up and down. That's all.
+ [x] The sword and trophy each vanish after the player picks it up. I do not know if it is invisible, shrunken, or simply placed somewhere nonsensical. REview the rules about how to position the sword and trophy while the player is holding it and enforce it.
+ [x] The minotaur is currently unable to follow the player around corners. It seems like once the player rounds a corner, the minotaur goes to sleep, even if it has line-of-sight of the player
+ [x] When a minotaur or werewolf is awake, it should always be facing the player, including during either of their movement animations`
+ [x] "Replay solution" should reset the whole maze before replaying the solution
+ [x] Add a Vignette tab to the debug window, move the vignette controls there, and add Vignette Noise Period and Vignette Noise Intensity (and apply them) and a Exposure Noise Intensity. Default the intensities to zero for now. The idea is to create a nervous flickering effect
+ [x] Double the monster screen shake intensity
+ [x] Apply DOF before bloom and after the billboard pass

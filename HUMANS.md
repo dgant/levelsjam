@@ -72,7 +72,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify the visible skybox brightness tracks the same calibrated HDRI path as the environment lighting.
 - Verify the ground, maze walls, and sconces load the committed PBR texture packs instead of preview images.
 - Verify the torch billboard uses the linked flipbook asset rather than a generated placeholder atlas.
-- Verify the torch billboard uses the runtime-cropped atlas derived from the linked `CampFire_l_nosmoke_front_Loop_01_4K_6x6.png` source atlas, preserving the 4K source frame detail while avoiding unused transparent margins at startup.
+- Verify the torch billboard uses the linked 4K `CampFire_l_nosmoke_front_Loop_01_4K_6x6.png` source atlas directly, with measured UV cropping in the shader path so the visible flame fills the quad without using a generated cropped derivative.
 - Verify each sconce renders with the requested `metal-13` PBR textures rather than a debug material.
 - Verify the sconces are visibly readable outside the maze walls rather than disappearing into the surface behind them.
 - Verify the torch billboards animate and stay camera-facing even on walls whose parent groups are rotated.
@@ -110,6 +110,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify the `DOF Focus Distance` slider reaches 8 meters.
 - Verify double-clicking a debug label resets only the associated control.
 - Verify the `Surface Lightmap`, `Volumetric Lightmap`, and `Reflection Intensity` controls each produce a visible material change when enabled.
+- Verify the Vignette tab exposes Vignette Intensity, Vignette Noise Period, Vignette Noise Intensity, and Exposure Noise Intensity, with the two noise intensities defaulting to zero.
 - Verify Bloom, Depth Of Field, Lens Flares, and SSR start disabled.
 - Verify the default `Exposure` value is `0`.
 - Verify each sconce, billboard, and torch light sits one sconce radius outside the wall face rather than intersecting the wall.
@@ -140,6 +141,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify enabling volumetric fog with an intensity of `0` produces no visible scene change.
 - Verify enabling Depth Of Field with a nonzero bokeh scale still allows a programmatic camera move to produce a visibly updated frame.
 - Verify enabling Depth Of Field with `0` bokeh scale produces no visible scene change.
+- Verify Depth Of Field runs after the torch-billboard composite and before Bloom in the postprocess stack.
 - Verify each control row in the visual controls panel keeps the value, label, and control on one line in that order.
 - Verify the FPS counter appears in the top-right corner and includes the Git revision and revision timestamp.
 - Verify pressing backquote opens the visual controls panel.

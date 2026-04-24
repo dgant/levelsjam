@@ -316,7 +316,6 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeVisible()
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeChecked()
     await expect(page.getByRole('slider', { name: 'Reflection Intensity' })).toHaveValue('1')
-    await expect(page.getByRole('slider', { name: 'Vignette Intensity' })).toHaveValue('0.6')
 
     await page.getByRole('button', { name: '2. AO' }).click()
     await expect(page.getByLabel('Ambient Occlusion', { exact: true })).toHaveValue('n8ao')
@@ -336,6 +335,12 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByRole('slider', { name: 'Glare Size' })).toHaveValue('0')
     await expect(page.getByRole('slider', { name: 'Ghost Scale' })).toHaveValue('0')
     await expect(page.getByRole('slider', { name: 'Flare Shape' })).toHaveValue('0.03')
+
+    await page.getByRole('button', { name: '8. Vignette' }).click()
+    await expect(page.getByRole('slider', { name: 'Vignette Intensity' })).toHaveValue('0.6')
+    await expect(page.getByRole('slider', { name: 'Vignette Noise Period' })).toHaveValue('5')
+    await expect(page.getByRole('slider', { name: 'Vignette Noise Intensity' })).toHaveValue('0')
+    await expect(page.getByRole('slider', { name: 'Exposure Noise Intensity' })).toHaveValue('0')
     await page.getByRole('button', { name: '1. Core' }).click()
 
     await setSlider(page, 'Exposure', 1.25)
@@ -677,8 +682,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       canvas,
       260,
       180,
-      0.72,
-      0.74,
+      0.4,
+      0.55,
       timingProfile
     )
 
@@ -691,8 +696,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       canvas,
       260,
       180,
-      0.72,
-      0.74,
+      0.4,
+      0.55,
       timingProfile
     )
 

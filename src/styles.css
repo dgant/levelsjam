@@ -119,7 +119,7 @@ body[data-player-effect='sword-strike']::after {
   vertical-align: baseline;
   width: 1ch;
   overflow: hidden;
-  animation: loading-overlay-dots 0.75s linear infinite;
+  animation: loading-overlay-dots 1s steps(1, end) infinite;
 }
 
 @keyframes loading-overlay-dots {
@@ -140,7 +140,7 @@ body[data-player-effect='sword-strike']::after {
 
   75%,
   100% {
-    width: 1ch;
+    width: 0;
   }
 }
 
