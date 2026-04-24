@@ -100,13 +100,22 @@ test('monsters render, stay off surface lightmaps, and land near intended size',
     expect(monster.state.hasLightMap).toBe(false)
     expect(monster.state.visible).toBe(true)
     expect(monster.state.targetSize).toBeGreaterThan(0)
+    expect(monster.state.boundsMin).not.toBeNull()
+    expect(monster.state.boundsMax).not.toBeNull()
 
     const maxDimension = Math.max(...monster.state.boundsSize)
     expect(maxDimension).toBeGreaterThan(monster.state.targetSize * 0.6)
     expect(maxDimension).toBeLessThan(monster.state.targetSize * 1.35)
 
     if (monster.state.type === 'minotaur') {
+      expect(monster.state.targetSize).toBeCloseTo(2.7, 3)
+      expect(monster.state.boundsMin[1]).toBeCloseTo(-0.25, 3)
       expect(monster.state.totalTriangleCount).toBeLessThanOrEqual(11_000)
+    }
+
+    if (monster.state.type === 'werewolf') {
+      expect(monster.state.targetSize).toBeCloseTo(1.6, 3)
+      expect(monster.state.boundsMin[1]).toBeGreaterThanOrEqual(0)
     }
 
     if (monster.state.type === 'spider') {

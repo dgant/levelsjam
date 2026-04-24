@@ -30,6 +30,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - `npm run test:unit` writes per-file and per-subtest timing data to `logs/latest-unit-test-profile.json` and enforces the 20-second reported unit-suite budget.
 - Run `npm run test:smoke` to exercise the built page through Playwright.
 - Run `npm run test:smoke:runner` when `npm run build:pages` has already prepared the root-published bundle.
+- Run `npx playwright test tests/surface-lightmap.spec.cjs --reporter=line` after touching runtime lightmap formats, lightmap extraction, or baked-lightmap application. It isolates a known lit wall and catches the black-wall regression caused by invalid half-float texture uploads.
 - Treat the Playwright `*:runner` commands as tests of the already-published root bundle. Run `npm run build:pages` first whenever source changes need to be reflected in those static-root runners.
 - Run `npm run test:render:integration` when you need the slower full-scene Playwright coverage for reflection, fog, and extended debug-control behavior.
 - `npm run test:render:integration` writes phase and screenshot timing data to `logs/latest-render-integration-profile.json`.

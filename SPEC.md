@@ -170,7 +170,7 @@
 - Each minotaur move triggers a mild screen shake whose amplitude falls off with maze distance from the player and whose duration is `1s`.
 - The werewolf model loads from `public/models/awil_werewolf.zip`, scales proportionally to fit a `1.6m` cube, and places its bottom center at the tile bottom-center.
 - The spider model loads from `public/models/pbr_jumping_spider_monster.zip`, scales proportionally to fit a `1.4m` cube, and is placed as a wall-walking spider with its base oriented along the configured wall and floor.
-- The minotaur runtime model loads from an offline-simplified asset derived from `public/models/minotaur.zip`, reduces the source mesh to roughly ten thousand triangles, scales proportionally to fit a `1.8m` cube, and places its bottom `0.25m` below the tile bottom-center.
+- The minotaur runtime model loads from an offline-simplified asset derived from `public/models/minotaur.zip`, reduces the source mesh to roughly ten thousand triangles, scales proportionally to fit a `2.7m` cube, and places its bottom `0.25m` below the tile bottom-center.
 - Monster GLTF materials preserve their authored PBR texture and material inputs where those inputs load successfully.
 - Monster GLTF materials participate in the local volumetric-lightmap diffuse path and the local reflection-probe specular path.
 - Pressing `1` toggles a free-camera inspection mode that detaches the camera from the player.

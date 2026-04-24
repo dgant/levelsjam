@@ -3930,29 +3930,37 @@ function createLightmapFaceTexture(
       data.byteOffset,
       Math.floor(data.byteLength / 2)
     )
-    const pixelStride = 3
-    const outputData = new Uint16Array(rect.width * rect.height * pixelStride)
+    const sourcePixelStride = 3
+    const outputPixelStride = 4
+    const outputData = new Uint16Array(rect.width * rect.height * outputPixelStride)
+    const alphaHalfFloat = DataUtils.toHalfFloat(1)
 
     for (let row = 0; row < rect.height; row += 1) {
-      const destinationRowOffset = row * rect.width * pixelStride
+      const destinationRowOffset = row * rect.width * outputPixelStride
 
       if (options.mirrorX) {
         for (let column = 0; column < rect.width; column += 1) {
           const sourceColumn = rect.width - 1 - column
           const sourceOffset =
-            ((((rect.y + row) * atlasWidth) + rect.x + sourceColumn) * pixelStride)
-          const destinationOffset = destinationRowOffset + (column * pixelStride)
+            ((((rect.y + row) * atlasWidth) + rect.x + sourceColumn) * sourcePixelStride)
+          const destinationOffset = destinationRowOffset + (column * outputPixelStride)
 
           outputData[destinationOffset] = sourceData[sourceOffset] ?? 0
           outputData[destinationOffset + 1] = sourceData[sourceOffset + 1] ?? 0
           outputData[destinationOffset + 2] = sourceData[sourceOffset + 2] ?? 0
+          outputData[destinationOffset + 3] = alphaHalfFloat
         }
       } else {
-        const sourceOffset = ((((rect.y + row) * atlasWidth) + rect.x) * pixelStride)
-        outputData.set(
-          sourceData.subarray(sourceOffset, sourceOffset + (rect.width * pixelStride)),
-          destinationRowOffset
-        )
+        for (let column = 0; column < rect.width; column += 1) {
+          const sourceOffset =
+            ((((rect.y + row) * atlasWidth) + rect.x + column) * sourcePixelStride)
+          const destinationOffset = destinationRowOffset + (column * outputPixelStride)
+
+          outputData[destinationOffset] = sourceData[sourceOffset] ?? 0
+          outputData[destinationOffset + 1] = sourceData[sourceOffset + 1] ?? 0
+          outputData[destinationOffset + 2] = sourceData[sourceOffset + 2] ?? 0
+          outputData[destinationOffset + 3] = alphaHalfFloat
+        }
       }
     }
 
@@ -3960,7 +3968,7 @@ function createLightmapFaceTexture(
       outputData,
       rect.width,
       rect.height,
-      RGBFormat,
+      RGBAFormat,
       HalfFloatType
     )
     texture.colorSpace = NoColorSpace
@@ -7509,7 +7517,6 @@ function SceneGeometry({
   iblContributionIntensity,
   layout,
   lightmapContributionIntensity,
-  onBasicTexturesReady,
   probeDebugMode,
   probeCoefficientTextures,
   reflectionProbeCoefficients,
@@ -7522,7 +7529,6 @@ function SceneGeometry({
   iblContributionIntensity: number
   layout: MazeLayout
   lightmapContributionIntensity: number
-  onBasicTexturesReady: () => void
   probeDebugMode: ProbeDebugMode
   probeCoefficientTextures: [Texture, Texture, Texture, Texture]
   reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
@@ -7532,12 +7538,6 @@ function SceneGeometry({
 }) {
   const lightmapBytes = useMazeLightmapBytes(layout.maze.lightmap)
   const groundLightmapTexture = useGroundLightmapTexture(layout.maze.lightmap, lightmapBytes)
-
-  useEffect(() => {
-    if (lightmapBytes.length > 0) {
-      onBasicTexturesReady()
-    }
-  }, [lightmapBytes, onBasicTexturesReady])
 
   return (
     <>
@@ -7790,7 +7790,7 @@ function MonsterModel({
     bounds.getCenter(center)
     const targetSize =
       monster.type === 'minotaur'
-        ? 1.8
+        ? 2.7
         : monster.type === 'spider'
           ? 1.4
           : 1.6
@@ -9365,6 +9365,16 @@ function FlightRig({
         monsterBounds.getSize(monsterBoundsSize)
 
         return {
+          boundsMax: [
+            monsterBounds.max.x,
+            monsterBounds.max.y,
+            monsterBounds.max.z
+          ],
+          boundsMin: [
+            monsterBounds.min.x,
+            monsterBounds.min.y,
+            monsterBounds.min.z
+          ],
           boundsSize: [
             monsterBoundsSize.x,
             monsterBoundsSize.y,
@@ -9592,10 +9602,14 @@ function Scene({
   const [turnState, setTurnState] = useState<TurnState>(() =>
     createInitialTurnState(layout.maze)
   )
+  const hasReportedBasicAssetsReady = useRef(false)
 
   useEffect(() => {
     setTurnState(createInitialTurnState(layout.maze))
   }, [layout.maze])
+  useEffect(() => {
+    hasReportedBasicAssetsReady.current = false
+  }, [layout.maze.id])
   useEffect(() => {
     recordStartupMarker('sceneMountedAt')
   }, [])
@@ -9614,6 +9628,19 @@ function Scene({
     () => getMazeCellWorldPosition(layout.maze, turnState.player.cell, GROUND_Y),
     [layout.maze, turnState.player.cell.x, turnState.player.cell.y]
   )
+
+  useFrame(() => {
+    if (hasReportedBasicAssetsReady.current) {
+      return
+    }
+
+    if (!getReflectionCaptureSceneState(scene, layout).ready) {
+      return
+    }
+
+    hasReportedBasicAssetsReady.current = true
+    onAssetsReady()
+  }, -100)
 
   useEffect(() => {
     const globalWindow = window as Window & {
@@ -10200,7 +10227,6 @@ function Scene({
         iblContributionIntensity={getEnabledContributionIntensity(visualSettings.iblContribution)}
         layout={layout}
         lightmapContributionIntensity={getEnabledContributionIntensity(visualSettings.lightmapContribution)}
-        onBasicTexturesReady={onAssetsReady}
         probeDebugMode={visualSettings.probeDebugMode}
         probeCoefficientTextures={probeCoefficientTextures}
         reflectionProbeCoefficients={reflectionProbeCoefficients}

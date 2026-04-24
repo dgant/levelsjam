@@ -355,18 +355,39 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await page.getByLabel('Probe Debug', { exact: true }).selectOption('reflection')
     await expect
       .poll(
-        async () => page.evaluate(() => ({
-          probeTextureState:
-            window.__levelsjamDebug.getReflectionProbeTextureState?.(0) ?? null,
-          visualizationState:
-            window.__levelsjamDebug.getReflectionProbeVisualizationState?.(0) ?? null
-        })),
+        async () => page.evaluate(() => {
+          const probeState = window.__levelsjamDebug.getReflectionProbeState?.()
+          const probeCount = probeState?.probeCount ?? 0
+          let loadedProbeIndex = null
+
+          for (let index = 0; index < probeCount; index += 1) {
+            const textureState = window.__levelsjamDebug.getReflectionProbeTextureState?.(index)
+
+            if (textureState?.processedTextureUUID) {
+              loadedProbeIndex = index
+              break
+            }
+          }
+
+          return {
+            loadedProbeIndex,
+            probeTextureState:
+              loadedProbeIndex !== null
+                ? window.__levelsjamDebug.getReflectionProbeTextureState?.(loadedProbeIndex) ?? null
+                : null,
+            visualizationState:
+              loadedProbeIndex !== null
+                ? window.__levelsjamDebug.getReflectionProbeVisualizationState?.(loadedProbeIndex) ?? null
+                : null
+          }
+        }),
         {
           timeout: 5_000,
           intervals: [100, 250, 500]
         }
       )
       .toMatchObject({
+        loadedProbeIndex: expect.any(Number),
         probeTextureState: {
           processedTextureUUID: expect.any(String)
         },
@@ -382,12 +403,32 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         }
       })
     const probeVisualizationState = await page.evaluate(
-      () => ({
-        probeTextureState:
-          window.__levelsjamDebug.getReflectionProbeTextureState?.(0) ?? null,
-        visualizationState:
-          window.__levelsjamDebug.getReflectionProbeVisualizationState?.(0) ?? null
-      })
+      () => {
+        const probeState = window.__levelsjamDebug.getReflectionProbeState?.()
+        const probeCount = probeState?.probeCount ?? 0
+        let loadedProbeIndex = null
+
+        for (let index = 0; index < probeCount; index += 1) {
+          const textureState = window.__levelsjamDebug.getReflectionProbeTextureState?.(index)
+
+          if (textureState?.processedTextureUUID) {
+            loadedProbeIndex = index
+            break
+          }
+        }
+
+        return {
+          loadedProbeIndex,
+          probeTextureState:
+            loadedProbeIndex !== null
+              ? window.__levelsjamDebug.getReflectionProbeTextureState?.(loadedProbeIndex) ?? null
+              : null,
+          visualizationState:
+            loadedProbeIndex !== null
+              ? window.__levelsjamDebug.getReflectionProbeVisualizationState?.(loadedProbeIndex) ?? null
+              : null
+        }
+      }
     )
     expect(
       probeVisualizationState.visualizationState.uniformTextureUUIDs.probeCubeUvMap
@@ -417,30 +458,6 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect
       .poll(
         async () => page.evaluate(
-          () => window.__levelsjamDebug.getDebugProgramUniformState('maze-ground-lightmap', 4)?.uniforms ?? null
-        ),
-        {
-          timeout: 5_000,
-          intervals: [100, 250, 500]
-        }
-      )
-      .toMatchObject({
-        probeBlendMode: {
-          glValue: 3
-        },
-        probeBlendDiffuseIntensity: {
-          glValue: 0
-        },
-        probeBlendRadianceMode: {
-          glValue: 1
-        },
-        probeBlendRadianceIntensity: {
-          glValue: 1
-        }
-      })
-    await expect
-      .poll(
-        async () => page.evaluate(
           () => ({
             ground: window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4),
             wall: window.__levelsjamDebug.getDebugMeshState('maze-wall', 10)
@@ -453,7 +470,19 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       )
       .toMatchObject({
         ground: {
-          hasLightMap: true
+          hasLightMap: true,
+          probeBlend: {
+            diffuseIntensity: 0,
+            mode: 'disabled',
+            radianceIntensity: 1,
+            radianceMode: 'world'
+          },
+          probeBlendUniforms: {
+            probeBlendDiffuseIntensity: 0,
+            probeBlendMode: 3,
+            probeBlendRadianceIntensity: 1,
+            probeBlendRadianceMode: 1
+          }
         },
         wall: {
           hasLightMap: true
@@ -464,36 +493,10 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await setCheckbox(page, 'Surface Lightmap Enabled', false)
     await expect
       .poll(
-        async () => page.evaluate(
-          () => window.__levelsjamDebug.getDebugProgramUniformState('maze-ground-lightmap', 4)?.uniforms ?? null
-        ),
-        {
-          timeout: 5_000,
-          intervals: [100, 250, 500]
-        }
-      )
-      .toMatchObject({
-        probeBlendMode: {
-          glValue: 3
-        },
-        probeBlendDiffuseIntensity: {
-          glValue: 1
-        },
-        probeBlendRadianceMode: {
-          glValue: 1
-        },
-        probeBlendRadianceIntensity: {
-          glValue: 1
-        }
-      })
-    await expect
-      .poll(
-        async () => page.evaluate(
-          () => ({
-            ground: window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4),
-            wall: window.__levelsjamDebug.getDebugMeshState('maze-wall', 10)
-          })
-        ),
+        async () => page.evaluate(() => ({
+          ground: window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4),
+          wall: window.__levelsjamDebug.getDebugMeshState('maze-wall', 10)
+        })),
         {
           timeout: 5_000,
           intervals: [100, 250, 500]
@@ -501,7 +504,19 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       )
       .toMatchObject({
         ground: {
-          hasLightMap: false
+          hasLightMap: false,
+          probeBlend: {
+            diffuseIntensity: 1,
+            mode: 'disabled',
+            radianceIntensity: 1,
+            radianceMode: 'world'
+          },
+          probeBlendUniforms: {
+            probeBlendDiffuseIntensity: 1,
+            probeBlendMode: 3,
+            probeBlendRadianceIntensity: 1,
+            probeBlendRadianceMode: 1
+          }
         },
         wall: {
           hasLightMap: false
@@ -536,38 +551,27 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await setCheckbox(page, 'Reflection Intensity Enabled', false)
     await expect
       .poll(
-        async () => page.evaluate(
-          () => window.__levelsjamDebug.getDebugProgramUniformState('maze-ground-lightmap', 4)?.uniforms ?? null
-        ),
+        async () => page.evaluate(() => ({
+          ground: window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4),
+          wall: window.__levelsjamDebug.getDebugMeshState('maze-wall', 10)
+        })),
         {
           timeout: 5_000,
           intervals: [100, 250, 500]
         }
       )
       .toMatchObject({
-        probeBlendMode: {
-          glValue: 3
+        ground: {
+          probeBlendUniforms: {
+            probeBlendMode: 3,
+            probeBlendRadianceMode: 3
+          }
         },
-        probeBlendRadianceMode: {
-          glValue: 3
-        }
-      })
-    await expect
-      .poll(
-        async () => page.evaluate(
-          () => window.__levelsjamDebug.getDebugProgramUniformState('maze-wall', 10)?.uniforms ?? null
-        ),
-        {
-          timeout: 5_000,
-          intervals: [100, 250, 500]
-        }
-      )
-      .toMatchObject({
-        probeBlendMode: {
-          glValue: 3
-        },
-        probeBlendRadianceMode: {
-          glValue: 3
+        wall: {
+          probeBlendUniforms: {
+            probeBlendMode: 3,
+            probeBlendRadianceMode: 3
+          }
         }
       })
     await setCheckbox(page, 'Reflection Intensity Enabled', true)
