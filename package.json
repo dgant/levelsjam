@@ -9,6 +9,7 @@
     "dev:bg:status": "node scripts/dev-server.cjs status",
     "dev:bg:stop": "node scripts/dev-server.cjs stop",
     "build": "node scripts/sync-maze-runtime-data.cjs && vite build",
+    "build:assets:props": "node scripts/build-runtime-props.mjs",
     "build:assets:minotaur": "node scripts/simplify-minotaur.mjs",
     "ensure:mazes": "node scripts/ensure-mazes.cjs",
     "export:maze-probes": "node scripts/export-maze-reflection-artifacts.cjs",
@@ -24,7 +25,8 @@
     "test:perf": "npm run build:pages && playwright test tests/perf.spec.cjs",
     "build:pages": "npm run build && node scripts/sync-pages.cjs",
     "bench:startup": "node scripts/benchmark-startup.cjs",
-    "bench:tests": "node scripts/benchmark-tests.cjs"
+    "bench:tests": "node scripts/benchmark-tests.cjs",
+    "test:maze:runner": "node scripts/run-maze-tests.cjs"
   },
   "dependencies": {
     "@react-three/fiber": "^9.3.0",

@@ -45,10 +45,30 @@ function isInsideMaze(maze, cell) {
   )
 }
 
-function createOpenEdgeSet(maze) {
+function createBaseOpenEdgeSet(maze) {
   return new Set(
     (maze.openEdges ?? []).map((edge) => normalizeEdge(edge.from, edge.to))
   )
+}
+
+function getGateId(gate) {
+  return gate.id ?? normalizeEdge(gate.from, gate.to)
+}
+
+function createClosedGateEdgeSet(maze) {
+  return new Set(
+    (maze.gates ?? []).map((gate) => normalizeEdge(gate.from, gate.to))
+  )
+}
+
+function createMonsterMoveEdgeSet(maze) {
+  const openEdges = createBaseOpenEdgeSet(maze)
+
+  for (const gate of maze.gates ?? []) {
+    openEdges.delete(normalizeEdge(gate.from, gate.to))
+  }
+
+  return openEdges
 }
 
 function canMove(maze, openEdges, cell, direction) {
@@ -99,13 +119,30 @@ function allCells(maze) {
   return cells
 }
 
+function getReservedCellKeys(maze) {
+  const reserved = new Set([cellKey(maze.opening.cell)])
+
+  if (maze.sword?.cell) {
+    reserved.add(cellKey(maze.sword.cell))
+  }
+
+  if (maze.trophy?.cell) {
+    reserved.add(cellKey(maze.trophy.cell))
+  }
+
+  return reserved
+}
+
 function chooseMonsterPlacements(maze) {
-  if (Array.isArray(maze.monsters) && maze.monsters.length >= 3) {
-    return maze.monsters
+  if (Array.isArray(maze.monsters)) {
+    return maze.monsters.map((monster) => ({
+      ...monster,
+      cell: { ...monster.cell }
+    }))
   }
 
   const random = createRandom(Number(maze.seed ?? hashString(maze.id ?? 'maze')))
-  const reserved = new Set([cellKey(maze.opening.cell)])
+  const reserved = getReservedCellKeys(maze)
   const candidates = allCells(maze).filter((cell) => !reserved.has(cellKey(cell)))
   const monsters = [
     { type: 'minotaur' },
@@ -125,6 +162,23 @@ function chooseMonsterPlacements(maze) {
   })
 }
 
+function cloneMonster(monster) {
+  return {
+    ...monster,
+    cell: { ...monster.cell },
+    lastPath: [...(monster.lastPath ?? [])]
+  }
+}
+
+function createPlayerState(maze, direction) {
+  return {
+    cell: { ...maze.opening.cell },
+    direction,
+    hasSword: false,
+    hasTrophy: false
+  }
+}
+
 export function createInitialTurnState(maze) {
   const playerDirection = OPPOSITE_DIRECTIONS[maze.opening.side] ?? 'north'
 
@@ -134,6 +188,7 @@ export function createInitialTurnState(maze) {
       direction: playerDirection
     },
     dead: false,
+    escaped: false,
     monsters: chooseMonsterPlacements(maze).map((monster, index) => ({
       awake: false,
       cell: { ...monster.cell },
@@ -146,10 +201,9 @@ export function createInitialTurnState(maze) {
       movedPreviousTurn: false,
       type: monster.type
     })),
-    player: {
-      cell: { ...maze.opening.cell },
-      direction: playerDirection
-    },
+    player: createPlayerState(maze, playerDirection),
+    swordState: maze.sword?.cell ? 'ground' : 'consumed',
+    trophyState: maze.trophy?.cell ? 'ground' : 'held',
     turn: 0
   }
 }
@@ -161,20 +215,27 @@ function cloneState(state) {
       cell: { ...state.checkpoint.cell },
       direction: state.checkpoint.direction
     },
-    monsters: state.monsters.map((monster) => ({
-      ...monster,
-      cell: { ...monster.cell },
-      lastPath: [...(monster.lastPath ?? [])]
-    })),
+    monsters: state.monsters.map(cloneMonster),
     player: {
-      cell: { ...state.player.cell },
-      direction: state.player.direction
+      ...state.player,
+      cell: { ...state.player.cell }
     }
   }
 }
 
 function getMonsterAt(monsters, cell) {
   return monsters.find((monster) => cellKey(monster.cell) === cellKey(cell)) ?? null
+}
+
+function removeMonsterById(monsters, monsterId) {
+  const index = monsters.findIndex((monster) => monster.id === monsterId)
+
+  if (index === -1) {
+    return null
+  }
+
+  const [monster] = monsters.splice(index, 1)
+  return monster ?? null
 }
 
 function directionBetween(from, to) {
@@ -208,7 +269,23 @@ function canSeeCell(maze, openEdges, from, to) {
   return true
 }
 
-function shortestPathStep(maze, openEdges, from, to) {
+function getVisibleCells(maze, state) {
+  const visible = new Set([cellKey(state.player.cell)])
+  const openEdges = createBaseOpenEdgeSet(maze)
+
+  for (const direction of DIRECTIONS) {
+    let current = { ...state.player.cell }
+
+    while (canMove(maze, openEdges, current, direction)) {
+      current = getNeighbor(current, direction)
+      visible.add(cellKey(current))
+    }
+  }
+
+  return visible
+}
+
+function shortestPathDirections(maze, openEdges, from, to) {
   const queue = [{ cell: from, path: [] }]
   const visited = new Set([cellKey(from)])
 
@@ -260,13 +337,111 @@ function chooseSpiderDirection(maze, openEdges, monster) {
   return null
 }
 
-function resolveMonsterTurn(maze, openEdges, monster, playerCell) {
-  const nextMonster = {
-    ...monster,
-    cell: { ...monster.cell },
-    lastPath: [...(monster.lastPath ?? [])]
+function chooseWerewolfDirection(maze, openEdges, monster, playerCell) {
+  const path = shortestPathDirections(maze, openEdges, monster.cell, playerCell)
+  const bestLength = path.length
+
+  if (bestLength === 0) {
+    return {
+      direction: null,
+      path: []
+    }
   }
-  const sawPlayer = canSeeCell(maze, openEdges, monster.cell, playerCell)
+
+  const candidateDirections = []
+
+  for (const direction of DIRECTIONS) {
+    if (!canMove(maze, openEdges, monster.cell, direction)) {
+      continue
+    }
+
+    const nextCell = getNeighbor(monster.cell, direction)
+    const nextPath = shortestPathDirections(maze, openEdges, nextCell, playerCell)
+
+    if (nextPath.length === 0 && cellKey(nextCell) !== cellKey(playerCell)) {
+      continue
+    }
+
+    if (nextPath.length !== (bestLength - 1)) {
+      continue
+    }
+
+    candidateDirections.push({
+      direction,
+      path: [direction, ...nextPath]
+    })
+  }
+
+  if (candidateDirections.length === 0) {
+    return {
+      direction: path[0] ?? null,
+      path
+    }
+  }
+
+  const preferredDirection = monster.lastPath?.[0] ?? null
+  const preferredMoveDirection = monster.lastMoveDirection ?? null
+  const preferred = (
+    candidateDirections.find((candidate) => candidate.direction === preferredDirection) ??
+    candidateDirections.find((candidate) => candidate.direction === preferredMoveDirection) ??
+    candidateDirections[0]
+  )
+
+  return preferred
+}
+
+function getGateOtherCell(gate, cell) {
+  if (cellKey(gate.from) === cellKey(cell)) {
+    return gate.to
+  }
+
+  if (cellKey(gate.to) === cellKey(cell)) {
+    return gate.from
+  }
+
+  return null
+}
+
+function getOpenGateIds(maze, state) {
+  const occupiedCells = new Set(state.monsters.map((monster) => cellKey(monster.cell)))
+
+  return (maze.gates ?? [])
+    .filter((gate) => {
+      const otherCell = getGateOtherCell(gate, state.player.cell)
+
+      return otherCell && !occupiedCells.has(cellKey(otherCell))
+    })
+    .map(getGateId)
+}
+
+function createPlayerMoveEdgeSet(maze, state) {
+  const openEdges = createMonsterMoveEdgeSet(maze)
+  const openGateIds = new Set(getOpenGateIds(maze, state))
+
+  for (const gate of maze.gates ?? []) {
+    if (openGateIds.has(getGateId(gate))) {
+      openEdges.add(normalizeEdge(gate.from, gate.to))
+    }
+  }
+
+  return openEdges
+}
+
+function isExitMove(maze, state, direction) {
+  return (
+    cellKey(state.player.cell) === cellKey(maze.opening.cell) &&
+    direction === maze.opening.side
+  )
+}
+
+function consumeSword(state) {
+  state.player.hasSword = false
+  state.swordState = 'consumed'
+}
+
+function resolveMonsterTurn(maze, openEdges, visibilityEdges, monster, playerCell) {
+  const nextMonster = cloneMonster(monster)
+  const sawPlayer = canSeeCell(maze, visibilityEdges, monster.cell, playerCell)
   const wasAwake = monster.awake
 
   if (sawPlayer) {
@@ -298,9 +473,9 @@ function resolveMonsterTurn(maze, openEdges, monster, playerCell) {
       return nextMonster
     }
 
-    const path = shortestPathStep(maze, openEdges, monster.cell, playerCell)
-    moveDirection = path[0] ?? null
-    nextMonster.lastPath = path
+    const pathChoice = chooseWerewolfDirection(maze, openEdges, monster, playerCell)
+    moveDirection = pathChoice.direction
+    nextMonster.lastPath = pathChoice.path
   }
 
   if (!moveDirection || !canMove(maze, openEdges, monster.cell, moveDirection)) {
@@ -316,81 +491,157 @@ function resolveMonsterTurn(maze, openEdges, monster, playerCell) {
   return nextMonster
 }
 
+function resolvePlayerPickups(maze, state, outcome) {
+  if (
+    maze.sword?.cell &&
+    state.swordState === 'ground' &&
+    cellKey(state.player.cell) === cellKey(maze.sword.cell)
+  ) {
+    state.player.hasSword = true
+    state.swordState = 'held'
+    outcome.pickedUpSword = true
+  }
+
+  if (
+    maze.trophy?.cell &&
+    state.trophyState === 'ground' &&
+    cellKey(state.player.cell) === cellKey(maze.trophy.cell)
+  ) {
+    state.player.hasTrophy = true
+    state.trophyState = 'held'
+    outcome.pickedUpTrophy = true
+  }
+}
+
 export function applyTurnAction(maze, state, action) {
-  const openEdges = createOpenEdgeSet(maze)
+  const visibilityEdges = createBaseOpenEdgeSet(maze)
+  const playerMoveEdges = createPlayerMoveEdgeSet(maze, state)
+  const monsterMoveEdges = createMonsterMoveEdgeSet(maze)
   const next = cloneState(state)
+  const outcome = {
+    blocked: false,
+    escaped: false,
+    killed: false,
+    pickedUpSword: false,
+    pickedUpTrophy: false,
+    playerEffect: null,
+    previous: state,
+    state: next
+  }
+
+  if (state.dead || state.escaped) {
+    return outcome
+  }
 
   if (action === 'rotate-left' || action === 'rotate-right') {
     next.player.direction = rotateDirection(
       next.player.direction,
       action === 'rotate-left' ? 'left' : 'right'
     )
-    return {
-      blocked: false,
-      killed: false,
-      previous: state,
-      state: next
-    }
+    return outcome
   }
 
   const moveDirection = action === 'move-backward'
     ? OPPOSITE_DIRECTIONS[next.player.direction]
     : next.player.direction
 
-  if (!moveDirection || !canMove(maze, openEdges, next.player.cell, moveDirection)) {
-    return {
-      blocked: true,
-      killed: false,
-      previous: state,
-      state: next
+  if (isExitMove(maze, next, moveDirection)) {
+    if (!next.player.hasTrophy) {
+      outcome.blocked = true
+      return outcome
     }
+
+    next.escaped = true
+    next.turn += 1
+    outcome.escaped = true
+    outcome.playerEffect = 'escape'
+    return outcome
   }
 
-  if (moveDirection) {
-    const nextPlayerCell = getNeighbor(next.player.cell, moveDirection)
+  if (!moveDirection || !canMove(maze, playerMoveEdges, next.player.cell, moveDirection)) {
+    outcome.blocked = true
+    return outcome
+  }
 
-    if (getMonsterAt(next.monsters, nextPlayerCell)) {
+  const nextPlayerCell = getNeighbor(next.player.cell, moveDirection)
+  const blockingMonster = getMonsterAt(next.monsters, nextPlayerCell)
+
+  if (blockingMonster) {
+    if (!next.player.hasSword) {
       next.player.cell = nextPlayerCell
       next.dead = true
-      return {
-        blocked: false,
-        killed: true,
-        previous: state,
-        state: next
-      }
+      outcome.killed = true
+      outcome.playerEffect = 'death'
+      return outcome
     }
 
-    next.player.cell = nextPlayerCell
+    removeMonsterById(next.monsters, blockingMonster.id)
+    consumeSword(next)
+    outcome.playerEffect = 'sword-strike'
   }
 
-  const movedMonsters = next.monsters.map((monster) =>
-    resolveMonsterTurn(maze, openEdges, monster, next.player.cell)
-  )
-  const killed = movedMonsters.some(
-    (monster) => cellKey(monster.cell) === cellKey(next.player.cell)
-  )
+  next.player.cell = nextPlayerCell
+  resolvePlayerPickups(maze, next, outcome)
+
+  const movedMonsters = []
+
+  for (const monster of next.monsters) {
+    const movedMonster = resolveMonsterTurn(
+      maze,
+      monsterMoveEdges,
+      visibilityEdges,
+      monster,
+      next.player.cell
+    )
+
+    if (cellKey(movedMonster.cell) === cellKey(next.player.cell)) {
+      if (!next.player.hasSword) {
+        movedMonsters.push(movedMonster)
+        next.dead = true
+        outcome.killed = true
+        outcome.playerEffect = 'death'
+        break
+      }
+
+      consumeSword(next)
+      outcome.playerEffect = 'sword-strike'
+      continue
+    }
+
+    movedMonsters.push(movedMonster)
+  }
 
   next.monsters = movedMonsters
-  next.dead = killed
   next.turn += 1
 
-  return {
-    blocked: false,
-    killed,
-    previous: state,
-    state: next
-  }
+  return outcome
 }
 
-export function resetTurnStateToCheckpoint(state) {
+export function resetTurnStateToCheckpoint(maze, state) {
+  const resetState = createInitialTurnState(maze)
+
   return {
-    ...state,
-    dead: false,
-    player: {
+    ...resetState,
+    checkpoint: {
       cell: { ...state.checkpoint.cell },
       direction: state.checkpoint.direction
     }
   }
 }
 
-export { DIRECTIONS, OPPOSITE_DIRECTIONS, canSeeCell, canMove, cellKey, getNeighbor, rotateDirection }
+export {
+  DIRECTIONS,
+  OPPOSITE_DIRECTIONS,
+  canSeeCell,
+  canMove,
+  cellKey,
+  createBaseOpenEdgeSet,
+  createMonsterMoveEdgeSet,
+  createPlayerMoveEdgeSet,
+  getNeighbor,
+  getOpenGateIds,
+  getVisibleCells,
+  normalizeEdge,
+  rotateDirection,
+  shortestPathDirections
+}

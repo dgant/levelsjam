@@ -4,13 +4,21 @@ import test from 'node:test'
 import {
   applyTurnAction,
   canSeeCell,
-  createInitialTurnState
+  createInitialTurnState,
+  getOpenGateIds,
+  resetTurnStateToCheckpoint
 } from '../src/lib/turnRules.js'
 
 function testMaze(overrides = {}) {
   return {
     height: 3,
     id: 'turn-rules-test',
+    gates: [
+      {
+        from: { x: 1, y: 1 },
+        to: { x: 1, y: 2 }
+      }
+    ],
     monsters: [
       { cell: { x: 2, y: 1 }, type: 'minotaur' },
       { cell: { x: 2, y: 2 }, type: 'werewolf' },
@@ -25,6 +33,8 @@ function testMaze(overrides = {}) {
       { from: { x: 0, y: 2 }, to: { x: 1, y: 2 } },
       { from: { x: 1, y: 2 }, to: { x: 2, y: 2 } }
     ],
+    sword: { cell: { x: 1, y: 1 } },
+    trophy: { cell: { x: 2, y: 2 } },
     width: 3,
     ...overrides
   }
@@ -35,6 +45,10 @@ test('initial turn state starts at the maze entrance facing inward', () => {
 
   assert.deepEqual(state.player.cell, { x: 0, y: 1 })
   assert.equal(state.player.direction, 'east')
+  assert.equal(state.player.hasSword, false)
+  assert.equal(state.player.hasTrophy, false)
+  assert.equal(state.swordState, 'ground')
+  assert.equal(state.trophyState, 'ground')
   assert.equal(state.monsters.length, 3)
 })
 
@@ -97,4 +111,107 @@ test('blocked movement reports a bump without consuming a turn', () => {
   assert.deepEqual(result.state.player.cell, state.player.cell)
   assert.equal(result.state.turn, state.turn)
   assert.deepEqual(result.state.monsters, state.monsters)
+})
+
+test('adjacent safe gates open for player movement', () => {
+  const maze = testMaze({
+    monsters: [
+      { cell: { x: 2, y: 1 }, type: 'minotaur' }
+    ]
+  })
+  const state = createInitialTurnState(maze)
+  const openGateIds = getOpenGateIds(maze, state)
+
+  assert.equal(openGateIds.length, 0)
+
+  const moved = applyTurnAction(maze, state, 'move-forward').state
+  assert.deepEqual(getOpenGateIds(maze, moved), ['1,1|1,2'])
+})
+
+test('player picks up the sword and kills a monster instead of dying', () => {
+  const maze = testMaze({
+    gates: [],
+    monsters: [
+      { cell: { x: 2, y: 1 }, type: 'minotaur' }
+    ],
+    openEdges: [
+      { from: { x: 0, y: 1 }, to: { x: 1, y: 1 } },
+      { from: { x: 1, y: 1 }, to: { x: 2, y: 1 } }
+    ],
+    sword: { cell: { x: 1, y: 1 } },
+    trophy: { cell: { x: 2, y: 1 } }
+  })
+  const initial = createInitialTurnState(maze)
+  const pickup = applyTurnAction(maze, initial, 'move-forward')
+
+  assert.equal(pickup.killed, false)
+  assert.equal(pickup.pickedUpSword, true)
+  assert.equal(pickup.state.player.hasSword, true)
+  assert.equal(pickup.state.swordState, 'held')
+
+  const strike = applyTurnAction(maze, pickup.state, 'move-forward')
+
+  assert.equal(strike.killed, false)
+  assert.equal(strike.playerEffect, 'sword-strike')
+  assert.equal(strike.state.player.hasSword, false)
+  assert.equal(strike.state.swordState, 'consumed')
+  assert.equal(strike.state.monsters.length, 0)
+  assert.deepEqual(strike.state.player.cell, { x: 2, y: 1 })
+})
+
+test('player can escape only while holding the trophy', () => {
+  const maze = testMaze({
+    gates: [],
+    monsters: [],
+    openEdges: [],
+    opening: { cell: { x: 0, y: 0 }, side: 'west' },
+    sword: { cell: { x: 0, y: 0 } },
+    trophy: { cell: { x: 0, y: 0 } },
+    width: 1,
+    height: 1
+  })
+  const initial = createInitialTurnState(maze)
+  const blockedExit = applyTurnAction(maze, initial, 'move-backward')
+
+  assert.equal(blockedExit.blocked, true)
+
+  const escaped = applyTurnAction(
+    maze,
+    {
+      ...initial,
+      player: {
+        ...initial.player,
+        hasTrophy: true
+      },
+      trophyState: 'held'
+    },
+    'move-backward'
+  )
+
+  assert.equal(escaped.escaped, true)
+  assert.equal(escaped.state.escaped, true)
+})
+
+test('reset restores monsters and items to the initial maze state', () => {
+  const maze = testMaze({
+    gates: [],
+    monsters: [
+      { cell: { x: 2, y: 1 }, type: 'minotaur' }
+    ],
+    openEdges: [
+      { from: { x: 0, y: 1 }, to: { x: 1, y: 1 } },
+      { from: { x: 1, y: 1 }, to: { x: 2, y: 1 } }
+    ],
+    sword: { cell: { x: 1, y: 1 } },
+    trophy: { cell: { x: 2, y: 1 } }
+  })
+  const initial = createInitialTurnState(maze)
+  const pickup = applyTurnAction(maze, initial, 'move-forward').state
+  const strike = applyTurnAction(maze, pickup, 'move-forward').state
+  const reset = resetTurnStateToCheckpoint(maze, strike)
+
+  assert.deepEqual(reset.player.cell, maze.opening.cell)
+  assert.equal(reset.player.hasSword, false)
+  assert.equal(reset.swordState, 'ground')
+  assert.equal(reset.monsters.length, 1)
 })

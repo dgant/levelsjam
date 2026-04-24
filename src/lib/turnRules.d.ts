@@ -26,18 +26,32 @@ export type TurnState = {
     direction: CardinalDirection
   }
   dead: boolean
+  escaped: boolean
   monsters: TurnMonster[]
   player: {
     cell: MazeCell
     direction: CardinalDirection
+    hasSword: boolean
+    hasTrophy: boolean
   }
+  swordState: 'ground' | 'held' | 'consumed'
+  trophyState: 'ground' | 'held'
   turn: number
 }
 
 export declare const DIRECTIONS: CardinalDirection[]
 export declare const OPPOSITE_DIRECTIONS: Record<CardinalDirection, CardinalDirection>
-export declare function applyTurnAction(maze: unknown, state: TurnState, action: TurnAction): {
+export declare function applyTurnAction(
+  maze: unknown,
+  state: TurnState,
+  action: TurnAction
+): {
+  blocked: boolean
+  escaped: boolean
   killed: boolean
+  pickedUpSword: boolean
+  pickedUpTrophy: boolean
+  playerEffect: 'death' | 'escape' | 'sword-strike' | null
   previous: TurnState
   state: TurnState
 }
@@ -54,10 +68,22 @@ export declare function canSeeCell(
   to: MazeCell
 ): boolean
 export declare function cellKey(cell: MazeCell): string
+export declare function createBaseOpenEdgeSet(maze: unknown): Set<string>
 export declare function createInitialTurnState(maze: unknown): TurnState
+export declare function createMonsterMoveEdgeSet(maze: unknown): Set<string>
+export declare function createPlayerMoveEdgeSet(maze: unknown, state: TurnState): Set<string>
 export declare function getNeighbor(cell: MazeCell, direction: CardinalDirection): MazeCell
-export declare function resetTurnStateToCheckpoint(state: TurnState): TurnState
+export declare function getOpenGateIds(maze: unknown, state: TurnState): string[]
+export declare function getVisibleCells(maze: unknown, state: TurnState): Set<string>
+export declare function normalizeEdge(from: MazeCell, to: MazeCell): string
+export declare function resetTurnStateToCheckpoint(maze: unknown, state: TurnState): TurnState
 export declare function rotateDirection(
   direction: CardinalDirection,
   turn: 'left' | 'right' | 'back'
 ): CardinalDirection
+export declare function shortestPathDirections(
+  maze: unknown,
+  openEdges: Set<string>,
+  from: MazeCell,
+  to: MazeCell
+): CardinalDirection[]

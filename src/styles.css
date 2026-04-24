@@ -30,7 +30,13 @@ body::after {
   transition: opacity 2s ease;
 }
 
-body[data-player-dead='true']::after {
+body[data-player-effect='death']::after {
+  opacity: 1;
+  transition-duration: 250ms;
+}
+
+body[data-player-effect='sword-strike']::after {
+  background: #fff;
   opacity: 1;
   transition-duration: 250ms;
 }
@@ -289,6 +295,22 @@ body[data-player-dead='true']::after {
   border-radius: 10px;
   color: inherit;
   font: inherit;
+}
+
+.visual-control-row button {
+  width: 100%;
+  padding: 6px 8px;
+  background: rgb(10 15 23 / 92%);
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 10px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.visual-control-row button:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .visual-control-row output {

@@ -54,6 +54,7 @@ const MAZE_MANIFEST_URL = `${MAZE_DATA_BASE_URL}/index.json`
 const AVAILABLE_MAZE_IDS: string[] = []
 let mazeManifestPromise: Promise<string[]> | null = null
 const mazeLayoutPromiseCache = new Map<string, Promise<MazeLayout | null>>()
+const mazeLayoutCache = new Map<string, MazeLayout>()
 const loadedDebugMazes = new Map<string, PersistedMaze>()
 const DEBUG_MAZE_LOADERS = Object.freeze({
   'debug-probe-occlusion-3x3-no-lights': () => import('../data/debug-mazes/debug-probe-occlusion-3x3-no-lights.js'),
@@ -87,6 +88,10 @@ async function loadAvailableMazeIds() {
   }
 
   return mazeManifestPromise
+}
+
+export async function getAvailableMazeIds() {
+  return loadAvailableMazeIds()
 }
 
 async function loadPersistedMaze(id: string) {
@@ -134,6 +139,12 @@ export function getDebugMazeLayoutById(id: string): MazeLayout | null {
 }
 
 export async function loadMazeLayoutById(id: string): Promise<MazeLayout | null> {
+  const cachedLayout = mazeLayoutCache.get(id)
+
+  if (cachedLayout) {
+    return cachedLayout
+  }
+
   const cached = mazeLayoutPromiseCache.get(id)
 
   if (cached) {
@@ -147,11 +158,37 @@ export async function loadMazeLayoutById(id: string): Promise<MazeLayout | null>
       return null
     }
 
-    return getMazeSceneLayout(persistedMaze, SCONCE_RADIUS) as MazeLayout
+    const layout = getMazeSceneLayout(persistedMaze, SCONCE_RADIUS) as MazeLayout
+
+    mazeLayoutCache.set(id, layout)
+    return layout
   })()
 
   mazeLayoutPromiseCache.set(id, layoutPromise)
   return layoutPromise
+}
+
+export function unloadMazeLayoutById(id: string) {
+  mazeLayoutPromiseCache.delete(id)
+  mazeLayoutCache.delete(id)
+  loadedDebugMazes.delete(id)
+}
+
+export function clearMazeLayoutCache() {
+  for (const id of [
+    ...mazeLayoutPromiseCache.keys(),
+    ...mazeLayoutCache.keys(),
+    ...loadedDebugMazes.keys()
+  ]) {
+    unloadMazeLayoutById(id)
+  }
+
+  AVAILABLE_MAZE_IDS.length = 0
+  mazeManifestPromise = null
+}
+
+export function getLoadedMazeLayoutIds() {
+  return Array.from(mazeLayoutCache.keys()).sort()
 }
 
 export async function loadRandomMazeLayout(

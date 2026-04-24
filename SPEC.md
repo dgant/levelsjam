@@ -433,6 +433,8 @@
 - Automated unit-test measurement records per-file and per-subtest timing data in addition to the overall suite duration so individual regressions can be identified directly.
 - Maze topology generation for one valid maze must complete in under 100 milliseconds before the later baked-lightmap step runs.
 - Full maze generation, validation, and bake for one maze must complete in under 5 seconds.
+- Maze-regeneration loops have a bounded maximum attempt count and fail with a diagnostic error instead of hanging indefinitely when the maze factory repeatedly returns invalid mazes.
+- Maze-generation performance tests record per-case reported and wall-clock durations in `logs/latest-maze-test-profile.json`.
 - The runtime records high-water RAM and VRAM usage so those values can be inspected during debugging.
 
 ## Testing Expectations
@@ -460,6 +462,8 @@
 - Automated render-integration coverage verifies that a geometry-only reflection-probe capture contains maze geometry, so the cube-camera capture path itself is proven before beauty-pass probe behavior is judged.
 - Maze-generation logic is covered by automated tests that validate every persisted maze against the maze rules.
 - Maze-validation coverage includes an agent that must beat each maze under the same movement, visibility, monster, gate, sword, and trophy rules available to the player while observing only player-visible information.
+- The maze-validation agent does not learn sword, trophy, or monster positions until those cells become visible by player line of sight.
+- The recorded maze solution stores the winning action list, move count, observed-cell count, and a marker that it was produced by the visibility-limited validation path.
 - Maze-validation coverage records a successful solution path for each persisted maze.
 - Maze-generation tests delete any generated maze files that fail validation.
 - Automated tests guarantee that the repository contains at least five valid persisted maze files by generating additional mazes when required and discarding invalid outputs until the target count is satisfied.

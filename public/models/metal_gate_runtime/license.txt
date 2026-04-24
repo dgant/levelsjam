@@ -1,0 +1,11 @@
+Model Information:
+* title:	Metal Gate
+* source:	https://sketchfab.com/3d-models/metal-gate-f5000327853440158f91fd5c1ceabc7c
+* author:	ugly kid (https://sketchfab.com/ugly_kid)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Metal Gate" (https://sketchfab.com/3d-models/metal-gate-f5000327853440158f91fd5c1ceabc7c) by ugly kid (https://sketchfab.com/ugly_kid) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

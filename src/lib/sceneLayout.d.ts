@@ -15,6 +15,22 @@ export type WallBounds = {
 }
 
 export type MazeLayout = {
+  gates: Array<{
+    axis: 'x' | 'z'
+    cells: [{ x: number; y: number }, { x: number; y: number }]
+    center: { x: number; z: number }
+    from: { x: number; y: number }
+    id: string
+    index: number
+    to: { x: number; y: number }
+    yaw: number
+  }>
+  items: Array<{
+    cell: { x: number; y: number }
+    id: string
+    position: Vector3Like
+    type: 'sword' | 'trophy'
+  }>
   lights: Array<{
     cell: { x: number; y: number }
     id: string
@@ -54,6 +70,11 @@ export type MazeLayout = {
         }
       >
     }
+    gates?: Array<{
+      from: { x: number; y: number }
+      id?: string
+      to: { x: number; y: number }
+    }>
     height: number
     id: string
     monsters?: Array<{
@@ -62,6 +83,16 @@ export type MazeLayout = {
       type: 'minotaur' | 'spider' | 'werewolf'
     }>
     width: number
+    solution?: {
+      actions: Array<'move-forward' | 'move-backward' | 'rotate-left' | 'rotate-right'>
+      moveCount: number
+    } | null
+    sword?: {
+      cell: { x: number; y: number }
+    }
+    trophy?: {
+      cell: { x: number; y: number }
+    }
   }
   reflectionProbes: Array<{
     cell: { x: number; y: number }

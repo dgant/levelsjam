@@ -28,6 +28,7 @@ import {
   Euler,
   FloatType,
   Float32BufferAttribute,
+  FrontSide,
   Group,
   HalfFloatType,
   LinearFilter,
@@ -94,10 +95,8 @@ import {
   ToneMappingMode as PostToneMappingMode
 } from 'postprocessing'
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js'
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { UnrealBloomPass as ThreeUnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { SSRPass as ThreeSSRPass } from 'three/addons/postprocessing/SSRPass.js'
-import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js'
 import {
   AUTHORED_LIGHTING_SOURCE_SCALE,
   DEFAULT_EXPOSURE_STOPS,
@@ -119,7 +118,10 @@ import {
   GROUND_SIZE,
   GROUND_Y,
   MAZE_CELL_SIZE,
+  getAvailableMazeIds,
+  getLoadedMazeLayoutIds,
   getWallBounds,
+  unloadMazeLayoutById,
   loadMazeLayoutById,
   loadRandomMazeLayout,
   PLAYER_EYE_HEIGHT,
@@ -141,12 +143,14 @@ import {
 import {
   applyTurnAction,
   createInitialTurnState,
+  getOpenGateIds,
   resetTurnStateToCheckpoint,
   type CardinalDirection,
   type TurnAction,
   type TurnMonster,
   type TurnState
 } from './lib/turnRules.js'
+import { cloneCachedGltfRoot, getCachedGltfRootUrls } from './lib/gltfRuntimeCache'
 
 declare const __GIT_REVISION__: string
 declare const __GIT_REVISION_TIMESTAMP__: string
@@ -160,6 +164,9 @@ const MONSTER_MODEL_URLS = {
   spider: `${assetBase}models/pbr_jumping_spider_monster/scene.gltf`,
   werewolf: `${assetBase}models/awil_werewolf/scene.gltf`
 } as const
+const GATE_MODEL_URL = `${assetBase}models/metal_gate_runtime/scene.gltf`
+const SWORD_MODEL_URL = `${assetBase}models/bronze_sword_mycean/scene.gltf`
+const TROPHY_MODEL_URL = `${assetBase}models/head_of_a_bull/scene.gltf`
 const PUDDLE_TEXTURE_URLS = {
   ao: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_AO.jpg`,
   color: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_Diffuse.jpg`,
@@ -711,6 +718,7 @@ type VisualControlTabKey =
   | 'ssr'
   | 'fog'
   | 'anamorphic'
+  | 'solution'
 
 type LightingContributionSettings = {
   enabled: boolean
@@ -837,7 +845,8 @@ const VISUAL_CONTROL_TABS: Array<{
   { hotkey: '5', key: 'flares', label: 'Flares' },
   { hotkey: '6', key: 'ssr', label: 'SSR' },
   { hotkey: '7', key: 'fog', label: 'Fog' },
-  { hotkey: '8', key: 'anamorphic', label: 'Anamorphic' }
+  { hotkey: '8', key: 'anamorphic', label: 'Anamorphic' },
+  { hotkey: '9', key: 'solution', label: 'Solution' }
 ]
 
 const DEFAULT_AO_RADIUS_METERS = 1
@@ -2866,6 +2875,24 @@ function getProbeBlendMaterialKey(
   return `${role}:${getProbeBlendUpdateKey(probeBlend, patchConfig)}`
 }
 
+function getProbeBlendProgramKey(
+  probeBlend: ProbeBlendConfig,
+  patchConfig: MaterialShaderPatchConfig
+) {
+  const activeRadianceMode = probeBlend.radianceMode ?? probeBlend.mode
+  const usesTintedLightMap =
+    Boolean(patchConfig.lightMapAmbientTint) ||
+    Boolean(patchConfig.lightMapTorchTint)
+
+  return [
+    'probe-blend-v4',
+    usesTintedLightMap ? 'lightmap-tint' : 'plain',
+    probeBlend.mode,
+    activeRadianceMode,
+    probeBlend.vlmMode ?? 'disabled'
+  ].join('-')
+}
+
 function updateProbeBlendMaterialDebugState(
   material: ThreeMeshPhysicalMaterial | ThreeMeshStandardMaterial | null,
   probeBlend: ProbeBlendConfig
@@ -3933,24 +3960,11 @@ function attachProbeBlendMaterialShader(
   const probeBlendRef = { current: probeBlend }
   const patchConfigRef = { current: patchConfig }
   const probeBlendUpdateKeyRef = { current: getProbeBlendUpdateKey(probeBlend, patchConfig) }
+  const probeBlendProgramKeyRef = { current: getProbeBlendProgramKey(probeBlend, patchConfig) }
   const appliedProbeBlendUpdateKeyRef = { current: null as string | null }
 
-  const customProgramCacheKey = () => {
-    const currentPatchConfig = patchConfigRef.current
-    const currentProbeBlend = probeBlendRef.current
-    const activeRadianceMode = currentProbeBlend.radianceMode ?? currentProbeBlend.mode
-    const usesTintedLightMap =
-      Boolean(currentPatchConfig.lightMapAmbientTint) ||
-      Boolean(currentPatchConfig.lightMapTorchTint)
-
-    return [
-      'probe-blend-v4',
-      usesTintedLightMap ? 'lightmap-tint' : 'plain',
-      currentProbeBlend.mode,
-      activeRadianceMode,
-      currentProbeBlend.vlmMode ?? 'disabled'
-    ].join('-')
-  }
+  const customProgramCacheKey = () =>
+    getProbeBlendProgramKey(probeBlendRef.current, patchConfigRef.current)
 
   material.customProgramCacheKey = customProgramCacheKey
   material.onBeforeCompile = (shader: Shader) => {
@@ -3992,15 +4006,22 @@ function attachProbeBlendMaterialShader(
 
   return {
     set(nextProbeBlend: ProbeBlendConfig, nextPatchConfig: MaterialShaderPatchConfig = patchConfig) {
+      const previousProgramKey = probeBlendProgramKeyRef.current
+      const nextProgramKey = getProbeBlendProgramKey(nextProbeBlend, nextPatchConfig)
+
       probeBlendRef.current = nextProbeBlend
       patchConfigRef.current = nextPatchConfig
       probeBlendUpdateKeyRef.current = getProbeBlendUpdateKey(nextProbeBlend, nextPatchConfig)
+      probeBlendProgramKeyRef.current = nextProgramKey
       appliedProbeBlendUpdateKeyRef.current = null
       updateProbeBlendMaterialDebugState(materialRef.current, nextProbeBlend)
       updateProbeBlendShaderUniforms(shaderRef.current, nextProbeBlend, nextPatchConfig)
       updateProbeBlendUniformDebugState(materialRef.current, shaderRef.current)
       appliedProbeBlendUpdateKeyRef.current = probeBlendUpdateKeyRef.current
-      materialRef.current.needsUpdate = true
+
+      if (previousProgramKey !== nextProgramKey) {
+        materialRef.current.needsUpdate = true
+      }
     }
   }
 }
@@ -4385,6 +4406,209 @@ function useFireFlipbookTexture() {
   }, [maxAnisotropy])
 
   return texture
+}
+
+type RuntimePropModelKind = 'gate' | 'monster' | 'sword' | 'trophy'
+
+function createLitCloneMaterial(
+  sourceMaterial: Material,
+  kind: RuntimePropModelKind
+) {
+  const side = kind === 'monster' ? FrontSide : sourceMaterial.side
+
+  if (
+    sourceMaterial instanceof ThreeMeshStandardMaterial ||
+    sourceMaterial instanceof ThreeMeshPhysicalMaterial
+  ) {
+    const clonedMaterial = sourceMaterial.clone()
+    clonedMaterial.side = side
+    return clonedMaterial
+  }
+
+  const basicMaterial = sourceMaterial as MeshBasicMaterial & {
+    alphaMap?: Texture | null
+    map?: Texture | null
+    normalMap?: Texture | null
+    opacity?: number
+  }
+  const metalness =
+    kind === 'gate'
+      ? 0.75
+      : kind === 'sword'
+        ? 0.9
+        : kind === 'trophy'
+          ? 0.15
+          : 0.2
+  const roughness =
+    kind === 'gate'
+      ? 0.45
+      : kind === 'sword'
+        ? 0.3
+        : kind === 'trophy'
+          ? 0.72
+          : 0.8
+
+  return new ThreeMeshStandardMaterial({
+    alphaMap: basicMaterial.alphaMap ?? null,
+    color: 'color' in basicMaterial && basicMaterial.color instanceof Color
+      ? basicMaterial.color.clone()
+      : WHITE_COLOR.clone(),
+    map: basicMaterial.map ?? null,
+    metalness,
+    normalMap: basicMaterial.normalMap ?? null,
+    opacity: basicMaterial.opacity ?? 1,
+    roughness,
+    side,
+    transparent: basicMaterial.transparent
+  })
+}
+
+function disposeCloneMaterials(root: Group) {
+  const disposedMaterials = new Set<Material>()
+
+  root.traverse((object) => {
+    if (!(object instanceof Mesh)) {
+      return
+    }
+
+    const materials = Array.isArray(object.material)
+      ? object.material
+      : [object.material]
+
+    for (const material of materials) {
+      if (material instanceof Material && !disposedMaterials.has(material)) {
+        disposedMaterials.add(material)
+        material.dispose()
+      }
+    }
+  })
+}
+
+function useClonedRuntimeModel(
+  modelUrl: string,
+  kind: RuntimePropModelKind,
+  debugRole: string,
+  debugIndex: number
+) {
+  const [model, setModel] = useState<Group | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    let clonedRoot: Group | null = null
+
+    void cloneCachedGltfRoot(modelUrl)
+      .then((clone) => {
+        if (cancelled) {
+          disposeCloneMaterials(clone)
+          return
+        }
+
+        const clonedMaterials = new Map<Material, Material>()
+        const getClonedMaterial = (sourceMaterial: Material) => {
+          const cachedMaterial = clonedMaterials.get(sourceMaterial)
+
+          if (cachedMaterial) {
+            return cachedMaterial
+          }
+
+          const nextMaterial = createLitCloneMaterial(sourceMaterial, kind)
+          clonedMaterials.set(sourceMaterial, nextMaterial)
+          return nextMaterial
+        }
+
+        clone.traverse((object) => {
+          if (!(object instanceof Mesh)) {
+            return
+          }
+
+          if (Array.isArray(object.material)) {
+            object.material = object.material.map((material) =>
+              material instanceof Material
+                ? getClonedMaterial(material)
+                : material
+            )
+          } else if (object.material instanceof Material) {
+            object.material = getClonedMaterial(object.material)
+          }
+
+          object.castShadow = true
+          object.receiveShadow = true
+          object.userData.debugIndex = debugIndex
+          object.userData.debugRole = debugRole
+          object.userData.runtimeModelKind = kind
+        })
+
+        clonedRoot = clone
+        setModel(clone)
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.error(error)
+        }
+      })
+
+    return () => {
+      cancelled = true
+      if (clonedRoot) {
+        disposeCloneMaterials(clonedRoot)
+      }
+      setModel(null)
+    }
+  }, [debugIndex, debugRole, kind, modelUrl])
+
+  return model
+}
+
+function useAttachProbeBlendToModel(
+  model: Group | null,
+  probeBlend: ProbeBlendConfig
+) {
+  useEffect(() => {
+    if (!model) {
+      return
+    }
+
+    model.traverse((object) => {
+      if (!(object instanceof Mesh)) {
+        return
+      }
+
+      const materials = Array.isArray(object.material)
+        ? object.material
+        : [object.material]
+
+      materials.forEach((material) => {
+        if (
+          !(material instanceof ThreeMeshStandardMaterial) &&
+          !(material instanceof ThreeMeshPhysicalMaterial)
+        ) {
+          return
+        }
+
+        material.envMap = null
+        material.envMapIntensity = 0
+        const attachment = material.userData.probeBlendAttachment as
+          | {
+            set: (
+              nextProbeBlend: ProbeBlendConfig,
+              nextPatchConfig?: MaterialShaderPatchConfig
+            ) => void
+          }
+          | undefined
+
+        if (attachment) {
+          attachment.set(probeBlend)
+        } else {
+          material.userData.probeBlendAttachment = attachProbeBlendMaterialShader(
+            material,
+            probeBlend,
+            {},
+            { current: null }
+          )
+        }
+      })
+    })
+  }, [model, probeBlend])
 }
 
 function decodeBase64Bytes(base64: string) {
@@ -5064,15 +5288,26 @@ function EnvironmentLighting({
     }
 
     const probeCount = layout.reflectionProbes.length
-    const spawnPosition = getPlayerSpawnPosition()
+    const getDistanceToPriorityPosition = (probeIndex: number) => {
+      const probe = layout.reflectionProbes[probeIndex]
+
+      if (!probe) {
+        return Number.POSITIVE_INFINITY
+      }
+
+      return (
+        ((probe.position.x - priorityPositionRef.current.x) ** 2) +
+        ((probe.position.z - priorityPositionRef.current.z) ** 2)
+      )
+    }
     const startupProbeIndices = Array.from(
       new Set(
         (() => {
           const prioritizedProbeIndices = getReflectionProbeBlendForPosition(
             layout,
             {
-              x: spawnPosition.x,
-              z: spawnPosition.z
+              x: priorityPositionRef.current.x,
+              z: priorityPositionRef.current.z
             }
           ).probeIndices.filter(
             (probeIndex) =>
@@ -5084,9 +5319,7 @@ function EnvironmentLighting({
           let nearestProbeDistanceSquared = Number.POSITIVE_INFINITY
 
           layout.reflectionProbes.forEach((probe, probeIndex) => {
-            const dx = probe.position.x - spawnPosition.x
-            const dz = probe.position.z - spawnPosition.z
-            const distanceSquared = (dx * dx) + (dz * dz)
+            const distanceSquared = getDistanceToPriorityPosition(probeIndex)
 
             if (distanceSquared < nearestProbeDistanceSquared) {
               nearestProbeDistanceSquared = distanceSquared
@@ -5326,19 +5559,11 @@ function EnvironmentLighting({
               return
             }
 
-            pendingBackgroundProbeIndices.sort((leftProbeIndex, rightProbeIndex) => {
-              const currentPriorityPosition = priorityPositionRef.current
-              const leftProbe = layout.reflectionProbes[leftProbeIndex]
-              const rightProbe = layout.reflectionProbes[rightProbeIndex]
-              const leftDistanceSquared =
-                ((leftProbe?.position.x ?? 0) - currentPriorityPosition.x) ** 2 +
-                ((leftProbe?.position.z ?? 0) - currentPriorityPosition.z) ** 2
-              const rightDistanceSquared =
-                ((rightProbe?.position.x ?? 0) - currentPriorityPosition.x) ** 2 +
-                ((rightProbe?.position.z ?? 0) - currentPriorityPosition.z) ** 2
-
-              return leftDistanceSquared - rightDistanceSquared
-            })
+            pendingBackgroundProbeIndices.sort(
+              (leftProbeIndex, rightProbeIndex) =>
+                getDistanceToPriorityPosition(leftProbeIndex) -
+                getDistanceToPriorityPosition(rightProbeIndex)
+            )
 
             const getNextProbeIndex = () => {
               if (pendingStartupProbeIndices.length > 0) {
@@ -5598,6 +5823,11 @@ function EnvironmentLighting({
         ...layout.reflectionProbes
           .map((_, probeIndex) => probeIndex)
           .filter((probeIndex) => !startupProbeIndices.includes(probeIndex))
+          .sort(
+            (leftProbeIndex, rightProbeIndex) =>
+              getDistanceToPriorityPosition(leftProbeIndex) -
+              getDistanceToPriorityPosition(rightProbeIndex)
+          )
       ]
       let captureOrderIndex = 0
 
@@ -8072,19 +8302,22 @@ function SceneGeometry({
   iblContributionIntensity,
   layout,
   lightmapContributionIntensity,
+  openGateIds,
   probeDebugMode,
   probeDepthAtlasTextures,
   probeCoefficientTextures,
   reflectionProbeCoefficients,
   reflectionProbeDepthTextures,
   reflectionContributionIntensity,
-  reflectionProbeTextures
+  reflectionProbeTextures,
+  turnState
 }: {
   environmentTexture: Texture | null
   environmentIntensity: number
   iblContributionIntensity: number
   layout: MazeLayout
   lightmapContributionIntensity: number
+  openGateIds: Set<string>
   probeDebugMode: ProbeDebugMode
   probeDepthAtlasTextures: ProbeDepthAtlasTextures
   probeCoefficientTextures: [Texture, Texture, Texture, Texture]
@@ -8092,6 +8325,7 @@ function SceneGeometry({
   reflectionProbeDepthTextures: CubeTexture[]
   reflectionContributionIntensity: number
   reflectionProbeTextures: Texture[]
+  turnState: TurnState
 }) {
   const lightmapBytes = useMazeLightmapBytes(layout.maze.lightmap)
   const groundLightmapTexture = useGroundLightmapTexture(layout.maze.lightmap, lightmapBytes)
@@ -8126,6 +8360,32 @@ function SceneGeometry({
         reflectionProbeDepthTextures={reflectionProbeDepthTextures}
         reflectionProbeTextures={reflectionProbeTextures}
       />
+      <MazeGates
+        environmentTexture={environmentTexture}
+        environmentIntensity={environmentIntensity}
+        iblContributionIntensity={iblContributionIntensity}
+        layout={layout}
+        openGateIds={openGateIds}
+        probeDepthAtlasTextures={probeDepthAtlasTextures}
+        probeCoefficientTextures={probeCoefficientTextures}
+        reflectionContributionIntensity={reflectionContributionIntensity}
+        reflectionProbeCoefficients={reflectionProbeCoefficients}
+        reflectionProbeDepthTextures={reflectionProbeDepthTextures}
+        reflectionProbeTextures={reflectionProbeTextures}
+      />
+      <MazeItems
+        environmentTexture={environmentTexture}
+        environmentIntensity={environmentIntensity}
+        iblContributionIntensity={iblContributionIntensity}
+        layout={layout}
+        probeDepthAtlasTextures={probeDepthAtlasTextures}
+        probeCoefficientTextures={probeCoefficientTextures}
+        reflectionContributionIntensity={reflectionContributionIntensity}
+        reflectionProbeCoefficients={reflectionProbeCoefficients}
+        reflectionProbeDepthTextures={reflectionProbeDepthTextures}
+        reflectionProbeTextures={reflectionProbeTextures}
+        turnState={turnState}
+      />
       <ReflectionProbeDebugOverlay
         mode={probeDebugMode}
         reflectionProbeCoefficients={reflectionProbeCoefficients}
@@ -8134,6 +8394,732 @@ function SceneGeometry({
         reflectionProbeTextures={reflectionProbeTextures}
         visible={probeDebugMode !== 'none'}
       />
+    </>
+  )
+}
+
+function GateActor({
+  debugIndex,
+  environmentIntensity,
+  environmentTexture,
+  gate,
+  iblContributionIntensity,
+  isOpen,
+  layout,
+  probeDepthAtlasTextures,
+  probeCoefficientTextures,
+  reflectionContributionIntensity,
+  reflectionProbeCoefficients,
+  reflectionProbeDepthTextures,
+  reflectionProbeTextures
+}: {
+  debugIndex: number
+  environmentIntensity: number
+  environmentTexture: Texture | null
+  gate: MazeLayout['gates'][number]
+  iblContributionIntensity: number
+  isOpen: boolean
+  layout: MazeLayout
+  probeDepthAtlasTextures: ProbeDepthAtlasTextures
+  probeCoefficientTextures: [Texture, Texture, Texture, Texture]
+  reflectionContributionIntensity: number
+  reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
+  reflectionProbeDepthTextures: CubeTexture[]
+  reflectionProbeTextures: Texture[]
+}) {
+  const group = useRef<Group>(null)
+  const model = useClonedRuntimeModel(
+    GATE_MODEL_URL,
+    'gate',
+    'maze-gate',
+    debugIndex
+  )
+  const reflectionProbeBlend = useMemo(
+    () =>
+      getReflectionProbeBlendForPosition(layout, {
+        x: gate.center.x,
+        z: gate.center.z
+      }),
+    [gate.center.x, gate.center.z, layout]
+  )
+  const probeTextures = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeTextures[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeTextures]
+  )
+  const probeDepthTextures = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeDepthTextures[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeDepthTextures]
+  )
+  const probeCoefficients = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeCoefficients[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeCoefficients]
+  )
+  const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
+  const hasProbeDepthTextures = hasCompleteProbeDepthTextures(probeDepthTextures)
+  const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
+  const probeBlend = useMemo(
+    () =>
+      buildProbeBlendConfig(
+        layout,
+        reflectionProbeBlend.probeIndices,
+        probeTextures,
+        probeDepthTextures,
+        probeDepthAtlasTextures,
+        probeCoefficients,
+        'disabled',
+        {
+          diffuseIntensity: iblContributionIntensity,
+          probeCoefficientTextures,
+          radianceIntensity: reflectionContributionIntensity,
+          radianceMode:
+            reflectionContributionIntensity > EFFECT_EPSILON &&
+            hasProbeDepthTextures &&
+            hasProbeTextures
+              ? 'constant'
+              : 'disabled',
+          vlmBoundaryNormal:
+            gate.axis === 'z'
+              ? { x: 1, z: 0 }
+              : { x: 0, z: 1 },
+          vlmMode:
+            iblContributionIntensity > EFFECT_EPSILON && hasProbeCoefficients
+              ? 'boundary8'
+              : 'disabled',
+          weights: reflectionProbeBlend.weights as [number, number, number, number]
+        }
+      ),
+    [
+      gate.axis,
+      hasProbeCoefficients,
+      hasProbeDepthTextures,
+      hasProbeTextures,
+      iblContributionIntensity,
+      layout,
+      probeCoefficientTextures,
+      probeCoefficients,
+      probeDepthAtlasTextures,
+      probeDepthTextures,
+      probeTextures,
+      reflectionContributionIntensity,
+      reflectionProbeBlend.probeIndices,
+      reflectionProbeBlend.weights
+    ]
+  )
+  const transform = useMemo(() => {
+    if (!model) {
+      return null
+    }
+
+    model.updateMatrixWorld(true)
+    const bounds = new Box3().setFromObject(model, true)
+    const center = new Vector3()
+    const size = new Vector3()
+
+    bounds.getCenter(center)
+    bounds.getSize(size)
+
+    const scale = MAZE_CELL_SIZE / Math.max(size.x, size.y, 0.0001)
+    const minRelativeY = (bounds.min.y - center.y) * scale
+    const maxRelativeY = (bounds.max.y - center.y) * scale
+
+    return {
+      closedY: GROUND_Y - minRelativeY,
+      modelOffset: new Vector3(
+        -center.x * scale,
+        -center.y * scale,
+        -center.z * scale
+      ),
+      openY: GROUND_Y - maxRelativeY - 0.02,
+      scale
+    }
+  }, [model])
+
+  useAttachProbeBlendToModel(model, probeBlend)
+
+  useEffect(() => {
+    if (!group.current || !transform) {
+      return
+    }
+
+    group.current.position.set(
+      gate.center.x,
+      isOpen ? transform.openY : transform.closedY,
+      gate.center.z
+    )
+  }, [gate.center.x, gate.center.z, isOpen, transform])
+
+  useFrame((_, delta) => {
+    if (!group.current || !transform) {
+      return
+    }
+
+    group.current.position.y = MathUtils.damp(
+      group.current.position.y,
+      isOpen ? transform.openY : transform.closedY,
+      18,
+      delta
+    )
+  })
+
+  if (!model || !transform) {
+    return null
+  }
+
+  return (
+    <group
+      ref={group}
+      rotation-y={gate.yaw}
+      userData={{
+        debugIndex,
+        debugRole: 'maze-gate',
+        gateId: gate.id
+      }}
+    >
+      <primitive
+        object={model}
+        position={[
+          transform.modelOffset.x,
+          transform.modelOffset.y,
+          transform.modelOffset.z
+        ]}
+        rotation-z={Math.PI}
+        scale={transform.scale}
+      />
+    </group>
+  )
+}
+
+function MazeGates({
+  environmentIntensity,
+  environmentTexture,
+  iblContributionIntensity,
+  layout,
+  openGateIds,
+  probeDepthAtlasTextures,
+  probeCoefficientTextures,
+  reflectionContributionIntensity,
+  reflectionProbeCoefficients,
+  reflectionProbeDepthTextures,
+  reflectionProbeTextures
+}: {
+  environmentIntensity: number
+  environmentTexture: Texture | null
+  iblContributionIntensity: number
+  layout: MazeLayout
+  openGateIds: Set<string>
+  probeDepthAtlasTextures: ProbeDepthAtlasTextures
+  probeCoefficientTextures: [Texture, Texture, Texture, Texture]
+  reflectionContributionIntensity: number
+  reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
+  reflectionProbeDepthTextures: CubeTexture[]
+  reflectionProbeTextures: Texture[]
+}) {
+  return (
+    <>
+      {layout.gates.map((gate, gateIndex) => (
+        <GateActor
+          debugIndex={gateIndex}
+          environmentIntensity={environmentIntensity}
+          environmentTexture={environmentTexture}
+          gate={gate}
+          iblContributionIntensity={iblContributionIntensity}
+          isOpen={openGateIds.has(gate.id)}
+          key={gate.id}
+          layout={layout}
+          probeDepthAtlasTextures={probeDepthAtlasTextures}
+          probeCoefficientTextures={probeCoefficientTextures}
+          reflectionContributionIntensity={reflectionContributionIntensity}
+          reflectionProbeCoefficients={reflectionProbeCoefficients}
+          reflectionProbeDepthTextures={reflectionProbeDepthTextures}
+          reflectionProbeTextures={reflectionProbeTextures}
+        />
+      ))}
+    </>
+  )
+}
+
+function MazeItemGroundActor({
+  debugIndex,
+  environmentIntensity,
+  environmentTexture,
+  iblContributionIntensity,
+  item,
+  layout,
+  probeDepthAtlasTextures,
+  probeCoefficientTextures,
+  reflectionContributionIntensity,
+  reflectionProbeCoefficients,
+  reflectionProbeDepthTextures,
+  reflectionProbeTextures
+}: {
+  debugIndex: number
+  environmentIntensity: number
+  environmentTexture: Texture | null
+  iblContributionIntensity: number
+  item: MazeLayout['items'][number]
+  layout: MazeLayout
+  probeDepthAtlasTextures: ProbeDepthAtlasTextures
+  probeCoefficientTextures: [Texture, Texture, Texture, Texture]
+  reflectionContributionIntensity: number
+  reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
+  reflectionProbeDepthTextures: CubeTexture[]
+  reflectionProbeTextures: Texture[]
+}) {
+  const model = useClonedRuntimeModel(
+    item.type === 'sword' ? SWORD_MODEL_URL : TROPHY_MODEL_URL,
+    item.type,
+    `maze-${item.type}`,
+    debugIndex
+  )
+  const reflectionProbeBlend = useMemo(
+    () =>
+      getReflectionProbeBlendForPosition(layout, {
+        x: item.position.x,
+        z: item.position.z
+      }),
+    [item.position.x, item.position.z, layout]
+  )
+  const probeTextures = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeTextures[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeTextures]
+  )
+  const probeDepthTextures = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeDepthTextures[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeDepthTextures]
+  )
+  const probeCoefficients = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeCoefficients[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeCoefficients]
+  )
+  const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
+  const hasProbeDepthTextures = hasCompleteProbeDepthTextures(probeDepthTextures)
+  const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
+  const probeBlend = useMemo(
+    () =>
+      buildProbeBlendConfig(
+        layout,
+        reflectionProbeBlend.probeIndices,
+        probeTextures,
+        probeDepthTextures,
+        probeDepthAtlasTextures,
+        probeCoefficients,
+        'disabled',
+        {
+          diffuseIntensity: iblContributionIntensity,
+          probeCoefficientTextures,
+          radianceIntensity: reflectionContributionIntensity,
+          radianceMode:
+            reflectionContributionIntensity > EFFECT_EPSILON &&
+            hasProbeDepthTextures &&
+            hasProbeTextures
+              ? 'constant'
+              : 'disabled',
+          vlmMode:
+            iblContributionIntensity > EFFECT_EPSILON && hasProbeCoefficients
+              ? 'cell5'
+              : 'disabled'
+        }
+      ),
+    [
+      hasProbeCoefficients,
+      hasProbeDepthTextures,
+      hasProbeTextures,
+      iblContributionIntensity,
+      layout,
+      probeCoefficientTextures,
+      probeCoefficients,
+      probeDepthAtlasTextures,
+      probeDepthTextures,
+      probeTextures,
+      reflectionContributionIntensity,
+      reflectionProbeBlend.probeIndices
+    ]
+  )
+  const transform = useMemo(() => {
+    if (!model) {
+      return null
+    }
+
+    model.updateMatrixWorld(true)
+    const bounds = new Box3().setFromObject(model, true)
+    const center = new Vector3()
+    const size = new Vector3()
+
+    bounds.getCenter(center)
+    bounds.getSize(size)
+
+    if (item.type === 'sword') {
+      const scale = 1 / Math.max(size.z, 0.0001)
+      return {
+        modelOffset: new Vector3(
+          -center.x * scale,
+          -center.y * scale,
+          -center.z * scale
+        ),
+        rotationX: -Math.PI / 2,
+        rotationY: 0,
+        scale,
+        y: GROUND_Y + ((bounds.max.z - center.z) * scale) - 0.04
+      }
+    }
+
+    const scale = 0.5 / Math.max(size.y, 0.0001)
+
+    return {
+      modelOffset: new Vector3(
+        -center.x * scale,
+        -center.y * scale,
+        -center.z * scale
+      ),
+      rotationX: 0,
+      rotationY: 0,
+      scale,
+      y: GROUND_Y + ((center.y - bounds.min.y) * scale)
+    }
+  }, [item.type, model])
+
+  useAttachProbeBlendToModel(model, probeBlend)
+
+  if (!model || !transform) {
+    return null
+  }
+
+  return (
+    <group
+      position={[item.position.x, transform.y, item.position.z]}
+      userData={{
+        debugIndex,
+        debugRole: `maze-${item.type}`,
+        itemId: item.id
+      }}
+    >
+      <primitive
+        object={model}
+        position={[
+          transform.modelOffset.x,
+          transform.modelOffset.y,
+          transform.modelOffset.z
+        ]}
+        rotation-x={transform.rotationX}
+        rotation-y={transform.rotationY}
+        scale={transform.scale}
+      />
+    </group>
+  )
+}
+
+function HeldItemView({
+  debugIndex,
+  environmentIntensity,
+  environmentTexture,
+  iblContributionIntensity,
+  itemType,
+  layout,
+  playerCell,
+  probeDepthAtlasTextures,
+  probeCoefficientTextures,
+  reflectionContributionIntensity,
+  reflectionProbeCoefficients,
+  reflectionProbeDepthTextures,
+  reflectionProbeTextures
+}: {
+  debugIndex: number
+  environmentIntensity: number
+  environmentTexture: Texture | null
+  iblContributionIntensity: number
+  itemType: 'sword' | 'trophy'
+  layout: MazeLayout
+  playerCell: { x: number; y: number }
+  probeDepthAtlasTextures: ProbeDepthAtlasTextures
+  probeCoefficientTextures: [Texture, Texture, Texture, Texture]
+  reflectionContributionIntensity: number
+  reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
+  reflectionProbeDepthTextures: CubeTexture[]
+  reflectionProbeTextures: Texture[]
+}) {
+  const group = useRef<Group>(null)
+  const camera = useThree((state) => state.camera)
+  const playerWorldPosition = useMemo(
+    () => getMazeCellWorldPosition(layout.maze, playerCell, GROUND_Y),
+    [layout.maze, playerCell.x, playerCell.y]
+  )
+  const model = useClonedRuntimeModel(
+    itemType === 'sword' ? SWORD_MODEL_URL : TROPHY_MODEL_URL,
+    itemType,
+    `held-${itemType}`,
+    debugIndex
+  )
+  const reflectionProbeBlend = useMemo(
+    () =>
+      getReflectionProbeBlendForPosition(layout, {
+        x: playerWorldPosition.x,
+        z: playerWorldPosition.z
+      }),
+    [layout, playerWorldPosition.x, playerWorldPosition.z]
+  )
+  const probeTextures = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeTextures[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeTextures]
+  )
+  const probeDepthTextures = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeDepthTextures[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeDepthTextures]
+  )
+  const probeCoefficients = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeCoefficients[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeCoefficients]
+  )
+  const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
+  const hasProbeDepthTextures = hasCompleteProbeDepthTextures(probeDepthTextures)
+  const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
+  const diffuseIntensity = 1 + iblContributionIntensity
+  const probeBlend = useMemo(
+    () =>
+      buildProbeBlendConfig(
+        layout,
+        reflectionProbeBlend.probeIndices,
+        probeTextures,
+        probeDepthTextures,
+        probeDepthAtlasTextures,
+        probeCoefficients,
+        'disabled',
+        {
+          diffuseIntensity,
+          probeCoefficientTextures,
+          radianceIntensity: reflectionContributionIntensity,
+          radianceMode:
+            reflectionContributionIntensity > EFFECT_EPSILON &&
+            hasProbeDepthTextures &&
+            hasProbeTextures
+              ? 'constant'
+              : 'disabled',
+          vlmMode:
+            diffuseIntensity > EFFECT_EPSILON && hasProbeCoefficients
+              ? 'cell5'
+              : 'disabled'
+        }
+      ),
+    [
+      diffuseIntensity,
+      hasProbeCoefficients,
+      hasProbeDepthTextures,
+      hasProbeTextures,
+      layout,
+      probeCoefficientTextures,
+      probeCoefficients,
+      probeDepthAtlasTextures,
+      probeDepthTextures,
+      probeTextures,
+      reflectionContributionIntensity,
+      reflectionProbeBlend.probeIndices
+    ]
+  )
+  const transform = useMemo(() => {
+    if (!model) {
+      return null
+    }
+
+    model.updateMatrixWorld(true)
+    const bounds = new Box3().setFromObject(model, true)
+    const center = new Vector3()
+    const size = new Vector3()
+
+    bounds.getCenter(center)
+    bounds.getSize(size)
+
+    if (itemType === 'sword') {
+      const scale = 1 / Math.max(size.z, 0.0001)
+
+      return {
+        modelOffset: new Vector3(
+          -center.x * scale,
+          -center.y * scale,
+          -(bounds.min.z * scale)
+        ),
+        rotationX: 0,
+        rotationY: Math.PI,
+        scale
+      }
+    }
+
+    const scale = 0.5 / Math.max(size.y, 0.0001)
+
+    return {
+      modelOffset: new Vector3(
+        -center.x * scale,
+        -(bounds.min.y * scale),
+        -center.z * scale
+      ),
+      rotationX: 0,
+      rotationY: 0,
+      scale
+    }
+  }, [itemType, model])
+
+  useAttachProbeBlendToModel(model, probeBlend)
+
+  useFrame(() => {
+    if (!group.current) {
+      return
+    }
+
+    const cameraQuaternion = camera.quaternion
+
+    if (itemType === 'sword') {
+      const handleLocal = new Vector3(0.5, -1, 0.25)
+      const targetLocal = new Vector3(0, 0, -2)
+      const handleWorld = handleLocal.applyQuaternion(cameraQuaternion).add(camera.position)
+      const targetWorld = targetLocal.applyQuaternion(cameraQuaternion).add(camera.position)
+
+      group.current.position.copy(handleWorld)
+      group.current.lookAt(targetWorld)
+      return
+    }
+
+    const trophyLocal = new Vector3(-0.5, -1, 0.25)
+    const trophyWorld = trophyLocal.applyQuaternion(cameraQuaternion).add(camera.position)
+
+    group.current.position.copy(trophyWorld)
+    group.current.quaternion.copy(cameraQuaternion)
+  })
+
+  if (!model || !transform) {
+    return null
+  }
+
+  return (
+    <group
+      ref={group}
+      userData={{
+        debugIndex,
+        debugRole: `held-${itemType}`
+      }}
+    >
+      <primitive
+        object={model}
+        position={[
+          transform.modelOffset.x,
+          transform.modelOffset.y,
+          transform.modelOffset.z
+        ]}
+        rotation-x={transform.rotationX}
+        rotation-y={transform.rotationY}
+        scale={transform.scale}
+      />
+    </group>
+  )
+}
+
+function MazeItems({
+  environmentIntensity,
+  environmentTexture,
+  iblContributionIntensity,
+  layout,
+  probeDepthAtlasTextures,
+  probeCoefficientTextures,
+  reflectionContributionIntensity,
+  reflectionProbeCoefficients,
+  reflectionProbeDepthTextures,
+  reflectionProbeTextures,
+  turnState
+}: {
+  environmentIntensity: number
+  environmentTexture: Texture | null
+  iblContributionIntensity: number
+  layout: MazeLayout
+  probeDepthAtlasTextures: ProbeDepthAtlasTextures
+  probeCoefficientTextures: [Texture, Texture, Texture, Texture]
+  reflectionContributionIntensity: number
+  reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
+  reflectionProbeDepthTextures: CubeTexture[]
+  reflectionProbeTextures: Texture[]
+  turnState: TurnState
+}) {
+  return (
+    <>
+      {layout.items
+        .filter((item) => (
+          (item.type === 'sword' && turnState.swordState === 'ground') ||
+          (item.type === 'trophy' && turnState.trophyState === 'ground')
+        ))
+        .map((item, itemIndex) => (
+          <MazeItemGroundActor
+            debugIndex={itemIndex}
+            environmentIntensity={environmentIntensity}
+            environmentTexture={environmentTexture}
+            iblContributionIntensity={iblContributionIntensity}
+            item={item}
+            key={item.id}
+            layout={layout}
+            probeDepthAtlasTextures={probeDepthAtlasTextures}
+            probeCoefficientTextures={probeCoefficientTextures}
+            reflectionContributionIntensity={reflectionContributionIntensity}
+            reflectionProbeCoefficients={reflectionProbeCoefficients}
+            reflectionProbeDepthTextures={reflectionProbeDepthTextures}
+            reflectionProbeTextures={reflectionProbeTextures}
+          />
+        ))}
+      {turnState.player.hasSword ? (
+        <HeldItemView
+          debugIndex={0}
+          environmentIntensity={environmentIntensity}
+          environmentTexture={environmentTexture}
+          iblContributionIntensity={iblContributionIntensity}
+          itemType="sword"
+          layout={layout}
+          playerCell={turnState.player.cell}
+          probeDepthAtlasTextures={probeDepthAtlasTextures}
+          probeCoefficientTextures={probeCoefficientTextures}
+          reflectionContributionIntensity={reflectionContributionIntensity}
+          reflectionProbeCoefficients={reflectionProbeCoefficients}
+          reflectionProbeDepthTextures={reflectionProbeDepthTextures}
+          reflectionProbeTextures={reflectionProbeTextures}
+        />
+      ) : null}
+      {turnState.player.hasTrophy ? (
+        <HeldItemView
+          debugIndex={1}
+          environmentIntensity={environmentIntensity}
+          environmentTexture={environmentTexture}
+          iblContributionIntensity={iblContributionIntensity}
+          itemType="trophy"
+          layout={layout}
+          playerCell={turnState.player.cell}
+          probeDepthAtlasTextures={probeDepthAtlasTextures}
+          probeCoefficientTextures={probeCoefficientTextures}
+          reflectionContributionIntensity={reflectionContributionIntensity}
+          reflectionProbeCoefficients={reflectionProbeCoefficients}
+          reflectionProbeDepthTextures={reflectionProbeDepthTextures}
+          reflectionProbeTextures={reflectionProbeTextures}
+        />
+      ) : null}
     </>
   )
 }
@@ -8167,7 +9153,12 @@ function MonsterModel({
   reflectionProbeDepthTextures: CubeTexture[]
   reflectionProbeTextures: Texture[]
 }) {
-  const [model, setModel] = useState<Group | null>(null)
+  const model = useClonedRuntimeModel(
+    MONSTER_MODEL_URLS[monster.type],
+    'monster',
+    'monster',
+    debugIndex
+  )
   const monsterCellPosition = useMemo(
     () => getMazeCellWorldPosition(layout.maze, monster.cell, GROUND_Y),
     [layout.maze, monster.cell.x, monster.cell.y]
@@ -8239,106 +9230,6 @@ function MonsterModel({
     ]
   )
 
-  useEffect(() => {
-    let cancelled = false
-    const loader = new GLTFLoader()
-
-    loader.load(
-      MONSTER_MODEL_URLS[monster.type],
-      (gltf) => {
-        if (cancelled) {
-          return
-        }
-
-        const clone = cloneSkeleton(gltf.scene)
-
-        clone.traverse((object) => {
-          if (object instanceof Mesh) {
-            if (Array.isArray(object.material)) {
-              object.material = object.material.map((material) =>
-                material instanceof Material ? material.clone() : material
-              )
-            } else if (object.material instanceof Material) {
-              object.material = object.material.clone()
-            }
-            object.castShadow = true
-            object.receiveShadow = true
-            object.userData.debugIndex = debugIndex
-            object.userData.debugRole = 'monster'
-            object.userData.monsterType = monster.type
-          }
-        })
-
-        setModel(clone)
-      },
-      undefined,
-      (error) => {
-        if (!cancelled) {
-          console.error(error)
-        }
-      }
-    )
-
-    return () => {
-      cancelled = true
-      setModel(null)
-    }
-  }, [debugIndex, monster.type])
-
-  useEffect(() => {
-    if (!model) {
-      return
-    }
-
-    model.traverse((object) => {
-      if (!(object instanceof Mesh)) {
-        return
-      }
-
-      const materials = Array.isArray(object.material)
-        ? object.material
-        : [object.material]
-
-      materials.forEach((material) => {
-        if (
-          !(material instanceof ThreeMeshStandardMaterial) &&
-          !(material instanceof ThreeMeshPhysicalMaterial)
-        ) {
-          return
-        }
-
-        material.envMap = null
-        material.envMapIntensity = 0
-        const attachment = material.userData.monsterProbeBlendAttachment as
-          | {
-            set: (
-              nextProbeBlend: ProbeBlendConfig,
-              nextPatchConfig?: MaterialShaderPatchConfig
-            ) => void
-          }
-          | undefined
-
-        if (attachment) {
-          attachment.set(probeBlend)
-        } else {
-          material.userData.monsterProbeBlendAttachment = attachProbeBlendMaterialShader(
-            material,
-            probeBlend,
-            {},
-            { current: null }
-          )
-        }
-        material.needsUpdate = true
-      })
-    })
-  }, [
-    environmentIntensity,
-    environmentTexture,
-    model,
-    probeBlend,
-    probeTextures
-  ])
-
   const transform = useMemo(() => {
     if (!model) {
       return null
@@ -8381,6 +9272,8 @@ function MonsterModel({
     }
   }, [model, monster.hand, monster.type])
 
+  useAttachProbeBlendToModel(model, probeBlend)
+
   if (!model || !transform) {
     return null
   }
@@ -8393,6 +9286,7 @@ function MonsterModel({
     transform.scaledSize.z
   ]
   model.userData.monsterTargetSize = transform.targetSize
+  model.userData.monsterType = monster.type
 
   return (
     <primitive
@@ -9195,6 +10089,9 @@ function FlightRig({
   controlsOpen,
   layout,
   movementSettings,
+  onReplayActiveChange,
+  replayRequestId,
+  setDisplayedOpenGateIds,
   setTurnState,
   turnState,
   wallBounds
@@ -9202,6 +10099,9 @@ function FlightRig({
   controlsOpen: boolean
   layout: MazeLayout
   movementSettings: MovementSettings
+  onReplayActiveChange: (active: boolean) => void
+  replayRequestId: number
+  setDisplayedOpenGateIds: (gateIds: string[]) => void
   setTurnState: (value: TurnState | ((current: TurnState) => TurnState)) => void
   turnState: TurnState
   wallBounds: ReturnType<typeof getWallBounds>
@@ -9231,6 +10131,8 @@ function FlightRig({
   const pitch = useRef(0)
   const freeCamera = useRef(false)
   const inputQueue = useRef<TurnAction[]>([])
+  const replayQueue = useRef<TurnAction[]>([])
+  const replayActive = useRef(false)
   const turnStateRef = useRef(turnState)
   const cameraShake = useRef({ amplitude: 0, endsAt: 0 })
   const playerAnimation = useRef<{
@@ -9238,6 +10140,7 @@ function FlightRig({
     blocked: boolean
     from: TurnState
     killed: boolean
+    playerEffect: 'death' | 'escape' | 'sword-strike' | null
     startedAt: number
     to: TurnState
   } | null>(null)
@@ -9261,6 +10164,26 @@ function FlightRig({
   useEffect(() => {
     turnStateRef.current = turnState
   }, [turnState])
+
+  useEffect(() => {
+    if (replayRequestId <= 0) {
+      return
+    }
+
+    const replayActions = Array.isArray(layout.maze.solution?.actions)
+      ? [...layout.maze.solution.actions]
+      : []
+    const nextState = createInitialTurnState(layout.maze)
+
+    replayQueue.current = replayActions
+    inputQueue.current = []
+    playerAnimation.current = null
+    replayActive.current = replayActions.length > 0
+    freeCamera.current = false
+    setDisplayedOpenGateIds([])
+    setTurnState(nextState)
+    onReplayActiveChange(replayActive.current)
+  }, [layout.maze, onReplayActiveChange, replayRequestId, setDisplayedOpenGateIds, setTurnState])
 
   useEffect(() => {
     const spawnPosition = getMazeCellWorldPosition(
@@ -9368,7 +10291,7 @@ function FlightRig({
         return
       }
 
-      if (!freeCamera.current) {
+      if (!freeCamera.current && !replayActive.current) {
         const queuedAction =
           event.code === 'KeyW' || event.code === 'ArrowUp'
             ? 'move-forward'
@@ -9500,13 +10423,37 @@ function FlightRig({
         } | null
         getMonsterRenderState?: (index: number) => {
           boundsSize: [number, number, number] | null
+          doubleSidedMaterialCount: number
           hasLightMap: boolean
           meshCount: number
           targetSize: number | null
           type: 'minotaur' | 'spider' | 'werewolf' | null
           totalTriangleCount: number
+          uniqueMaterialCount: number
           visible: boolean
         } | null
+        getTurnStateSummary?: () => {
+          dead: boolean
+          escaped: boolean
+          monsters: Array<{
+            awake: boolean
+            cell: { x: number; y: number }
+            direction: CardinalDirection
+            id: string
+            type: 'minotaur' | 'spider' | 'werewolf'
+          }>
+          openGateIds: string[]
+          player: {
+            cell: { x: number; y: number }
+            direction: CardinalDirection
+            hasSword: boolean
+            hasTrophy: boolean
+          }
+          replayActive: boolean
+          swordState: 'consumed' | 'ground' | 'held'
+          trophyState: 'ground' | 'held'
+          turn: number
+        }
         getReflectionProbeState?: () => {
           activeProbeId: string | null
           captureSceneState?: {
@@ -9893,10 +10840,12 @@ function FlightRig({
       getMonsterRenderState: (index) => {
         let meshCount = 0
         let totalTriangleCount = 0
+        let doubleSidedMaterialCount = 0
         let hasLightMap = false
         let visible = false
         let targetSize: number | null = null
         let monsterType: 'minotaur' | 'spider' | 'werewolf' | null = null
+        const materialIds = new Set<string>()
 
         monsterBounds.makeEmpty()
 
@@ -9929,6 +10878,18 @@ function FlightRig({
             const materials = Array.isArray(object.material)
               ? object.material
               : [object.material]
+
+            for (const material of materials) {
+              if (!(material instanceof Material)) {
+                continue
+              }
+
+              materialIds.add(material.uuid)
+
+              if (material.side === DoubleSide) {
+                doubleSidedMaterialCount += 1
+              }
+            }
 
             hasLightMap = hasLightMap || materials.some(
               (material) => Boolean((material as { lightMap?: Texture | null }).lightMap)
@@ -9963,14 +10924,38 @@ function FlightRig({
             monsterBoundsSize.y,
             monsterBoundsSize.z
           ],
+          doubleSidedMaterialCount,
           hasLightMap,
           meshCount,
           targetSize,
           type: monsterType,
           totalTriangleCount,
+          uniqueMaterialCount: materialIds.size,
           visible
         }
       },
+      getTurnStateSummary: () => ({
+        dead: turnStateRef.current.dead,
+        escaped: turnStateRef.current.escaped,
+        monsters: turnStateRef.current.monsters.map((monster) => ({
+          awake: monster.awake,
+          cell: { ...monster.cell },
+          direction: monster.direction,
+          id: monster.id,
+          type: monster.type
+        })),
+        openGateIds: getOpenGateIds(layout.maze, turnStateRef.current),
+        player: {
+          cell: { ...turnStateRef.current.player.cell },
+          direction: turnStateRef.current.player.direction,
+          hasSword: turnStateRef.current.player.hasSword,
+          hasTrophy: turnStateRef.current.player.hasTrophy
+        },
+        replayActive: replayActive.current,
+        swordState: turnStateRef.current.swordState,
+        trophyState: turnStateRef.current.trophyState,
+        turn: turnStateRef.current.turn
+      }),
       getReflectionProbeState: () => {
         return scene.userData.reflectionProbeState ?? null
       },
@@ -10000,6 +10985,7 @@ function FlightRig({
       delete globalWindow.__levelsjamDebug.getDebugPosition
       delete globalWindow.__levelsjamDebug.getDebugMeshState
       delete globalWindow.__levelsjamDebug.getMonsterRenderState
+      delete globalWindow.__levelsjamDebug.getTurnStateSummary
       delete globalWindow.__levelsjamDebug.getDebugProgramUniformState
       delete globalWindow.__levelsjamDebug.getReflectionProbeState
       delete globalWindow.__levelsjamDebug.setView
@@ -10011,10 +10997,16 @@ function FlightRig({
 
   useFrame((_, delta) => {
     if (!freeCamera.current) {
-      if (!playerAnimation.current && inputQueue.current.length > 0) {
-        const action = inputQueue.current.shift()
+      if (!playerAnimation.current) {
+        const action = replayQueue.current.shift() ?? inputQueue.current.shift()
 
         if (action) {
+          if (action === 'move-forward' || action === 'move-backward') {
+            setDisplayedOpenGateIds(getOpenGateIds(layout.maze, turnStateRef.current))
+          } else {
+            setDisplayedOpenGateIds([])
+          }
+
           const result = applyTurnAction(layout.maze, turnStateRef.current, action)
           const previousMinotaur = result.previous.monsters.find(
             (monster) => monster.type === 'minotaur'
@@ -10052,11 +11044,12 @@ function FlightRig({
             blocked: Boolean(result.blocked),
             from: result.previous,
             killed: result.killed,
+            playerEffect: result.playerEffect,
             startedAt: performance.now(),
             to: result.state
           }
-          if (result.killed) {
-            document.body.dataset.playerDead = 'true'
+          if (result.playerEffect === 'death' || result.playerEffect === 'sword-strike') {
+            document.body.dataset.playerEffect = result.playerEffect
           }
         }
       }
@@ -10074,17 +11067,26 @@ function FlightRig({
 
         if (animationAlpha >= 1) {
           const finalState = activeAnimation.killed
-            ? resetTurnStateToCheckpoint(activeAnimation.to)
+            ? resetTurnStateToCheckpoint(layout.maze, activeAnimation.to)
             : activeAnimation.to
 
           turnStateRef.current = finalState
           setTurnState(finalState)
           playerAnimation.current = null
+          setDisplayedOpenGateIds([])
 
-          if (activeAnimation.killed) {
+          if (
+            activeAnimation.playerEffect === 'death' ||
+            activeAnimation.playerEffect === 'sword-strike'
+          ) {
             window.setTimeout(() => {
-              delete document.body.dataset.playerDead
+              delete document.body.dataset.playerEffect
             }, 2000)
+          }
+
+          if (replayActive.current && replayQueue.current.length === 0) {
+            replayActive.current = false
+            onReplayActiveChange(false)
           }
         }
       }
@@ -10165,6 +11167,13 @@ function FlightRig({
     camera.updateMatrixWorld()
   }, -1)
 
+  useEffect(() => {
+    return () => {
+      onReplayActiveChange(false)
+      setDisplayedOpenGateIds([])
+    }
+  }, [onReplayActiveChange, setDisplayedOpenGateIds])
+
   return null
 }
 
@@ -10173,22 +11182,28 @@ function Scene({
   controlsOpen,
   layout,
   onAssetsReady,
+  onReplayActiveChange,
+  replayRequestId,
   visualSettings
 }: {
   composerEnabled: boolean
   controlsOpen: boolean
   layout: MazeLayout
   onAssetsReady: () => void
+  onReplayActiveChange: (active: boolean) => void
+  replayRequestId: number
   visualSettings: VisualSettings
 }) {
   recordStartupMarker('sceneRenderStartedAt')
   const [turnState, setTurnState] = useState<TurnState>(() =>
     createInitialTurnState(layout.maze)
   )
+  const [displayedOpenGateIds, setDisplayedOpenGateIds] = useState<string[]>([])
   const hasReportedBasicAssetsReady = useRef(false)
 
   useEffect(() => {
     setTurnState(createInitialTurnState(layout.maze))
+    setDisplayedOpenGateIds([])
   }, [layout.maze])
   useEffect(() => {
     hasReportedBasicAssetsReady.current = false
@@ -10210,6 +11225,10 @@ function Scene({
   const playerWorldPosition = useMemo(
     () => getMazeCellWorldPosition(layout.maze, turnState.player.cell, GROUND_Y),
     [layout.maze, turnState.player.cell.x, turnState.player.cell.y]
+  )
+  const openGateIds = useMemo(
+    () => new Set(displayedOpenGateIds),
+    [displayedOpenGateIds]
   )
 
   useFrame(() => {
@@ -10278,6 +11297,11 @@ function Scene({
           lines: number
           points: number
           triangles: number
+        }
+        getRuntimeMemoryState?: () => {
+          estimatedTextureBytes: number
+          rendererGeometries: number
+          rendererTextures: number
         }
         bakeReflectionProbeAssets?: (
           probeIndex: number,
@@ -10400,10 +11424,119 @@ function Scene({
     const getReflectionCaptureSceneStateDebug = () =>
       getReflectionCaptureSceneState(scene, layout)
 
+    const estimateTextureBytes = (texture: Texture | null | undefined) => {
+      if (!texture) {
+        return 0
+      }
+
+      const image = texture.image ?? (
+        texture as Texture & {
+          source?: {
+            data?: {
+              data?: ArrayBufferView
+              height?: number
+              width?: number
+            }
+          }
+        }
+      ).source?.data
+
+      if (Array.isArray(image)) {
+        return image.reduce((total, face) => {
+          if (face?.data && 'byteLength' in face.data) {
+            return total + face.data.byteLength
+          }
+
+          if (
+            typeof face?.width === 'number' &&
+            typeof face?.height === 'number'
+          ) {
+            return total + (face.width * face.height * 4)
+          }
+
+          return total
+        }, 0)
+      }
+
+      if (image?.data && 'byteLength' in image.data) {
+        return image.data.byteLength
+      }
+
+      if (
+        typeof image?.width === 'number' &&
+        typeof image?.height === 'number'
+      ) {
+        const baseBytes = image.width * image.height * 4
+        return texture.generateMipmaps
+          ? Math.round(baseBytes * 1.33)
+          : baseBytes
+      }
+
+      return 0
+    }
+
+    const getRuntimeMemoryState = () => {
+      const textures = new Map<string, Texture>()
+      const addTexture = (texture: Texture | null | undefined) => {
+        if (texture) {
+          textures.set(texture.uuid, texture)
+        }
+      }
+
+      scene.traverse((object) => {
+        if (!(object instanceof Mesh)) {
+          return
+        }
+
+        const materials = Array.isArray(object.material)
+          ? object.material
+          : [object.material]
+
+        for (const material of materials) {
+          if (!(material instanceof Material)) {
+            continue
+          }
+
+          for (const value of Object.values(material as Record<string, unknown>)) {
+            if (value instanceof Texture) {
+              addTexture(value)
+            }
+          }
+        }
+      })
+
+      addTexture(environmentTexture)
+      for (const texture of reflectionProbeRawTextures) {
+        addTexture(texture)
+      }
+      for (const texture of reflectionProbeTextures) {
+        addTexture(texture)
+      }
+      for (const texture of reflectionProbeDepthTextures) {
+        addTexture(texture)
+      }
+
+      let estimatedTextureBytes = 0
+
+      for (const texture of textures.values()) {
+        estimatedTextureBytes += estimateTextureBytes(texture)
+      }
+
+      return {
+        estimatedTextureBytes,
+        rendererGeometries: gl.info.memory.geometries,
+        rendererTextures: gl.info.memory.textures
+      }
+    }
+
     const bakeReflectionProbeAssets = (probeIndex: number, size = 32) => {
       const probe = layout.reflectionProbes[probeIndex]
+      const backgroundTexture = scene.background instanceof Texture
+        ? scene.background
+        : null
+      const captureEnvironmentTexture = environmentTexture ?? backgroundTexture
 
-      if (!probe || size <= 0 || !environmentTexture) {
+      if (!probe || size <= 0 || !captureEnvironmentTexture) {
         return null
       }
 
@@ -10452,7 +11585,7 @@ function Scene({
 
       scene.background = savedBackground
       scene.backgroundIntensity = BAKED_ENVIRONMENT_INTENSITY
-      scene.environment = environmentTexture
+      scene.environment = captureEnvironmentTexture
       scene.environmentIntensity = environmentIntensity
 
       try {
@@ -10745,6 +11878,7 @@ function Scene({
         points: gl.info.render.points,
         triangles: gl.info.render.triangles
       }),
+      getRuntimeMemoryState,
       getReflectionProbeTextureState,
       isolateDebugRole,
       setDebugVisible
@@ -10765,6 +11899,7 @@ function Scene({
       delete globalWindow.__levelsjamDebug.getFogState
       delete globalWindow.__levelsjamDebug.getReflectionCaptureSceneState
       delete globalWindow.__levelsjamDebug.getRendererStats
+      delete globalWindow.__levelsjamDebug.getRuntimeMemoryState
       delete globalWindow.__levelsjamDebug.getReflectionProbeTextureState
       delete globalWindow.__levelsjamDebug.setDebugVisible
       delete globalWindow.__levelsjamDebug.isolateDebugRole
@@ -10772,7 +11907,7 @@ function Scene({
         delete globalWindow.__levelsjamDebug
       }
     }
-  }, [environmentIntensity, environmentTexture, gl, layout, reflectionProbeRawTextures, reflectionProbeTextures, scene])
+  }, [environmentIntensity, environmentTexture, gl, layout, reflectionProbeDepthTextures, reflectionProbeRawTextures, reflectionProbeTextures, scene])
 
   const ambientOcclusionActive = isAmbientOcclusionActive(visualSettings)
   const bloomActive = isEffectActive(visualSettings.bloom)
@@ -10815,6 +11950,7 @@ function Scene({
         iblContributionIntensity={getEnabledContributionIntensity(visualSettings.iblContribution)}
         layout={layout}
         lightmapContributionIntensity={getEnabledContributionIntensity(visualSettings.lightmapContribution)}
+        openGateIds={openGateIds}
         probeDebugMode={visualSettings.probeDebugMode}
         probeDepthAtlasTextures={probeDepthAtlasTextures}
         probeCoefficientTextures={probeCoefficientTextures}
@@ -10822,6 +11958,7 @@ function Scene({
         reflectionProbeDepthTextures={reflectionProbeDepthTextures}
         reflectionContributionIntensity={getEnabledContributionIntensity(visualSettings.reflectionContribution)}
         reflectionProbeTextures={reflectionProbeTextures}
+        turnState={turnState}
       />
       <MonsterActors
         environmentIntensity={environmentIntensity}
@@ -10926,6 +12063,9 @@ function Scene({
         controlsOpen={controlsOpen}
         layout={layout}
         movementSettings={visualSettings.movement}
+        onReplayActiveChange={onReplayActiveChange}
+        replayRequestId={replayRequestId}
+        setDisplayedOpenGateIds={setDisplayedOpenGateIds}
         setTurnState={setTurnState}
         turnState={turnState}
         wallBounds={getWallBounds(layout)}
@@ -11042,9 +12182,12 @@ function VisualControls({
   onResetScalarSetting,
   onResetSsrSettings,
   onResetToneMapping,
+  onReplaySolution,
   onScalarSettingChange,
   onSsrSettingChange,
   onToneMappingChange,
+  replayActive,
+  replayAvailable,
   visualSettings
 }: {
   onAnamorphicSettingChange: (patch: Partial<AnamorphicSettings>) => void
@@ -11075,9 +12218,12 @@ function VisualControls({
   onResetScalarSetting: (key: ScalarSettingKey) => void
   onResetSsrSettings: () => void
   onResetToneMapping: () => void
+  onReplaySolution: () => void
   onScalarSettingChange: (key: ScalarSettingKey, value: number) => void
   onSsrSettingChange: (patch: Partial<SSRSettings>) => void
   onToneMappingChange: (value: ToneMappingMode) => void
+  replayActive: boolean
+  replayAvailable: boolean
   visualSettings: VisualSettings
 }) {
   const [activeTab, setActiveTab] = useState<VisualControlTabKey>('core')
@@ -12459,6 +13605,22 @@ function VisualControls({
           </label>
         </>
       ) : null}
+
+      {activeTab === 'solution' ? (
+        <div className="visual-control-row">
+          <output>{replayActive ? 'running' : replayAvailable ? 'ready' : 'none'}</output>
+          <ResettableLabel onReset={onReplaySolution}>
+            Replay Solution
+          </ResettableLabel>
+          <button
+            disabled={!replayAvailable || replayActive}
+            onClick={onReplaySolution}
+            type="button"
+          >
+            Replay solution
+          </button>
+        </div>
+      ) : null}
     </aside>
   )
 }
@@ -12505,12 +13667,24 @@ export default function App() {
   const [creditsOpen, setCreditsOpen] = useState(false)
   const [fps, setFps] = useState(0)
   const [overlayVisible, setOverlayVisible] = useState(true)
+  const availableMazeIdsRef = useRef<string[]>([])
+  const loadedMazeLayoutsRef = useRef(new Map<string, MazeLayout>())
+  const memoryHighWaterRef = useRef({
+    estimatedTextureBytes: 0,
+    jsHeapBytes: 0,
+    rendererGeometries: 0,
+    rendererTextures: 0
+  })
   const requestedMazeId = useMemo(
     () => new URLSearchParams(window.location.search).get('maze'),
     []
   )
+  const [instantiatedMazeId, setInstantiatedMazeId] = useState<string | null>(null)
   const [mazeLayout, setMazeLayout] = useState<MazeLayout | null>(null)
   const [mazeLoadError, setMazeLoadError] = useState<string | null>(null)
+  const [replayActive, setReplayActive] = useState(false)
+  const [replayRequestId, setReplayRequestId] = useState(0)
+  const [mazeSceneKey, setMazeSceneKey] = useState(0)
   const [sceneLoaded, setSceneLoaded] = useState(false)
   const [visualSettings, setVisualSettings] = useState(createDefaultVisualSettings)
   const composerEnabled = true
@@ -12518,6 +13692,49 @@ export default function App() {
   useEffect(() => {
     document.getElementById('bootstrap-loading-shell')?.remove()
   }, [])
+
+  useEffect(() => {
+    void getAvailableMazeIds()
+      .then((mazeIds) => {
+        availableMazeIdsRef.current = mazeIds
+      })
+      .catch((error) => {
+        console.error(error)
+      })
+  }, [])
+
+  const instantiateLoadedMaze = (mazeId: string) => {
+    const nextLayout = loadedMazeLayoutsRef.current.get(mazeId)
+
+    if (!nextLayout) {
+      throw new Error(`Maze data "${mazeId}" has not been loaded`)
+    }
+
+    setReplayActive(false)
+    setSceneLoaded(false)
+    setMazeLoadError(null)
+    setInstantiatedMazeId(mazeId)
+    setMazeSceneKey((current) => current + 1)
+    setMazeLayout(nextLayout)
+    document.body.dataset.loadedMazeId = mazeId
+  }
+
+  const uninstantiateMaze = () => {
+    setReplayActive(false)
+    setSceneLoaded(false)
+    setInstantiatedMazeId(null)
+    setMazeLayout(null)
+  }
+
+  const resetInstantiatedMaze = () => {
+    if (!mazeLayout) {
+      return
+    }
+
+    setReplayActive(false)
+    setSceneLoaded(false)
+    setMazeSceneKey((current) => current + 1)
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -12543,6 +13760,9 @@ export default function App() {
         if (!cancelled) {
           document.body.dataset.mazeLayoutLoadedAt = performance.now().toFixed(1)
           document.body.dataset.loadedMazeId = nextLayout.maze.id
+          loadedMazeLayoutsRef.current.set(nextLayout.maze.id, nextLayout)
+          setInstantiatedMazeId(nextLayout.maze.id)
+          setReplayActive(false)
           setMazeLayout(nextLayout)
         }
       } catch (error) {
@@ -12563,6 +13783,165 @@ export default function App() {
       document.body.dataset.mazeLayoutCancelledAt = performance.now().toFixed(1)
     }
   }, [requestedMazeId])
+
+  useEffect(() => {
+    const globalWindow = window as Window & {
+      __levelsjamDebug?: {
+        getMazeLifecycleState?: () => {
+          availableMazeIds: string[]
+          cachedGltfRootUrls: string[]
+          error: string | null
+          instantiatedMazeId: string | null
+          loadedMazeIds: string[]
+          persistedLayoutCacheIds: string[]
+          replayActive: boolean
+          sceneLoaded: boolean
+        }
+        getRuntimeMemoryState?: () => {
+          estimatedTextureBytes: number
+          rendererGeometries: number
+          rendererTextures: number
+        } | null
+        getRuntimeMemoryHighWater?: () => {
+          current: {
+            estimatedTextureBytes: number
+            jsHeapBytes: number | null
+            rendererGeometries: number
+            rendererTextures: number
+          }
+          highWater: {
+            estimatedTextureBytes: number
+            jsHeapBytes: number
+            rendererGeometries: number
+            rendererTextures: number
+          }
+        }
+        instantiateMaze?: (id: string) => boolean
+        loadMazeData?: (id: string) => Promise<boolean>
+        resetMaze?: () => boolean
+        startSolutionReplay?: () => boolean
+        uninstantiateMaze?: () => boolean
+        unloadMazeData?: (id: string) => boolean
+      }
+    }
+    const existing = globalWindow.__levelsjamDebug ?? {}
+    const readCurrentMemory = () => {
+      const runtimeMemory = globalWindow.__levelsjamDebug?.getRuntimeMemoryState?.() ?? null
+      const jsHeapBytes =
+        'memory' in performance &&
+        performance.memory &&
+        typeof performance.memory.usedJSHeapSize === 'number'
+          ? performance.memory.usedJSHeapSize
+          : null
+      const current = {
+        estimatedTextureBytes: runtimeMemory?.estimatedTextureBytes ?? 0,
+        jsHeapBytes,
+        rendererGeometries: runtimeMemory?.rendererGeometries ?? 0,
+        rendererTextures: runtimeMemory?.rendererTextures ?? 0
+      }
+
+      memoryHighWaterRef.current = {
+        estimatedTextureBytes: Math.max(
+          memoryHighWaterRef.current.estimatedTextureBytes,
+          current.estimatedTextureBytes
+        ),
+        jsHeapBytes: Math.max(
+          memoryHighWaterRef.current.jsHeapBytes,
+          current.jsHeapBytes ?? 0
+        ),
+        rendererGeometries: Math.max(
+          memoryHighWaterRef.current.rendererGeometries,
+          current.rendererGeometries
+        ),
+        rendererTextures: Math.max(
+          memoryHighWaterRef.current.rendererTextures,
+          current.rendererTextures
+        )
+      }
+
+      return current
+    }
+    const intervalId = window.setInterval(() => {
+      readCurrentMemory()
+    }, 250)
+
+    globalWindow.__levelsjamDebug = {
+      ...existing,
+      getMazeLifecycleState: () => ({
+        availableMazeIds: [...availableMazeIdsRef.current],
+        cachedGltfRootUrls: getCachedGltfRootUrls(),
+        error: mazeLoadError,
+        instantiatedMazeId,
+        loadedMazeIds: Array.from(loadedMazeLayoutsRef.current.keys()).sort(),
+        persistedLayoutCacheIds: getLoadedMazeLayoutIds(),
+        replayActive,
+        sceneLoaded
+      }),
+      getRuntimeMemoryHighWater: () => ({
+        current: readCurrentMemory(),
+        highWater: { ...memoryHighWaterRef.current }
+      }),
+      instantiateMaze: (id) => {
+        instantiateLoadedMaze(id)
+        return true
+      },
+      loadMazeData: async (id) => {
+        const layout = await loadMazeLayoutById(id)
+
+        if (!layout) {
+          return false
+        }
+
+        loadedMazeLayoutsRef.current.set(id, layout)
+        return true
+      },
+      resetMaze: () => {
+        resetInstantiatedMaze()
+        return true
+      },
+      startSolutionReplay: () => {
+        if (!mazeLayout?.maze.solution?.actions?.length) {
+          return false
+        }
+
+        setReplayRequestId((current) => current + 1)
+        return true
+      },
+      uninstantiateMaze: () => {
+        uninstantiateMaze()
+        return true
+      },
+      unloadMazeData: (id) => {
+        if (instantiatedMazeId === id) {
+          uninstantiateMaze()
+        }
+
+        loadedMazeLayoutsRef.current.delete(id)
+        unloadMazeLayoutById(id)
+        return true
+      }
+    }
+
+    return () => {
+      window.clearInterval(intervalId)
+
+      if (!globalWindow.__levelsjamDebug) {
+        return
+      }
+
+      delete globalWindow.__levelsjamDebug.getMazeLifecycleState
+      delete globalWindow.__levelsjamDebug.getRuntimeMemoryHighWater
+      delete globalWindow.__levelsjamDebug.instantiateMaze
+      delete globalWindow.__levelsjamDebug.loadMazeData
+      delete globalWindow.__levelsjamDebug.resetMaze
+      delete globalWindow.__levelsjamDebug.startSolutionReplay
+      delete globalWindow.__levelsjamDebug.uninstantiateMaze
+      delete globalWindow.__levelsjamDebug.unloadMazeData
+      if (Object.keys(globalWindow.__levelsjamDebug).length === 0) {
+        delete globalWindow.__levelsjamDebug
+      }
+    }
+  }, [instantiatedMazeId, mazeLoadError, replayActive, sceneLoaded, mazeLayout])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -13048,9 +14427,16 @@ export default function App() {
         onResetScalarSetting={onResetScalarSetting}
         onResetSsrSettings={onResetSsrSettings}
         onResetToneMapping={onResetToneMapping}
+        onReplaySolution={() => {
+          if (mazeLayout?.maze.solution?.actions?.length) {
+            setReplayRequestId((current) => current + 1)
+          }
+        }}
         onScalarSettingChange={onScalarSettingChange}
         onSsrSettingChange={onSsrSettingChange}
         onToneMappingChange={onToneMappingChange}
+        replayActive={replayActive}
+        replayAvailable={Boolean(mazeLayout.maze.solution?.actions?.length)}
         visualSettings={visualSettings}
       />
       <div
@@ -13090,8 +14476,11 @@ export default function App() {
             <Scene
               composerEnabled={composerEnabled}
               controlsOpen={controlsOpen}
+              key={`${mazeLayout.maze.id}:${mazeSceneKey}`}
               layout={mazeLayout}
               onAssetsReady={onAssetsReady}
+              onReplayActiveChange={setReplayActive}
+              replayRequestId={replayRequestId}
               visualSettings={visualSettings}
             />
           </Suspense>

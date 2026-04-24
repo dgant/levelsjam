@@ -18,6 +18,7 @@ async function waitForSceneReady(page) {
       return page.evaluate(() => ({
         clearDebugIsolation: typeof window.__levelsjamDebug?.clearDebugIsolation,
         getDebugPosition: typeof window.__levelsjamDebug?.getDebugPosition,
+        getMazeLifecycleState: typeof window.__levelsjamDebug?.getMazeLifecycleState,
         getMonsterRenderState: typeof window.__levelsjamDebug?.getMonsterRenderState,
         isolateDebugRole: typeof window.__levelsjamDebug?.isolateDebugRole,
         setView: typeof window.__levelsjamDebug?.setView
@@ -29,6 +30,7 @@ async function waitForSceneReady(page) {
     .toEqual({
       clearDebugIsolation: 'function',
       getDebugPosition: 'function',
+      getMazeLifecycleState: 'function',
       getMonsterRenderState: 'function',
       isolateDebugRole: 'function',
       setView: 'function'
@@ -83,6 +85,15 @@ test('monsters render, stay off surface lightmaps, and land near intended size',
     )
     .toEqual([true, true, true])
 
+  const lifecycleState = await page.evaluate(() => window.__levelsjamDebug.getMazeLifecycleState?.())
+  expect(lifecycleState).not.toBeNull()
+  expect(new Set(lifecycleState.cachedGltfRootUrls).size).toBe(lifecycleState.cachedGltfRootUrls.length)
+  expect(lifecycleState.cachedGltfRootUrls).toEqual(expect.arrayContaining([
+    expect.stringContaining('/models/minotaur-runtime/scene.gltf'),
+    expect.stringContaining('/models/pbr_jumping_spider_monster/scene.gltf'),
+    expect.stringContaining('/models/awil_werewolf/scene.gltf')
+  ]))
+
   const monsterStates = await page.evaluate(() =>
     Array.from({ length: 3 }, (_, index) => ({
       index,
@@ -95,8 +106,10 @@ test('monsters render, stay off surface lightmaps, and land near intended size',
     expect(monster.position).not.toBeNull()
     expect(monster.state).not.toBeNull()
     expect(['minotaur', 'spider', 'werewolf']).toContain(monster.state.type)
+    expect(monster.state.doubleSidedMaterialCount).toBe(0)
     expect(monster.state.meshCount).toBeGreaterThan(0)
     expect(monster.state.totalTriangleCount).toBeGreaterThan(0)
+    expect(monster.state.uniqueMaterialCount).toBeGreaterThan(0)
     expect(monster.state.hasLightMap).toBe(false)
     expect(monster.state.visible).toBe(true)
     expect(monster.state.targetSize).toBeGreaterThan(0)
@@ -111,6 +124,7 @@ test('monsters render, stay off surface lightmaps, and land near intended size',
       expect(monster.state.targetSize).toBeCloseTo(2.7, 3)
       expect(monster.state.boundsMin[1]).toBeCloseTo(-0.25, 3)
       expect(monster.state.totalTriangleCount).toBeLessThanOrEqual(11_000)
+      expect(monster.state.uniqueMaterialCount).toBeLessThan(monster.state.meshCount)
     }
 
     if (monster.state.type === 'werewolf') {

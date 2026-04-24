@@ -3,6 +3,11 @@ import {
   getHdrLightingIntensity
 } from './lightingCalibration.js'
 import { DataUtils } from 'three'
+import {
+  getMazeSolutionMoveBound,
+  solveMaze,
+  validateRecordedSolution
+} from './mazeSolver.js'
 
 export const MAZE_WIDTH = 7
 export const MAZE_HEIGHT = 7
@@ -167,6 +172,18 @@ function parseCellKey(key) {
   return { x, y }
 }
 
+function allCells(maze) {
+  const cells = []
+
+  for (let y = 0; y < maze.height; y += 1) {
+    for (let x = 0; x < maze.width; x += 1) {
+      cells.push({ x, y })
+    }
+  }
+
+  return cells
+}
+
 function normalizeEdge(from, to) {
   const a = cellKey(from)
   const b = cellKey(to)
@@ -183,9 +200,18 @@ function edgeKey(from, to) {
   return `${cellKey(normalized.from)}|${cellKey(normalized.to)}`
 }
 
+function getGateId(gate) {
+  return gate.id ?? edgeKey(gate.from, gate.to)
+}
+
 function cloneMaze(maze) {
   return {
     ...maze,
+    gates: (maze.gates ?? []).map((gate) => ({
+      ...gate,
+      from: { ...gate.from },
+      to: { ...gate.to }
+    })),
     lights: maze.lights.map((light) => ({
       cell: { ...light.cell },
       side: light.side
@@ -201,7 +227,25 @@ function cloneMaze(maze) {
     opening: {
       cell: { ...maze.opening.cell },
       side: maze.opening.side
-    }
+    },
+    solution: maze.solution
+      ? {
+        ...maze.solution,
+        actions: [...(maze.solution.actions ?? [])]
+      }
+      : null,
+    sword: maze.sword?.cell
+      ? {
+        ...maze.sword,
+        cell: { ...maze.sword.cell }
+      }
+      : maze.sword,
+    trophy: maze.trophy?.cell
+      ? {
+        ...maze.trophy,
+        cell: { ...maze.trophy.cell }
+      }
+      : maze.trophy
   }
 }
 
@@ -318,6 +362,117 @@ function getCellOpenEdgeCount(maze, adjacency, cell) {
   }
 
   return count
+}
+
+function shortestPathCells(adjacency, startCell, endCell) {
+  const startKey = cellKey(startCell)
+  const endKey = cellKey(endCell)
+  const queue = [{ key: startKey, path: [startKey] }]
+  const visited = new Set([startKey])
+
+  while (queue.length > 0) {
+    const current = queue.shift()
+
+    if (current.key === endKey) {
+      return current.path.map(parseCellKey)
+    }
+
+    for (const nextKey of adjacency.get(current.key) ?? []) {
+      if (visited.has(nextKey)) {
+        continue
+      }
+
+      visited.add(nextKey)
+      queue.push({
+        key: nextKey,
+        path: [...current.path, nextKey]
+      })
+    }
+  }
+
+  return []
+}
+
+function shortestPathDistance(adjacency, startCell, endCell) {
+  const path = shortestPathCells(adjacency, startCell, endCell)
+
+  return path.length > 0
+    ? path.length - 1
+    : Number.POSITIVE_INFINITY
+}
+
+function listInteriorOpenEdges(maze) {
+  return maze.openEdges
+    .filter((edge) => (
+      isInsideMaze(edge.from, maze.width, maze.height) &&
+      isInsideMaze(edge.to, maze.width, maze.height)
+    ))
+    .map((edge) => ({
+      from: { ...edge.from },
+      id: edgeKey(edge.from, edge.to),
+      to: { ...edge.to }
+    }))
+}
+
+function chooseMazeGates(maze, random, count = 4) {
+  const candidates = listInteriorOpenEdges(maze)
+  const chosen = []
+
+  while (candidates.length > 0 && chosen.length < count) {
+    const candidateIndex = integerFromRandom(random, candidates.length)
+    const [candidate] = candidates.splice(candidateIndex, 1)
+
+    chosen.push(candidate)
+  }
+
+  return chosen
+}
+
+function chooseMazeSwordCell(maze, random) {
+  const reserved = getReservedCellKeys(maze)
+  const candidates = allCells(maze).filter((cell) => !reserved.has(cellKey(cell)))
+  const index = integerFromRandom(random, candidates.length)
+
+  return candidates[index] ?? { x: 0, y: 0 }
+}
+
+function getReservedCellKeys(maze) {
+  const reserved = new Set([cellKey(maze.opening.cell)])
+
+  if (maze.sword?.cell) {
+    reserved.add(cellKey(maze.sword.cell))
+  }
+
+  if (maze.trophy?.cell) {
+    reserved.add(cellKey(maze.trophy.cell))
+  }
+
+  return reserved
+}
+
+function chooseMazeTrophyCell(maze, adjacency, reservedKeys) {
+  let bestCell = { ...maze.opening.cell }
+  let bestDistance = -1
+
+  for (let y = 0; y < maze.height; y += 1) {
+    for (let x = 0; x < maze.width; x += 1) {
+      const cell = { x, y }
+      const key = cellKey(cell)
+
+      if (reservedKeys.has(key)) {
+        continue
+      }
+
+      const distance = shortestPathDistance(adjacency, maze.opening.cell, cell)
+
+      if (distance > bestDistance) {
+        bestCell = cell
+        bestDistance = distance
+      }
+    }
+  }
+
+  return bestCell
 }
 
 function hasTwoVertexDisjointPaths(adjacency, startKey, endKey) {
@@ -563,6 +718,119 @@ function hasValidMazeLightmap(maze) {
   })
 }
 
+function hasUniqueCells(cells) {
+  const seen = new Set()
+
+  for (const cell of cells) {
+    const key = cellKey(cell)
+
+    if (seen.has(key)) {
+      return false
+    }
+
+    seen.add(key)
+  }
+
+  return true
+}
+
+function validateMazeContent(maze) {
+  const errors = []
+  const adjacency = buildAdjacency(maze)
+  const gateEdges = new Set()
+  const monsterTypes = new Set((maze.monsters ?? []).map((monster) => monster.type))
+
+  if (!Array.isArray(maze.gates) || maze.gates.length !== 4) {
+    errors.push('Maze must include exactly four gates')
+  } else {
+    for (const gate of maze.gates) {
+      if (
+        !isInsideMaze(gate.from, maze.width, maze.height) ||
+        !isInsideMaze(gate.to, maze.width, maze.height)
+      ) {
+        errors.push('Gate edges must stay inside the maze bounds')
+        continue
+      }
+
+      const key = edgeKey(gate.from, gate.to)
+
+      if (gateEdges.has(key)) {
+        errors.push('Gate edges must be unique')
+        continue
+      }
+
+      if (!adjacency.get(cellKey(gate.from))?.has(cellKey(gate.to))) {
+        errors.push(`Gate ${key} must lie on an existing open edge`)
+      }
+
+      gateEdges.add(key)
+    }
+  }
+
+  if (!maze.sword?.cell || !isInsideMaze(maze.sword.cell, maze.width, maze.height)) {
+    errors.push('Maze must include a sword cell inside the maze')
+  }
+
+  if (!maze.trophy?.cell || !isInsideMaze(maze.trophy.cell, maze.width, maze.height)) {
+    errors.push('Maze must include a trophy cell inside the maze')
+  }
+
+  const occupiedCells = [
+    maze.opening.cell,
+    ...(maze.sword?.cell ? [maze.sword.cell] : []),
+    ...(maze.trophy?.cell ? [maze.trophy.cell] : []),
+    ...((maze.monsters ?? []).map((monster) => monster.cell))
+  ]
+
+  if (!hasUniqueCells(occupiedCells)) {
+    errors.push('Opening, items, and monsters must occupy distinct cells')
+  }
+
+  if ((maze.monsters ?? []).length !== 3) {
+    errors.push('Maze must include exactly three monsters')
+  }
+
+  for (const requiredMonsterType of ['minotaur', 'werewolf', 'spider']) {
+    if (!monsterTypes.has(requiredMonsterType)) {
+      errors.push(`Maze must include a ${requiredMonsterType}`)
+    }
+  }
+
+  return {
+    errors,
+    valid: errors.length === 0
+  }
+}
+
+function hasValidRecordedSolution(maze) {
+  const validation = validateRecordedSolution(maze)
+  const moveBound = getMazeSolutionMoveBound(maze)
+
+  return (
+    validation.escaped &&
+    validation.state.player.hasTrophy &&
+    validation.moveCount <= moveBound
+  )
+}
+
+function recordMazeSolution(maze) {
+  const solution = solveMaze(maze)
+
+  if (!solution) {
+    maze.solution = null
+    return false
+  }
+
+  maze.solution = {
+    actions: solution.actions,
+    moveCount: solution.moveCount,
+    observedCellCount: solution.observedCellCount ?? null,
+    visibilityLimited: solution.visibilityLimited === true
+  }
+
+  return true
+}
+
 export function validateMaze(maze, options = {}) {
   const {
     requireLightmap = true
@@ -588,16 +856,28 @@ export function validateMaze(maze, options = {}) {
   }
 
   const lightValidation = validateMazeLights(maze)
+  const contentValidation = validateMazeContent(maze)
   const lightmapErrors = requireLightmap && !hasValidMazeLightmap(maze)
     ? ['Maze must include a valid baked lightmap']
     : []
+  const solutionErrors = hasValidRecordedSolution(maze)
+    ? []
+    : ['Maze must include a recorded winning solution within the move bound']
 
   return {
-    errors: [...minimalityErrors, ...lightValidation.errors, ...lightmapErrors],
+    errors: [
+      ...minimalityErrors,
+      ...lightValidation.errors,
+      ...contentValidation.errors,
+      ...lightmapErrors,
+      ...solutionErrors
+    ],
     valid:
       minimalityErrors.length === 0 &&
       lightValidation.valid &&
-      lightmapErrors.length === 0
+      contentValidation.valid &&
+      lightmapErrors.length === 0 &&
+      solutionErrors.length === 0
   }
 }
 
@@ -636,18 +916,80 @@ function generateMazeLights(maze, random) {
   return lights
 }
 
-function generateMazeMonsters(maze, random) {
-  const reserved = new Set([cellKey(maze.opening.cell)])
-  const cells = []
+function getVisibleCellKeysFromCells(maze, cells) {
+  const adjacency = buildAdjacency(maze)
+  const visible = new Set()
+
+  for (const cell of cells) {
+    visible.add(cellKey(cell))
+
+    for (const { side: direction } of CARDINAL_DIRECTIONS) {
+      let current = { ...cell }
+
+      while (true) {
+        const next = getNeighbor(current, direction)
+
+        if (!adjacency.get(cellKey(current))?.has(cellKey(next))) {
+          break
+        }
+
+        visible.add(cellKey(next))
+        current = next
+      }
+    }
+  }
+
+  return visible
+}
+
+function getSolutionRouteCells(maze, adjacency) {
+  const route = []
+  const appendPath = (path) => {
+    for (const cell of path) {
+      if (
+        route.length === 0 ||
+        cellKey(route[route.length - 1]) !== cellKey(cell)
+      ) {
+        route.push(cell)
+      }
+    }
+  }
+
+  if (maze.sword?.cell) {
+    appendPath(shortestPathCells(adjacency, maze.opening.cell, maze.sword.cell))
+  }
+
+  if (maze.sword?.cell && maze.trophy?.cell) {
+    appendPath(shortestPathCells(adjacency, maze.sword.cell, maze.trophy.cell))
+  } else if (maze.trophy?.cell) {
+    appendPath(shortestPathCells(adjacency, maze.opening.cell, maze.trophy.cell))
+  }
+
+  if (maze.trophy?.cell) {
+    appendPath(shortestPathCells(adjacency, maze.trophy.cell, maze.opening.cell))
+  }
+
+  return route
+}
+
+function generateMazeMonsters(maze, random, protectedCellKeys = new Set()) {
+  const reserved = getReservedCellKeys(maze)
+  const allCandidateCells = []
 
   for (let y = 0; y < maze.height; y += 1) {
     for (let x = 0; x < maze.width; x += 1) {
       const cell = { x, y }
 
       if (!reserved.has(cellKey(cell))) {
-        cells.push(cell)
+        allCandidateCells.push(cell)
       }
     }
+  }
+
+  let cells = allCandidateCells.filter((cell) => !protectedCellKeys.has(cellKey(cell)))
+
+  if (cells.length < 3) {
+    cells = allCandidateCells
   }
 
   const takeCell = () => {
@@ -709,6 +1051,7 @@ export function generateMaze(seed = Date.now(), options = {}) {
     normalizeEdge(transformedEar[1], transformedEar[2])
   )
   const maze = {
+    gates: [],
     height: MAZE_HEIGHT,
     id: `generated-${seed}`,
     lights: [],
@@ -720,10 +1063,31 @@ export function generateMaze(seed = Date.now(), options = {}) {
     seed,
     width: MAZE_WIDTH
   }
+  const adjacency = buildAdjacency(maze)
+
+  maze.gates = chooseMazeGates(maze, random)
+  maze.sword = {
+    cell: chooseMazeSwordCell(maze, random)
+  }
+  maze.trophy = {
+    cell: chooseMazeTrophyCell(
+      maze,
+      adjacency,
+      new Set([cellKey(maze.opening.cell), cellKey(maze.sword.cell)])
+    )
+  }
 
   maze.lights = generateMazeLights(maze, random)
-  maze.monsters = generateMazeMonsters(maze, random)
+  maze.monsters = generateMazeMonsters(
+    maze,
+    random,
+    getVisibleCellKeysFromCells(
+      maze,
+      getSolutionRouteCells(maze, adjacency)
+    )
+  )
   maze.generationMs = performance.now() - startTime
+  recordMazeSolution(maze)
   if (bakeLightmap) {
     maze.lightmap = bakeMazeLightmap(maze)
   }
@@ -741,6 +1105,10 @@ export function getMazeSignature(maze) {
     .map((light) => `${cellKey(light.cell)}:${light.side}`)
     .sort()
     .join(',')
+  const gates = (maze.gates ?? [])
+    .map((gate) => edgeKey(gate.from, gate.to))
+    .sort()
+    .join(',')
   const monsters = (maze.monsters ?? [])
     .map((monster) => `${monster.type}:${cellKey(monster.cell)}:${monster.hand ?? ''}`)
     .sort()
@@ -752,8 +1120,11 @@ export function getMazeSignature(maze) {
     cellKey(maze.opening.cell),
     maze.opening.side,
     edges,
+    gates,
     lights,
-    monsters
+    monsters,
+    maze.sword?.cell ? cellKey(maze.sword.cell) : '',
+    maze.trophy?.cell ? cellKey(maze.trophy.cell) : ''
   ].join('|')
 }
 
@@ -1791,6 +2162,67 @@ export function getMazeTorchPlacements(maze, sconceRadius) {
 
 export const GROUND_Y = 0
 
+export function getMazeGatePlacements(maze) {
+  return (maze.gates ?? []).map((gate, index) => {
+    const fromCenter = getCellCenter(maze, gate.from)
+    const toCenter = getCellCenter(maze, gate.to)
+    const horizontal = gate.from.y === gate.to.y
+
+    return {
+      axis: horizontal ? 'z' : 'x',
+      cells: [
+        { ...gate.from },
+        { ...gate.to }
+      ],
+      center: {
+        x: (fromCenter.x + toCenter.x) / 2,
+        z: (fromCenter.z + toCenter.z) / 2
+      },
+      from: { ...gate.from },
+      id: getGateId(gate),
+      index,
+      to: { ...gate.to },
+      yaw: horizontal ? Math.PI / 2 : 0
+    }
+  })
+}
+
+export function getMazeItemPlacements(maze) {
+  const items = []
+
+  if (maze.sword?.cell) {
+    const center = getCellCenter(maze, maze.sword.cell)
+
+    items.push({
+      cell: { ...maze.sword.cell },
+      id: 'maze-sword',
+      position: {
+        x: center.x,
+        y: GROUND_Y,
+        z: center.z
+      },
+      type: 'sword'
+    })
+  }
+
+  if (maze.trophy?.cell) {
+    const center = getCellCenter(maze, maze.trophy.cell)
+
+    items.push({
+      cell: { ...maze.trophy.cell },
+      id: 'maze-trophy',
+      position: {
+        x: center.x,
+        y: GROUND_Y,
+        z: center.z
+      },
+      type: 'trophy'
+    })
+  }
+
+  return items
+}
+
 function getMazeReflectionProbePlacements(maze) {
   const probes = []
 
@@ -1815,6 +2247,8 @@ function getMazeReflectionProbePlacements(maze) {
 
 export function getMazeSceneLayout(maze, sconceRadius) {
   return {
+    gates: getMazeGatePlacements(maze),
+    items: getMazeItemPlacements(maze),
     lights: getMazeTorchPlacements(maze, sconceRadius),
     maze,
     reflectionProbes: getMazeReflectionProbePlacements(maze),

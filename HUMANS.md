@@ -46,6 +46,8 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Treat a scene that shows only the HDRI skybox and flame billboards as a render failure; the smoke test now checks that a real maze wall writes visible beauty-pass color.
 - `npm run test:perf` is temporarily disabled while the static baked-lightmap torch-lighting evaluation is under way.
 - Run the maze-generation validation script or its test entrypoint whenever maze files or maze rules change so persisted mazes keep their baked lightmaps in sync.
+- Run `npm run test:maze:runner` after changing maze generation, maze validation, baked lightmap construction, or persisted maze cleanup. It writes per-test timings to `logs/latest-maze-test-profile.json` and enforces the bounded maze-test budget.
+- Run `npm run ensure:mazes` when persisted maze runtime payloads or reflection-probe assets must be refreshed. Expect the fast existing-maze validation and artifact sync phase to be separate from the much slower full reflection-probe export phase.
 - Verify the main page renders the 3D scene without console errors.
 - Verify the loading overlay appears with `MINOTAUR` and `Entering the labyrinth...` before the scene fades in.
 - Verify the loading overlay does not fade out before the basic required scene textures are available in the mounted scene.
@@ -143,6 +145,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify the loaded scene uses one of the persisted maze files instead of the previous random wall field.
 - Verify the repository contains at least five valid maze files, that each maze file includes baked lightmap data, and that maze topology generation remains under 100ms before the later bake step.
 - Verify the validation path records a successful replayable solution for each persisted maze and rejects mazes that cannot be beaten.
+- Verify recorded maze solutions include action lists, move counts, observed-cell counts, and the visibility-limited solution marker.
 - Verify maze load, instantiate, uninstantiate, unload, reload, and reinstantiate work repeatedly without leaving stale GPU assets or scene objects behind.
 - Benchmark startup with `npm run bench:startup` and test duration with `npm run bench:tests` before handoff.
 - Inspect `logs/latest-test-benchmark.json`, `logs/latest-unit-test-profile.json`, `logs/latest-smoke-profile.json`, and `logs/latest-render-integration-profile.json` after `npm run bench:tests` so the slowest scripts and browser-test phases are identified from measurements rather than guessed.
@@ -150,7 +153,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Treat the temporary `test:perf` disablement as intentional until the static baked-lightmap torch-lighting evaluation ends.
 - Keep `npm run test:unit` under 20 seconds.
 - Keep the prepared smoke startup phase under 1 minute after a single `npm run build:pages`, and keep the total benchmarked smoke runner under 3 minutes while deeper render assertions remain split into slower integration specs.
-- Latest measured benchmark on April 23, 2026: `npm run build:pages` took about `11.0s`; `npm run test:unit` reported about `8.9s`; `npm run test:smoke:runner` took about `61.0s` after a prepared `build:pages`; the smoke loading-complete marker was about `3.7s`; the current benchmarked smoke hot spots are `reflection-captures` at about `25.0s`, `debug-controls` at about `23.3s`, and `startup` at about `12.4s`; `npm run test:render:integration:runner` took about `4.6m`; `npm run test:probe-occlusion:runner` took about `45.6s`; and `npm run test:perf:runner` remains intentionally skipped during the static baked-lightmap evaluation.
+- Latest measured benchmark on April 24, 2026: `npm run build:pages` took about `16.3s`; `npm run test:unit` reported about `2.0s`; `npm run test:maze:runner` reported about `11.5s` with an `11.9s` wall total; `npm run ensure:mazes` took about `4.9m`, dominated by `export:maze-probes` at about `4.5m` for all 245 persisted probe captures; and `npm run test:perf:runner` remains intentionally skipped during the static baked-lightmap evaluation.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.

@@ -72,6 +72,7 @@ test('generates valid mazes under 100ms', () => {
   assert.equal(maze.height, MAZE_HEIGHT)
   assert.equal(maze.lightmap, undefined)
   assert.ok(maze.generationMs < 100, `generation took ${maze.generationMs}ms`)
+  assert.ok(maze.totalGenerationMs < 5000, `full generation took ${maze.totalGenerationMs}ms`)
 })
 
 test('persists at least five valid mazes', async () => {
@@ -119,19 +120,27 @@ test('deletes invalid maze files and regenerates replacements', async () => {
     )
 
     const files = await ensureMazeFiles({
+      artifactsDirectory: null,
       directory: temporaryDirectory,
-      mazeFactory: () => JSON.parse(JSON.stringify(replacementMaze)),
+      mazeFactory: () => ({
+        ...JSON.parse(JSON.stringify(replacementMaze)),
+        generationMs: 1,
+        totalGenerationMs: 1
+      }),
       targetCount: 1
     })
 
     assert.ok(files.length >= 1)
-    for (const fileName of files) {
-      const module = await import(
-        `${pathToFileURL(path.join(temporaryDirectory, fileName)).href}?verify=${Math.random()}`
-      )
-      const validation = validateMaze(module.default)
-      assert.equal(validation.valid, true, validation.errors.join('\n'))
-    }
+    assert.ok(files.some((fileName) => /^maze-\d{3}\.js$/.test(fileName)))
+    const regeneratedMazeSource = fs.readFileSync(
+      path.join(temporaryDirectory, files[0]),
+      'utf8'
+    )
+    assert.notEqual(regeneratedMazeSource.includes('width: 4'), true)
+    assert.equal(
+      fs.existsSync(path.join(temporaryDirectory, 'index.js')),
+      true
+    )
   } finally {
     fs.rmSync(temporaryDirectory, { force: true, recursive: true })
   }

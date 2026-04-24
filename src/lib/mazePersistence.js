@@ -319,6 +319,7 @@ export async function ensureMazeFiles({
   artifactsDirectory = DEFAULT_LIGHTMAP_ARTIFACT_DIRECTORY,
   directory,
   mazeFactory = generateMaze,
+  maxGenerationAttempts = 200,
   onProgress = null,
   targetCount = MAZE_TARGET_COUNT
 }) {
@@ -399,6 +400,12 @@ export async function ensureMazeFiles({
   let generationAttempt = 0
 
   while (validMazes.length < targetCount) {
+    if (generationAttempt >= maxGenerationAttempts) {
+      throw new Error(
+        `Unable to generate ${targetCount} valid mazes after ${maxGenerationAttempts} attempts`
+      )
+    }
+
     const seed =
       Date.now() +
       (nextIndex * 97) +
@@ -407,7 +414,11 @@ export async function ensureMazeFiles({
     const maze = mazeFactory(seed)
     const validation = validateMaze(maze)
 
-    if (!validation.valid || maze.generationMs > 100) {
+    if (
+      !validation.valid ||
+      maze.generationMs > 100 ||
+      maze.totalGenerationMs > 5000
+    ) {
       continue
     }
 

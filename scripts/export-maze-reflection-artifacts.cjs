@@ -172,6 +172,7 @@ async function captureMazeReflectionArtifacts(page, maze, artifactRoot) {
     )
 
     if (
+      !capture ||
       !Array.isArray(capture.rawAtlas) ||
       !Array.isArray(capture.rawRgbEAtlas) ||
       !Array.isArray(capture.processedAtlas) ||
@@ -179,8 +180,17 @@ async function captureMazeReflectionArtifacts(page, maze, artifactRoot) {
       !Array.isArray(capture.depthAtlas) ||
       !capture.processedCubeUvRgbE?.dataUrl
     ) {
+      const probeState = await page.evaluate(
+        () => ({
+          captureSceneState: window.__levelsjamDebug?.getReflectionCaptureSceneState?.() ?? null,
+          reflectionProbeState: window.__levelsjamDebug?.getReflectionProbeState?.() ?? null
+        })
+      )
       throw new Error(
-        `Expected full probe bake output for maze ${maze.id} probe ${probeIndex}`
+        `Expected full probe bake output for maze ${maze.id} probe ${probeIndex}; got ${JSON.stringify({
+          capture,
+          probeState
+        })}`
       )
     }
 

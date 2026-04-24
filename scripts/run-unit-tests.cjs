@@ -10,7 +10,7 @@ const overallThresholdMs = 20_000
 const testFiles = [
   'tests/billboard.test.js',
   'tests/lighting-calibration.test.js',
-  'tests/maze.test.js',
+  'tests/maze-solver.test.js',
   'tests/player-collision.test.js',
   'tests/player-motion.test.js',
   'tests/probe-spherical-harmonics.test.js',
@@ -21,7 +21,7 @@ const testFiles = [
 const perFileThresholdsMs = {
   'tests/billboard.test.js': 3_000,
   'tests/lighting-calibration.test.js': 3_000,
-  'tests/maze.test.js': 14_000,
+  'tests/maze-solver.test.js': 4_000,
   'tests/player-collision.test.js': 3_000,
   'tests/player-motion.test.js': 3_000,
   'tests/probe-spherical-harmonics.test.js': 3_000,
