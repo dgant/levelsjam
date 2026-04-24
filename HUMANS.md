@@ -44,7 +44,8 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Expect gameplay runtime lighting to use baked surface lightmaps, local volumetric-lightmap probes, and local reflection probes only. Global environment lighting is for offline bake inputs, not an in-game fallback.
 - For baked surface lightmaps, treat `lightmap-atlas.png` as the human-readable preview and `lightmap-rgbe.png` as the raw HDR export encoded into a PNG container. Do not assume those two files should look the same.
 - Treat a scene that shows only the HDRI skybox and flame billboards as a render failure; the smoke test now checks that a real maze wall writes visible beauty-pass color.
-- `npm run test:perf` is temporarily disabled while the static baked-lightmap torch-lighting evaluation is under way.
+- Run `npm run test:perf` after changes that affect runtime probe loading, postprocessing defaults, monster rendering, or material shader paths.
+- The perf test exercises the default rendered scene after local probe residency has stabilized and asserts both FPS and resident probe memory limits.
 - Run the maze-generation validation script or its test entrypoint whenever maze files or maze rules change so persisted mazes keep their baked lightmaps in sync.
 - Run `npm run test:maze:runner` after changing maze generation, maze validation, baked lightmap construction, or persisted maze cleanup. It writes per-test timings to `logs/latest-maze-test-profile.json` and enforces the bounded maze-test budget.
 - Run `npm run ensure:mazes` when persisted maze runtime payloads or reflection-probe assets must be refreshed. Expect the fast existing-maze validation and artifact sync phase to be separate from the much slower full reflection-probe export phase.
@@ -150,10 +151,10 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Benchmark startup with `npm run bench:startup` and test duration with `npm run bench:tests` before handoff.
 - Inspect `logs/latest-test-benchmark.json`, `logs/latest-unit-test-profile.json`, `logs/latest-smoke-profile.json`, and `logs/latest-render-integration-profile.json` after `npm run bench:tests` so the slowest scripts and browser-test phases are identified from measurements rather than guessed.
 - Treat duration regressions as blocking issues.
-- Treat the temporary `test:perf` disablement as intentional until the static baked-lightmap torch-lighting evaluation ends.
 - Keep `npm run test:unit` under 20 seconds.
+- Keep `npm run test:perf:runner` under 1 minute, and expect it to benchmark the initial gameplay view after all monsters have rendered rather than only a cheap static camera angle.
 - Keep the prepared smoke startup phase under 1 minute after a single `npm run build:pages`, and keep the total benchmarked smoke runner under 3 minutes while deeper render assertions remain split into slower integration specs.
-- Latest measured benchmark on April 24, 2026: `npm run build:pages` took about `16.3s`; `npm run test:unit` reported about `2.0s`; `npm run test:maze:runner` reported about `11.5s` with an `11.9s` wall total; `npm run ensure:mazes` took about `4.9m`, dominated by `export:maze-probes` at about `4.5m` for all 245 persisted probe captures; and `npm run test:perf:runner` remains intentionally skipped during the static baked-lightmap evaluation.
+- Latest measured benchmark on April 24, 2026: `npm run build:pages` took about `19.3s`; `npm run test:unit` reported about `2.5s`; `npm run test:perf:runner` reported about `11.3s`; `npm run test:smoke:runner` reported about `34.2s`; `npm run test:render:integration:runner` reported about `9.0s`; `npm run test:maze:runner` previously reported about `11.5s` with an `11.9s` wall total; and `npm run ensure:mazes` previously took about `4.9m`, dominated by `export:maze-probes` at about `4.5m` for all 245 persisted probe captures.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.

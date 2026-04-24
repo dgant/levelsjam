@@ -8,6 +8,7 @@ const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 const smokePort = 42731
 const thresholdsMs = {
   'test:unit': 20_000,
+  'test:perf:runner': 60_000,
   'test:smoke:runner': 180_000,
   'test:render:integration:runner': 180_000
 }
@@ -45,8 +46,9 @@ function runTimedScript(scriptName) {
   const start = process.hrtime.bigint()
   const result = spawnSync(npmCommand, ['run', scriptName], {
     cwd: rootDir,
+    env: { ...process.env },
     stdio: 'inherit',
-    env: { ...process.env }
+    windowsHide: true
   })
   const durationMs = Number(process.hrtime.bigint() - start) / 1e6
 

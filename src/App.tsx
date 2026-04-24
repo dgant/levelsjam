@@ -162,11 +162,11 @@ const FIRE_FLIPBOOK_URL =
 const MONSTER_MODEL_URLS = {
   minotaur: `${assetBase}models/minotaur-runtime/scene.gltf`,
   spider: `${assetBase}models/pbr_jumping_spider_monster/scene.gltf`,
-  werewolf: `${assetBase}models/awil_werewolf/scene.gltf`
+  werewolf: `${assetBase}models/awil_werewolf_runtime/scene.gltf`
 } as const
 const GATE_MODEL_URL = `${assetBase}models/metal_gate_runtime/scene.gltf`
 const SWORD_MODEL_URL = `${assetBase}models/bronze_sword_mycean/scene.gltf`
-const TROPHY_MODEL_URL = `${assetBase}models/head_of_a_bull/scene.gltf`
+const TROPHY_MODEL_URL = `${assetBase}models/head_of_a_bull_runtime/scene.gltf`
 const PUDDLE_TEXTURE_URLS = {
   ao: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_AO.jpg`,
   color: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_Diffuse.jpg`,
@@ -255,6 +255,8 @@ const REFLECTION_PROBE_FAR = 48
 const REFLECTION_PROBE_LOAD_CONCURRENCY = 8
 const REFLECTION_PROBE_BACKGROUND_LOAD_CONCURRENCY = 1
 const REFLECTION_PROBE_PUBLISH_INTERVAL_MS = 250
+const REFLECTION_PROBE_RUNTIME_RESIDENT_LIMIT = 8
+const REFLECTION_PROBE_RUNTIME_TEXTURE_MEMORY_BUDGET_BYTES = 768 * 1024 * 1024
 const REFLECTION_PROBE_STARTUP_DELAY_MS = 5000
 const REFLECTION_PROBE_STARTUP_CAPTURE_DELAY_MS = 250
 const REFLECTION_PROBE_BACKGROUND_CAPTURE_DELAY_MS = 1000
@@ -5370,7 +5372,10 @@ function EnvironmentLighting({
         return {
           activeProbeId: null,
           captureSceneState,
-          complete: loadedProbeCount === probeCount,
+          complete: loadedProbeCount >= Math.min(
+            probeCount,
+            Math.max(startupProbeIndices.length, REFLECTION_PROBE_RUNTIME_RESIDENT_LIMIT)
+          ),
           loadedProbeCount,
           priorityProbeIndices: [...startupProbeIndices],
           probeCaptureCounts: [],
@@ -5382,6 +5387,21 @@ function EnvironmentLighting({
           probeRawTextureUUIDs: [],
           probeTextureUUIDs: nextTargets.map((target) => target?.texture.uuid ?? null),
           probeCount,
+          requestedResidentProbeIndices: nextTargets.reduce<number[]>(
+            (probeIndices, target, probeIndex) => {
+              if (target) {
+                probeIndices.push(probeIndex)
+              }
+
+              return probeIndices
+            },
+            []
+          ),
+          residentProbeLimit: Math.min(
+            probeCount,
+            Math.max(startupProbeIndices.length, REFLECTION_PROBE_RUNTIME_RESIDENT_LIMIT)
+          ),
+          textureMemoryBudgetBytes: REFLECTION_PROBE_RUNTIME_TEXTURE_MEMORY_BUDGET_BYTES,
           ready:
             startupProbeIndices.length > 0 &&
             startupProbeIndices.every((probeIndex) => Boolean(nextTargets[probeIndex]))
@@ -5419,8 +5439,6 @@ function EnvironmentLighting({
           (count, texture) => count + Number(Boolean(texture)),
           0
         )
-        const probesComplete = loadedProbeCount === probeCount
-
         reflectionProbeDepthTargets.current = nextDepthTargets
         reflectionProbeTargets.current = nextTargets
         reflectionProbeRawTargets.current = []
@@ -5483,10 +5501,36 @@ function EnvironmentLighting({
           }
 
           const manifest = await response.json() as RuntimeProbeAssetManifest
+          const residentProbeLimit = Math.min(
+            manifest.probes.length,
+            Math.max(startupProbeIndices.length, REFLECTION_PROBE_RUNTIME_RESIDENT_LIMIT)
+          )
+          const sortedBackgroundProbeIndices = manifest.probes
+            .map((probe) => probe.index)
+            .filter((probeIndex) => !startupProbeIndexSet.has(probeIndex))
+            .sort(
+              (leftProbeIndex, rightProbeIndex) =>
+                getDistanceToPriorityPosition(leftProbeIndex) -
+                getDistanceToPriorityPosition(rightProbeIndex)
+            )
+          const requestedResidentProbeIndices = Array.from(
+            new Set([
+              ...startupProbeIndices,
+              ...sortedBackgroundProbeIndices.slice(
+                0,
+                Math.max(0, residentProbeLimit - startupProbeIndices.length)
+              )
+            ])
+          )
+          const requestedResidentProbeIndexSet = new Set(requestedResidentProbeIndices)
           const pendingStartupProbeIndices = [...startupProbeIndices]
           const pendingBackgroundProbeIndices = manifest.probes
             .map((probe) => probe.index)
-            .filter((probeIndex) => !startupProbeIndexSet.has(probeIndex))
+            .filter(
+              (probeIndex) =>
+                requestedResidentProbeIndexSet.has(probeIndex) &&
+                !startupProbeIndexSet.has(probeIndex)
+            )
           let activeProbeLoads = 0
           let finished = false
 
@@ -5496,6 +5540,7 @@ function EnvironmentLighting({
             }
 
             finished = true
+            disposeProbeTargets(previousDepthTargets)
             disposeProbeTargets(previousTargets)
             disposeProbeTargets(previousRawTargets)
             schedulePublishedProbeState(true)
@@ -6201,7 +6246,7 @@ function Ground({
   reflectionContributionIntensity,
   reflectionProbeCoefficients,
   reflectionProbeDepthTextures,
-  reflectionProbeTextures,
+  reflectionProbeTextures
 }: {
   environmentTexture: Texture | null
   environmentIntensity: number
@@ -6287,13 +6332,14 @@ function Ground({
 
 function TorchBillboard({
   position,
-  seed
+  seed,
+  texture
 }: {
   position: [number, number, number]
   seed: number
+  texture: Texture | null
 }) {
   const camera = useThree((state) => state.camera)
-  const texture = useFireFlipbookTexture()
   const group = useRef<Group>(null)
   const material = useRef<Mesh>(null)
   const parentWorldQuaternion = useMemo(() => new Quaternion(), [])
@@ -6393,6 +6439,7 @@ function WallSconce({
   reflectionProbeCoefficients,
   reflectionProbeDepthTextures,
   reflectionProbeTextures,
+  torchTexture
 }: {
   environmentTexture: Texture | null
   environmentIntensity: number
@@ -6406,6 +6453,7 @@ function WallSconce({
   reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
   reflectionProbeDepthTextures: CubeTexture[]
   reflectionProbeTextures: Texture[]
+  torchTexture: Texture | null
 }) {
   const metal = useStandardPbrTextures(METAL_TEXTURE_URLS, METAL_TEXTURE_REPEAT)
   const [material, setMaterial] = useState<ThreeMeshStandardMaterial | null>(null)
@@ -6563,6 +6611,7 @@ function WallSconce({
       <TorchBillboard
         position={torchPosition}
         seed={mazeLight.index + 1}
+        texture={torchTexture}
       />
     </>
   )
@@ -6865,7 +6914,9 @@ function FogVolume({
         probeGrid.y
       ],
       rayStepCount,
-      useProbeAmbientTexture: 0
+      useProbeAmbientTexture: 0,
+      useProbeCoefficientTexture: probeCoefficientTextures[0] ? 1 : 0,
+      useProbeDepthAtlases: probeDepthAtlasTextures.every(Boolean) ? 1 : 0
     }
   }, [
     ambientColor,
@@ -7961,6 +8012,7 @@ function MazeWalls({
   reflectionProbeTextures: Texture[]
 }) {
   const wall = useStandardPbrTextures(WALL_TEXTURE_URLS, WALL_TEXTURE_REPEAT)
+  const torchTexture = useFireFlipbookTexture()
 
   return (
     <>
@@ -8000,6 +8052,7 @@ function MazeWalls({
           reflectionProbeCoefficients={reflectionProbeCoefficients}
           reflectionProbeDepthTextures={reflectionProbeDepthTextures}
           reflectionProbeTextures={reflectionProbeTextures}
+          torchTexture={torchTexture}
         />
       ))}
     </>
@@ -9883,7 +9936,7 @@ function TorchLensFlare({
           aditionalStreaks: settings.aditionalStreaks,
           animated: settings.animated,
           anamorphic: settings.anamorphic,
-          blendFunction: BlendFunction.NORMAL,
+          blendFunction: BlendFunction.ADD,
           colorGain: FIRE_COLOR.clone().multiplyScalar(
             Math.sqrt(AUTHORED_LIGHTING_SOURCE_SCALE)
           ),
@@ -10482,7 +10535,10 @@ function FlightRig({
           probeRawTextureUUIDs?: Array<string | null>
           probeTextureUUIDs?: Array<string | null>
           probeCount: number
+          requestedResidentProbeIndices?: number[]
+          residentProbeLimit?: number
           ready: boolean
+          textureMemoryBudgetBytes?: number
         } | null
         getReflectionProbeTextureState?: (probeIndex: number) => {
           processedTextureUUID: string | null
@@ -11262,6 +11318,8 @@ function Scene({
           probeAmbientGrid: [number, number] | null
           rayStepCount: number | null
           useProbeAmbientTexture: number | null
+          useProbeCoefficientTexture?: number | null
+          useProbeDepthAtlases?: number | null
         } | null
         setDebugVisible?: (
           role: string,
@@ -11302,6 +11360,13 @@ function Scene({
           estimatedTextureBytes: number
           rendererGeometries: number
           rendererTextures: number
+          textureBreakdown?: Array<{
+            bytes: number
+            height: number | null
+            label: string
+            uuid: string
+            width: number | null
+          }>
         }
         bakeReflectionProbeAssets?: (
           probeIndex: number,
@@ -11364,7 +11429,9 @@ function Scene({
         probeAmbientBounds: null,
         probeAmbientGrid: null,
         rayStepCount: null,
-        useProbeAmbientTexture: null
+        useProbeAmbientTexture: null,
+        useProbeCoefficientTexture: null,
+        useProbeDepthAtlases: null
       }
     }
 
@@ -11424,9 +11491,13 @@ function Scene({
     const getReflectionCaptureSceneStateDebug = () =>
       getReflectionCaptureSceneState(scene, layout)
 
-    const estimateTextureBytes = (texture: Texture | null | undefined) => {
+    const getTextureImageInfo = (texture: Texture | null | undefined) => {
       if (!texture) {
-        return 0
+        return {
+          bytes: 0,
+          height: null,
+          width: null
+        }
       }
 
       const image = texture.image ?? (
@@ -11442,8 +11513,12 @@ function Scene({
       ).source?.data
 
       if (Array.isArray(image)) {
-        return image.reduce((total, face) => {
+        let height: number | null = null
+        let width: number | null = null
+        const bytes = image.reduce((total, face) => {
           if (face?.data && 'byteLength' in face.data) {
+            height = typeof face.height === 'number' ? face.height : height
+            width = typeof face.width === 'number' ? face.width : width
             return total + face.data.byteLength
           }
 
@@ -11451,15 +11526,23 @@ function Scene({
             typeof face?.width === 'number' &&
             typeof face?.height === 'number'
           ) {
+            height = face.height
+            width = face.width
             return total + (face.width * face.height * 4)
           }
 
           return total
         }, 0)
+
+        return { bytes, height, width }
       }
 
       if (image?.data && 'byteLength' in image.data) {
-        return image.data.byteLength
+        return {
+          bytes: image.data.byteLength,
+          height: typeof image.height === 'number' ? image.height : null,
+          width: typeof image.width === 'number' ? image.width : null
+        }
       }
 
       if (
@@ -11467,19 +11550,27 @@ function Scene({
         typeof image?.height === 'number'
       ) {
         const baseBytes = image.width * image.height * 4
-        return texture.generateMipmaps
-          ? Math.round(baseBytes * 1.33)
-          : baseBytes
+        return {
+          bytes: texture.generateMipmaps
+            ? Math.round(baseBytes * 1.33)
+            : baseBytes,
+          height: image.height,
+          width: image.width
+        }
       }
 
-      return 0
+      return {
+        bytes: 0,
+        height: null,
+        width: null
+      }
     }
 
     const getRuntimeMemoryState = () => {
-      const textures = new Map<string, Texture>()
-      const addTexture = (texture: Texture | null | undefined) => {
+      const textures = new Map<string, { label: string, texture: Texture }>()
+      const addTexture = (texture: Texture | null | undefined, label: string) => {
         if (texture) {
-          textures.set(texture.uuid, texture)
+          textures.set(texture.uuid, { label, texture })
         }
       }
 
@@ -11497,35 +11588,56 @@ function Scene({
             continue
           }
 
-          for (const value of Object.values(material as Record<string, unknown>)) {
+          for (const [key, value] of Object.entries(material as Record<string, unknown>)) {
             if (value instanceof Texture) {
-              addTexture(value)
+              const debugRole = typeof object.userData?.debugRole === 'string'
+                ? object.userData.debugRole
+                : 'mesh'
+              addTexture(value, `${debugRole}.${key}`)
             }
           }
         }
       })
 
-      addTexture(environmentTexture)
-      for (const texture of reflectionProbeRawTextures) {
-        addTexture(texture)
+      addTexture(environmentTexture, 'environmentTexture')
+      for (const [index, texture] of reflectionProbeRawTextures.entries()) {
+        addTexture(texture, `reflectionProbeRawTextures.${index}`)
       }
-      for (const texture of reflectionProbeTextures) {
-        addTexture(texture)
+      for (const [index, texture] of reflectionProbeTextures.entries()) {
+        addTexture(texture, `reflectionProbeTextures.${index}`)
       }
-      for (const texture of reflectionProbeDepthTextures) {
-        addTexture(texture)
+      for (const [index, texture] of reflectionProbeDepthTextures.entries()) {
+        addTexture(texture, `reflectionProbeDepthTextures.${index}`)
       }
 
       let estimatedTextureBytes = 0
+      const textureBreakdown: Array<{
+        bytes: number
+        height: number | null
+        label: string
+        uuid: string
+        width: number | null
+      }> = []
 
-      for (const texture of textures.values()) {
-        estimatedTextureBytes += estimateTextureBytes(texture)
+      for (const { label, texture } of textures.values()) {
+        const imageInfo = getTextureImageInfo(texture)
+        estimatedTextureBytes += imageInfo.bytes
+        textureBreakdown.push({
+          bytes: imageInfo.bytes,
+          height: imageInfo.height,
+          label,
+          uuid: texture.uuid,
+          width: imageInfo.width
+        })
       }
 
       return {
         estimatedTextureBytes,
         rendererGeometries: gl.info.memory.geometries,
-        rendererTextures: gl.info.memory.textures
+        rendererTextures: gl.info.memory.textures,
+        textureBreakdown: textureBreakdown
+          .sort((left, right) => right.bytes - left.bytes)
+          .slice(0, 40)
       }
     }
 
@@ -13863,7 +13975,7 @@ export default function App() {
     }
     const intervalId = window.setInterval(() => {
       readCurrentMemory()
-    }, 250)
+    }, 2000)
 
     globalWindow.__levelsjamDebug = {
       ...existing,

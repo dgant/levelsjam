@@ -508,9 +508,24 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await page.waitForTimeout(250)
     await expect
       .poll(
-        async () => page.evaluate(
-          () => window.__levelsjamDebug.getReflectionProbeVisualizationState?.(0) ?? null
-        ),
+        async () => page.evaluate(() => {
+          const probeState = window.__levelsjamDebug.getReflectionProbeState?.()
+          const probeCount = probeState?.probeCount ?? 0
+          let loadedProbeIndex = null
+
+          for (let index = 0; index < probeCount; index += 1) {
+            const textureState = window.__levelsjamDebug.getReflectionProbeTextureState?.(index)
+
+            if (textureState?.processedTextureUUID) {
+              loadedProbeIndex = index
+              break
+            }
+          }
+
+          return loadedProbeIndex === null
+            ? null
+            : window.__levelsjamDebug.getReflectionProbeVisualizationState?.(loadedProbeIndex) ?? null
+        }),
         {
           timeout: 5_000,
           intervals: [100, 250, 500]
@@ -521,18 +536,39 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await page.getByLabel('Probe Debug', { exact: true }).selectOption('reflection')
     await expect
       .poll(
-        async () => page.evaluate(() => ({
-          probeTextureState:
-            window.__levelsjamDebug.getReflectionProbeTextureState?.(0) ?? null,
-          visualizationState:
-            window.__levelsjamDebug.getReflectionProbeVisualizationState?.(0) ?? null
-        })),
+        async () => page.evaluate(() => {
+          const probeState = window.__levelsjamDebug.getReflectionProbeState?.()
+          const probeCount = probeState?.probeCount ?? 0
+          let loadedProbeIndex = null
+
+          for (let index = 0; index < probeCount; index += 1) {
+            const textureState = window.__levelsjamDebug.getReflectionProbeTextureState?.(index)
+
+            if (textureState?.processedTextureUUID) {
+              loadedProbeIndex = index
+              break
+            }
+          }
+
+          return {
+            loadedProbeIndex,
+            probeTextureState:
+              loadedProbeIndex !== null
+                ? window.__levelsjamDebug.getReflectionProbeTextureState?.(loadedProbeIndex) ?? null
+                : null,
+            visualizationState:
+              loadedProbeIndex !== null
+                ? window.__levelsjamDebug.getReflectionProbeVisualizationState?.(loadedProbeIndex) ?? null
+                : null
+          }
+        }),
         {
           timeout: 5_000,
           intervals: [100, 250, 500]
         }
       )
       .toMatchObject({
+        loadedProbeIndex: expect.any(Number),
         probeTextureState: {
           processedTextureUUID: expect.any(String)
         },
@@ -549,9 +585,24 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await page.getByLabel('Probe Debug', { exact: true }).selectOption('volumetric-lightmap')
     await expect
       .poll(
-        async () => page.evaluate(
-          () => window.__levelsjamDebug.getReflectionProbeVisualizationState?.(0) ?? null
-        ),
+        async () => page.evaluate(() => {
+          const probeState = window.__levelsjamDebug.getReflectionProbeState?.()
+          const probeCount = probeState?.probeCount ?? 0
+          let loadedProbeIndex = null
+
+          for (let index = 0; index < probeCount; index += 1) {
+            const textureState = window.__levelsjamDebug.getReflectionProbeTextureState?.(index)
+
+            if (textureState?.processedTextureUUID) {
+              loadedProbeIndex = index
+              break
+            }
+          }
+
+          return loadedProbeIndex !== null
+            ? window.__levelsjamDebug.getReflectionProbeVisualizationState?.(loadedProbeIndex) ?? null
+            : null
+        }),
         {
           timeout: 5_000,
           intervals: [100, 250, 500]
@@ -570,9 +621,24 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await page.getByLabel('Probe Debug', { exact: true }).selectOption('shadow-map')
     await expect
       .poll(
-        async () => page.evaluate(
-          () => window.__levelsjamDebug.getReflectionProbeVisualizationState?.(0) ?? null
-        ),
+        async () => page.evaluate(() => {
+          const probeState = window.__levelsjamDebug.getReflectionProbeState?.()
+          const probeCount = probeState?.probeCount ?? 0
+          let loadedProbeIndex = null
+
+          for (let index = 0; index < probeCount; index += 1) {
+            const textureState = window.__levelsjamDebug.getReflectionProbeTextureState?.(index)
+
+            if (textureState?.processedTextureUUID) {
+              loadedProbeIndex = index
+              break
+            }
+          }
+
+          return loadedProbeIndex !== null
+            ? window.__levelsjamDebug.getReflectionProbeVisualizationState?.(loadedProbeIndex) ?? null
+            : null
+        }),
         {
           timeout: 5_000,
           intervals: [100, 250, 500]
@@ -695,12 +761,14 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         density: 1,
         fogDistance: 12,
         noiseFrequency: 6,
-        useProbeAmbientTexture: 1
+        useProbeAmbientTexture: 0,
+        useProbeCoefficientTexture: 1,
+        useProbeDepthAtlases: 1
       })
 
     await expect
       .poll(
-        async () => page.evaluate(() => window.__levelsjamDebug.getFogState?.()?.useProbeAmbientTexture ?? null),
+        async () => page.evaluate(() => window.__levelsjamDebug.getFogState?.()?.useProbeCoefficientTexture ?? null),
         {
           timeout: 5_000,
           intervals: [50, 100, 250]
@@ -749,13 +817,16 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await page.getByRole('button', { name: '5. Flares' }).click()
     await page.evaluate(() => {
       window.__levelsjamDebug.setView(
-        [5.4, 1.55, -6.9],
-        [7, 1.1, -6]
+        [4, 1.55, -6.4],
+        [4, 1.225, -5.25]
       )
     })
     await page.waitForTimeout(200)
     await setCheckbox(page, 'Lens Flares', true)
     await setSlider(page, 'Lens Flares Intensity', 0)
+    await setSlider(page, 'Flare Opacity', 1)
+    await setSlider(page, 'Flare Size', 0.05)
+    await setSlider(page, 'Glare Size', 0.1)
     await page.keyboard.press('Backquote')
     await page.waitForTimeout(250)
     const lensFlareOffFrame = await screenshotCanvasRegion(
@@ -763,8 +834,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       canvas,
       260,
       180,
-      0.72,
-      0.74,
+      0.5,
+      0.5,
       timingProfile
     )
     await page.keyboard.press('Backquote')
@@ -777,8 +848,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       canvas,
       260,
       180,
-      0.72,
-      0.74,
+      0.5,
+      0.5,
       timingProfile
     )
     const lensFlareDiff = measureBufferDiff(

@@ -208,3 +208,7 @@ Regenerate the mazes, and give each one randomly placed minotaur, wolf, spider (
 [x] Scale up the minotaur model by 1.5x
 [x] Fog noise: The noise should also be sampled along a time dimension, with a Fog Noise Period slider from 0-10s, defaulting to 5s
 [x] Lens Flares: Find a way to support up to 5 simultaneous lens flares. Apply them additively
+[x] Would it be more performant and reduce burden on sampler limitations for each maze's volumetric lightmaps to be atlassed together? If so, or if it's not clear either way, do it.
+[x] When you run npm run dev the first thing it does is... process/copy some maze files? Surely this is something that can be done during maze generation instead, to speed up server startup time, right?
+[] A crucial smoke/performance test would be to load the page, do "Replay solution", then watch the solution play all the way out until the player successfully exits the maze, and watch it maintain our target fps (currently 144) the whole time (on GPU), with no cheating or hacks. Accept an average FPS that's at least 85% of the target and if less, optimize until hitting it or at least figure out and document exactly where the time is going and why.
+[] The intro screen must not fade out until all general assets are loaded, and all surface and volumetric lightmaps within 12m of the player's starting position have loaded.

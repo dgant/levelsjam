@@ -1,175 +1,147 @@
 {
-  "generatedAt": "2026-04-21T22:48:12.422Z",
+  "generatedAt": "2026-04-24T15:16:13.865Z",
   "results": [
     {
-      "durationMs": 10854.5075,
+      "durationMs": 3209.8657,
       "error": null,
       "exitCode": 0,
       "scriptName": "test:unit",
-      "effectiveDurationMs": 9960.499499999998,
+      "effectiveDurationMs": 2468.8223,
       "overThreshold": false,
       "renderIntegrationProfile": null,
       "startupPhaseDurationMs": null,
       "smokeProfile": null,
       "unitProfile": {
-        "generatedAt": "2026-04-21T22:48:33.758Z",
+        "generatedAt": "2026-04-24T15:16:36.252Z",
         "overallThresholdMs": 20000,
-        "totalDurationMs": 9960.499499999998,
-        "wallTotalDurationMs": 9911,
+        "totalDurationMs": 2468.8223,
+        "wallTotalDurationMs": 2071,
         "workerCount": 8,
         "files": [
           {
-            "durationMs": 4.4001,
+            "durationMs": 4.5603,
             "filePath": "tests/billboard.test.js",
             "overThreshold": false,
-            "reportedDurationMs": 4.4001,
+            "reportedDurationMs": 4.5603,
             "testCases": [
               {
-                "durationMs": 1.6634,
+                "durationMs": 1.6932,
                 "name": "converts camera world orientation into billboard local orientation under a rotated parent"
               }
             ]
           },
           {
-            "durationMs": 4.7147,
+            "durationMs": 5.179,
             "filePath": "tests/lighting-calibration.test.js",
             "overThreshold": false,
-            "reportedDurationMs": 4.7147,
+            "reportedDurationMs": 5.179,
             "testCases": [
               {
-                "durationMs": 1.0557,
+                "durationMs": 1.127,
                 "name": "keeps neutral exposure at zero stops"
               },
               {
-                "durationMs": 0.2299,
+                "durationMs": 0.254,
                 "name": "maps exposure stops to renderer exposure"
               },
               {
-                "durationMs": 0.0655,
+                "durationMs": 0.0711,
                 "name": "preserves the legacy default exposure as authored source scale"
               },
               {
-                "durationMs": 0.0638,
+                "durationMs": 0.0647,
                 "name": "uses a shared internal light-unit scale for HDRI"
               }
             ]
           },
           {
-            "durationMs": 9781.8715,
-            "filePath": "tests/maze.test.js",
+            "durationMs": 1953.3008,
+            "filePath": "tests/maze-solver.test.js",
             "overThreshold": false,
-            "reportedDurationMs": 9781.8715,
+            "reportedDurationMs": 1953.3008,
             "testCases": [
               {
-                "durationMs": 166.0101,
-                "name": "generates valid mazes under 100ms"
+                "durationMs": 1392.6706,
+                "name": "generated mazes include gates, items, and a recorded winning solution"
               },
               {
-                "durationMs": 5903.4034,
-                "name": "persists at least five valid mazes"
+                "durationMs": 552.2273,
+                "name": "recorded maze solutions replay to a winning escaped state within the move bound"
               },
               {
-                "durationMs": 791.9902,
-                "name": "dumps persisted maze lightmap artifacts into the gitignored logs directory"
+                "durationMs": 0.8013,
+                "name": "solver finds a winning route for a simple trophy-and-exit maze"
               },
               {
-                "durationMs": 1342.4546,
-                "name": "deletes invalid maze files and regenerates replacements"
-              },
-              {
-                "durationMs": 81.3672,
-                "name": "converts persisted mazes into wall segments and torch placements"
-              },
-              {
-                "durationMs": 697.2056,
-                "name": "keeps baked lighting continuous across an open coplanar wall run"
-              },
-              {
-                "durationMs": 160.831,
-                "name": "bakes local sconce occlusion into the attached wall face"
-              },
-              {
-                "durationMs": 166.5792,
-                "name": "keeps mid-wall torch lighting visible below the sconce top"
-              },
-              {
-                "durationMs": 151.3197,
-                "name": "stores baked wall ambient in the lightmap ambient channel"
-              },
-              {
-                "durationMs": 1.6045,
-                "name": "three box geometry mirrors local -Z face UVs relative to +Z"
-              },
-              {
-                "durationMs": 313.5139,
-                "name": "assigns z-axis wall-run lightmap slices to the correct wall"
+                "durationMs": 3.7576,
+                "name": "solver does not use hidden trophy placement before it becomes visible"
               }
             ]
           },
           {
-            "durationMs": 6.4288,
+            "durationMs": 8.0561,
             "filePath": "tests/player-collision.test.js",
             "overThreshold": false,
-            "reportedDurationMs": 6.4288,
+            "reportedDurationMs": 8.0561,
             "testCases": [
               {
-                "durationMs": 1.3619,
+                "durationMs": 1.7562,
                 "name": "spawns the player one meter above the ground plane"
               },
               {
-                "durationMs": 0.1508,
+                "durationMs": 0.2248,
                 "name": "derives the camera position from the capsule base position"
               },
               {
-                "durationMs": 0.1675,
+                "durationMs": 0.2415,
                 "name": "clamps the player to the ground plane"
               },
               {
-                "durationMs": 0.2449,
+                "durationMs": 0.3269,
                 "name": "clamps the player to a wall side when moving through it horizontally"
               },
               {
-                "durationMs": 0.1202,
+                "durationMs": 0.1585,
                 "name": "preserves tangential motion when sliding along a wall face"
               },
               {
-                "durationMs": 0.448,
+                "durationMs": 0.6035,
                 "name": "repeated wall-slide resolution preserves tangent travel without tunneling through the wall"
               },
               {
-                "durationMs": 0.1128,
+                "durationMs": 0.1471,
                 "name": "lands on top of a wall when descending onto it"
               },
               {
-                "durationMs": 0.105,
+                "durationMs": 0.1158,
                 "name": "accepts custom wall bounds for isolated collision checks"
               }
             ]
           },
           {
-            "durationMs": 6.6015,
+            "durationMs": 8.0203,
             "filePath": "tests/player-motion.test.js",
             "overThreshold": false,
-            "reportedDurationMs": 6.6015,
+            "reportedDurationMs": 8.0203,
             "testCases": [
               {
-                "durationMs": 1.3331,
+                "durationMs": 1.6119,
                 "name": "converts the requested mph limits to meters per second"
               },
               {
-                "durationMs": 0.1482,
+                "durationMs": 0.173,
                 "name": "matches the requested acceleration and deceleration distances"
               },
               {
-                "durationMs": 0.1363,
+                "durationMs": 0.1652,
                 "name": "creates runtime movement settings from debug values"
               },
               {
-                "durationMs": 0.0747,
+                "durationMs": 0.0886,
                 "name": "matches the requested gravity and jetpack forces"
               },
               {
-                "durationMs": 0.1643,
+                "durationMs": 0.1763,
                 "name": "clamps horizontal velocity to the requested top speed"
               },
               {
@@ -177,96 +149,152 @@
                 "name": "decelerates horizontal velocity toward rest without reversing"
               },
               {
-                "durationMs": 0.0924,
+                "durationMs": 0.1102,
                 "name": "applies opposing input as deceleration instead of acceleration"
               },
               {
-                "durationMs": 0.0797,
+                "durationMs": 0.0923,
                 "name": "switches to the requested camera-relative direction when accelerating"
               },
               {
-                "durationMs": 0.1115,
+                "durationMs": 0.1134,
                 "name": "keeps grounded vertical velocity at rest without jetpack"
               },
               {
-                "durationMs": 0.0889,
+                "durationMs": 0.1007,
                 "name": "caps upward jetpack velocity to the requested vertical limit"
               },
               {
-                "durationMs": 0.0783,
+                "durationMs": 0.1399,
                 "name": "caps downward velocity to the requested fall-speed limit"
               }
             ]
           },
           {
-            "durationMs": 5.3154,
-            "filePath": "tests/reflection-probe-blending.test.js",
+            "durationMs": 15.5686,
+            "filePath": "tests/probe-spherical-harmonics.test.js",
             "overThreshold": false,
-            "reportedDurationMs": 5.3154,
+            "reportedDurationMs": 15.5686,
             "testCases": [
               {
-                "durationMs": 1.4949,
+                "durationMs": 12.5599,
+                "name": "volumetric lightmap SH keeps probe face directions coherent"
+              }
+            ]
+          },
+          {
+            "durationMs": 7.5117,
+            "filePath": "tests/reflection-probe-blending.test.js",
+            "overThreshold": false,
+            "reportedDurationMs": 7.5117,
+            "testCases": [
+              {
+                "durationMs": 1.7383,
                 "name": "blends fully to the nearest probe at a probe center"
               },
               {
-                "durationMs": 0.2307,
+                "durationMs": 0.4177,
                 "name": "blends evenly between adjacent probes midway between their centers"
               },
               {
-                "durationMs": 0.1287,
+                "durationMs": 0.1697,
                 "name": "blends across four probes at the midpoint between both axes"
               },
               {
-                "durationMs": 0.5307,
+                "durationMs": 0.6164,
                 "name": "builds ground probe blend tiles that cover the ground bounds continuously"
               }
             ]
           },
           {
-            "durationMs": 151.1675,
+            "durationMs": 457.383,
             "filePath": "tests/scene-layout.test.js",
             "overThreshold": false,
-            "reportedDurationMs": 151.1675,
+            "reportedDurationMs": 457.383,
             "testCases": [
               {
-                "durationMs": 63.3111,
+                "durationMs": 194.6934,
                 "name": "keeps at least five persisted mazes available to the runtime"
               },
               {
-                "durationMs": 62.6986,
+                "durationMs": 207.8622,
                 "name": "builds a scene layout from a persisted maze with walls, lights, probes, and a lightmap"
               },
               {
-                "durationMs": 0.1367,
+                "durationMs": 0.174,
                 "name": "expands the baked ground patch beyond the maze footprint"
               },
               {
-                "durationMs": 0.2133,
+                "durationMs": 0.3858,
                 "name": "uses the requested wall mesh dimensions for maze wall segments"
               },
               {
-                "durationMs": 0.1138,
+                "durationMs": 0.1531,
                 "name": "places each sconce one radius outside the wall face on the lit-cell side"
               },
               {
-                "durationMs": 0.0696,
+                "durationMs": 0.081,
                 "name": "sizes the torch billboard to match its wall clearance"
               },
               {
-                "durationMs": 0.1565,
+                "durationMs": 0.1713,
                 "name": "exposes wall bounds for collision checks"
               },
               {
-                "durationMs": 0.5196,
+                "durationMs": 0.7243,
                 "name": "keeps the player spawn one meter above the ground"
               },
               {
-                "durationMs": 0.3782,
+                "durationMs": 0.5481,
                 "name": "provides synthetic 3x3 probe-occlusion layouts for diagnostics"
               },
               {
-                "durationMs": 19.8743,
+                "durationMs": 48.8037,
                 "name": "keeps the sealed 3x3 center-facing wall lightmap faces dark"
+              }
+            ]
+          },
+          {
+            "durationMs": 9.2425,
+            "filePath": "tests/turn-rules.test.js",
+            "overThreshold": false,
+            "reportedDurationMs": 9.2425,
+            "testCases": [
+              {
+                "durationMs": 1.9263,
+                "name": "initial turn state starts at the maze entrance facing inward"
+              },
+              {
+                "durationMs": 0.5792,
+                "name": "rotation changes player direction without advancing monster turns"
+              },
+              {
+                "durationMs": 0.4269,
+                "name": "sleeping monsters wake on sight and move on a later turn"
+              },
+              {
+                "durationMs": 0.1235,
+                "name": "walls block line of sight for monster wakeups"
+              },
+              {
+                "durationMs": 0.3414,
+                "name": "blocked movement reports a bump without consuming a turn"
+              },
+              {
+                "durationMs": 0.7236,
+                "name": "adjacent safe gates open for player movement"
+              },
+              {
+                "durationMs": 0.3821,
+                "name": "player picks up the sword and kills a monster instead of dying"
+              },
+              {
+                "durationMs": 0.2615,
+                "name": "player can escape only while holding the trophy"
+              },
+              {
+                "durationMs": 0.4325,
+                "name": "reset restores monsters and items to the initial maze state"
               }
             ]
           }
@@ -275,79 +303,114 @@
       "thresholdMs": 20000
     },
     {
-      "durationMs": 36222.0913,
+      "durationMs": 11294.7064,
+      "error": null,
+      "exitCode": 0,
+      "scriptName": "test:perf:runner",
+      "effectiveDurationMs": 11294.7064,
+      "overThreshold": false,
+      "renderIntegrationProfile": null,
+      "startupPhaseDurationMs": null,
+      "smokeProfile": null,
+      "unitProfile": null,
+      "thresholdMs": 60000
+    },
+    {
+      "durationMs": 34155.962,
       "error": null,
       "exitCode": 0,
       "scriptName": "test:smoke:runner",
-      "effectiveDurationMs": 36222.0913,
+      "effectiveDurationMs": 34155.962,
       "overThreshold": false,
       "renderIntegrationProfile": null,
-      "startupPhaseDurationMs": 6136,
+      "startupPhaseDurationMs": 2863,
       "smokeProfile": {
         "phases": [
           {
-            "durationMs": 19636,
+            "durationMs": 2863,
+            "label": "startup"
+          },
+          {
+            "durationMs": 756,
             "label": "reflection-captures"
           },
           {
-            "durationMs": 8290,
+            "durationMs": 302,
             "label": "debug-controls"
-          },
-          {
-            "durationMs": 6136,
-            "label": "startup"
           }
         ],
         "screenshotCount": 0,
         "screenshotMs": 0,
-        "startedAt": "2026-04-21T22:48:35.821Z",
-        "loadingCompleteAtMs": 3768,
-        "shellVisibleAtMs": 21.799999997019768,
-        "totalRunMs": 34069,
-        "finishedAt": "2026-04-21T22:49:09.891Z",
-        "totalPhaseMs": 34062,
-        "wroteAt": "2026-04-21T22:49:09.891Z"
+        "startedAt": "2026-04-24T15:16:49.528Z",
+        "loadingCompleteAtMs": 2188,
+        "shellVisibleAtMs": 19.899999999441206,
+        "totalRunMs": 3927,
+        "finishedAt": "2026-04-24T15:16:53.456Z",
+        "totalPhaseMs": 3921,
+        "wroteAt": "2026-04-24T15:16:53.456Z"
       },
       "unitProfile": null,
       "thresholdMs": 180000
     },
     {
-      "durationMs": 89009.1635,
+      "durationMs": 11170.4495,
       "error": null,
       "exitCode": 0,
       "scriptName": "test:render:integration:runner",
-      "effectiveDurationMs": 86828,
+      "effectiveDurationMs": 8969,
       "overThreshold": false,
       "renderIntegrationProfile": {
+        "measurements": {
+          "ssrDiff": {
+            "averagePerChannel": 6.911844729344729,
+            "maxCombinedDifference": 89
+          },
+          "fogDiff": {
+            "averagePerChannel": 6.729177083333333,
+            "maxCombinedDifference": 57
+          },
+          "lensFlareDiff": {
+            "averagePerChannel": 1.6458974358974359,
+            "maxCombinedDifference": 28
+          }
+        },
         "phases": [
           {
-            "durationMs": 32190,
-            "label": "reflection-captures"
+            "durationMs": 2844,
+            "label": "startup"
           },
           {
-            "durationMs": 21595,
-            "label": "volumetric-fog"
+            "durationMs": 1312,
+            "label": "ssr"
           },
           {
-            "durationMs": 18177,
+            "durationMs": 1285,
             "label": "lens-flares"
           },
           {
-            "durationMs": 6352,
-            "label": "debug-controls"
+            "durationMs": 1060,
+            "label": "volumetric-fog"
           },
           {
-            "durationMs": 5559,
-            "label": "startup"
+            "durationMs": 1058,
+            "label": "reflection-captures"
+          },
+          {
+            "durationMs": 655,
+            "label": "probe-debug-visualization"
+          },
+          {
+            "durationMs": 538,
+            "label": "debug-controls"
           }
         ],
-        "screenshotCount": 9,
-        "screenshotMs": 19148,
-        "startedAt": "2026-04-21T22:49:12.079Z",
-        "totalRunMs": 86828,
-        "finishedAt": "2026-04-21T22:50:38.908Z",
-        "totalPhaseMs": 83873,
-        "wroteAt": "2026-04-21T22:50:38.908Z"
+        "screenshotCount": 7,
+        "screenshotMs": 516,
+        "startedAt": "2026-04-24T15:17:23.800Z",
+        "totalRunMs": 8969,
+        "finishedAt": "2026-04-24T15:17:32.770Z",
+        "totalPhaseMs": 8752,
+        "wroteAt": "2026-04-24T15:17:32.770Z"
       },
       "startupPhaseDurationMs": null,
       "smokeProfile": null,
@@ -356,7 +419,7 @@
     }
   ],
   "buildPages": {
-    "durationMs": 10572.6232,
+    "durationMs": 19281.5909,
     "error": null,
     "exitCode": 0,
     "scriptName": "build:pages"

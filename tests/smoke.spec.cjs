@@ -664,10 +664,32 @@ test('maze-003 remains responsive through background probe loading', async ({ pa
   })
 
   const rafLatencyMs = await measureRafLatency(page)
+  const probeAndMemoryState = await page.evaluate(() => {
+    const probeState = window.__levelsjamDebug?.getReflectionProbeState?.() ?? null
+    const memoryState = window.__levelsjamDebug?.getRuntimeMemoryHighWater?.() ?? null
+
+    return {
+      currentEstimatedTextureBytes: memoryState?.current?.estimatedTextureBytes ?? 0,
+      highWaterEstimatedTextureBytes: memoryState?.highWater?.estimatedTextureBytes ?? 0,
+      loadedProbeCount: probeState?.loadedProbeCount ?? 0,
+      residentProbeLimit: probeState?.residentProbeLimit ?? null,
+      textureMemoryBudgetBytes: probeState?.textureMemoryBudgetBytes ?? null
+    }
+  })
 
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
   expect(rafLatencyMs).toBeLessThan(500)
+  expect(probeAndMemoryState.loadedProbeCount).toBeGreaterThan(0)
+  expect(probeAndMemoryState.loadedProbeCount).toBeLessThanOrEqual(
+    probeAndMemoryState.residentProbeLimit
+  )
+  expect(probeAndMemoryState.currentEstimatedTextureBytes).toBeLessThanOrEqual(
+    probeAndMemoryState.textureMemoryBudgetBytes
+  )
+  expect(probeAndMemoryState.highWaterEstimatedTextureBytes).toBeLessThanOrEqual(
+    probeAndMemoryState.textureMemoryBudgetBytes
+  )
 })
 
 test('runtime probe assets stay loaded when volumetric fog is toggled', async ({ page }) => {

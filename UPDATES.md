@@ -109,3 +109,6 @@
 - When a generation or validation loop can reject candidates, give it a bounded attempt count and a diagnostic failure. Do not allow a test fixture or bad factory to create an unbounded retry loop.
 - When offline baking code needs the HDRI as an input, use the bake/capture scene source directly. Do not rely on runtime environment-light state, because in-game global environment lighting is intentionally disabled and may be null.
 - Keep full reflection-probe export measured as an offline asset pipeline phase. Do not fold its multi-minute runtime into the fast maze topology, validation, and lightmap-budget measurements.
+- When a real browser load freezes but tests pass, inspect whether the tests measured only startup readiness or disabled-effect states. Performance gates must cover the user-visible steady state after background work has stabilized.
+- Do not let runtime probe loading silently accumulate every baked probe in GPU memory. Keep a bounded resident set near the player and assert that bound in browser tests.
+- When an asset causes a frame-rate collapse, measure mesh count, material count, skinning, and draw submissions before reducing visual fidelity. A static skinned model split into many meshes should be joined offline into a runtime asset rather than hidden or replaced.

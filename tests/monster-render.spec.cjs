@@ -91,7 +91,7 @@ test('monsters render, stay off surface lightmaps, and land near intended size',
   expect(lifecycleState.cachedGltfRootUrls).toEqual(expect.arrayContaining([
     expect.stringContaining('/models/minotaur-runtime/scene.gltf'),
     expect.stringContaining('/models/pbr_jumping_spider_monster/scene.gltf'),
-    expect.stringContaining('/models/awil_werewolf/scene.gltf')
+    expect.stringContaining('/models/awil_werewolf_runtime/scene.gltf')
   ]))
 
   const monsterStates = await page.evaluate(() =>
@@ -130,6 +130,7 @@ test('monsters render, stay off surface lightmaps, and land near intended size',
     if (monster.state.type === 'werewolf') {
       expect(monster.state.targetSize).toBeCloseTo(1.6, 3)
       expect(monster.state.boundsMin[1]).toBeGreaterThanOrEqual(0)
+      expect(monster.state.meshCount).toBeLessThanOrEqual(2)
     }
 
     if (monster.state.type === 'spider') {
