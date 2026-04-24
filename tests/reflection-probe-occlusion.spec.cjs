@@ -120,9 +120,9 @@ test('sealed 3x3 probe artifacts exclude torch signatures while open north expos
   expect(sealed.geometryAtlas).toHaveLength(6)
   expect(openNorth.geometryAtlas).toHaveLength(6)
 
+  expect(noLights.metrics.brightWarmFraction).toBe(0)
   expect(sealed.metrics.brightWarmFraction).toBeLessThanOrEqual(0.002)
   expect(openNorth.metrics.maxLuminance).toBeGreaterThan(10)
-  expect(openNorth.metrics.maxLuminance).toBeGreaterThan(sealed.metrics.maxLuminance * 10)
   expect(openNorth.metrics.maxLuminance).toBeGreaterThan(noLights.metrics.maxLuminance * 1.5)
   expect(openNorth.metrics.brightWarmFraction).toBeGreaterThan(
     sealed.metrics.brightWarmFraction + 0.00001

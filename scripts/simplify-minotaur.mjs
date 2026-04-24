@@ -9,11 +9,13 @@ const rootDir = path.resolve(__dirname, '..')
 const sourcePath = path.join(rootDir, 'public', 'models', 'minotaur', 'scene.gltf')
 const outputDir = path.join(rootDir, 'public', 'models', 'minotaur-runtime')
 const outputPath = path.join(outputDir, 'scene.gltf')
-// Meshopt preserves enough topology that the requested count is a lower bound;
-// this request currently emits a non-permissive runtime mesh just under 10k tris.
-const TARGET_TRIANGLES = 2_000
+// The source scan has many open borders. Locking borders is required to avoid
+// turning those openings into visible holes during simplification, so the
+// requested target is a lower bound rather than an exact triangle count.
+const TARGET_TRIANGLES = 10_000
 const MIN_PRIMITIVE_TRIANGLES = 12
-const MAX_ERROR = 0.08
+const MAX_ERROR = 0.04
+const SIMPLIFY_FLAGS = ['LockBorder']
 const MISSING_INDEX = 0xffffffff
 
 function getPrimitiveTriangleCount(primitive) {
@@ -235,7 +237,7 @@ async function main() {
             null,
             targetIndexCount,
             MAX_ERROR,
-            []
+            SIMPLIFY_FLAGS
           )
         : MeshoptSimplifier.simplify(
             new Uint32Array(indexArray),
@@ -243,7 +245,7 @@ async function main() {
             3,
             targetIndexCount,
             MAX_ERROR,
-            []
+            SIMPLIFY_FLAGS
           )
     const simplifiedIndices = simplifyResult[0].slice()
     const [remap, nextVertexCount] = MeshoptSimplifier.compactMesh(simplifiedIndices)

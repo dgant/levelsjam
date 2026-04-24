@@ -229,6 +229,7 @@ const TORCH_LIGHTMAP_TINT = FIRE_LIGHT_COLOR.clone()
 const FIRE_BILLBOARD_INTENSITY_SCALE =
   AUTHORED_LIGHTING_SOURCE_SCALE / TORCH_BASE_CANDELA
 const LENS_FLARE_INTENSITY_SCALE = 4
+const LENS_FLARE_COLOR_GAIN = 40000
 const LENS_FLARE_OCCLUSION_MARGIN = 0.05
 const TORCH_BILLBOARD_LAYER = 1
 const FLOOR_LIGHTMAP_INTENSITY_SCALE = 1
@@ -1967,9 +1968,8 @@ vec4 probeBlendTextureCubeUV(
 `
 
 const PROBE_BLEND_SHADER_CHUNK = `
-#ifdef USE_ENVMAP
 
-#if defined(PROBE_BLEND_ENABLE_LOCAL_RADIANCE)
+#if defined(PROBE_BLEND_ENABLE_LOCAL_RADIANCE) && defined(USE_ENVMAP)
 uniform sampler2D localProbeEnvMap0;
 uniform sampler2D localProbeEnvMap1;
 uniform sampler2D localProbeEnvMap2;
@@ -1992,7 +1992,7 @@ uniform int probeBlendMode;
 uniform int probeBlendRadianceMode;
 uniform vec4 probeBlendWeights;
 uniform vec4 probeBlendRegion;
-#if defined(PROBE_BLEND_ENABLE_LOCAL_RADIANCE)
+#if defined(PROBE_BLEND_ENABLE_LOCAL_RADIANCE) && defined(USE_ENVMAP)
 uniform vec3 localProbePosition0;
 uniform vec3 localProbePosition1;
 uniform vec3 localProbePosition2;
@@ -2023,6 +2023,7 @@ uniform vec3 localProbeCoeffL30;
 uniform vec3 localProbeCoeffL31;
 uniform vec3 localProbeCoeffL32;
 uniform vec3 localProbeCoeffL33;
+#if defined(PROBE_BLEND_ENABLE_VLM_TEXTURES)
 uniform sampler2D localProbeCoeffTextureL0;
 uniform sampler2D localProbeCoeffTextureL1;
 uniform sampler2D localProbeCoeffTextureL2;
@@ -2033,6 +2034,7 @@ uniform sampler2D localProbeDepthAtlasPy;
 uniform sampler2D localProbeDepthAtlasNy;
 uniform sampler2D localProbeDepthAtlasPz;
 uniform sampler2D localProbeDepthAtlasNz;
+#endif
 uniform vec2 probeBoundaryNormal;
 uniform float probeCellSize;
 uniform float probeDepthAtlasFaceSize;
@@ -2098,7 +2100,7 @@ vec3 applyProbeBoxProjection(
   return projectedWorldPosition - probePosition;
 }
 
-#if defined(PROBE_BLEND_ENABLE_LOCAL_RADIANCE)
+#if defined(PROBE_BLEND_ENABLE_LOCAL_RADIANCE) && defined(USE_ENVMAP)
 vec3 sampleProbeBlendTexture(
   sampler2D probeMap,
   vec3 worldPosition,
@@ -2172,6 +2174,7 @@ vec3 sampleProbeBlendDiffuse(
   );
 }
 
+#if defined(PROBE_BLEND_ENABLE_VLM_TEXTURES)
 vec2 clampProbeGridCell( vec2 cell ) {
   return clamp( cell, vec2( 0.0 ), max( probeGridSize - vec2( 1.0 ), vec2( 0.0 ) ) );
 }
@@ -2354,6 +2357,7 @@ vec3 sampleProbeGridDiffuseBoundary8(
 ) {
   return sampleProbeGridDiffuseCell5( worldPosition, direction );
 }
+#endif
 
 vec4 getProbeBlendVisibleWeights(
   vec4 baseWeights
@@ -2371,7 +2375,7 @@ vec4 getProbeBlendVisibleWeights(
   return baseWeights / visibleWeightSum;
 }
 
-#if defined(PROBE_BLEND_ENABLE_LOCAL_RADIANCE)
+#if defined(PROBE_BLEND_ENABLE_LOCAL_RADIANCE) && defined(USE_ENVMAP)
 vec3 sampleProbeBlendLocalRadiance(
   vec3 worldPosition,
   vec3 direction,
@@ -2504,7 +2508,7 @@ vec3 sampleProbeBlendRadianceWithMode(
   int mode,
   float intensity
 ) {
-#if defined(PROBE_BLEND_ENABLE_LOCAL_RADIANCE)
+#if defined(PROBE_BLEND_ENABLE_LOCAL_RADIANCE) && defined(USE_ENVMAP)
   if ( mode == 1 ) {
     return sampleProbeBlendLocalRadiance(
       vProbeBlendWorldPosition,
@@ -2538,6 +2542,7 @@ vec3 sampleProbeBlendDiffuseWithMode(
   int mode,
   float intensity
 ) {
+#if defined(PROBE_BLEND_ENABLE_VLM_TEXTURES)
   if ( probeVlmMode == 1 ) {
     return sampleProbeGridDiffuseCell5(
       vProbeBlendWorldPosition,
@@ -2551,6 +2556,7 @@ vec3 sampleProbeBlendDiffuseWithMode(
       direction
     ) * intensity;
   }
+#endif
 
   if ( mode == 1 ) {
     return sampleProbeBlendLocalDiffuse(
@@ -2579,8 +2585,6 @@ vec3 sampleProbeBlendDiffuseWithMode(
 
 vec3 getIBLIrradiance( const in vec3 normal ) {
 
-  #ifdef ENVMAP_TYPE_CUBE_UV
-
     vec3 worldNormal = inverseTransformDirection( normal, viewMatrix );
     vec3 envMapColor = sampleProbeBlendDiffuseWithMode(
       worldNormal,
@@ -2590,17 +2594,11 @@ vec3 getIBLIrradiance( const in vec3 normal ) {
 
     return PI * envMapColor;
 
-  #else
-
-    return vec3( 0.0 );
-
-  #endif
-
 }
 
 vec3 getIBLRadiance( const in vec3 viewDir, const in vec3 normal, const in float roughness ) {
 
-  #ifdef ENVMAP_TYPE_CUBE_UV
+  #if defined(PROBE_BLEND_ENABLE_LOCAL_RADIANCE) && defined(USE_ENVMAP) && defined(ENVMAP_TYPE_CUBE_UV)
 
     vec3 reflectVec = reflect( - viewDir, normal );
     reflectVec = normalize( mix( reflectVec, normal, pow4( roughness ) ) );
@@ -2621,7 +2619,7 @@ vec3 getIBLRadiance( const in vec3 viewDir, const in vec3 normal, const in float
 
 }
 
-  #ifdef USE_ANISOTROPY
+  #if defined(PROBE_BLEND_ENABLE_LOCAL_RADIANCE) && defined(USE_ANISOTROPY)
 
     vec3 getIBLAnisotropyRadiance( const in vec3 viewDir, const in vec3 normal, const in float roughness, const in vec3 bitangent, const in float anisotropy ) {
 
@@ -2642,8 +2640,6 @@ vec3 getIBLRadiance( const in vec3 viewDir, const in vec3 normal, const in float
     }
 
   #endif
-
-#endif
 `
 
 const LEVELSJAM_LIGHTS_FRAGMENT_MAPS = `
@@ -2668,7 +2664,7 @@ const LEVELSJAM_LIGHTS_FRAGMENT_MAPS = `
 
 \t#endif
 
-\t#if defined( USE_ENVMAP ) && defined( STANDARD ) && defined( ENVMAP_TYPE_CUBE_UV )
+\t#if defined( STANDARD )
 
 \t\tiblIrradiance += getIBLIrradiance( geometryNormal );
 
@@ -3178,8 +3174,13 @@ function patchProbeBlendMaterialShader(
   const usesLocalRadiance =
     activeRadianceMode === 'world' ||
     activeRadianceMode === 'constant'
+  const usesVlmTextures = currentProbeBlend.vlmMode !== undefined &&
+    currentProbeBlend.vlmMode !== 'disabled'
   const shaderFeatureDefines = usesLocalRadiance
-    ? '#define PROBE_BLEND_ENABLE_LOCAL_RADIANCE 1'
+    ? '#define PROBE_BLEND_ENABLE_LOCAL_RADIANCE 1\n'
+    : ''
+  const vlmFeatureDefines = usesVlmTextures
+    ? '#define PROBE_BLEND_ENABLE_VLM_TEXTURES 1\n'
     : ''
   const lightMapFeatureDefines =
     currentPatchConfig.lightMapEncoding === 'rgbe8'
@@ -3277,7 +3278,7 @@ function patchProbeBlendMaterialShader(
 \t#include <project_vertex>`
       )
   probeBlendShader.fragmentShader =
-    `${shaderFeatureDefines}\n${lightMapFeatureDefines}uniform vec3 lightMapAmbientTint;\nuniform vec3 lightMapTorchTint;\nuniform float probeBlendDiffuseIntensity;\nuniform float probeBlendRadianceIntensity;\nvarying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
+    `${shaderFeatureDefines}${vlmFeatureDefines}${lightMapFeatureDefines}uniform vec3 lightMapAmbientTint;\nuniform vec3 lightMapTorchTint;\nuniform float probeBlendDiffuseIntensity;\nuniform float probeBlendRadianceIntensity;\nvarying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
       .replace(
         '#include <envmap_physical_pars_fragment>',
         PROBE_BLEND_SHADER_CHUNK
@@ -4685,6 +4686,21 @@ function useFireFlipbookTexture() {
   return texture
 }
 
+function usesProbeBlendLocalRadiance(probeBlend: ProbeBlendConfig) {
+  const radianceMode = probeBlend.radianceMode ?? probeBlend.mode
+
+  return (
+    (radianceMode === 'world' || radianceMode === 'constant') &&
+    (probeBlend.radianceIntensity ?? 1) > EFFECT_EPSILON
+  )
+}
+
+function getProbeBlendEnvMap(probeBlend: ProbeBlendConfig) {
+  return usesProbeBlendLocalRadiance(probeBlend)
+    ? getDummyProbeEnvMapTexture()
+    : null
+}
+
 type RuntimePropModelKind = 'gate' | 'monster' | 'sword' | 'trophy'
 
 function createLitCloneMaterial(
@@ -4862,7 +4878,7 @@ function useAttachProbeBlendToModel(
           return
         }
 
-        material.envMap = getDummyProbeEnvMapTexture()
+        material.envMap = getProbeBlendEnvMap(probeBlend)
         material.envMapIntensity = 0
         const attachment = material.userData.probeBlendAttachment as
           | {
@@ -6547,7 +6563,8 @@ function EnvironmentLighting({
         if (
           object.userData?.debugRole === 'torch-lens-flare' ||
           object.userData?.debugRole === 'global-fog-volume' ||
-          object.userData?.debugRole === 'reflection-probe-visual'
+          object.userData?.debugRole === 'reflection-probe-visual' ||
+          isOfflineBakeExcludedObject(object)
         ) {
           hiddenObjects.push({ object, visible: object.visible })
           object.visible = false
@@ -6842,7 +6859,7 @@ function GroundSurfaceMaterial({
       {...maps}
       bumpScale={0.08}
       customProgramCacheKey={probeBlendMaterialProps.customProgramCacheKey}
-      envMap={getDummyProbeEnvMapTexture()}
+      envMap={getProbeBlendEnvMap(normalizedProbeBlend)}
       envMapIntensity={0}
       key={materialKey}
       lightMap={lightMap}
@@ -7013,10 +7030,14 @@ function Ground({
                 probeCoefficients,
                 'disabled',
                 {
-                  diffuseIntensity: iblContributionIntensity,
-                  probeCoefficientTextures,
-                  radianceIntensity: reflectionContributionIntensity,
-                  radianceMode: reflectionActive ? 'world' : 'disabled',
+          diffuseIntensity: iblContributionIntensity,
+          probeCoefficientTextures,
+          radianceIntensity: reflectionContributionIntensity,
+          radianceMode: probeIblActive
+            ? 'disabled'
+            : reflectionActive
+              ? 'world'
+              : 'disabled',
                   region: rect.region,
                   vlmMode: probeIblActive ? 'cell5' : 'disabled'
                 }
@@ -7238,7 +7259,11 @@ function WallSconce({
           diffuseIntensity: diffuseProbeIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: reflectionActive ? 'constant' : 'disabled',
+          radianceMode: diffuseProbeActive
+            ? 'disabled'
+            : reflectionActive
+              ? 'constant'
+              : 'disabled',
           vlmBoundaryNormal:
             mazeLight.side === 'east'
               ? { x: 1, z: 0 }
@@ -7292,7 +7317,7 @@ function WallSconce({
             bumpScale={0.02}
             color="white"
             customProgramCacheKey={probeBlendMaterialProps.customProgramCacheKey}
-            envMap={getDummyProbeEnvMapTexture()}
+            envMap={getProbeBlendEnvMap(probeBlend)}
             envMapIntensity={0}
             key={materialKey}
             map={metal.map}
@@ -8800,7 +8825,7 @@ function WallFaceMaterial({
       attach={attach}
       bumpScale={0.05}
       customProgramCacheKey={probeBlendMaterialProps.customProgramCacheKey}
-      envMap={getDummyProbeEnvMapTexture()}
+      envMap={getProbeBlendEnvMap(probeBlend)}
       envMapIntensity={0}
       key={materialKey}
       lightMap={lightMap}
@@ -8925,7 +8950,7 @@ function MazeWallMesh({
           diffuseIntensity: iblContributionIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: reflectionActive ? 'constant' : 'disabled',
+          radianceMode: 'disabled',
           vlmBoundaryNormal:
             mazeWall.axis === 'z'
               ? { x: 1, z: 0 }
@@ -9610,7 +9635,7 @@ function HeldItemView({
   const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
   const hasProbeDepthTextures = hasCompleteProbeDepthTextures(probeDepthTextures)
   const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
-  const diffuseIntensity = 1 + iblContributionIntensity
+  const diffuseIntensity = iblContributionIntensity
   const probeBlend = useMemo(
     () =>
       buildProbeBlendConfig(
@@ -9626,6 +9651,7 @@ function HeldItemView({
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
           radianceMode:
+            diffuseIntensity <= EFFECT_EPSILON &&
             reflectionContributionIntensity > EFFECT_EPSILON &&
             hasProbeDepthTextures &&
             hasProbeTextures
@@ -9904,8 +9930,7 @@ function MonsterModel({
   )
   const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
   const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
-  const diffuseProbeIntensity =
-    lightmapContributionIntensity + iblContributionIntensity
+  const diffuseProbeIntensity = iblContributionIntensity
   const diffuseProbeActive =
     diffuseProbeIntensity > EFFECT_EPSILON &&
     hasProbeCoefficients
@@ -9923,7 +9948,7 @@ function MonsterModel({
           diffuseIntensity: diffuseProbeIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: 'none',
+          radianceMode: diffuseProbeActive ? 'disabled' : 'none',
           vlmMode: diffuseProbeActive ? 'cell5' : 'disabled'
         }
       ),
@@ -10394,6 +10419,19 @@ function isSsrReflectiveMesh(object: Mesh) {
   })
 }
 
+function isOfflineBakeExcludedObject(object: Object3D) {
+  const role = object.userData?.debugRole
+
+  return (
+    role === 'maze-gate' ||
+    role === 'maze-sword' ||
+    role === 'maze-trophy' ||
+    role === 'held-sword' ||
+    role === 'held-trophy' ||
+    role === 'monster'
+  )
+}
+
 function SSRPassPrimitive({
   settings
 }: {
@@ -10648,7 +10686,7 @@ function TorchLensFlare({
           anamorphic: settings.anamorphic,
           blendFunction: BlendFunction.NORMAL,
           colorGain: FIRE_COLOR.clone().multiplyScalar(
-            Math.sqrt(AUTHORED_LIGHTING_SOURCE_SCALE)
+            LENS_FLARE_COLOR_GAIN
           ),
           enabled: settings.enabled,
           flareShape: settings.flareShape,
@@ -10716,7 +10754,7 @@ function TorchLensFlare({
       if (starPointsUniform) starPointsUniform.value = settings.starPoints
       if (colorGainUniform) {
         colorGainUniform.value.copy(
-          FIRE_COLOR.clone().multiplyScalar(Math.sqrt(AUTHORED_LIGHTING_SOURCE_SCALE))
+          FIRE_COLOR.clone().multiplyScalar(LENS_FLARE_COLOR_GAIN)
         )
       }
     }
@@ -10824,6 +10862,17 @@ function TorchLensFlare({
           delta
         )
       }
+    }
+
+    scene.userData.lensFlareState = {
+      enabled: settings.enabled,
+      intensity: settings.intensity,
+      totalLensCount: lensPositions.length,
+      visibleLensCount: visibleLensPositions.length,
+      visibleLenses: visibleLensPositions.map((lens) => ({
+        position: [lens.position.x, lens.position.y, lens.position.z],
+        score: lens.score
+      }))
     }
 
     setVisibleSlotCount((currentCount) =>
@@ -11734,6 +11783,9 @@ function FlightRig({
       getReflectionProbeState: () => {
         return scene.userData.reflectionProbeState ?? null
       },
+      getLensFlareState: () => {
+        return scene.userData.lensFlareState ?? null
+      },
       setView: (cameraPosition, target) => {
         freeCamera.current = true
         playerPosition.current.set(
@@ -11759,6 +11811,7 @@ function FlightRig({
 
       delete globalWindow.__levelsjamDebug.getDebugPosition
       delete globalWindow.__levelsjamDebug.getDebugMeshState
+      delete globalWindow.__levelsjamDebug.getLensFlareState
       delete globalWindow.__levelsjamDebug.getMonsterRenderState
       delete globalWindow.__levelsjamDebug.getTurnStateSummary
       delete globalWindow.__levelsjamDebug.getDebugProgramUniformState
@@ -12484,7 +12537,8 @@ function Scene({
           object.userData?.debugRole === 'torch-lens-flare' ||
           object.userData?.debugRole === 'global-fog-volume' ||
           object.userData?.debugRole === 'reflection-probe-visual' ||
-          object.userData?.debugRole === 'torch-billboard'
+          object.userData?.debugRole === 'torch-billboard' ||
+          isOfflineBakeExcludedObject(object)
         ) {
           hiddenObjects.push({ object, visible: object.visible })
           object.visible = false
@@ -12566,8 +12620,12 @@ function Scene({
     const captureReflectionProbeAtlas = (probeIndex: number, size = 128) => {
       const probeTexture = reflectionProbeRawTextures[probeIndex]
 
-      if (!probeTexture || size <= 0) {
+      if (size <= 0) {
         return null
+      }
+
+      if (!probeTexture) {
+        return bakeReflectionProbeAssets(probeIndex, size)?.rawAtlas ?? null
       }
 
       return captureCubeTextureAtlasDataUrls(gl, probeTexture, size)
@@ -12576,8 +12634,12 @@ function Scene({
     const captureReflectionProbeProcessedAtlas = (probeIndex: number, size = 128) => {
       const probeTexture = reflectionProbeTextures[probeIndex]
 
-      if (!probeTexture || size <= 0) {
+      if (size <= 0) {
         return null
+      }
+
+      if (!probeTexture) {
+        return bakeReflectionProbeAssets(probeIndex, size)?.processedAtlas ?? null
       }
 
       return captureCubeUvTextureAtlasDataUrls(gl, probeTexture, size)
@@ -12613,7 +12675,8 @@ function Scene({
           object.userData?.debugRole === 'torch-lens-flare' ||
           object.userData?.debugRole === 'global-fog-volume' ||
           object.userData?.debugRole === 'reflection-probe-visual' ||
-          object.userData?.debugRole === 'torch-billboard'
+          object.userData?.debugRole === 'torch-billboard' ||
+          isOfflineBakeExcludedObject(object)
         ) {
           hiddenObjects.push({ object, visible: object.visible })
           object.visible = false
@@ -13920,7 +13983,7 @@ function VisualControls({
         <input
           aria-label="Lens Flares Intensity"
           disabled={!visualSettings.lensFlare.enabled}
-          max={0.1}
+          max={1}
           min={0}
           onChange={(event) => {
             onLensFlareSettingChange({

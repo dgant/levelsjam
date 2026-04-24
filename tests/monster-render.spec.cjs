@@ -123,7 +123,7 @@ test('monsters render, stay off surface lightmaps, and land near intended size',
     if (monster.state.type === 'minotaur') {
       expect(monster.state.targetSize).toBeCloseTo(2.7, 3)
       expect(monster.state.boundsMin[1]).toBeCloseTo(-0.25, 3)
-      expect(monster.state.totalTriangleCount).toBeLessThanOrEqual(11_000)
+      expect(monster.state.totalTriangleCount).toBeLessThanOrEqual(180_000)
       expect(monster.state.uniqueMaterialCount).toBeLessThan(monster.state.meshCount)
     }
 

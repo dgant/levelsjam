@@ -511,13 +511,13 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
             mode: 'disabled',
             probeDepthAtlasCount: 6,
             radianceIntensity: 1,
-            radianceMode: 'world'
+            radianceMode: 'disabled'
           },
           probeBlendUniforms: {
             probeBlendDiffuseIntensity: 1,
             probeBlendMode: 3,
             probeBlendRadianceIntensity: 1,
-            probeBlendRadianceMode: 1
+            probeBlendRadianceMode: 3
           }
         },
         wall: {

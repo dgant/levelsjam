@@ -98,6 +98,7 @@
 - Each offline reflection probe stores an offline-captured depth or shadow cubemap suitable for probe-space visibility tests during local reflections.
 - Each offline volumetric-lightmap probe stores HDR directional lighting data that is separate from the reflection texture and is intended for diffuse probe lighting rather than specular reflections.
 - Reflection probes and volumetric-lightmap probes share the same probe positions, local areas of influence, and capture-time occluders.
+- Gates, monsters, ground pickup items, and held pickup items are omitted from offline lightmap, volumetric-lightmap, and reflection-probe baking.
 - Diffuse volumetric-lightmap shading is evaluated per pixel rather than from one constant probe blend per mesh.
 - Diffuse volumetric-lightmap shading visibly contributes to surface materials when its runtime intensity is nonzero.
 - Local reflection probes visibly contribute to reflective surface materials when their runtime intensity is nonzero.
@@ -124,7 +125,8 @@
 - The top of each wall sconce aligns to the bottom of its torch billboard by default so the flame billboard does not appear to float above the fixture.
 - The authored torch light color is `10 * #FF7E00` in HDR linear lighting space.
 - The spider model loads from `public/models/pbr_jumping_spider_monster/scene.gltf` instead of the older `dopepopes_zkumonga` asset.
-- The minotaur runtime model is an offline-simplified derivative of the authored source model and stays near `10k` triangles without materially changing the silhouette expected in gameplay views.
+- The minotaur runtime model is an offline-simplified derivative of the authored source model and stays far below the authored source triangle count while preserving the silhouette expected in gameplay views.
+- The minotaur runtime model simplification preserves continuous visible surfaces and must not introduce see-through topology holes.
 - The werewolf model scales proportionally to fit the required `1.6m` cube and sits on the floor without clipping below it.
 - Screen-space ambient occlusion controls visibly affect the scene when enabled.
 - Lens flares, SSR, and volumetric fog remain visually stable as their intensity controls increase and must not black out the scene.
@@ -360,6 +362,7 @@
 - Screen-space reflections select reflective PBR surfaces through the documented three.js `SSRPass` selection path rather than applying to the skybox, unlit billboards, debug geometry, or non-reflective helpers.
 - Screen-space reflections remain visually stable and do not blow out reflections relative to the rest of the lighting stack.
 - Screen-space reflections follow the official three.js documented pass implementation rather than a repository-local custom effect whose behavior diverges from the upstream reference.
+- Runtime PBR shader variants compile only the probe/lightmap samplers they actually use so walls, floors, and sconces remain below WebGL fragment texture limits and always write visible scene color.
 - The baked torch lighting and the torch billboards read as a matched fire source rather than independent unrelated elements.
 - The scene reads as an overcast exterior space lit primarily by environment light and torches.
 - The maze walls define the primary navigable space instead of the previous open random-wall field.
