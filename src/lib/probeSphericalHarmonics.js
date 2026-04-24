@@ -57,6 +57,24 @@ export function decodeRgbE8(r, g, b, a) {
   ]
 }
 
+export function encodeRgbE8(color) {
+  const maxComponent = Math.max(color[0] ?? 0, color[1] ?? 0, color[2] ?? 0)
+
+  if (!(maxComponent > 1e-32)) {
+    return [0, 0, 0, 0]
+  }
+
+  const exponent = Math.ceil(Math.log2(maxComponent))
+  const scale = 2 ** exponent
+
+  return [
+    Math.max(0, Math.min(255, Math.round(((color[0] ?? 0) / scale) * 255))),
+    Math.max(0, Math.min(255, Math.round(((color[1] ?? 0) / scale) * 255))),
+    Math.max(0, Math.min(255, Math.round(((color[2] ?? 0) / scale) * 255))),
+    Math.max(1, Math.min(255, exponent + 128))
+  ]
+}
+
 export function computeVolumetricLightmapCoefficientsFromPixels(
   faces,
   decodePixel

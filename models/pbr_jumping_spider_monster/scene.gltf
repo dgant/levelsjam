@@ -1,0 +1,289 @@
+{
+  "accessors": [
+    {
+      "bufferView": 2,
+      "componentType": 5126,
+      "count": 5141,
+      "max": [
+        136.91551208496094,
+        65.98176574707031,
+        127.73823547363281
+      ],
+      "min": [
+        -136.91551208496094,
+        -98.9166488647461,
+        -105.96480560302734
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 61692,
+      "componentType": 5126,
+      "count": 5141,
+      "max": [
+        0.9994516372680664,
+        0.9999011158943176,
+        0.999875009059906
+      ],
+      "min": [
+        -0.9994516372680664,
+        -0.9999138116836548,
+        -0.9993984699249268
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 3,
+      "componentType": 5126,
+      "count": 5141,
+      "max": [
+        0.9995038509368896,
+        0.9989816546440125,
+        0.9999871850013733,
+        1.0
+      ],
+      "min": [
+        -0.9995038509368896,
+        -0.9995894432067871,
+        -0.9999930262565613,
+        -1.0
+      ],
+      "type": "VEC4"
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5126,
+      "count": 5141,
+      "max": [
+        0.9983900189399719,
+        0.9936642646789551
+      ],
+      "min": [
+        0.01660919189453125,
+        0.00678427517414093
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 0,
+      "componentType": 5125,
+      "count": 22434,
+      "type": "SCALAR"
+    }
+  ],
+  "asset": {
+    "extras": {
+      "author": "Toast (https://sketchfab.com/eternity8361)",
+      "license": "CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)",
+      "source": "https://sketchfab.com/3d-models/pbr-jumping-spider-monster-92e54bef46114d4bb7f09dc078612075",
+      "title": "PBR Jumping Spider Monster"
+    },
+    "generator": "Sketchfab-13.74.0",
+    "version": "2.0"
+  },
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteLength": 89736,
+      "name": "floatBufferViews",
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteLength": 41128,
+      "byteOffset": 89736,
+      "byteStride": 8,
+      "name": "floatBufferViews",
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 123384,
+      "byteOffset": 130864,
+      "byteStride": 12,
+      "name": "floatBufferViews",
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 82256,
+      "byteOffset": 254248,
+      "byteStride": 16,
+      "name": "floatBufferViews",
+      "target": 34962
+    }
+  ],
+  "buffers": [
+    {
+      "byteLength": 336504,
+      "uri": "scene.bin"
+    }
+  ],
+  "images": [
+    {
+      "uri": "textures/PBR_Jumping_Spider_Monster_baseColor.png"
+    },
+    {
+      "uri": "textures/PBR_Jumping_Spider_Monster_metallicRoughness.png"
+    },
+    {
+      "uri": "textures/PBR_Jumping_Spider_Monster_normal.png"
+    }
+  ],
+  "materials": [
+    {
+      "doubleSided": true,
+      "name": "PBR_Jumping_Spider_Monster",
+      "normalTexture": {
+        "index": 2
+      },
+      "occlusionTexture": {
+        "index": 1
+      },
+      "pbrMetallicRoughness": {
+        "baseColorTexture": {
+          "index": 0
+        },
+        "metallicFactor": 0.0,
+        "metallicRoughnessTexture": {
+          "index": 1
+        },
+        "roughnessFactor": 0.58
+      }
+    }
+  ],
+  "meshes": [
+    {
+      "name": "PBR_Jumping Spider_Monster_PBR_Jumping Spider_Monster_0",
+      "primitives": [
+        {
+          "attributes": {
+            "NORMAL": 1,
+            "POSITION": 0,
+            "TANGENT": 2,
+            "TEXCOORD_0": 3
+          },
+          "indices": 4,
+          "material": 0,
+          "mode": 4
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "children": [
+        1
+      ],
+      "matrix": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        2.220446049250313e-16,
+        -1.0,
+        0.0,
+        0.0,
+        1.0,
+        2.220446049250313e-16,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "name": "Sketchfab_model"
+    },
+    {
+      "children": [
+        2
+      ],
+      "matrix": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "name": "2bfc00733100499b914c87bb8f97f8e8.fbx"
+    },
+    {
+      "children": [
+        3
+      ],
+      "name": "RootNode"
+    },
+    {
+      "children": [
+        4
+      ],
+      "matrix": [
+        0.5927945971488953,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.47973933183220313,
+        -0.1372344036580541,
+        0.0,
+        0.0,
+        0.1630355429915641,
+        0.569934071740203,
+        0.0,
+        0.0,
+        22.73358917236328,
+        -8.538078308105469,
+        1.0
+      ],
+      "name": "PBR_Jumping Spider_Monster"
+    },
+    {
+      "mesh": 0,
+      "name": "PBR_Jumping Spider_Monster_PBR_Jumping Spider_Monster_0"
+    }
+  ],
+  "samplers": [
+    {
+      "magFilter": 9729,
+      "minFilter": 9987,
+      "wrapS": 10497,
+      "wrapT": 10497
+    }
+  ],
+  "scene": 0,
+  "scenes": [
+    {
+      "name": "Sketchfab_Scene",
+      "nodes": [
+        0
+      ]
+    }
+  ],
+  "textures": [
+    {
+      "sampler": 0,
+      "source": 0
+    },
+    {
+      "sampler": 0,
+      "source": 1
+    },
+    {
+      "sampler": 0,
+      "source": 2
+    }
+  ]
+}

@@ -326,6 +326,7 @@ export function applyTurnAction(maze, state, action) {
       action === 'rotate-left' ? 'left' : 'right'
     )
     return {
+      blocked: false,
       killed: false,
       previous: state,
       state: next
@@ -336,13 +337,23 @@ export function applyTurnAction(maze, state, action) {
     ? OPPOSITE_DIRECTIONS[next.player.direction]
     : next.player.direction
 
-  if (moveDirection && canMove(maze, openEdges, next.player.cell, moveDirection)) {
+  if (!moveDirection || !canMove(maze, openEdges, next.player.cell, moveDirection)) {
+    return {
+      blocked: true,
+      killed: false,
+      previous: state,
+      state: next
+    }
+  }
+
+  if (moveDirection) {
     const nextPlayerCell = getNeighbor(next.player.cell, moveDirection)
 
     if (getMonsterAt(next.monsters, nextPlayerCell)) {
       next.player.cell = nextPlayerCell
       next.dead = true
       return {
+        blocked: false,
         killed: true,
         previous: state,
         state: next
@@ -364,6 +375,7 @@ export function applyTurnAction(maze, state, action) {
   next.turn += 1
 
   return {
+    blocked: false,
     killed,
     previous: state,
     state: next

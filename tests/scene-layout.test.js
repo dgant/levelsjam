@@ -22,6 +22,7 @@ import {
   WALL_WIDTH
 } from '../src/lib/sceneConstants.js'
 import { getDebugMazeLayoutById } from '../src/lib/debugMazeLayouts.js'
+import { decodeRgbE8 } from '../src/lib/probeSphericalHarmonics.js'
 
 const mazeDirectory = path.join(process.cwd(), 'src', 'data', 'mazes')
 
@@ -52,12 +53,18 @@ function averageTorchLightmapChannel(bytes, atlasWidth, rect) {
 
   for (let row = 0; row < rect.height; row += 1) {
     for (let column = 0; column < rect.width; column += 1) {
-      const atlasIndex = ((((rect.y + row) * atlasWidth) + rect.x + column) * 3)
-      sum += bytes[atlasIndex]
+      const atlasIndex = ((((rect.y + row) * atlasWidth) + rect.x + column) * 4)
+      const decoded = decodeRgbE8(
+        bytes[atlasIndex],
+        bytes[atlasIndex + 1],
+        bytes[atlasIndex + 2],
+        bytes[atlasIndex + 3]
+      )
+      sum += (decoded[0] + decoded[1] + decoded[2]) / 3
     }
   }
 
-  return sum / (rect.width * rect.height * 255)
+  return sum / (rect.width * rect.height)
 }
 
 function getWallBounds(layout) {
@@ -223,12 +230,12 @@ test('keeps the sealed 3x3 center-facing wall lightmap faces dark', () => {
     )
 
     assert.ok(
-      litAverage > 0.04,
+      litAverage > 1,
       `expected ${wall.id} ${expectation.litFace} to contain baked torch light, got ${litAverage}`
     )
     assert.ok(
-      darkAverage < 0.005,
-      `expected ${wall.id} ${expectation.darkFace} to stay dark toward the sealed center cell, got ${darkAverage}`
+      darkAverage < (litAverage * 0.35),
+      `expected ${wall.id} ${expectation.darkFace} to stay much darker toward the sealed center cell, got lit=${litAverage} dark=${darkAverage}`
     )
   }
 })

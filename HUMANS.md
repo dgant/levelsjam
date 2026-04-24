@@ -9,6 +9,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Install Node.js 20 or newer.
 - Install dependencies with `npm install`.
 - Start the dev server with `npm run dev`.
+- The default interactive dev URL is `http://localhost:5173/`.
 - Start one reusable headless Vite instance with `npm run dev:bg`.
 - Check that background instance with `npm run dev:bg:status`.
 - Stop that background instance with `npm run dev:bg:stop`.
@@ -19,6 +20,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Create a production build with `npm run build`.
 - Verify the root-published production build with `npm run preview`.
 - Refresh the legacy GitHub Pages publishable files with `npm run build:pages`.
+- Rebuild the processed minotaur runtime asset with `npm run build:assets:minotaur` if the source minotaur model changes.
 - Treat `public/textures/` as the canonical texture source tree. `npm run build:pages` now copies built JS and CSS from `dist/assets` but syncs root `textures/` directly from `public/textures` so runtime assets do not round-trip through the Vite output folder.
 - Expect `npm run build:pages` to publish the lazy maze chunks as additional root `assets/maze-*.js` files alongside `assets/app.js`.
 
@@ -28,16 +30,23 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - `npm run test:unit` writes per-file and per-subtest timing data to `logs/latest-unit-test-profile.json` and enforces the 20-second reported unit-suite budget.
 - Run `npm run test:smoke` to exercise the built page through Playwright.
 - Run `npm run test:smoke:runner` when `npm run build:pages` has already prepared the root-published bundle.
+- Treat the Playwright `*:runner` commands as tests of the already-published root bundle. Run `npm run build:pages` first whenever source changes need to be reflected in those static-root runners.
 - Run `npm run test:render:integration` when you need the slower full-scene Playwright coverage for reflection, fog, and extended debug-control behavior.
 - `npm run test:render:integration` writes phase and screenshot timing data to `logs/latest-render-integration-profile.json`.
 - Run `npm run test:probe-occlusion` to dump the synthetic `3x3` probe-capture artifacts under `logs/probe-occlusion-artifacts/` and verify that the sealed center probe does not see any torch signature beyond the no-lights skybox baseline.
 - Run `npm run ensure:mazes` to refresh persisted mazes, baked lightmap artifacts, and per-maze reflection-probe dumps under `logs/lightmap-artifacts/<maze-id>/reflection-probes/`.
 - Treat `logs/lightmap-artifacts/<maze-id>/` as the canonical human-inspection output for the current persisted maze lighting data. After any persisted-maze rebake, expect the lightmap PNGs and reflection-probe PNGs there to be current rather than stale.
+- `node scripts/sync-maze-runtime-data.cjs`, `npm run build`, and `npm run dev` now refresh the baked surface-lightmap artifacts for every maze under `logs/lightmap-artifacts/<maze-id>/` as part of the normal runtime-data sync.
+- For `rgb16f` baked lightmaps, expect each `public/maze-data/<maze-id>/` directory to contain `surface-lightmap.bin` for runtime loading, `surface-lightmap.png` for human-readable inspection, and `surface-lightmap-rgbe.png` for inspecting the encoded HDR payload.
+- Expect every persisted maze to emit the same baked-lighting artifact set. Differences in emitted filenames between mazes indicate stale or inconsistent bake output and should be treated as a bug.
+- Expect gameplay runtime lighting to use baked surface lightmaps, local volumetric-lightmap probes, and local reflection probes only. Global environment lighting is for offline bake inputs, not an in-game fallback.
+- For baked surface lightmaps, treat `lightmap-atlas.png` as the human-readable preview and `lightmap-rgbe.png` as the raw HDR export encoded into a PNG container. Do not assume those two files should look the same.
 - Treat a scene that shows only the HDRI skybox and flame billboards as a render failure; the smoke test now checks that a real maze wall writes visible beauty-pass color.
 - `npm run test:perf` is temporarily disabled while the static baked-lightmap torch-lighting evaluation is under way.
 - Run the maze-generation validation script or its test entrypoint whenever maze files or maze rules change so persisted mazes keep their baked lightmaps in sync.
 - Verify the main page renders the 3D scene without console errors.
 - Verify the loading overlay appears with `MINOTAUR` and `Entering the labyrinth...` before the scene fades in.
+- Verify the loading overlay does not fade out before the basic required scene textures are available in the mounted scene.
 - If you change the loading overlay markup or styling, update both the inline bootstrap shell in [index.html](/E:/p/levelsjam/index.html) and the React overlay in [App.tsx](/E:/p/levelsjam/src/App.tsx) so the immediate first paint and the live app stay visually aligned.
 - Verify `W` and `D` move the player one grid cell forward or backward relative to the current camera direction.
 - Verify `A`, `S`, left-arrow, and right-arrow rotate the player camera by 90 degrees without consuming a turn.
@@ -91,6 +100,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify the visual controls panel also exposes `Probe Debug`.
 - Verify the visual controls panel also exposes `Bloom Kernel`, `AO Radius`, `DOF Focus Distance`, `DOF Focal Length`, `Depth Of Field Bokeh Scale`, and the volumetric fog controls.
 - Verify the `DOF Focus Distance` slider reaches 8 meters.
+- Verify double-clicking a debug label resets only the associated control.
 - Verify the `Surface Lightmap`, `Volumetric Lightmap`, and `Reflection Intensity` controls each produce a visible material change when enabled.
 - Verify Bloom, Depth Of Field, Lens Flares, and SSR start disabled.
 - Verify the default `Exposure` value is `0`.
@@ -118,6 +128,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify enabling `SSAO` still allows a programmatic camera move to produce a visibly updated frame.
 - Verify the volumetric-lighting controls produce visible changes in the full-scene fog volume rather than in per-torch cone meshes.
 - Verify the fog volume occupies the maze footprint from ground level up to roughly 6 meters.
+- Verify volumetric fog lighting does not visibly fall back to environment lighting when local probe data is absent or still loading.
 - Verify enabling volumetric fog with an intensity of `0` produces no visible scene change.
 - Verify enabling Depth Of Field with a nonzero bokeh scale still allows a programmatic camera move to produce a visibly updated frame.
 - Verify enabling Depth Of Field with `0` bokeh scale produces no visible scene change.
@@ -129,6 +140,8 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify the loading subtitle width stays visually stable while the animated dots change.
 - Verify the loaded scene uses one of the persisted maze files instead of the previous random wall field.
 - Verify the repository contains at least five valid maze files, that each maze file includes baked lightmap data, and that maze topology generation remains under 100ms before the later bake step.
+- Verify the validation path records a successful replayable solution for each persisted maze and rejects mazes that cannot be beaten.
+- Verify maze load, instantiate, uninstantiate, unload, reload, and reinstantiate work repeatedly without leaving stale GPU assets or scene objects behind.
 - Benchmark startup with `npm run bench:startup` and test duration with `npm run bench:tests` before handoff.
 - Inspect `logs/latest-test-benchmark.json`, `logs/latest-unit-test-profile.json`, `logs/latest-smoke-profile.json`, and `logs/latest-render-integration-profile.json` after `npm run bench:tests` so the slowest scripts and browser-test phases are identified from measurements rather than guessed.
 - Treat duration regressions as blocking issues.

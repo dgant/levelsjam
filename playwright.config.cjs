@@ -7,6 +7,16 @@ module.exports = defineConfig({
   use: {
     baseURL: 'http://127.0.0.1:42731',
     headless: true,
+    launchOptions: {
+      args: [
+        '--use-angle=d3d11',
+        '--use-gl=angle',
+        '--enable-gpu',
+        '--enable-gpu-rasterization',
+        '--ignore-gpu-blocklist',
+        '--disable-software-rasterizer'
+      ]
+    },
     viewport: { width: 800, height: 450 }
   },
   webServer: {

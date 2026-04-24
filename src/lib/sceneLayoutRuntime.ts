@@ -112,7 +112,17 @@ async function loadPersistedMaze(id: string) {
     )
   }
 
-  return await response.json() as PersistedMaze
+  const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
+
+  if (contentType.includes('text/html')) {
+    return null
+  }
+
+  try {
+    return await response.json() as PersistedMaze
+  } catch {
+    return null
+  }
 }
 
 export function getDebugMazeLayoutById(id: string): MazeLayout | null {

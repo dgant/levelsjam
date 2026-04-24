@@ -86,3 +86,15 @@ test('walls block line of sight for monster wakeups', () => {
     false
   )
 })
+
+test('blocked movement reports a bump without consuming a turn', () => {
+  const maze = testMaze()
+  const state = createInitialTurnState(maze)
+  const result = applyTurnAction(maze, state, 'move-backward')
+
+  assert.equal(result.blocked, true)
+  assert.equal(result.killed, false)
+  assert.deepEqual(result.state.player.cell, state.player.cell)
+  assert.equal(result.state.turn, state.turn)
+  assert.deepEqual(result.state.monsters, state.monsters)
+})

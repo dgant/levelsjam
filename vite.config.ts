@@ -29,8 +29,14 @@ function readGitMetadata() {
 const gitMetadata = readGitMetadata()
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react({ fastRefresh: false })],
   base: './',
+  server: {
+    host: '127.0.0.1'
+  },
+  preview: {
+    host: '127.0.0.1'
+  },
   define: {
     __GIT_REVISION__: JSON.stringify(gitMetadata.revision),
     __GIT_REVISION_TIMESTAMP__: JSON.stringify(gitMetadata.revisionTimestamp)

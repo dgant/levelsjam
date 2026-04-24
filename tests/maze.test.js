@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { pathToFileURL } from 'node:url'
-import { BoxGeometry } from 'three'
+import { BoxGeometry, DataUtils } from 'three'
 
 import {
   MAZE_HEIGHT,
@@ -21,6 +21,7 @@ import {
   dumpMazeLightmapArtifacts,
   ensureMazeFiles
 } from '../src/lib/mazePersistence.js'
+import { decodeRgbE8 } from '../src/lib/probeSphericalHarmonics.js'
 import { SCONCE_RADIUS } from '../src/lib/sceneConstants.js'
 
 const DEFAULT_MAZE_DIRECTORY = path.join(process.cwd(), 'src', 'data', 'mazes')
@@ -34,6 +35,32 @@ async function importPersistedMaze(
   )
 
   return module.default
+}
+
+function decodeLightmapPixel(bytes, lightmap, x, y) {
+  const pixelIndex = ((y * lightmap.atlasWidth) + x)
+
+  if (lightmap.encoding === 'rgb16f') {
+    const atlasOffset = pixelIndex * 6
+    return [
+      DataUtils.fromHalfFloat(bytes.readUInt16LE(atlasOffset)),
+      DataUtils.fromHalfFloat(bytes.readUInt16LE(atlasOffset + 2)),
+      DataUtils.fromHalfFloat(bytes.readUInt16LE(atlasOffset + 4))
+    ]
+  }
+
+  const atlasOffset = pixelIndex * 4
+  return decodeRgbE8(
+    bytes[atlasOffset],
+    bytes[atlasOffset + 1],
+    bytes[atlasOffset + 2],
+    bytes[atlasOffset + 3]
+  )
+}
+
+function sampleLightmapLuminance(bytes, lightmap, rect, column, row) {
+  const pixel = decodeLightmapPixel(bytes, lightmap, rect.x + column, rect.y + row)
+  return (pixel[0] + pixel[1] + pixel[2]) / 3
 }
 
 test('generates valid mazes under 100ms', () => {
@@ -70,8 +97,8 @@ test('dumps persisted maze lightmap artifacts into the gitignored logs directory
 
   assert.equal(artifactDirectory, path.join(DEFAULT_LIGHTMAP_ARTIFACT_DIRECTORY, maze.id))
   assert.equal(fs.existsSync(path.join(artifactDirectory, 'lightmap-atlas.png')), true)
+  assert.equal(fs.existsSync(path.join(artifactDirectory, 'lightmap-rgbe.png')), true)
   assert.equal(fs.existsSync(path.join(artifactDirectory, 'lightmap-torch.png')), true)
-  assert.equal(fs.existsSync(path.join(artifactDirectory, 'lightmap-ambient.png')), true)
   assert.equal(fs.existsSync(path.join(artifactDirectory, 'lightmap-metadata.json')), true)
 })
 
@@ -119,7 +146,7 @@ test('converts persisted mazes into wall segments and torch placements', async (
   assert.ok(layout.maze.lightmap)
   assert.equal(
     Buffer.from(layout.maze.lightmap.dataBase64, 'base64').length,
-    layout.maze.lightmap.atlasWidth * layout.maze.lightmap.atlasHeight * 3
+    layout.maze.lightmap.atlasWidth * layout.maze.lightmap.atlasHeight * 6
   )
   assert.equal(layout.maze.lightmap.groundRect.width, 256)
   assert.equal(layout.maze.lightmap.groundRect.height, 256)
@@ -162,10 +189,7 @@ test('keeps baked lighting continuous across an open coplanar wall run', () => {
   const rightRect = lightmap.wallRects['2,0:north:exterior'].pz
 
   const sample = (rect, column, row) => {
-    const atlasOffset =
-      ((((rect.y + row) * lightmap.atlasWidth) + rect.x + column) * 3)
-
-    return bytes[atlasOffset]
+    return sampleLightmapLuminance(bytes, lightmap, rect, column, row)
   }
 
   let seamDifferenceTotal = 0
@@ -200,10 +224,7 @@ test('bakes local sconce occlusion into the attached wall face', () => {
   const bytes = Buffer.from(lightmap.dataBase64, 'base64')
   const rect = lightmap.wallRects['0,0:north:exterior'].pz
   const sample = (column, row) => {
-    const atlasOffset =
-      ((((rect.y + row) * lightmap.atlasWidth) + rect.x + column) * 3)
-
-    return bytes[atlasOffset]
+    return sampleLightmapLuminance(bytes, lightmap, rect, column, row)
   }
   const shadowRow = 64
   const centerColumn = Math.floor(rect.width / 2)
@@ -234,7 +255,7 @@ test('keeps mid-wall torch lighting visible below the sconce top', () => {
     let sum = 0
 
     for (let column = 0; column < rect.width; column += 1) {
-      sum += bytes[((((rect.y + row) * lightmap.atlasWidth) + rect.x + column) * 3)]
+      sum += sampleLightmapLuminance(bytes, lightmap, rect, column, row)
     }
 
     return sum / rect.width
@@ -247,7 +268,7 @@ test('keeps mid-wall torch lighting visible below the sconce top', () => {
   )
 })
 
-test('stores baked wall ambient in the lightmap ambient channel', () => {
+test('stores baked wall skylight in the HDR lightmap', () => {
   const wallMaze = {
     height: 1,
     id: 'wall-ambient-test',
@@ -263,16 +284,13 @@ test('stores baked wall ambient in the lightmap ambient channel', () => {
 
   for (let row = 0; row < rect.height; row += 1) {
     for (let column = 0; column < rect.width; column += 1) {
-      const atlasOffset =
-        ((((rect.y + row) * lightmap.atlasWidth) + rect.x + column) * 3)
-
-      sum += bytes[atlasOffset + 1]
+      sum += sampleLightmapLuminance(bytes, lightmap, rect, column, row)
     }
   }
 
   assert.ok(
     sum > 0,
-    'expected the wall-face ambient lightmap channel to contain baked environment contribution'
+    'expected the wall-face HDR lightmap to contain baked skylight contribution'
   )
 })
 
@@ -332,7 +350,7 @@ test('assigns z-axis wall-run lightmap slices to the correct wall', () => {
 
     for (let row = 0; row < rect.height; row += 1) {
       for (let column = 0; column < rect.width; column += 1) {
-        sum += bytes[((((rect.y + row) * lightmap.atlasWidth) + rect.x + column) * 3)]
+        sum += sampleLightmapLuminance(bytes, lightmap, rect, column, row)
       }
     }
 

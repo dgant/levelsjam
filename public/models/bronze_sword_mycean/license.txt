@@ -1,0 +1,11 @@
+Model Information:
+* title:	Bronze Sword Mycean
+* source:	https://sketchfab.com/3d-models/bronze-sword-mycean-15f7ba2747244b26a3b5fec0fedafe6d
+* author:	Ryoce (https://sketchfab.com/Ryoce)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Bronze Sword Mycean" (https://sketchfab.com/3d-models/bronze-sword-mycean-15f7ba2747244b26a3b5fec0fedafe6d) by Ryoce (https://sketchfab.com/Ryoce) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

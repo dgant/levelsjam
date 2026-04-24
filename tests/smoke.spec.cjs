@@ -219,6 +219,16 @@ async function setCheckbox(page, label, enabled) {
   }, enabled)
 }
 
+async function measureRafLatency(page) {
+  return page.evaluate(() => new Promise((resolve) => {
+    const startedAt = performance.now()
+
+    requestAnimationFrame(() => {
+      resolve(performance.now() - startedAt)
+    })
+  }))
+}
+
 test('loads the maze scene and exposes working debug/render controls', async ({ page }) => {
   const consoleErrors = []
   const pageErrors = []
@@ -338,7 +348,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByRole('slider', { name: 'Volumetric Fog Intensity' })).toBeVisible()
     await expect(page.getByLabel('Fog Ambient Color Hex')).toHaveValue('#8f949e')
     await expect(page.getByLabel('Fog Ambient Color Picker')).toHaveValue('#8f949e')
-    await expect(page.getByRole('slider', { name: 'Fog Distance' })).toHaveValue('10')
+    await expect(page.getByRole('slider', { name: 'Fog Distance' })).toHaveValue('12')
     await page.keyboard.press('Digit1')
     await expect(page.getByRole('slider', { name: 'Exposure' })).toBeVisible()
 
@@ -464,7 +474,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       )
       .toMatchObject({
         probeBlendMode: {
-          glValue: 1
+          glValue: 3
         },
         probeBlendDiffuseIntensity: {
           glValue: 1
@@ -536,7 +546,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       )
       .toMatchObject({
         probeBlendMode: {
-          glValue: 1
+          glValue: 3
         },
         probeBlendRadianceMode: {
           glValue: 3
@@ -554,7 +564,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       )
       .toMatchObject({
         probeBlendMode: {
-          glValue: 2
+          glValue: 3
         },
         probeBlendRadianceMode: {
           glValue: 3
@@ -593,4 +603,116 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   timingProfile.loadingCompleteAtMs = loadingCompleteAtMs
   timingProfile.shellVisibleAtMs = shellVisibleAtMs
   timingProfile.totalRunMs = Date.now() - runStartedAt
+})
+
+test('maze-003 remains responsive through background probe loading', async ({ page }) => {
+  const consoleErrors = []
+  const pageErrors = []
+
+  page.on('console', (message) => {
+    if (message.type() === 'error') {
+      consoleErrors.push(message.text())
+    }
+  })
+
+  page.on('pageerror', (error) => {
+    pageErrors.push(String(error))
+  })
+
+  await page.goto('/?maze=maze-003', { waitUntil: 'domcontentloaded' })
+  await expect
+    .poll(async () => page.locator('#root .loading-overlay').getAttribute('data-loading-complete'), {
+      timeout: 180_000,
+      intervals: [250, 500, 1_000]
+    })
+    .toBe('true')
+  await expect
+    .poll(async () => page.evaluate(
+      () => window.__levelsjamDebug?.getReflectionProbeState?.()?.ready ?? false
+    ), {
+      timeout: 30_000,
+      intervals: [250, 500, 1_000]
+    })
+    .toBe(true)
+  await page.waitForTimeout(20_000)
+  await expect(page.locator('.fps-counter')).toContainText('maze-003')
+  await page.keyboard.press('Backquote')
+  await expect(page.locator('[data-testid="visual-controls"]')).toBeVisible({
+    timeout: 5_000
+  })
+
+  const rafLatencyMs = await measureRafLatency(page)
+
+  expect(consoleErrors).toEqual([])
+  expect(pageErrors).toEqual([])
+  expect(rafLatencyMs).toBeLessThan(500)
+})
+
+test('runtime probe assets stay loaded when volumetric fog is toggled', async ({ page }) => {
+  await page.goto('/?maze=maze-001', { waitUntil: 'domcontentloaded' })
+  await expect
+    .poll(async () => page.locator('#root .loading-overlay').getAttribute('data-loading-complete'), {
+      timeout: 180_000,
+      intervals: [250, 500, 1_000]
+    })
+    .toBe('true')
+  await expect
+    .poll(async () => page.evaluate(
+      () => window.__levelsjamDebug?.getReflectionProbeState?.()?.ready ?? false
+    ), {
+      timeout: 180_000,
+      intervals: [250, 500, 1_000]
+    })
+    .toBe(true)
+
+  await expect
+    .poll(async () => page.evaluate(
+      () => window.__levelsjamDebug.getReflectionProbeState()
+    ), {
+      timeout: 30_000,
+      intervals: [250, 500, 1_000]
+    })
+    .toMatchObject({
+      loadedProbeCount: expect.any(Number),
+      ready: true
+    })
+
+  const stableBeforeToggle = await page.evaluate(
+    () => window.__levelsjamDebug.getReflectionProbeState()
+  )
+
+  await page.evaluate(() => {
+    window.__levelsjamSetVisualSettings({
+      volumetricLighting: {
+        enabled: false,
+        intensity: 0
+      }
+    })
+  })
+  await page.waitForTimeout(2_000)
+
+  const afterDisable = await page.evaluate(
+    () => window.__levelsjamDebug.getReflectionProbeState()
+  )
+
+  await page.evaluate(() => {
+    window.__levelsjamSetVisualSettings({
+      volumetricLighting: {
+        enabled: true,
+        intensity: 1
+      }
+    })
+  })
+  await page.waitForTimeout(2_000)
+
+  const afterEnable = await page.evaluate(
+    () => window.__levelsjamDebug.getReflectionProbeState()
+  )
+
+  expect(stableBeforeToggle.ready).toBe(true)
+  expect(stableBeforeToggle.loadedProbeCount).toBeGreaterThan(0)
+  expect(afterDisable.ready).toBe(true)
+  expect(afterEnable.ready).toBe(true)
+  expect(afterDisable.loadedProbeCount).toBeGreaterThanOrEqual(stableBeforeToggle.loadedProbeCount)
+  expect(afterEnable.loadedProbeCount).toBeGreaterThanOrEqual(stableBeforeToggle.loadedProbeCount)
 })

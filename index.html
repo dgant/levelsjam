@@ -8,23 +8,23 @@
       content="Levels Jam 2026 prototype: a torchlit labyrinth rendered with three.js."
     />
     <link rel="preload" href="./textures/environment/overcast_soil_1k.hdr" as="fetch" crossorigin="anonymous" />
-    <link rel="preload" href="./textures/fire/CampFire_l_nosmoke_front_Loop_01_4K_6x6.png" as="image" />
-    <link rel="preload" href="./textures/puddle-ground/puddle_ground-1K/1K-puddle_Diffuse.jpg" as="image" />
-    <link rel="preload" href="./textures/puddle-ground/puddle_ground-1K/1K-puddle_Normal.jpg" as="image" />
-    <link rel="preload" href="./textures/puddle-ground/puddle_ground-1K/1K-puddle_Gloss.jpg" as="image" />
-    <link rel="preload" href="./textures/puddle-ground/puddle_ground-1K/1K-puddle_Displacement.jpg" as="image" />
-    <link rel="preload" href="./textures/puddle-ground/puddle_ground-1K/1K-puddle_AO.jpg" as="image" />
-    <link rel="preload" href="./textures/stone-wall-29/stonewall_29-1K/stonewall_29_ambientocclusion-1K.png" as="image" />
-    <link rel="preload" href="./textures/stone-wall-29/stonewall_29-1K/stonewall_29_basecolor-1K.png" as="image" />
-    <link rel="preload" href="./textures/stone-wall-29/stonewall_29-1K/stonewall_29_normal-1K.png" as="image" />
-    <link rel="preload" href="./textures/stone-wall-29/stonewall_29-1K/stonewall_29_roughness-1K.png" as="image" />
-    <link rel="preload" href="./textures/stone-wall-29/stonewall_29-1K/stonewall_29_height-1K.png" as="image" />
-    <link rel="preload" href="./textures/metal-13/metal_13-1K/metal_13_ambientocclusion-1K.png" as="image" />
-    <link rel="preload" href="./textures/metal-13/metal_13-1K/metal_13_basecolor-1K.png" as="image" />
-    <link rel="preload" href="./textures/metal-13/metal_13-1K/metal_13_normal-1K.png" as="image" />
-    <link rel="preload" href="./textures/metal-13/metal_13-1K/metal_13_roughness-1K.png" as="image" />
-    <link rel="preload" href="./textures/metal-13/metal_13-1K/metal_13_metallic-1K.png" as="image" />
-    <link rel="preload" href="./textures/metal-13/metal_13-1K/metal_13_height-1K.png" as="image" />
+    <link rel="preload" href="./textures/fire/CampFire_l_nosmoke_front_Loop_01_4K_6x6.png" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="./textures/puddle-ground/puddle_ground-1K/1K-puddle_Diffuse.jpg" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="./textures/puddle-ground/puddle_ground-1K/1K-puddle_Normal.jpg" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="./textures/puddle-ground/puddle_ground-1K/1K-puddle_Gloss.jpg" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="./textures/puddle-ground/puddle_ground-1K/1K-puddle_Displacement.jpg" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="./textures/puddle-ground/puddle_ground-1K/1K-puddle_AO.jpg" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="./textures/stone-wall-29/stonewall_29-1K/stonewall_29_ambientocclusion-1K.png" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="./textures/stone-wall-29/stonewall_29-1K/stonewall_29_basecolor-1K.png" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="./textures/stone-wall-29/stonewall_29-1K/stonewall_29_normal-1K.png" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="./textures/stone-wall-29/stonewall_29-1K/stonewall_29_roughness-1K.png" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="./textures/stone-wall-29/stonewall_29-1K/stonewall_29_height-1K.png" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="./textures/metal-13/metal_13-1K/metal_13_ambientocclusion-1K.png" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="./textures/metal-13/metal_13-1K/metal_13_basecolor-1K.png" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="./textures/metal-13/metal_13-1K/metal_13_normal-1K.png" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="./textures/metal-13/metal_13-1K/metal_13_roughness-1K.png" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="./textures/metal-13/metal_13-1K/metal_13_metallic-1K.png" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="./textures/metal-13/metal_13-1K/metal_13_height-1K.png" as="image" crossorigin="anonymous" />
     <title>Levels Jam 2026</title>
     <script>
       {
@@ -34,7 +34,7 @@
           const link = document.createElement('link')
           link.rel = rel
           if (as) link.as = as
-          if (as === 'fetch') link.crossOrigin = 'anonymous'
+          if (as === 'fetch' || as === 'image') link.crossOrigin = 'anonymous'
           link.href = href
           document.head.appendChild(link)
         }
@@ -207,7 +207,7 @@
         if (as) {
           link.as = as
         }
-        if (as === 'fetch') {
+        if (as === 'fetch' || as === 'image') {
           link.crossOrigin = 'anonymous'
         }
         link.href = href

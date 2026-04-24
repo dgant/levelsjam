@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { PNG } from 'pngjs'
+import { DataUtils } from 'three'
 import {
   bakeMazeLightmap,
   MAZE_LIGHTMAP_VERSION,
@@ -14,6 +15,7 @@ import {
   serializeMazeModule,
   validateMaze
 } from './maze.js'
+import { decodeRgbE8, encodeRgbE8 } from './probeSphericalHarmonics.js'
 
 const MAZE_FILE_PATTERN = /^maze-\d{3}\.js$/
 export const DEFAULT_LIGHTMAP_ARTIFACT_DIRECTORY = path.join(
@@ -115,11 +117,77 @@ export function buildMazeLightmapArtifactBuffers(maze) {
 
   const lightmap = maze.lightmap
   const bytes = Buffer.from(lightmap.dataBase64, 'base64')
-  const pixelStride = 3
+  const pixelStride =
+    lightmap.encoding === 'rgb16f'
+      ? 6
+      : lightmap.encoding === 'rgbe8'
+        ? 4
+        : 3
+  const byteView = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
 
   const readChannel = (row, column, channelOffset) => {
     const pixelIndex = (((row * lightmap.atlasWidth) + column) * pixelStride) + channelOffset
     return bytes[pixelIndex] ?? 0
+  }
+  const readHalfFloatChannel = (row, column, channelOffset) => {
+    const pixelIndex = ((((row * lightmap.atlasWidth) + column) * 3) + channelOffset) * 2
+    return DataUtils.fromHalfFloat(byteView.getUint16(pixelIndex, true))
+  }
+
+  const decodedPixels = new Float32Array(lightmap.atlasWidth * lightmap.atlasHeight * 3)
+  let maxComponent = 0
+
+  for (let row = 0; row < lightmap.atlasHeight; row += 1) {
+    for (let column = 0; column < lightmap.atlasWidth; column += 1) {
+      const pixelOffset = ((row * lightmap.atlasWidth) + column) * 3
+
+      if (lightmap.encoding === 'rgb16f') {
+        decodedPixels[pixelOffset] = readHalfFloatChannel(row, column, 0)
+        decodedPixels[pixelOffset + 1] = readHalfFloatChannel(row, column, 1)
+        decodedPixels[pixelOffset + 2] = readHalfFloatChannel(row, column, 2)
+        maxComponent = Math.max(
+          maxComponent,
+          decodedPixels[pixelOffset],
+          decodedPixels[pixelOffset + 1],
+          decodedPixels[pixelOffset + 2]
+        )
+        continue
+      }
+
+      if (pixelStride === 4) {
+        const decoded = decodeRgbE8(
+          readChannel(row, column, 0),
+          readChannel(row, column, 1),
+          readChannel(row, column, 2),
+          readChannel(row, column, 3)
+        )
+
+        decodedPixels[pixelOffset] = decoded[0]
+        decodedPixels[pixelOffset + 1] = decoded[1]
+        decodedPixels[pixelOffset + 2] = decoded[2]
+        maxComponent = Math.max(maxComponent, decoded[0], decoded[1], decoded[2])
+        continue
+      }
+
+      decodedPixels[pixelOffset] = readChannel(row, column, 0) / 255
+      decodedPixels[pixelOffset + 1] = readChannel(row, column, 1) / 255
+      decodedPixels[pixelOffset + 2] = readChannel(row, column, 2) / 255
+      maxComponent = Math.max(
+        maxComponent,
+        decodedPixels[pixelOffset],
+        decodedPixels[pixelOffset + 1],
+        decodedPixels[pixelOffset + 2]
+      )
+    }
+  }
+
+  const previewComponent = (value) => {
+    if (!(value > 0)) {
+      return 0
+    }
+
+    const toneMapped = value / (1 + value)
+    return Math.max(0, Math.min(255, Math.round(toneMapped * 255)))
   }
 
   const buildPngBuffer = (pixelWriter) => {
@@ -144,30 +212,59 @@ export function buildMazeLightmapArtifactBuffers(maze) {
   }
 
   return {
-    ambientPng: buildPngBuffer((row, column) => {
-      const value = readChannel(row, column, 1)
-      return [value, value, value, 255]
+    atlasPng: buildPngBuffer((row, column) => {
+      const pixelOffset = ((row * lightmap.atlasWidth) + column) * 3
+      return [
+        previewComponent(decodedPixels[pixelOffset]),
+        previewComponent(decodedPixels[pixelOffset + 1]),
+        previewComponent(decodedPixels[pixelOffset + 2]),
+        255
+      ]
     }),
-    atlasPng: buildPngBuffer((row, column) => [
-      readChannel(row, column, 0),
-      readChannel(row, column, 1),
-      readChannel(row, column, 2),
-      255
-    ]),
     metadata: {
       atlasHeight: lightmap.atlasHeight,
       atlasWidth: lightmap.atlasWidth,
       bakeMs: lightmap.bakeMs,
+      encoding: lightmap.encoding ?? 'legacy-rgb',
       groundBounds: lightmap.groundBounds,
       groundRect: lightmap.groundRect,
+      maxComponent,
       neutralRect: lightmap.neutralRect,
       version: lightmap.version,
       wallRects: lightmap.wallRects
     },
-    torchPng: buildPngBuffer((row, column) => {
-      const value = readChannel(row, column, 0)
-      return [value, value, value, 255]
-    })
+    runtimeAtlasPng: buildPngBuffer((row, column) => {
+      if (lightmap.encoding === 'rgb16f') {
+        const pixelOffset = ((row * lightmap.atlasWidth) + column) * 3
+        const [r, g, b, a] = encodeRgbE8([
+          decodedPixels[pixelOffset],
+          decodedPixels[pixelOffset + 1],
+          decodedPixels[pixelOffset + 2]
+        ])
+
+        return [r, g, b, a]
+      }
+
+      if (pixelStride === 4) {
+        return [
+          readChannel(row, column, 0),
+          readChannel(row, column, 1),
+          readChannel(row, column, 2),
+          readChannel(row, column, 3)
+        ]
+      }
+
+      return [
+        readChannel(row, column, 0),
+        readChannel(row, column, 1),
+        readChannel(row, column, 2),
+        255
+      ]
+    }),
+    runtimeAtlasBytes:
+      lightmap.encoding === 'rgb16f'
+        ? Buffer.from(bytes)
+        : null
   }
 }
 
@@ -187,18 +284,29 @@ export function dumpMazeLightmapArtifacts({
   }
 
   fs.mkdirSync(mazeDirectory, { recursive: true })
+  for (const obsoleteFileName of [
+    'lightmap-ambient.png'
+  ]) {
+    fs.rmSync(path.join(mazeDirectory, obsoleteFileName), { force: true })
+  }
   fs.writeFileSync(
     path.join(mazeDirectory, 'lightmap-atlas.png'),
     buffers.atlasPng
   )
   fs.writeFileSync(
     path.join(mazeDirectory, 'lightmap-torch.png'),
-    buffers.torchPng
+    buffers.atlasPng
   )
   fs.writeFileSync(
-    path.join(mazeDirectory, 'lightmap-ambient.png'),
-    buffers.ambientPng
+    path.join(mazeDirectory, 'lightmap-rgbe.png'),
+    buffers.runtimeAtlasPng
   )
+  if (buffers.runtimeAtlasBytes) {
+    fs.writeFileSync(
+      path.join(mazeDirectory, 'lightmap-runtime.bin'),
+      buffers.runtimeAtlasBytes
+    )
+  }
   fs.writeFileSync(
     path.join(mazeDirectory, 'lightmap-metadata.json'),
     JSON.stringify(buffers.metadata, null, 2)

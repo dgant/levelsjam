@@ -22,7 +22,10 @@ function replaceMazeLightmapWithRuntimeAssetUrls(maze) {
     ...maze,
     lightmap: {
       ...maze.lightmap,
-      atlasUrl: `${maze.id}/surface-lightmap.png`,
+      atlasUrl:
+        maze.lightmap.encoding === 'rgb16f'
+          ? `${maze.id}/surface-lightmap.bin`
+          : `${maze.id}/surface-lightmap.png`,
       dataBase64: undefined
     }
   }
@@ -30,7 +33,9 @@ function replaceMazeLightmapWithRuntimeAssetUrls(maze) {
 
 async function main() {
   const {
-    buildMazeLightmapArtifactBuffers
+    buildMazeLightmapArtifactBuffers,
+    DEFAULT_LIGHTMAP_ARTIFACT_DIRECTORY,
+    dumpMazeLightmapArtifacts
   } = await import('../src/lib/mazePersistence.js')
 
   fs.mkdirSync(outputDirectory, { recursive: true })
@@ -62,15 +67,42 @@ async function main() {
     )
     fs.mkdirSync(mazeOutputDirectory, { recursive: true })
     if (lightmapBuffers) {
-      fs.writeFileSync(
-        path.join(mazeOutputDirectory, 'surface-lightmap.png'),
-        lightmapBuffers.atlasPng
-      )
+      if (lightmapBuffers.runtimeAtlasBytes) {
+        fs.writeFileSync(
+          path.join(mazeOutputDirectory, 'surface-lightmap.bin'),
+          lightmapBuffers.runtimeAtlasBytes
+        )
+        fs.writeFileSync(
+          path.join(mazeOutputDirectory, 'surface-lightmap.png'),
+          lightmapBuffers.atlasPng
+        )
+        fs.writeFileSync(
+          path.join(mazeOutputDirectory, 'surface-lightmap-rgbe.png'),
+          lightmapBuffers.runtimeAtlasPng
+        )
+      } else {
+        fs.rmSync(
+          path.join(mazeOutputDirectory, 'surface-lightmap.bin'),
+          { force: true }
+        )
+        fs.writeFileSync(
+          path.join(mazeOutputDirectory, 'surface-lightmap.png'),
+          lightmapBuffers.runtimeAtlasPng
+        )
+        fs.rmSync(
+          path.join(mazeOutputDirectory, 'surface-lightmap-rgbe.png'),
+          { force: true }
+        )
+      }
     }
     fs.writeFileSync(
       path.join(outputDirectory, `${mazeId}.json`),
       JSON.stringify(runtimeMaze)
     )
+    dumpMazeLightmapArtifacts({
+      directory: DEFAULT_LIGHTMAP_ARTIFACT_DIRECTORY,
+      maze
+    })
     mazeIds.push(mazeId)
   }
 

@@ -21,6 +21,7 @@ import {
   CubeTextureLoader,
   CubeUVReflectionMapping,
   DataTexture,
+  DataUtils,
   DepthTexture,
   DoubleSide,
   EquirectangularReflectionMapping,
@@ -29,9 +30,9 @@ import {
   Float32BufferAttribute,
   Group,
   HalfFloatType,
-  ImageBitmapLoader,
   LinearFilter,
   LinearMipmapLinearFilter,
+  Material,
   MathUtils,
   Matrix4,
   NearestFilter,
@@ -53,6 +54,7 @@ import {
   PlaneGeometry,
   Quaternion,
   RGBAFormat,
+  RGBFormat,
   RGBADepthPacking,
   ReinhardToneMapping,
   RepeatWrapping,
@@ -75,6 +77,7 @@ import {
 } from 'three'
 import {
   Suspense,
+  startTransition,
   useEffect,
   useMemo,
   type RefObject,
@@ -94,12 +97,14 @@ import { HDRLoader } from 'three/addons/loaders/HDRLoader.js'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { UnrealBloomPass as ThreeUnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { SSRPass as ThreeSSRPass } from 'three/addons/postprocessing/SSRPass.js'
+import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js'
 import {
   AUTHORED_LIGHTING_SOURCE_SCALE,
   DEFAULT_EXPOSURE_STOPS,
   getHdrLightingIntensity,
   getRendererExposure
 } from './lib/lightingCalibration.js'
+import { decodeRgbE8 } from './lib/probeSphericalHarmonics.js'
 import {
   getCameraPosition,
   getPlayerSpawnPosition,
@@ -151,8 +156,8 @@ const ENVIRONMENT_URL = `${assetBase}textures/environment/overcast_soil_1k.hdr`
 const FIRE_FLIPBOOK_URL =
   `${assetBase}textures/fire/CampFire_l_nosmoke_front_Loop_01_4K_6x6.png`
 const MONSTER_MODEL_URLS = {
-  minotaur: `${assetBase}models/minotaur/scene.gltf`,
-  spider: `${assetBase}models/dopepopes_zkumonga/scene.gltf`,
+  minotaur: `${assetBase}models/minotaur-runtime/scene.gltf`,
+  spider: `${assetBase}models/pbr_jumping_spider_monster/scene.gltf`,
   werewolf: `${assetBase}models/awil_werewolf/scene.gltf`
 } as const
 const PUDDLE_TEXTURE_URLS = {
@@ -179,6 +184,7 @@ const METAL_TEXTURE_URLS = {
 }
 const LOOK_SENSITIVITY = 0.003
 const MAX_PITCH = Math.PI / 2 - 0.05
+const DEFAULT_CAMERA_PITCH = MathUtils.degToRad(-5)
 const BACKQUOTE_CODE = 'Backquote'
 const OVERLAY_TOGGLE_CODE = 'F9'
 const POINTER_UNLOCK_CODES = new Set([
@@ -207,19 +213,18 @@ const FIRE_FLIPBOOK_CROP_WIDTH =
   FIRE_FLIPBOOK_FRAME_CROP.maxX - FIRE_FLIPBOOK_FRAME_CROP.minX
 const FIRE_FLIPBOOK_CROP_HEIGHT =
   FIRE_FLIPBOOK_FRAME_CROP.maxY - FIRE_FLIPBOOK_FRAME_CROP.minY
-const FIRE_COLOR = new Color('#d3a987')
+const FIRE_COLOR = new Color('#ff7e00')
+const FIRE_LIGHT_COLOR = FIRE_COLOR.clone().multiplyScalar(10)
 const BLACK_COLOR = new Color(0, 0, 0)
-const EMPTY_RUNTIME_LIGHTMAP_DATA_URL =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aW4YAAAAASUVORK5CYII='
+const LIGHTMAP_AMBIENT_TINT = new Color(1, 1, 1)
+const TORCH_LIGHTMAP_TINT = FIRE_LIGHT_COLOR.clone()
 const FIRE_BILLBOARD_INTENSITY_SCALE =
   AUTHORED_LIGHTING_SOURCE_SCALE / TORCH_BASE_CANDELA
 const LENS_FLARE_INTENSITY_SCALE = 4
 const LENS_FLARE_OCCLUSION_MARGIN = 0.05
-const LIGHTMAP_AMBIENT_TINT = new Color(1, 1, 1)
-const TORCH_LIGHTMAP_TINT = FIRE_COLOR.clone()
 const TORCH_BILLBOARD_LAYER = 1
-const FLOOR_LIGHTMAP_INTENSITY_SCALE = AUTHORED_LIGHTING_SOURCE_SCALE
-const WALL_LIGHTMAP_INTENSITY_SCALE = AUTHORED_LIGHTING_SOURCE_SCALE
+const FLOOR_LIGHTMAP_INTENSITY_SCALE = 1
+const WALL_LIGHTMAP_INTENSITY_SCALE = 1
 const BAKED_ENVIRONMENT_INTENSITY = getHdrLightingIntensity(
   AUTHORED_LIGHTING_SOURCE_SCALE
 )
@@ -227,6 +232,7 @@ const DEFAULT_LIGHTMAP_CONTRIBUTION_INTENSITY = 1
 const DEFAULT_PROBE_IBL_INTENSITY = 1
 const DEFAULT_REFLECTION_INTENSITY = 1
 const MAX_LIGHTING_CONTRIBUTION_INTENSITY = 4
+const BLOCKED_MOVE_FRACTION = 0.25
 
 function recordStartupMarker(name: string) {
   if (document.body.dataset[name] && document.body.dataset[name] !== 'pending') {
@@ -240,6 +246,8 @@ const REFLECTION_PROBE_RENDER_SIZE = 32
 const REFLECTION_PROBE_AMBIENT_RENDER_SIZE = 24
 const REFLECTION_PROBE_FAR = 48
 const REFLECTION_PROBE_LOAD_CONCURRENCY = 8
+const REFLECTION_PROBE_BACKGROUND_LOAD_CONCURRENCY = 1
+const REFLECTION_PROBE_PUBLISH_INTERVAL_MS = 250
 const REFLECTION_PROBE_STARTUP_DELAY_MS = 5000
 const REFLECTION_PROBE_STARTUP_CAPTURE_DELAY_MS = 250
 const REFLECTION_PROBE_BACKGROUND_CAPTURE_DELAY_MS = 1000
@@ -248,7 +256,7 @@ const REFLECTION_PROBE_EMISSIVE_SCALE = 2
 const FOG_VOLUME_HEIGHT = 6
 const FOG_EXTINCTION_SCALE = 1
 const DEFAULT_VOLUMETRIC_AMBIENT_HEX = '#8f949e'
-const DEFAULT_VOLUMETRIC_FOG_DISTANCE = 10
+const DEFAULT_VOLUMETRIC_FOG_DISTANCE = 12
 const EFFECT_EPSILON = 0.0001
 const MAX_PHYSICS_SUBSTEPS = 10
 const MIN_LOADING_OVERLAY_MS = 200
@@ -406,7 +414,7 @@ float noise(vec3 p) {
 
 vec3 sampleFogAmbientColor(vec3 worldPosition) {
   if (useProbeAmbientTexture < 0.5) {
-    return environmentFogColor;
+    return vec3(0.0);
   }
 
   if (
@@ -415,7 +423,7 @@ vec3 sampleFogAmbientColor(vec3 worldPosition) {
     worldPosition.x > probeAmbientBounds.x + probeAmbientBounds.z ||
     worldPosition.z > probeAmbientBounds.y + probeAmbientBounds.w
   ) {
-    return environmentFogColor;
+    return vec3(0.0);
   }
 
   vec2 gridMax = max(probeAmbientGrid - vec2(1.0), vec2(0.0));
@@ -509,15 +517,11 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
     }
 
     vec3 ambientColor =
-      sampleFogAmbientColor(samplePosition) * max(0.0, lightingStrength);
-    float normalizedHeight = clamp(
-      sampleHeight / max(volumeHeight, 0.0001),
-      0.0,
-      1.0
-    );
-    float heightDensity = pow(
-      max(1.0 - normalizedHeight, 0.0001),
-      max(heightFalloff, 0.0001)
+      sampleFogAmbientColor(samplePosition) *
+      environmentFogColor *
+      max(0.0, lightingStrength);
+    float heightDensity = exp2(
+      -sampleHeight / max(heightFalloff, 0.0001)
     );
     float densityNoise = 1.0;
 
@@ -696,10 +700,10 @@ const VISUAL_CONTROL_TABS: Array<{
 ]
 
 const DEFAULT_AO_RADIUS_METERS = 1
-const DEFAULT_VOLUMETRIC_NOISE_FREQUENCY = 2
-const DEFAULT_VOLUMETRIC_NOISE_STRENGTH = 0.55
-const DEFAULT_VOLUMETRIC_HEIGHT_FALLOFF = 1.35
-const DEFAULT_VOLUMETRIC_LIGHTING_STRENGTH = 0.35
+const DEFAULT_VOLUMETRIC_NOISE_FREQUENCY = 10
+const DEFAULT_VOLUMETRIC_NOISE_STRENGTH = 1
+const DEFAULT_VOLUMETRIC_HEIGHT_FALLOFF = 0.5
+const DEFAULT_VOLUMETRIC_LIGHTING_STRENGTH = 1
 const DEFAULT_VOLUMETRIC_STEP_COUNT = 16
 const GIT_REVISION = __GIT_REVISION__
 const GIT_REVISION_TIMESTAMP = __GIT_REVISION_TIMESTAMP__
@@ -744,6 +748,33 @@ type VisualSettings = {
   volumetricStepCount: number
   vignette: EffectSettings
 }
+
+type VisualSettingsPatch = Partial<{
+  ambientOcclusionIntensity: number
+  ambientOcclusionMode: AmbientOcclusionMode
+  ambientOcclusionRadius: number
+  anamorphic: Partial<AnamorphicSettings>
+  bloom: Partial<BloomSettings>
+  depthOfField: Partial<DepthOfFieldSettings>
+  exposureStops: number
+  iblContribution: Partial<LightingContributionSettings>
+  lensFlare: Partial<LensFlareSettings>
+  lightmapContribution: Partial<LightingContributionSettings>
+  movement: Partial<MovementSettings>
+  probeDebugMode: ProbeDebugMode
+  reflectionContribution: Partial<LightingContributionSettings>
+  ssr: Partial<SSRSettings>
+  toneMapping: ToneMappingMode
+  volumetricAmbientHex: string
+  volumetricDistance: number
+  volumetricHeightFalloff: number
+  volumetricLighting: Partial<EffectSettings>
+  volumetricLightingStrength: number
+  volumetricNoiseFrequency: number
+  volumetricNoiseStrength: number
+  volumetricStepCount: number
+  vignette: Partial<EffectSettings>
+}>
 
 type GenericEffectSettingKey =
   'vignette' |
@@ -858,6 +889,7 @@ type GroundPatchRect = {
 }
 
 type ProbeBlendMode = 'none' | 'constant' | 'world' | 'disabled'
+type ProbeVlmMode = 'disabled' | 'cell5' | 'boundary8'
 
 type ProbeTextureInfo = {
   maxMip: number
@@ -868,10 +900,28 @@ type ProbeTextureInfo = {
 type ProbeBlendConfig = {
   diffuseIntensity?: number
   mode: ProbeBlendMode
+  probeCellSize?: number
   probeCoefficients?: Array<ProbeIrradianceCoefficients | null>
+  probeCoeffTextureL0?: Texture | null
+  probeCoeffTextureL1?: Texture | null
+  probeCoeffTextureL2?: Texture | null
+  probeCoeffTextureL3?: Texture | null
   probeDepthTextures?: Array<CubeTexture | null>
+  probeGridMin?: {
+    x: number
+    z: number
+  }
+  probeGridSize?: {
+    x: number
+    y: number
+  }
   radianceIntensity?: number
   radianceMode?: ProbeBlendMode
+  vlmBoundaryNormal?: {
+    x: number
+    z: number
+  }
+  vlmMode?: ProbeVlmMode
   probeBoxes?: Array<{
     max: { x: number, y: number, z: number } | null
     min: { x: number, y: number, z: number } | null
@@ -940,12 +990,21 @@ type ProbeBlendShader = Shader & {
     localProbeCoeffL31?: Uniform<Vector3>
     localProbeCoeffL32?: Uniform<Vector3>
     localProbeCoeffL33?: Uniform<Vector3>
+    localProbeCoeffTextureL0?: Uniform<Texture | null>
+    localProbeCoeffTextureL1?: Uniform<Texture | null>
+    localProbeCoeffTextureL2?: Uniform<Texture | null>
+    localProbeCoeffTextureL3?: Uniform<Texture | null>
     probeBlendMode?: Uniform<number>
     probeBlendDiffuseIntensity?: Uniform<number>
+    probeBoundaryNormal?: Uniform<Vector2>
+    probeCellSize?: Uniform<number>
+    probeGridMin?: Uniform<Vector2>
+    probeGridSize?: Uniform<Vector2>
     probeBlendRadianceMode?: Uniform<number>
     probeBlendRadianceIntensity?: Uniform<number>
     probeBlendRegion?: Uniform<Vector4>
     probeBlendWeights?: Uniform<Vector4>
+    probeVlmMode?: Uniform<number>
   }
 }
 
@@ -1160,14 +1219,14 @@ function createDefaultVisualSettings(): VisualSettings {
       animated: false,
       anamorphic: true,
       enabled: true,
-      flareShape: 0.05,
-      flareSize: 0.05,
+      flareShape: 0.03,
+      flareSize: 0.01,
       flareSpeed: 0.01,
       ghostScale: 0,
       glareSize: 0,
       haloScale: 0.16,
       intensity: 0.1,
-      opacity: 1,
+      opacity: 0.1,
       secondaryGhosts: false,
       starBurst: false,
       starPoints: 6
@@ -1180,11 +1239,11 @@ function createDefaultVisualSettings(): VisualSettings {
     toneMapping: 'agx',
     bloom: {
       enabled: true,
-      intensity: 1,
+      intensity: 0.65,
       kernelSize: 'huge',
       resolutionScale: 0.25,
       smoothing: 0.5,
-      threshold: 0.7
+      threshold: 0.5
     },
     depthOfField: {
       bokehScale: 0,
@@ -1215,9 +1274,9 @@ function createDefaultVisualSettings(): VisualSettings {
     },
     volumetricAmbientHex: DEFAULT_VOLUMETRIC_AMBIENT_HEX,
     volumetricDistance: DEFAULT_VOLUMETRIC_FOG_DISTANCE,
-    volumetricHeightFalloff: DEFAULT_VOLUMETRIC_HEIGHT_FALLOFF,
+    volumetricHeightFalloff: 0.5,
     volumetricLightingStrength: DEFAULT_VOLUMETRIC_LIGHTING_STRENGTH,
-    volumetricLighting: { enabled: false, intensity: 0 },
+    volumetricLighting: { enabled: true, intensity: 1 },
     volumetricNoiseFrequency: DEFAULT_VOLUMETRIC_NOISE_FREQUENCY,
     volumetricNoiseStrength: DEFAULT_VOLUMETRIC_NOISE_STRENGTH,
     volumetricStepCount: DEFAULT_VOLUMETRIC_STEP_COUNT,
@@ -1231,6 +1290,120 @@ function isEffectActive(effect: EffectSettings) {
 
 function getEnabledContributionIntensity(settings: LightingContributionSettings) {
   return settings.enabled ? settings.intensity : 0
+}
+
+function applyVisualSettingsPatch(
+  settings: VisualSettings,
+  patch: VisualSettingsPatch
+) {
+  return {
+    ...settings,
+    ...(patch.ambientOcclusionIntensity === undefined
+      ? null
+      : { ambientOcclusionIntensity: patch.ambientOcclusionIntensity }),
+    ...(patch.ambientOcclusionMode === undefined
+      ? null
+      : { ambientOcclusionMode: patch.ambientOcclusionMode }),
+    ...(patch.ambientOcclusionRadius === undefined
+      ? null
+      : { ambientOcclusionRadius: patch.ambientOcclusionRadius }),
+    ...(patch.exposureStops === undefined
+      ? null
+      : { exposureStops: patch.exposureStops }),
+    ...(patch.probeDebugMode === undefined
+      ? null
+      : { probeDebugMode: patch.probeDebugMode }),
+    ...(patch.toneMapping === undefined
+      ? null
+      : { toneMapping: patch.toneMapping }),
+    ...(patch.volumetricAmbientHex === undefined
+      ? null
+      : { volumetricAmbientHex: patch.volumetricAmbientHex }),
+    ...(patch.volumetricDistance === undefined
+      ? null
+      : { volumetricDistance: patch.volumetricDistance }),
+    ...(patch.volumetricHeightFalloff === undefined
+      ? null
+      : { volumetricHeightFalloff: patch.volumetricHeightFalloff }),
+    ...(patch.volumetricLightingStrength === undefined
+      ? null
+      : { volumetricLightingStrength: patch.volumetricLightingStrength }),
+    ...(patch.volumetricNoiseFrequency === undefined
+      ? null
+      : { volumetricNoiseFrequency: patch.volumetricNoiseFrequency }),
+    ...(patch.volumetricNoiseStrength === undefined
+      ? null
+      : { volumetricNoiseStrength: patch.volumetricNoiseStrength }),
+    ...(patch.volumetricStepCount === undefined
+      ? null
+      : { volumetricStepCount: patch.volumetricStepCount }),
+    anamorphic: patch.anamorphic
+      ? {
+          ...settings.anamorphic,
+          ...patch.anamorphic
+        }
+      : settings.anamorphic,
+    bloom: patch.bloom
+      ? {
+          ...settings.bloom,
+          ...patch.bloom
+        }
+      : settings.bloom,
+    depthOfField: patch.depthOfField
+      ? {
+          ...settings.depthOfField,
+          ...patch.depthOfField
+        }
+      : settings.depthOfField,
+    iblContribution: patch.iblContribution
+      ? {
+          ...settings.iblContribution,
+          ...patch.iblContribution
+        }
+      : settings.iblContribution,
+    lensFlare: patch.lensFlare
+      ? {
+          ...settings.lensFlare,
+          ...patch.lensFlare
+        }
+      : settings.lensFlare,
+    lightmapContribution: patch.lightmapContribution
+      ? {
+          ...settings.lightmapContribution,
+          ...patch.lightmapContribution
+        }
+      : settings.lightmapContribution,
+    movement: patch.movement
+      ? {
+          ...settings.movement,
+          ...patch.movement
+        }
+      : settings.movement,
+    reflectionContribution: patch.reflectionContribution
+      ? {
+          ...settings.reflectionContribution,
+          ...patch.reflectionContribution
+        }
+      : settings.reflectionContribution,
+    ssr: patch.ssr
+      ? {
+          ...settings.ssr,
+          ...patch.ssr
+        }
+      : settings.ssr,
+    volumetricLighting: patch.volumetricLighting
+      ? {
+          ...settings.volumetricLighting,
+          ...patch.volumetricLighting
+        }
+      : settings.volumetricLighting,
+    vignette: patch.vignette
+      ? {
+          ...settings.vignette,
+          ...patch.vignette
+        }
+      : settings.vignette
+  }
 }
 
 function isDepthOfFieldActive(settings: DepthOfFieldSettings) {
@@ -1402,14 +1575,11 @@ vec4 probeBlendTextureCubeUV(
 const PROBE_BLEND_SHADER_CHUNK = `
 #ifdef USE_ENVMAP
 
+#if defined(PROBE_BLEND_ENABLE_LOCAL_RADIANCE)
 uniform sampler2D localProbeEnvMap0;
 uniform sampler2D localProbeEnvMap1;
 uniform sampler2D localProbeEnvMap2;
 uniform sampler2D localProbeEnvMap3;
-uniform samplerCube localProbeDepthMap0;
-uniform samplerCube localProbeDepthMap1;
-uniform samplerCube localProbeDepthMap2;
-uniform samplerCube localProbeDepthMap3;
 uniform float localProbeTexelWidth0;
 uniform float localProbeTexelWidth1;
 uniform float localProbeTexelWidth2;
@@ -1422,11 +1592,13 @@ uniform float localProbeMaxMip0;
 uniform float localProbeMaxMip1;
 uniform float localProbeMaxMip2;
 uniform float localProbeMaxMip3;
+#endif
+
 uniform int probeBlendMode;
 uniform int probeBlendRadianceMode;
 uniform vec4 probeBlendWeights;
 uniform vec4 probeBlendRegion;
-
+#if defined(PROBE_BLEND_ENABLE_LOCAL_RADIANCE)
 uniform vec3 localProbePosition0;
 uniform vec3 localProbePosition1;
 uniform vec3 localProbePosition2;
@@ -1439,6 +1611,8 @@ uniform vec3 localProbeBoxMax0;
 uniform vec3 localProbeBoxMax1;
 uniform vec3 localProbeBoxMax2;
 uniform vec3 localProbeBoxMax3;
+#endif
+
 uniform vec3 localProbeCoeffL00;
 uniform vec3 localProbeCoeffL01;
 uniform vec3 localProbeCoeffL02;
@@ -1455,6 +1629,15 @@ uniform vec3 localProbeCoeffL30;
 uniform vec3 localProbeCoeffL31;
 uniform vec3 localProbeCoeffL32;
 uniform vec3 localProbeCoeffL33;
+uniform sampler2D localProbeCoeffTextureL0;
+uniform sampler2D localProbeCoeffTextureL1;
+uniform sampler2D localProbeCoeffTextureL2;
+uniform sampler2D localProbeCoeffTextureL3;
+uniform vec2 probeBoundaryNormal;
+uniform float probeCellSize;
+uniform vec2 probeGridMin;
+uniform vec2 probeGridSize;
+uniform int probeVlmMode;
 
 ${PROBE_CUBEUV_SAMPLING_GLSL}
 
@@ -1487,34 +1670,6 @@ float probeBlendSafeComponent( float value ) {
   return value;
 }
 
-float sampleProbeVisibility(
-  samplerCube probeDepthMap,
-  vec3 worldPosition,
-  vec3 probePosition
-) {
-  vec3 toWorld = worldPosition - probePosition;
-  float distanceToWorld = length( toWorld );
-
-  if ( distanceToWorld <= 0.0001 ) {
-    return 1.0;
-  }
-
-  vec4 packedDepth = textureCube( probeDepthMap, normalize( toWorld ) );
-  float storedDistance = decodePackedDistance( packedDepth );
-
-  if ( storedDistance <= 0.0001 ) {
-    return 1.0;
-  }
-
-  float bias = 0.06 + ( distanceToWorld * 0.01 );
-
-  return 1.0 - smoothstep(
-    storedDistance + bias,
-    storedDistance + ( bias * 3.0 ),
-    distanceToWorld
-  );
-}
-
 vec3 applyProbeBoxProjection(
   vec3 worldPosition,
   vec3 direction,
@@ -1540,6 +1695,7 @@ vec3 applyProbeBoxProjection(
   return projectedWorldPosition - probePosition;
 }
 
+#if defined(PROBE_BLEND_ENABLE_LOCAL_RADIANCE)
 vec3 sampleProbeBlendTexture(
   sampler2D probeMap,
   vec3 worldPosition,
@@ -1571,6 +1727,7 @@ vec3 sampleProbeBlendTexture(
     )
   );
 }
+#endif
 
 vec3 reconstructProbeIrradiance(
   vec3 direction,
@@ -1612,29 +1769,123 @@ vec3 sampleProbeBlendDiffuse(
   );
 }
 
-vec4 getProbeBlendVisibleWeights(
+vec2 clampProbeGridCell( vec2 cell ) {
+  return clamp( cell, vec2( 0.0 ), max( probeGridSize - vec2( 1.0 ), vec2( 0.0 ) ) );
+}
+
+vec2 worldToProbeGridCell( vec2 worldXZ ) {
+  return clampProbeGridCell(
+    floor( ( worldXZ - probeGridMin ) / max( probeCellSize, 0.0001 ) )
+  );
+}
+
+vec2 probeGridCellToWorld( vec2 cell ) {
+  return probeGridMin + ( ( cell + vec2( 0.5 ) ) * probeCellSize );
+}
+
+vec2 probeGridCellToUv( vec2 cell ) {
+  return ( clampProbeGridCell( cell ) + vec2( 0.5 ) ) / max( probeGridSize, vec2( 1.0 ) );
+}
+
+vec4 sampleProbeGridCandidate(
   vec3 worldPosition,
+  vec3 direction,
+  vec2 cell
+) {
+  vec2 uv = probeGridCellToUv( cell );
+  vec4 coeff0 = texture2D( localProbeCoeffTextureL0, uv );
+
+  if ( coeff0.a <= 0.0 ) {
+    return vec4( 0.0 );
+  }
+
+  vec4 coeff1 = texture2D( localProbeCoeffTextureL1, uv );
+  vec4 coeff2 = texture2D( localProbeCoeffTextureL2, uv );
+  vec4 coeff3 = texture2D( localProbeCoeffTextureL3, uv );
+  vec2 probeWorldXZ = probeGridCellToWorld( cell );
+  vec2 delta = worldPosition.xz - probeWorldXZ;
+  float weight = 1.0 / max( dot( delta, delta ), 0.04 );
+  vec3 color = sampleProbeBlendDiffuse(
+    direction,
+    coeff0.rgb,
+    coeff1.rgb,
+    coeff2.rgb,
+    coeff3.rgb
+  );
+
+  return vec4( color * weight, weight );
+}
+
+vec3 sampleProbeGridDiffuseCell5(
+  vec3 worldPosition,
+  vec3 direction
+) {
+  vec2 cell = worldToProbeGridCell( worldPosition.xz );
+  vec4 c0 = sampleProbeGridCandidate( worldPosition, direction, cell );
+  vec4 c1 = sampleProbeGridCandidate( worldPosition, direction, cell + vec2( 0.0, -1.0 ) );
+  vec4 c2 = sampleProbeGridCandidate( worldPosition, direction, cell + vec2( 1.0, 0.0 ) );
+  vec4 c3 = sampleProbeGridCandidate( worldPosition, direction, cell + vec2( 0.0, 1.0 ) );
+  vec4 c4 = sampleProbeGridCandidate( worldPosition, direction, cell + vec2( -1.0, 0.0 ) );
+  vec3 color = c0.rgb + c1.rgb + c2.rgb + c3.rgb + c4.rgb;
+  float weight = c0.a + c1.a + c2.a + c3.a + c4.a;
+
+  if ( weight <= 0.0001 ) {
+    return vec3( 0.0 );
+  }
+
+  return color / weight;
+}
+
+vec3 sampleProbeGridDiffuseBoundary8(
+  vec3 worldPosition,
+  vec3 direction
+) {
+  vec2 normalOffset = vec2(
+    abs( probeBoundaryNormal.x ) > 0.5 ? sign( probeBoundaryNormal.x ) : 0.0,
+    abs( probeBoundaryNormal.y ) > 0.5 ? sign( probeBoundaryNormal.y ) : 0.0
+  );
+  vec2 tangentOffset = vec2( -normalOffset.y, normalOffset.x );
+  vec2 cellA = worldToProbeGridCell(
+    worldPosition.xz - ( normalOffset * probeCellSize * 0.51 )
+  );
+  vec2 cellB = worldToProbeGridCell(
+    worldPosition.xz + ( normalOffset * probeCellSize * 0.51 )
+  );
+  vec4 c0 = sampleProbeGridCandidate( worldPosition, direction, cellA );
+  vec4 c1 = sampleProbeGridCandidate( worldPosition, direction, cellA + tangentOffset );
+  vec4 c2 = sampleProbeGridCandidate( worldPosition, direction, cellA - tangentOffset );
+  vec4 c3 = sampleProbeGridCandidate( worldPosition, direction, cellA - normalOffset );
+  vec4 c4 = sampleProbeGridCandidate( worldPosition, direction, cellB );
+  vec4 c5 = sampleProbeGridCandidate( worldPosition, direction, cellB + tangentOffset );
+  vec4 c6 = sampleProbeGridCandidate( worldPosition, direction, cellB - tangentOffset );
+  vec4 c7 = sampleProbeGridCandidate( worldPosition, direction, cellB + normalOffset );
+  vec3 color = c0.rgb + c1.rgb + c2.rgb + c3.rgb + c4.rgb + c5.rgb + c6.rgb + c7.rgb;
+  float weight = c0.a + c1.a + c2.a + c3.a + c4.a + c5.a + c6.a + c7.a;
+
+  if ( weight <= 0.0001 ) {
+    return vec3( 0.0 );
+  }
+
+  return color / weight;
+}
+
+vec4 getProbeBlendVisibleWeights(
   vec4 baseWeights
 ) {
-  vec4 visibleWeights = vec4(
-    sampleProbeVisibility( localProbeDepthMap0, worldPosition, localProbePosition0 ),
-    sampleProbeVisibility( localProbeDepthMap1, worldPosition, localProbePosition1 ),
-    sampleProbeVisibility( localProbeDepthMap2, worldPosition, localProbePosition2 ),
-    sampleProbeVisibility( localProbeDepthMap3, worldPosition, localProbePosition3 )
-  ) * baseWeights;
   float visibleWeightSum =
-    visibleWeights.x +
-    visibleWeights.y +
-    visibleWeights.z +
-    visibleWeights.w;
+    baseWeights.x +
+    baseWeights.y +
+    baseWeights.z +
+    baseWeights.w;
 
   if ( visibleWeightSum <= 0.0001 ) {
     return baseWeights;
   }
 
-  return visibleWeights / visibleWeightSum;
+  return baseWeights / visibleWeightSum;
 }
 
+#if defined(PROBE_BLEND_ENABLE_LOCAL_RADIANCE)
 vec3 sampleProbeBlendLocalRadiance(
   vec3 worldPosition,
   vec3 direction,
@@ -1642,7 +1893,7 @@ vec3 sampleProbeBlendLocalRadiance(
   vec4 weights,
   float intensity
 ) {
-  vec4 visibleWeights = getProbeBlendVisibleWeights( worldPosition, weights );
+  vec4 visibleWeights = getProbeBlendVisibleWeights( weights );
   vec3 color0 = sampleProbeBlendTexture(
     localProbeEnvMap0,
     worldPosition,
@@ -1699,6 +1950,7 @@ vec3 sampleProbeBlendLocalRadiance(
     ( color3 * visibleWeights.w )
   ) * intensity;
 }
+#endif
 
 vec3 sampleProbeBlendLocalDiffuse(
   vec3 worldPosition,
@@ -1706,7 +1958,7 @@ vec3 sampleProbeBlendLocalDiffuse(
   vec4 weights,
   float intensity
 ) {
-  vec4 visibleWeights = getProbeBlendVisibleWeights( worldPosition, weights );
+  vec4 visibleWeights = getProbeBlendVisibleWeights( weights );
   vec3 color0 = sampleProbeBlendDiffuse(
     direction,
     localProbeCoeffL00,
@@ -1766,6 +2018,7 @@ vec3 sampleProbeBlendRadianceWithMode(
   int mode,
   float intensity
 ) {
+#if defined(PROBE_BLEND_ENABLE_LOCAL_RADIANCE)
   if ( mode == 1 ) {
     return sampleProbeBlendLocalRadiance(
       vProbeBlendWorldPosition,
@@ -1785,6 +2038,7 @@ vec3 sampleProbeBlendRadianceWithMode(
       intensity
     );
   }
+#endif
 
   if ( mode == 3 ) {
     return vec3( 0.0 );
@@ -1798,6 +2052,20 @@ vec3 sampleProbeBlendDiffuseWithMode(
   int mode,
   float intensity
 ) {
+  if ( probeVlmMode == 1 ) {
+    return sampleProbeGridDiffuseCell5(
+      vProbeBlendWorldPosition,
+      direction
+    ) * intensity;
+  }
+
+  if ( probeVlmMode == 2 ) {
+    return sampleProbeGridDiffuseBoundary8(
+      vProbeBlendWorldPosition,
+      direction
+    ) * intensity;
+  }
+
   if ( mode == 1 ) {
     return sampleProbeBlendLocalDiffuse(
       vProbeBlendWorldPosition,
@@ -2079,6 +2347,41 @@ function updateProbeBlendShaderUniforms(
     shader.uniforms.localProbeCoeffL23,
     shader.uniforms.localProbeCoeffL33
   )
+  if (shader.uniforms.localProbeCoeffTextureL0) {
+    shader.uniforms.localProbeCoeffTextureL0.value = probeBlend.probeCoeffTextureL0 ?? null
+  }
+  if (shader.uniforms.localProbeCoeffTextureL1) {
+    shader.uniforms.localProbeCoeffTextureL1.value = probeBlend.probeCoeffTextureL1 ?? null
+  }
+  if (shader.uniforms.localProbeCoeffTextureL2) {
+    shader.uniforms.localProbeCoeffTextureL2.value = probeBlend.probeCoeffTextureL2 ?? null
+  }
+  if (shader.uniforms.localProbeCoeffTextureL3) {
+    shader.uniforms.localProbeCoeffTextureL3.value = probeBlend.probeCoeffTextureL3 ?? null
+  }
+  if (shader.uniforms.probeCellSize) {
+    shader.uniforms.probeCellSize.value = probeBlend.probeCellSize ?? MAZE_CELL_SIZE
+  }
+  shader.uniforms.probeGridMin?.value.set(
+    probeBlend.probeGridMin?.x ?? 0,
+    probeBlend.probeGridMin?.z ?? 0
+  )
+  shader.uniforms.probeGridSize?.value.set(
+    probeBlend.probeGridSize?.x ?? 1,
+    probeBlend.probeGridSize?.y ?? 1
+  )
+  shader.uniforms.probeBoundaryNormal?.value.set(
+    probeBlend.vlmBoundaryNormal?.x ?? 0,
+    probeBlend.vlmBoundaryNormal?.z ?? 1
+  )
+  if (shader.uniforms.probeVlmMode) {
+    shader.uniforms.probeVlmMode.value =
+      probeBlend.vlmMode === 'cell5'
+        ? 1
+        : probeBlend.vlmMode === 'boundary8'
+          ? 2
+          : 0
+  }
   if (shader.uniforms.probeBlendMode) {
     shader.uniforms.probeBlendMode.value =
       probeBlend.mode === 'world'
@@ -2139,12 +2442,25 @@ function getProbeBlendUpdateKey(
       : null,
     diffuseIntensity: probeBlend.diffuseIntensity ?? 1,
     mode: probeBlend.mode,
+    probeCellSize: probeBlend.probeCellSize ?? MAZE_CELL_SIZE,
     probeBoxes: (probeBlend.probeBoxes ?? []).map((box) => box
       ? {
           max: [box.max.x, box.max.y, box.max.z],
           min: [box.min.x, box.min.y, box.min.z]
         }
       : null),
+    probeCoeffTextureUUIDs: [
+      probeBlend.probeCoeffTextureL0?.uuid ?? null,
+      probeBlend.probeCoeffTextureL1?.uuid ?? null,
+      probeBlend.probeCoeffTextureL2?.uuid ?? null,
+      probeBlend.probeCoeffTextureL3?.uuid ?? null
+    ],
+    probeGridMin: probeBlend.probeGridMin
+      ? [probeBlend.probeGridMin.x, probeBlend.probeGridMin.z]
+      : null,
+    probeGridSize: probeBlend.probeGridSize
+      ? [probeBlend.probeGridSize.x, probeBlend.probeGridSize.y]
+      : null,
     probePositions: (probeBlend.probePositions ?? []).map((position) =>
       position
         ? [position.x, position.y, position.z]
@@ -2166,6 +2482,10 @@ function getProbeBlendUpdateKey(
           probeBlend.region.sizeZ
         ]
       : null,
+    vlmBoundaryNormal: probeBlend.vlmBoundaryNormal
+      ? [probeBlend.vlmBoundaryNormal.x, probeBlend.vlmBoundaryNormal.z]
+      : null,
+    vlmMode: probeBlend.vlmMode ?? 'disabled',
     weights: probeBlend.weights ?? null
   })
 }
@@ -2241,6 +2561,7 @@ function updateProbeBlendUniformDebugState(
     ].filter(Boolean).length,
     probeBlendMode: shader.uniforms.probeBlendMode?.value ?? null,
     probeBlendDiffuseIntensity: shader.uniforms.probeBlendDiffuseIntensity?.value ?? null,
+    probeVlmMode: shader.uniforms.probeVlmMode?.value ?? null,
     probeBlendRadianceMode: shader.uniforms.probeBlendRadianceMode?.value ?? null,
     probeBlendRadianceIntensity: shader.uniforms.probeBlendRadianceIntensity?.value ?? null
   }
@@ -2256,6 +2577,13 @@ function patchProbeBlendMaterialShader(
   const probeBlendShader = shader as ProbeBlendShader
   const currentProbeBlend = probeBlendRef.current
   const currentPatchConfig = patchConfigRef.current
+  const activeRadianceMode = currentProbeBlend.radianceMode ?? currentProbeBlend.mode
+  const usesLocalRadiance =
+    activeRadianceMode === 'world' ||
+    activeRadianceMode === 'constant'
+  const shaderFeatureDefines = usesLocalRadiance
+    ? '#define PROBE_BLEND_ENABLE_LOCAL_RADIANCE 1'
+    : ''
 
   probeBlendShader.uniforms.lightMapAmbientTint = new Uniform(BLACK_COLOR.clone())
   probeBlendShader.uniforms.lightMapTorchTint = new Uniform(WHITE_COLOR.clone())
@@ -2299,12 +2627,21 @@ function patchProbeBlendMaterialShader(
   probeBlendShader.uniforms.localProbeCoeffL31 = new Uniform(new Vector3())
   probeBlendShader.uniforms.localProbeCoeffL32 = new Uniform(new Vector3())
   probeBlendShader.uniforms.localProbeCoeffL33 = new Uniform(new Vector3())
+  probeBlendShader.uniforms.localProbeCoeffTextureL0 = new Uniform<Texture | null>(null)
+  probeBlendShader.uniforms.localProbeCoeffTextureL1 = new Uniform<Texture | null>(null)
+  probeBlendShader.uniforms.localProbeCoeffTextureL2 = new Uniform<Texture | null>(null)
+  probeBlendShader.uniforms.localProbeCoeffTextureL3 = new Uniform<Texture | null>(null)
   probeBlendShader.uniforms.probeBlendMode = new Uniform(0)
   probeBlendShader.uniforms.probeBlendDiffuseIntensity = new Uniform(1)
+  probeBlendShader.uniforms.probeBoundaryNormal = new Uniform(new Vector2(0, 1))
+  probeBlendShader.uniforms.probeCellSize = new Uniform(MAZE_CELL_SIZE)
+  probeBlendShader.uniforms.probeGridMin = new Uniform(new Vector2(0, 0))
+  probeBlendShader.uniforms.probeGridSize = new Uniform(new Vector2(1, 1))
   probeBlendShader.uniforms.probeBlendRadianceMode = new Uniform(0)
   probeBlendShader.uniforms.probeBlendRadianceIntensity = new Uniform(1)
   probeBlendShader.uniforms.probeBlendWeights = new Uniform(new Vector4(1, 0, 0, 0))
   probeBlendShader.uniforms.probeBlendRegion = new Uniform(new Vector4(0, 0, 0, 0))
+  probeBlendShader.uniforms.probeVlmMode = new Uniform(0)
   probeBlendShader.uniforms.localProbeTexelHeight0 = new Uniform(1)
   probeBlendShader.uniforms.localProbeTexelHeight1 = new Uniform(1)
   probeBlendShader.uniforms.localProbeTexelHeight2 = new Uniform(1)
@@ -2330,16 +2667,10 @@ function patchProbeBlendMaterialShader(
 \t#include <project_vertex>`
       )
   probeBlendShader.fragmentShader =
-    `uniform vec3 lightMapAmbientTint;\nuniform vec3 lightMapTorchTint;\nuniform float probeBlendDiffuseIntensity;\nuniform float probeBlendRadianceIntensity;\nvarying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
+    `${shaderFeatureDefines}\nuniform vec3 lightMapAmbientTint;\nuniform vec3 lightMapTorchTint;\nuniform float probeBlendDiffuseIntensity;\nuniform float probeBlendRadianceIntensity;\nvarying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
       .replace(
         '#include <envmap_physical_pars_fragment>',
         PROBE_BLEND_SHADER_CHUNK
-      )
-      .replace(
-        'vec3 lightMapIrradiance = lightMapTexel.rgb * lightMapIntensity;',
-        `vec3 lightMapTorchIrradiance = vec3( lightMapTexel.r ) * lightMapTorchTint * lightMapIntensity;
-\t\tvec3 lightMapAmbientIrradiance = vec3( lightMapTexel.g ) * lightMapAmbientTint;
-\t\tvec3 lightMapIrradiance = lightMapTorchIrradiance + lightMapAmbientIrradiance;`
       )
 
   material.userData.probeBlendShaderDebug = {
@@ -2463,6 +2794,19 @@ function directionToYaw(direction: CardinalDirection) {
   }
 }
 
+function directionToWorldOffset(direction: CardinalDirection) {
+  switch (direction) {
+    case 'east':
+      return { x: MAZE_CELL_SIZE, z: 0 }
+    case 'south':
+      return { x: 0, z: MAZE_CELL_SIZE }
+    case 'west':
+      return { x: -MAZE_CELL_SIZE, z: 0 }
+    default:
+      return { x: 0, z: -MAZE_CELL_SIZE }
+  }
+}
+
 function getPmremCubeSize(texture: Texture | null | undefined) {
   const image = texture?.image as
     | {
@@ -2512,6 +2856,68 @@ function getCubeUvTextureInfo(texture: Texture | null | undefined): ProbeTexture
   }
 }
 
+function useProbeCoefficientTextures(
+  layout: MazeLayout,
+  reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
+) {
+  const textures = useMemo(() => {
+    const coefficientArrays = Array.from(
+      { length: 4 },
+      () => new Float32Array(layout.maze.width * layout.maze.height * 4)
+    )
+
+    for (let probeIndex = 0; probeIndex < reflectionProbeCoefficients.length; probeIndex += 1) {
+      const coefficients = reflectionProbeCoefficients[probeIndex]
+      const pixelOffset = probeIndex * 4
+
+      if (!coefficients) {
+        continue
+      }
+
+      for (let bandIndex = 0; bandIndex < 4; bandIndex += 1) {
+        const target = coefficientArrays[bandIndex]
+        const coefficient = coefficients[bandIndex] ?? [0, 0, 0]
+
+        target[pixelOffset] = coefficient[0]
+        target[pixelOffset + 1] = coefficient[1]
+        target[pixelOffset + 2] = coefficient[2]
+        target[pixelOffset + 3] = 1
+      }
+    }
+
+    return coefficientArrays.map((data) => {
+      const texture = new DataTexture(
+        data,
+        layout.maze.width,
+        layout.maze.height,
+        RGBAFormat,
+        FloatType
+      )
+
+      texture.colorSpace = NoColorSpace
+      texture.flipY = false
+      texture.generateMipmaps = false
+      texture.magFilter = NearestFilter
+      texture.minFilter = NearestFilter
+      texture.wrapS = ClampToEdgeWrapping
+      texture.wrapT = ClampToEdgeWrapping
+      texture.needsUpdate = true
+      return texture
+    })
+  }, [layout.maze.height, layout.maze.width, reflectionProbeCoefficients])
+
+  useEffect(
+    () => () => {
+      for (const texture of textures) {
+        texture.dispose()
+      }
+    },
+    [textures]
+  )
+
+  return textures
+}
+
 function getCubeTextureFaceSize(texture: Texture | null | undefined) {
   const image = texture?.image as
     | Array<{
@@ -2550,18 +2956,21 @@ function getCubeTextureFaceSize(texture: Texture | null | undefined) {
 }
 
 function loadRuntimeProbeCubeUvTexture(url: string) {
-  const loader = new ImageBitmapLoader()
-
-  loader.setOptions({
-    colorSpaceConversion: 'none',
-    imageOrientation: 'flipY',
-    premultiplyAlpha: 'none'
-  })
-
   return new Promise<Texture>((resolve, reject) => {
-    loader.load(
-      url,
-      (imageBitmap) => {
+    void fetch(url)
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Failed to load reflection probe texture ${url}: ${response.status}`)
+        }
+
+        const blob = await response.blob()
+        return createImageBitmap(blob, {
+          colorSpaceConversion: 'none',
+          imageOrientation: 'flipY',
+          premultiplyAlpha: 'none'
+        })
+      })
+      .then((imageBitmap) => {
         const texture = new Texture(imageBitmap)
 
         texture.colorSpace = NoColorSpace
@@ -2573,10 +2982,8 @@ function loadRuntimeProbeCubeUvTexture(url: string) {
         texture.premultiplyAlpha = false
         texture.needsUpdate = true
         resolve(texture)
-      },
-      undefined,
-      reject
-    )
+      })
+      .catch(reject)
   })
 }
 
@@ -2812,6 +3219,7 @@ function buildProbeBlendConfig(
   mode: ProbeBlendMode,
   options: {
     diffuseIntensity?: number
+    probeCoefficientTextures?: [Texture, Texture, Texture, Texture]
     radianceIntensity?: number
     radianceMode?: ProbeBlendMode
     region?: {
@@ -2820,12 +3228,22 @@ function buildProbeBlendConfig(
       sizeX: number
       sizeZ: number
     }
+    vlmBoundaryNormal?: {
+      x: number
+      z: number
+    }
+    vlmMode?: ProbeVlmMode
     weights?: [number, number, number, number]
   } = {}
 ) {
   return {
     diffuseIntensity: options.diffuseIntensity ?? 1,
     mode,
+    probeCellSize: MAZE_CELL_SIZE,
+    probeCoeffTextureL0: options.probeCoefficientTextures?.[0] ?? null,
+    probeCoeffTextureL1: options.probeCoefficientTextures?.[1] ?? null,
+    probeCoeffTextureL2: options.probeCoefficientTextures?.[2] ?? null,
+    probeCoeffTextureL3: options.probeCoefficientTextures?.[3] ?? null,
     radianceIntensity: options.radianceIntensity ?? 1,
     radianceMode: options.radianceMode ?? mode,
     probeBoxes: probeIndices.map((probeIndex) =>
@@ -2833,12 +3251,22 @@ function buildProbeBlendConfig(
     ),
     probeCoefficients,
     probeDepthTextures,
+    probeGridMin: {
+      x: -((layout.maze.width * MAZE_CELL_SIZE) / 2),
+      z: -((layout.maze.height * MAZE_CELL_SIZE) / 2)
+    },
+    probeGridSize: {
+      x: layout.maze.width,
+      y: layout.maze.height
+    },
     probePositions: probeIndices.map(
       (probeIndex) => layout.reflectionProbes[probeIndex]?.position ?? null
     ),
     probeTextureInfos: probeTextures.map((texture) => getCubeUvTextureInfo(texture)),
     probeTextures,
     region: options.region,
+    vlmBoundaryNormal: options.vlmBoundaryNormal,
+    vlmMode: options.vlmMode ?? 'disabled',
     weights: options.weights
   } satisfies ProbeBlendConfig
 }
@@ -2853,24 +3281,29 @@ function useProbeBlendMaterialShader(
   const materialRef = useRef(material)
   const probeBlendRef = useRef(probeBlend)
   const patchConfigRef = useRef(patchConfig)
+  const probeBlendUpdateKeyRef = useRef(getProbeBlendUpdateKey(probeBlend, patchConfig))
+  const appliedProbeBlendUpdateKeyRef = useRef<string | null>(null)
 
   materialRef.current = material
   probeBlendRef.current = probeBlend
   patchConfigRef.current = patchConfig
+  probeBlendUpdateKeyRef.current = getProbeBlendUpdateKey(probeBlend, patchConfig)
 
   const customProgramCacheKey = useMemo(
     () => () => {
       const currentPatchConfig = patchConfigRef.current
       const currentProbeBlend = probeBlendRef.current
+      const activeRadianceMode = currentProbeBlend.radianceMode ?? currentProbeBlend.mode
       const usesTintedLightMap =
         Boolean(currentPatchConfig.lightMapAmbientTint) ||
         Boolean(currentPatchConfig.lightMapTorchTint)
 
       return [
-        'probe-blend-v3',
+        'probe-blend-v4',
         usesTintedLightMap ? 'lightmap-tint' : 'plain',
         currentProbeBlend.mode,
-        currentProbeBlend.radianceMode ?? currentProbeBlend.mode
+        activeRadianceMode,
+        currentProbeBlend.vlmMode ?? 'disabled'
       ].join('-')
     },
     []
@@ -2897,31 +3330,116 @@ function useProbeBlendMaterialShader(
     () => () => {
       const currentMaterial = materialRef.current
 
+      if (appliedProbeBlendUpdateKeyRef.current === probeBlendUpdateKeyRef.current) {
+        return
+      }
+
       updateProbeBlendMaterialDebugState(currentMaterial, probeBlendRef.current)
-      updateProbeBlendShaderUniforms(
-        shaderRef.current,
-        probeBlendRef.current,
-        patchConfigRef.current
-      )
+      updateProbeBlendShaderUniforms(shaderRef.current, probeBlendRef.current, patchConfigRef.current)
       updateProbeBlendUniformDebugState(currentMaterial, shaderRef.current)
+      appliedProbeBlendUpdateKeyRef.current = probeBlendUpdateKeyRef.current
     },
     []
   )
 
   useEffect(() => {
     shaderRef.current = null
+    appliedProbeBlendUpdateKeyRef.current = null
   }, [materialKey])
 
   useEffect(() => {
     updateProbeBlendMaterialDebugState(material, probeBlend)
     updateProbeBlendShaderUniforms(shaderRef.current, probeBlend, patchConfig)
     updateProbeBlendUniformDebugState(material, shaderRef.current)
+    appliedProbeBlendUpdateKeyRef.current = probeBlendUpdateKeyRef.current
   }, [material, materialKey, patchConfig, probeBlend])
 
   return {
     customProgramCacheKey,
     onBeforeCompile,
     onBeforeRender
+  }
+}
+
+function attachProbeBlendMaterialShader(
+  material: ThreeMeshPhysicalMaterial | ThreeMeshStandardMaterial,
+  probeBlend: ProbeBlendConfig,
+  patchConfig: MaterialShaderPatchConfig = {},
+  shaderRef: { current: ProbeBlendShader | null }
+) {
+  const materialRef = { current: material }
+  const probeBlendRef = { current: probeBlend }
+  const patchConfigRef = { current: patchConfig }
+  const probeBlendUpdateKeyRef = { current: getProbeBlendUpdateKey(probeBlend, patchConfig) }
+  const appliedProbeBlendUpdateKeyRef = { current: null as string | null }
+
+  const customProgramCacheKey = () => {
+    const currentPatchConfig = patchConfigRef.current
+    const currentProbeBlend = probeBlendRef.current
+    const activeRadianceMode = currentProbeBlend.radianceMode ?? currentProbeBlend.mode
+    const usesTintedLightMap =
+      Boolean(currentPatchConfig.lightMapAmbientTint) ||
+      Boolean(currentPatchConfig.lightMapTorchTint)
+
+    return [
+      'probe-blend-v4',
+      usesTintedLightMap ? 'lightmap-tint' : 'plain',
+      currentProbeBlend.mode,
+      activeRadianceMode,
+      currentProbeBlend.vlmMode ?? 'disabled'
+    ].join('-')
+  }
+
+  material.customProgramCacheKey = customProgramCacheKey
+  material.onBeforeCompile = (shader: Shader) => {
+    const currentMaterial = materialRef.current
+
+    if (!currentMaterial) {
+      return
+    }
+
+    patchProbeBlendMaterialShader(
+      currentMaterial,
+      shader,
+      probeBlendRef,
+      patchConfigRef,
+      shaderRef
+    )
+  }
+  material.onBeforeRender = () => {
+    const currentMaterial = materialRef.current
+
+    if (appliedProbeBlendUpdateKeyRef.current === probeBlendUpdateKeyRef.current) {
+      return
+    }
+
+    updateProbeBlendMaterialDebugState(currentMaterial, probeBlendRef.current)
+    updateProbeBlendShaderUniforms(
+      shaderRef.current,
+      probeBlendRef.current,
+      patchConfigRef.current
+    )
+    updateProbeBlendUniformDebugState(currentMaterial, shaderRef.current)
+    appliedProbeBlendUpdateKeyRef.current = probeBlendUpdateKeyRef.current
+  }
+  material.needsUpdate = true
+  updateProbeBlendMaterialDebugState(material, probeBlend)
+  updateProbeBlendShaderUniforms(shaderRef.current, probeBlend, patchConfig)
+  updateProbeBlendUniformDebugState(material, shaderRef.current)
+  appliedProbeBlendUpdateKeyRef.current = probeBlendUpdateKeyRef.current
+
+  return {
+    set(nextProbeBlend: ProbeBlendConfig, nextPatchConfig: MaterialShaderPatchConfig = patchConfig) {
+      probeBlendRef.current = nextProbeBlend
+      patchConfigRef.current = nextPatchConfig
+      probeBlendUpdateKeyRef.current = getProbeBlendUpdateKey(nextProbeBlend, nextPatchConfig)
+      appliedProbeBlendUpdateKeyRef.current = null
+      updateProbeBlendMaterialDebugState(materialRef.current, nextProbeBlend)
+      updateProbeBlendShaderUniforms(shaderRef.current, nextProbeBlend, nextPatchConfig)
+      updateProbeBlendUniformDebugState(materialRef.current, shaderRef.current)
+      appliedProbeBlendUpdateKeyRef.current = probeBlendUpdateKeyRef.current
+      materialRef.current.needsUpdate = true
+    }
   }
 }
 
@@ -3318,57 +3836,55 @@ function decodeBase64Bytes(base64: string) {
   return bytes
 }
 
-function decodeAtlasTextureBytes(texture: Texture) {
-  const image = texture.image as CanvasImageSource & {
-    height: number
-    width: number
-  }
-
-  if (!image?.width || !image?.height) {
-    return new Uint8Array()
-  }
-
-  const canvas = document.createElement('canvas')
-  canvas.width = image.width
-  canvas.height = image.height
-
-  const context = canvas.getContext('2d')
-  if (!context) {
-    throw new Error('Unable to create canvas context for lightmap atlas decode')
-  }
-
-  context.drawImage(image, 0, 0)
-  const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
-  const bytes = new Uint8Array(canvas.width * canvas.height * 3)
-
-  for (let sourceOffset = 0, targetOffset = 0; sourceOffset < imageData.data.length; sourceOffset += 4) {
-    bytes[targetOffset] = imageData.data[sourceOffset]
-    bytes[targetOffset + 1] = imageData.data[sourceOffset + 1]
-    bytes[targetOffset + 2] = imageData.data[sourceOffset + 2]
-    targetOffset += 3
-  }
-
-  return bytes
-}
-
 function useMazeLightmapBytes(lightmap: MazeLightmap) {
-  const atlasTexture = useLoader(
-    TextureLoader,
-    lightmap.atlasUrl
-      ? resolveMazeDataUrl(lightmap.atlasUrl)
-      : EMPTY_RUNTIME_LIGHTMAP_DATA_URL
+  const [bytes, setBytes] = useState<Uint8Array>(() =>
+    typeof lightmap.dataBase64 === 'string' && lightmap.dataBase64.length > 0
+      ? decodeBase64Bytes(lightmap.dataBase64)
+      : new Uint8Array()
   )
 
-  return useMemo(
+  useEffect(
     () => {
       if (typeof lightmap.dataBase64 === 'string' && lightmap.dataBase64.length > 0) {
-        return decodeBase64Bytes(lightmap.dataBase64)
+        setBytes(decodeBase64Bytes(lightmap.dataBase64))
+        return
       }
 
-      return decodeAtlasTextureBytes(atlasTexture)
+      if (!lightmap.atlasUrl) {
+        setBytes(new Uint8Array())
+        return
+      }
+
+      let cancelled = false
+
+      void fetch(resolveMazeDataUrl(lightmap.atlasUrl))
+        .then(async (response) => {
+          if (!response.ok) {
+            throw new Error(`Failed to load surface lightmap bytes: ${response.status}`)
+          }
+
+          return new Uint8Array(await response.arrayBuffer())
+        })
+        .then((nextBytes) => {
+          if (!cancelled) {
+            setBytes(nextBytes)
+          }
+        })
+        .catch((error) => {
+          console.error(error)
+          if (!cancelled) {
+            setBytes(new Uint8Array())
+          }
+        })
+
+      return () => {
+        cancelled = true
+      }
     },
-    [atlasTexture, lightmap]
+    [lightmap]
   )
+
+  return bytes
 }
 
 function useGroundLightmapTexture(
@@ -3376,7 +3892,13 @@ function useGroundLightmapTexture(
   lightmapBytes: Uint8Array
 ) {
   const texture = useMemo(
-    () => createLightmapFaceTexture(lightmapBytes, lightmap.atlasWidth, lightmap.groundRect),
+    () =>
+      createLightmapFaceTexture(
+        lightmapBytes,
+        lightmap.atlasWidth,
+        lightmap.groundRect,
+        lightmap.encoding ?? 'rgbe8'
+      ),
     [lightmap, lightmapBytes]
   )
 
@@ -3396,45 +3918,114 @@ function createLightmapFaceTexture(
   data: Uint8Array,
   atlasWidth: number,
   rect: LightmapRect,
+  encoding: MazeLightmap['encoding'] = 'rgb16f',
   options: {
     flipY?: boolean
     mirrorX?: boolean
   } = {}
 ) {
-  const canvas = document.createElement('canvas')
-  canvas.width = rect.width
-  canvas.height = rect.height
-  const context = canvas.getContext('2d')
+  if (encoding === 'rgb16f') {
+    const sourceData = new Uint16Array(
+      data.buffer,
+      data.byteOffset,
+      Math.floor(data.byteLength / 2)
+    )
+    const pixelStride = 3
+    const outputData = new Uint16Array(rect.width * rect.height * pixelStride)
 
-  if (!context) {
-    throw new Error('Could not create 2D context for wall lightmap face texture')
+    for (let row = 0; row < rect.height; row += 1) {
+      const destinationRowOffset = row * rect.width * pixelStride
+
+      if (options.mirrorX) {
+        for (let column = 0; column < rect.width; column += 1) {
+          const sourceColumn = rect.width - 1 - column
+          const sourceOffset =
+            ((((rect.y + row) * atlasWidth) + rect.x + sourceColumn) * pixelStride)
+          const destinationOffset = destinationRowOffset + (column * pixelStride)
+
+          outputData[destinationOffset] = sourceData[sourceOffset] ?? 0
+          outputData[destinationOffset + 1] = sourceData[sourceOffset + 1] ?? 0
+          outputData[destinationOffset + 2] = sourceData[sourceOffset + 2] ?? 0
+        }
+      } else {
+        const sourceOffset = ((((rect.y + row) * atlasWidth) + rect.x) * pixelStride)
+        outputData.set(
+          sourceData.subarray(sourceOffset, sourceOffset + (rect.width * pixelStride)),
+          destinationRowOffset
+        )
+      }
+    }
+
+    const texture = new DataTexture(
+      outputData,
+      rect.width,
+      rect.height,
+      RGBFormat,
+      HalfFloatType
+    )
+    texture.colorSpace = NoColorSpace
+    texture.flipY = options.flipY ?? true
+    texture.generateMipmaps = false
+    texture.magFilter = LinearFilter
+    texture.minFilter = LinearFilter
+    texture.wrapS = ClampToEdgeWrapping
+    texture.wrapT = ClampToEdgeWrapping
+    texture.needsUpdate = true
+    return texture
   }
 
-  const image = context.createImageData(rect.width, rect.height)
+  const decodedFaceData = new Uint16Array(rect.width * rect.height * 4)
+  const byteView = new DataView(data.buffer, data.byteOffset, data.byteLength)
 
   for (let row = 0; row < rect.height; row += 1) {
     for (let column = 0; column < rect.width; column += 1) {
       const sourceColumn = options.mirrorX
         ? (rect.width - 1 - column)
         : column
-      const atlasIndex =
-        ((((rect.y + row) * atlasWidth) + rect.x + sourceColumn) * 3)
+      const atlasPixelIndex =
+        (((rect.y + row) * atlasWidth) + rect.x + sourceColumn)
       const pixelIndex = ((row * rect.width) + column) * 4
+      const decoded =
+        encoding === 'rgb16f' && ((atlasPixelIndex * 6) + 5) < data.byteLength
+          ? [
+              DataUtils.fromHalfFloat(byteView.getUint16((atlasPixelIndex * 6) + 0, true)),
+              DataUtils.fromHalfFloat(byteView.getUint16((atlasPixelIndex * 6) + 2, true)),
+              DataUtils.fromHalfFloat(byteView.getUint16((atlasPixelIndex * 6) + 4, true))
+            ]
+          : encoding === 'rgbe8' && ((atlasPixelIndex * 4) + 3) < data.byteLength
+          ? decodeRgbE8(
+              data[atlasPixelIndex * 4],
+              data[(atlasPixelIndex * 4) + 1],
+              data[(atlasPixelIndex * 4) + 2],
+              data[(atlasPixelIndex * 4) + 3]
+            )
+          : ((atlasPixelIndex * 3) + 2) < data.byteLength
+            ? [
+              (data[atlasPixelIndex * 3] ?? 0) / 255,
+              (data[(atlasPixelIndex * 3) + 1] ?? 0) / 255,
+              (data[(atlasPixelIndex * 3) + 2] ?? 0) / 255
+            ]
+            : [0, 0, 0]
 
-      image.data[pixelIndex] = data[atlasIndex]
-      image.data[pixelIndex + 1] = data[atlasIndex + 1]
-      image.data[pixelIndex + 2] = data[atlasIndex + 2]
-      image.data[pixelIndex + 3] = 255
+      decodedFaceData[pixelIndex] = DataUtils.toHalfFloat(decoded[0] ?? 0)
+      decodedFaceData[pixelIndex + 1] = DataUtils.toHalfFloat(decoded[1] ?? 0)
+      decodedFaceData[pixelIndex + 2] = DataUtils.toHalfFloat(decoded[2] ?? 0)
+      decodedFaceData[pixelIndex + 3] = DataUtils.toHalfFloat(1)
     }
   }
 
-  context.putImageData(image, 0, 0)
-
-  const texture = new CanvasTexture(canvas)
+  const texture = new DataTexture(
+    decodedFaceData,
+    rect.width,
+    rect.height,
+    RGBAFormat,
+    HalfFloatType
+  )
+  texture.colorSpace = NoColorSpace
   texture.flipY = options.flipY ?? true
-  texture.generateMipmaps = true
+  texture.generateMipmaps = false
   texture.magFilter = LinearFilter
-  texture.minFilter = LinearMipmapLinearFilter
+  texture.minFilter = LinearFilter
   texture.wrapS = ClampToEdgeWrapping
   texture.wrapT = ClampToEdgeWrapping
   texture.needsUpdate = true
@@ -3489,16 +4080,29 @@ function useWallLightmapTextures(
       neutral: createLightmapFaceTexture(
         lightmapBytes,
         lightmap.atlasWidth,
-        lightmap.neutralRect
+        lightmap.neutralRect,
+        lightmap.encoding ?? 'rgbe8'
       ),
       // BoxGeometry's local -Z face UVs are mirrored horizontally relative to +Z.
-      nz: createLightmapFaceTexture(lightmapBytes, lightmap.atlasWidth, rects.nz, {
-        flipY: false,
-        mirrorX: true
-      }),
-      pz: createLightmapFaceTexture(lightmapBytes, lightmap.atlasWidth, rects.pz, {
-        flipY: false
-      })
+      nz: createLightmapFaceTexture(
+        lightmapBytes,
+        lightmap.atlasWidth,
+        rects.nz,
+        lightmap.encoding ?? 'rgbe8',
+        {
+          flipY: false,
+          mirrorX: true
+        }
+      ),
+      pz: createLightmapFaceTexture(
+        lightmapBytes,
+        lightmap.atlasWidth,
+        rects.pz,
+        lightmap.encoding ?? 'rgbe8',
+        {
+          flipY: false
+        }
+      )
     }
   }, [lightmap, lightmapBytes, wallId])
 
@@ -3764,6 +4368,7 @@ function StartupReporter() {
 
 function EnvironmentLighting({
   layout,
+  priorityPosition,
   volumetricLighting,
   onEnvironmentFogColorChange,
   onEnvironmentTextureChange,
@@ -3774,6 +4379,7 @@ function EnvironmentLighting({
   onReflectionProbeTexturesChange
 }: {
   layout: MazeLayout
+  priorityPosition: { x: number; z: number }
   volumetricLighting: EffectSettings
   onEnvironmentFogColorChange: (color: Color) => void
   onEnvironmentTextureChange: (texture: Texture | null) => void
@@ -3791,11 +4397,11 @@ function EnvironmentLighting({
   const reflectionProbeDepthTargets = useRef<Array<{ dispose: () => void; texture: CubeTexture }>>([])
   const reflectionProbeRawTargets = useRef<Array<{ dispose: () => void; texture: Texture }>>([])
   const reflectionProbeTargets = useRef<Array<{ dispose: () => void; texture: Texture }>>([])
-  const fogAmbientColor = useMemo(
-    () => computeAverageHdrColor(hdrTexture, BAKED_ENVIRONMENT_INTENSITY),
-    [hdrTexture]
-  )
   const needsProbeAmbientCapture = isEffectActive(volumetricLighting)
+  const needsProbeAmbientCaptureRef = useRef(needsProbeAmbientCapture)
+  needsProbeAmbientCaptureRef.current = needsProbeAmbientCapture
+  const priorityPositionRef = useRef(priorityPosition)
+  priorityPositionRef.current = priorityPosition
 
   useEffect(() => {
     const captureSceneState = getReflectionCaptureSceneState(scene, layout)
@@ -3811,7 +4417,7 @@ function EnvironmentLighting({
       probeCount: layout.reflectionProbes.length,
       ready: false
     }
-    onEnvironmentFogColorChange(DEFAULT_FOG_IBL_COLOR.clone())
+    onEnvironmentFogColorChange(BLACK_COLOR.clone())
     onEnvironmentTextureChange(null)
     onReflectionProbeAmbientColorsChange([])
     onReflectionProbeCoefficientsChange([])
@@ -3821,7 +4427,7 @@ function EnvironmentLighting({
 
     return () => {
       delete scene.userData.reflectionProbeState
-      onEnvironmentFogColorChange(DEFAULT_FOG_IBL_COLOR.clone())
+      onEnvironmentFogColorChange(BLACK_COLOR.clone())
       onEnvironmentTextureChange(null)
       onReflectionProbeAmbientColorsChange([])
       onReflectionProbeCoefficientsChange([])
@@ -3848,11 +4454,11 @@ function EnvironmentLighting({
 
     environmentTarget.current = nextEnvironment
     scene.background = hdrTexture
-    scene.environment = nextEnvironment.texture
+    scene.environment = null
     scene.backgroundIntensity = BAKED_ENVIRONMENT_INTENSITY
-    scene.environmentIntensity = BAKED_ENVIRONMENT_INTENSITY
-    onEnvironmentFogColorChange(fogAmbientColor.clone())
-    onEnvironmentTextureChange(nextEnvironment.texture)
+    scene.environmentIntensity = 0
+    onEnvironmentFogColorChange(BLACK_COLOR.clone())
+    onEnvironmentTextureChange(null)
 
     return () => {
       if (scene.background === hdrTexture) {
@@ -3864,11 +4470,10 @@ function EnvironmentLighting({
       nextEnvironment.dispose()
       environmentTarget.current = null
       pmremGenerator.dispose()
-      onEnvironmentFogColorChange(DEFAULT_FOG_IBL_COLOR.clone())
+      onEnvironmentFogColorChange(BLACK_COLOR.clone())
       onEnvironmentTextureChange(null)
     }
   }, [
-    fogAmbientColor,
     gl,
     hdrTexture,
     onEnvironmentFogColorChange,
@@ -3937,6 +4542,9 @@ function EnvironmentLighting({
       const nextProbeCoefficients = new Array<ProbeIrradianceCoefficients | null>(probeCount).fill(null)
       let cancelled = false
       let loadHandle = 0
+      let publishHandle = 0
+      let latestCaptureSceneState = getReflectionCaptureSceneState(scene, layout)
+      const startupProbeIndexSet = new Set(startupProbeIndices)
 
       const disposeProbeTargets = (
         targets: Array<{ dispose: () => void; texture: Texture }>
@@ -3990,7 +4598,7 @@ function EnvironmentLighting({
           const target = nextTargets[probeIndex]
 
           publishedAmbientColors[probeIndex] = (
-            ambientColor ?? fogAmbientColor
+            ambientColor ?? BLACK_COLOR
           ).clone()
           if (coefficients) {
             publishedCoefficients[probeIndex] = coefficients.map((coefficient) => (
@@ -4013,24 +4621,51 @@ function EnvironmentLighting({
         reflectionProbeDepthTargets.current = nextDepthTargets
         reflectionProbeTargets.current = nextTargets
         reflectionProbeRawTargets.current = []
-        onReflectionProbeAmbientColorsChange(publishedAmbientColors)
-        onReflectionProbeCoefficientsChange(publishedCoefficients)
-        onReflectionProbeDepthTexturesChange(publishedDepthTextures)
-        onReflectionProbeRawTexturesChange([])
-        onReflectionProbeTexturesChange(publishedTextures)
+        startTransition(() => {
+          onReflectionProbeAmbientColorsChange(publishedAmbientColors)
+          onReflectionProbeCoefficientsChange(publishedCoefficients)
+          onReflectionProbeDepthTexturesChange(publishedDepthTextures)
+          onReflectionProbeRawTexturesChange([])
+          onReflectionProbeTexturesChange(publishedTextures)
+        })
+        latestCaptureSceneState = getReflectionCaptureSceneState(scene, layout)
         scene.userData.reflectionProbeState = buildReflectionProbeState(
-          getReflectionCaptureSceneState(scene, layout)
+          latestCaptureSceneState
         )
       }
 
-      scene.userData.reflectionProbeState = buildReflectionProbeState(
-        getReflectionCaptureSceneState(scene, layout)
-      )
-      onReflectionProbeAmbientColorsChange([])
-      onReflectionProbeCoefficientsChange([])
-      onReflectionProbeDepthTexturesChange([])
-      onReflectionProbeRawTexturesChange([])
-      onReflectionProbeTexturesChange([])
+      const schedulePublishedProbeState = (immediate = false) => {
+        if (cancelled) {
+          return
+        }
+
+        if (immediate) {
+          if (publishHandle !== 0) {
+            window.clearTimeout(publishHandle)
+            publishHandle = 0
+          }
+          publishReflectionProbeState()
+          return
+        }
+
+        if (publishHandle !== 0) {
+          return
+        }
+
+        publishHandle = window.setTimeout(() => {
+          publishHandle = 0
+          publishReflectionProbeState()
+        }, REFLECTION_PROBE_PUBLISH_INTERVAL_MS)
+      }
+
+      scene.userData.reflectionProbeState = buildReflectionProbeState(latestCaptureSceneState)
+      startTransition(() => {
+        onReflectionProbeAmbientColorsChange([])
+        onReflectionProbeCoefficientsChange([])
+        onReflectionProbeDepthTexturesChange([])
+        onReflectionProbeRawTexturesChange([])
+        onReflectionProbeTexturesChange([])
+      })
 
       const loadProbeManifest = async () => {
         try {
@@ -4045,13 +4680,10 @@ function EnvironmentLighting({
           }
 
           const manifest = await response.json() as RuntimeProbeAssetManifest
-          const loadOrder = [
-            ...startupProbeIndices,
-            ...manifest.probes
-              .map((probe) => probe.index)
-              .filter((probeIndex) => !startupProbeIndices.includes(probeIndex))
-          ]
-          const pendingProbeIndices = [...loadOrder]
+          const pendingStartupProbeIndices = [...startupProbeIndices]
+          const pendingBackgroundProbeIndices = manifest.probes
+            .map((probe) => probe.index)
+            .filter((probeIndex) => !startupProbeIndexSet.has(probeIndex))
           let activeProbeLoads = 0
           let finished = false
 
@@ -4063,14 +4695,14 @@ function EnvironmentLighting({
             finished = true
             disposeProbeTargets(previousTargets)
             disposeProbeTargets(previousRawTargets)
-            publishReflectionProbeState()
+            schedulePublishedProbeState(true)
           }
 
           const loadProbe = async (probeIndex: number) => {
             const manifestProbe = manifest.probes.find((probe) => probe.index === probeIndex)
 
             if (!manifestProbe) {
-              publishReflectionProbeState()
+              schedulePublishedProbeState(startupProbeIndexSet.has(probeIndex))
               return
             }
 
@@ -4110,9 +4742,13 @@ function EnvironmentLighting({
                   l0[1] / 0.282095,
                   l0[2] / 0.282095
                 )
-              : fogAmbientColor.clone()
+              : BLACK_COLOR.clone()
 
-            publishReflectionProbeState()
+            scene.userData.reflectionProbeState = buildReflectionProbeState(latestCaptureSceneState)
+
+            if (startupProbeIndexSet.has(probeIndex)) {
+              schedulePublishedProbeState(true)
+            }
           }
 
           const scheduleProbeLoads = () => {
@@ -4120,11 +4756,42 @@ function EnvironmentLighting({
               return
             }
 
+            pendingBackgroundProbeIndices.sort((leftProbeIndex, rightProbeIndex) => {
+              const currentPriorityPosition = priorityPositionRef.current
+              const leftProbe = layout.reflectionProbes[leftProbeIndex]
+              const rightProbe = layout.reflectionProbes[rightProbeIndex]
+              const leftDistanceSquared =
+                ((leftProbe?.position.x ?? 0) - currentPriorityPosition.x) ** 2 +
+                ((leftProbe?.position.z ?? 0) - currentPriorityPosition.z) ** 2
+              const rightDistanceSquared =
+                ((rightProbe?.position.x ?? 0) - currentPriorityPosition.x) ** 2 +
+                ((rightProbe?.position.z ?? 0) - currentPriorityPosition.z) ** 2
+
+              return leftDistanceSquared - rightDistanceSquared
+            })
+
+            const getNextProbeIndex = () => {
+              if (pendingStartupProbeIndices.length > 0) {
+                return pendingStartupProbeIndices.shift()
+              }
+
+              return pendingBackgroundProbeIndices.shift()
+            }
+
+            const getLoadConcurrency = () => (
+              pendingStartupProbeIndices.length > 0
+                ? REFLECTION_PROBE_LOAD_CONCURRENCY
+                : REFLECTION_PROBE_BACKGROUND_LOAD_CONCURRENCY
+            )
+
             while (
-              activeProbeLoads < REFLECTION_PROBE_LOAD_CONCURRENCY &&
-              pendingProbeIndices.length > 0
+              activeProbeLoads < getLoadConcurrency() &&
+              (
+                pendingStartupProbeIndices.length > 0 ||
+                pendingBackgroundProbeIndices.length > 0
+              )
             ) {
-              const probeIndex = pendingProbeIndices.shift()
+              const probeIndex = getNextProbeIndex()
 
               if (probeIndex === undefined) {
                 continue
@@ -4143,7 +4810,8 @@ function EnvironmentLighting({
                   }
 
                   if (
-                    pendingProbeIndices.length === 0 &&
+                    pendingStartupProbeIndices.length === 0 &&
+                    pendingBackgroundProbeIndices.length === 0 &&
                     activeProbeLoads === 0
                   ) {
                     finishLoading()
@@ -4159,7 +4827,7 @@ function EnvironmentLighting({
         } catch (error) {
           console.error(error)
           scene.userData.reflectionProbeState = buildReflectionProbeState(
-            getReflectionCaptureSceneState(scene, layout)
+            latestCaptureSceneState
           )
         }
       }
@@ -4169,16 +4837,19 @@ function EnvironmentLighting({
       return () => {
         cancelled = true
         window.clearTimeout(loadHandle)
+        window.clearTimeout(publishHandle)
         disposeProbeTargets(nextDepthTargets)
         disposeProbeTargets(previousDepthTargets)
         disposeProbeTargets(nextTargets)
         disposeProbeTargets(previousTargets)
         disposeProbeTargets(previousRawTargets)
-        onReflectionProbeAmbientColorsChange([])
-        onReflectionProbeCoefficientsChange([])
-        onReflectionProbeDepthTexturesChange([])
-        onReflectionProbeRawTexturesChange([])
-        onReflectionProbeTexturesChange([])
+        startTransition(() => {
+          onReflectionProbeAmbientColorsChange([])
+          onReflectionProbeCoefficientsChange([])
+          onReflectionProbeDepthTexturesChange([])
+          onReflectionProbeRawTexturesChange([])
+          onReflectionProbeTexturesChange([])
+        })
       }
     }
 
@@ -4380,7 +5051,7 @@ function EnvironmentLighting({
           probeCaptureSize,
           { type: HalfFloatType }
         )
-        const ambientCubeRenderTarget = needsProbeAmbientCapture
+        const ambientCubeRenderTarget = needsProbeAmbientCaptureRef.current
           ? new WebGLCubeRenderTarget(
               REFLECTION_PROBE_AMBIENT_RENDER_SIZE,
               { type: UnsignedByteType }
@@ -4466,7 +5137,7 @@ function EnvironmentLighting({
             warmFraction: probeDebugStats.warmFraction
           }
         } else {
-          nextProbeAmbientColors[probeIndex] = fogAmbientColor.clone()
+          nextProbeAmbientColors[probeIndex] = BLACK_COLOR.clone()
           nextProbeMetrics[probeIndex] = null
         }
         nextProbeRawMetrics[probeIndex] = null
@@ -4577,8 +5248,6 @@ function EnvironmentLighting({
     onReflectionProbeRawTexturesChange,
     onReflectionProbeTexturesChange,
     pmremGenerator,
-    fogAmbientColor,
-    needsProbeAmbientCapture,
     scene
   ])
 
@@ -4633,8 +5302,8 @@ function GroundSurfaceMaterial({
       {...maps}
       bumpScale={0.08}
       customProgramCacheKey={probeBlendMaterialProps.customProgramCacheKey}
-      envMap={globalEnvMap ?? null}
-      envMapIntensity={globalEnvMapIntensity}
+      envMap={null}
+      envMapIntensity={0}
       key={materialKey}
       lightMap={lightMap}
       lightMapIntensity={lightMapIntensity}
@@ -4727,6 +5396,7 @@ function Ground({
   layout,
   lightmapContributionIntensity,
   groundLightmapTexture,
+  probeCoefficientTextures,
   reflectionContributionIntensity,
   reflectionProbeCoefficients,
   reflectionProbeDepthTextures,
@@ -4738,6 +5408,7 @@ function Ground({
   layout: MazeLayout
   lightmapContributionIntensity: number
   groundLightmapTexture: Texture
+  probeCoefficientTextures: [Texture, Texture, Texture, Texture]
   reflectionContributionIntensity: number
   reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
   reflectionProbeDepthTextures: CubeTexture[]
@@ -4751,19 +5422,6 @@ function Ground({
 
   return (
     <>
-      <mesh
-        position={[0, GROUND_Y, 0]}
-        receiveShadow
-        rotation-x={-Math.PI / 2}
-        userData={{ debugIndex: 0, debugRole: 'maze-ground-base' }}
-      >
-        <planeGeometry args={[GROUND_SIZE, GROUND_SIZE]} />
-        <GroundSurfaceMaterial
-          globalEnvMap={environmentTexture}
-          globalEnvMapIntensity={environmentIntensity}
-          maps={puddle}
-        />
-      </mesh>
       {groundPatchRects.map((rect, index) => (
         (() => {
           const probeTextures = rect.probeIndices.map(
@@ -4782,7 +5440,6 @@ function Ground({
             lightmapContributionIntensity > EFFECT_EPSILON
           const probeIblActive =
             iblContributionIntensity > EFFECT_EPSILON &&
-            hasProbeDepthTextures &&
             hasProbeCoefficients
           const reflectionActive =
             reflectionContributionIntensity > EFFECT_EPSILON &&
@@ -4805,12 +5462,14 @@ function Ground({
                 probeTextures,
                 probeDepthTextures,
                 probeCoefficients,
-                probeIblActive ? 'world' : 'disabled',
+                'disabled',
                 {
                   diffuseIntensity: iblContributionIntensity,
+                  probeCoefficientTextures,
                   radianceIntensity: reflectionContributionIntensity,
                   radianceMode: reflectionActive ? 'world' : 'disabled',
-                  region: rect.region
+                  region: rect.region,
+                  vlmMode: probeIblActive ? 'cell5' : 'disabled'
                 }
               )}
               rect={rect}
@@ -4925,6 +5584,7 @@ function WallSconce({
   layout,
   lightmapContributionIntensity,
   mazeLight,
+  probeCoefficientTextures,
   reflectionContributionIntensity,
   reflectionProbeCoefficients,
   reflectionProbeDepthTextures,
@@ -4936,6 +5596,7 @@ function WallSconce({
   layout: MazeLayout
   lightmapContributionIntensity: number
   mazeLight: MazeLayout['lights'][number]
+  probeCoefficientTextures: [Texture, Texture, Texture, Texture]
   reflectionContributionIntensity: number
   reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
   reflectionProbeDepthTextures: CubeTexture[]
@@ -4975,12 +5636,20 @@ function WallSconce({
       ),
     [reflectionProbeBlend.probeIndices, reflectionProbeTextures]
   )
+  const monsterRadianceProbeTextures = useMemo(
+    () => [probeTextures[0] ?? null, null, null, null] as [Texture | null, Texture | null, Texture | null, Texture | null],
+    [probeTextures]
+  )
   const probeDepthTextures = useMemo(
     () =>
       reflectionProbeBlend.probeIndices.map(
         (probeIndex) => reflectionProbeDepthTextures[probeIndex] ?? null
       ),
     [reflectionProbeBlend.probeIndices, reflectionProbeDepthTextures]
+  )
+  const monsterRadianceProbeDepthTextures = useMemo(
+    () => [probeDepthTextures[0] ?? null, null, null, null] as [CubeTexture | null, CubeTexture | null, CubeTexture | null, CubeTexture | null],
+    [probeDepthTextures]
   )
   const probeCoefficients = useMemo(
     () =>
@@ -4989,14 +5658,13 @@ function WallSconce({
       ),
     [reflectionProbeBlend.probeIndices, reflectionProbeCoefficients]
   )
-  const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
-  const hasProbeDepthTextures = hasCompleteProbeDepthTextures(probeDepthTextures)
+  const hasProbeTextures = Boolean(monsterRadianceProbeTextures[0])
+  const hasProbeDepthTextures = Boolean(monsterRadianceProbeDepthTextures[0])
   const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
   const diffuseProbeIntensity =
     lightmapContributionIntensity + iblContributionIntensity
   const diffuseProbeActive =
     diffuseProbeIntensity > EFFECT_EPSILON &&
-    hasProbeDepthTextures &&
     hasProbeCoefficients
   const reflectionActive =
     reflectionContributionIntensity > EFFECT_EPSILON &&
@@ -5010,11 +5678,21 @@ function WallSconce({
         probeTextures,
         probeDepthTextures,
         probeCoefficients,
-        diffuseProbeActive ? 'constant' : 'disabled',
+        'disabled',
         {
           diffuseIntensity: diffuseProbeIntensity,
+          probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
           radianceMode: reflectionActive ? 'constant' : 'disabled',
+          vlmBoundaryNormal:
+            mazeLight.side === 'east'
+              ? { x: 1, z: 0 }
+              : mazeLight.side === 'west'
+                ? { x: -1, z: 0 }
+                : mazeLight.side === 'south'
+                  ? { x: 0, z: 1 }
+                  : { x: 0, z: -1 },
+          vlmMode: diffuseProbeActive ? 'boundary8' : 'disabled',
           weights: reflectionProbeBlend.weights as [number, number, number, number]
         }
       )
@@ -5058,8 +5736,8 @@ function WallSconce({
             bumpScale={0.02}
             color="white"
             customProgramCacheKey={probeBlendMaterialProps.customProgramCacheKey}
-            envMap={environmentTexture ?? null}
-            envMapIntensity={environmentIntensity}
+            envMap={null}
+            envMapIntensity={0}
             key={materialKey}
             map={metal.map}
             metalness={0.85}
@@ -5336,7 +6014,7 @@ function FogVolume({
     const data = new Float32Array(probeCount * 4)
 
     for (let index = 0; index < probeCount; index += 1) {
-      const color = reflectionProbeAmbientColors[index] ?? DEFAULT_FOG_IBL_COLOR
+      const color = reflectionProbeAmbientColors[index] ?? BLACK_COLOR
       const offset = index * 4
 
       data[offset] = color.r
@@ -6477,6 +7155,7 @@ function MazeWalls({
   layout,
   lightmapContributionIntensity,
   lightmapBytes,
+  probeCoefficientTextures,
   reflectionContributionIntensity,
   reflectionProbeCoefficients,
   reflectionProbeDepthTextures,
@@ -6488,6 +7167,7 @@ function MazeWalls({
   layout: MazeLayout
   lightmapContributionIntensity: number
   lightmapBytes: Uint8Array
+  probeCoefficientTextures: [Texture, Texture, Texture, Texture]
   reflectionContributionIntensity: number
   reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
   reflectionProbeDepthTextures: CubeTexture[]
@@ -6508,6 +7188,7 @@ function MazeWalls({
           layout={layout}
           lightmapContributionIntensity={lightmapContributionIntensity}
           mazeWall={mazeWall}
+          probeCoefficientTextures={probeCoefficientTextures}
           reflectionContributionIntensity={reflectionContributionIntensity}
           reflectionProbeCoefficients={reflectionProbeCoefficients}
           reflectionProbeDepthTextures={reflectionProbeDepthTextures}
@@ -6525,6 +7206,7 @@ function MazeWalls({
           layout={layout}
           lightmapContributionIntensity={lightmapContributionIntensity}
           mazeLight={mazeLight}
+          probeCoefficientTextures={probeCoefficientTextures}
           reflectionContributionIntensity={reflectionContributionIntensity}
           reflectionProbeCoefficients={reflectionProbeCoefficients}
           reflectionProbeDepthTextures={reflectionProbeDepthTextures}
@@ -6571,8 +7253,8 @@ function WallFaceMaterial({
       attach={attach}
       bumpScale={0.05}
       customProgramCacheKey={probeBlendMaterialProps.customProgramCacheKey}
-      envMap={environmentTexture ?? null}
-      envMapIntensity={environmentIntensity}
+      envMap={null}
+      envMapIntensity={0}
       key={materialKey}
       lightMap={lightMap}
       lightMapIntensity={lightMapIntensity}
@@ -6594,6 +7276,7 @@ function MazeWallMesh({
   layout,
   lightmapContributionIntensity,
   mazeWall,
+  probeCoefficientTextures,
   reflectionContributionIntensity,
   reflectionProbeCoefficients,
   reflectionProbeDepthTextures,
@@ -6609,6 +7292,7 @@ function MazeWallMesh({
   layout: MazeLayout
   lightmapContributionIntensity: number
   mazeWall: MazeLayout['walls'][number]
+  probeCoefficientTextures: [Texture, Texture, Texture, Texture]
   reflectionContributionIntensity: number
   reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
   reflectionProbeDepthTextures: CubeTexture[]
@@ -6661,7 +7345,6 @@ function MazeWallMesh({
     lightmapContributionIntensity > EFFECT_EPSILON
   const probeIblActive =
     iblContributionIntensity > EFFECT_EPSILON &&
-    hasProbeDepthTextures &&
     hasProbeCoefficients
   const reflectionActive =
     reflectionContributionIntensity > EFFECT_EPSILON &&
@@ -6689,11 +7372,17 @@ function MazeWallMesh({
         probeTextures,
         probeDepthTextures,
         probeCoefficients,
-        probeIblActive ? 'constant' : 'disabled',
+        'disabled',
         {
           diffuseIntensity: iblContributionIntensity,
+          probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
           radianceMode: reflectionActive ? 'constant' : 'disabled',
+          vlmBoundaryNormal:
+            mazeWall.axis === 'z'
+              ? { x: 1, z: 0 }
+              : { x: 0, z: 1 },
+          vlmMode: probeIblActive ? 'boundary8' : 'disabled',
           weights: reflectionProbeBlend.weights as [number, number, number, number]
         }
       ),
@@ -6820,7 +7509,9 @@ function SceneGeometry({
   iblContributionIntensity,
   layout,
   lightmapContributionIntensity,
+  onBasicTexturesReady,
   probeDebugMode,
+  probeCoefficientTextures,
   reflectionProbeCoefficients,
   reflectionProbeDepthTextures,
   reflectionContributionIntensity,
@@ -6831,7 +7522,9 @@ function SceneGeometry({
   iblContributionIntensity: number
   layout: MazeLayout
   lightmapContributionIntensity: number
+  onBasicTexturesReady: () => void
   probeDebugMode: ProbeDebugMode
+  probeCoefficientTextures: [Texture, Texture, Texture, Texture]
   reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
   reflectionProbeDepthTextures: CubeTexture[]
   reflectionContributionIntensity: number
@@ -6839,6 +7532,12 @@ function SceneGeometry({
 }) {
   const lightmapBytes = useMazeLightmapBytes(layout.maze.lightmap)
   const groundLightmapTexture = useGroundLightmapTexture(layout.maze.lightmap, lightmapBytes)
+
+  useEffect(() => {
+    if (lightmapBytes.length > 0) {
+      onBasicTexturesReady()
+    }
+  }, [lightmapBytes, onBasicTexturesReady])
 
   return (
     <>
@@ -6849,6 +7548,7 @@ function SceneGeometry({
         layout={layout}
         lightmapContributionIntensity={lightmapContributionIntensity}
         groundLightmapTexture={groundLightmapTexture}
+        probeCoefficientTextures={probeCoefficientTextures}
         reflectionContributionIntensity={reflectionContributionIntensity}
         reflectionProbeCoefficients={reflectionProbeCoefficients}
         reflectionProbeDepthTextures={reflectionProbeDepthTextures}
@@ -6861,6 +7561,7 @@ function SceneGeometry({
         layout={layout}
         lightmapContributionIntensity={lightmapContributionIntensity}
         lightmapBytes={lightmapBytes}
+        probeCoefficientTextures={probeCoefficientTextures}
         reflectionContributionIntensity={reflectionContributionIntensity}
         reflectionProbeCoefficients={reflectionProbeCoefficients}
         reflectionProbeDepthTextures={reflectionProbeDepthTextures}
@@ -6879,11 +7580,101 @@ function SceneGeometry({
 }
 
 function MonsterModel({
-  monster
+  debugIndex,
+  environmentIntensity,
+  environmentTexture,
+  iblContributionIntensity,
+  layout,
+  lightmapContributionIntensity,
+  monster,
+  probeCoefficientTextures,
+  reflectionContributionIntensity,
+  reflectionProbeCoefficients,
+  reflectionProbeDepthTextures,
+  reflectionProbeTextures
 }: {
+  debugIndex: number
+  environmentIntensity: number
+  environmentTexture: Texture | null
+  iblContributionIntensity: number
+  layout: MazeLayout
+  lightmapContributionIntensity: number
   monster: TurnMonster
+  probeCoefficientTextures: [Texture, Texture, Texture, Texture]
+  reflectionContributionIntensity: number
+  reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
+  reflectionProbeDepthTextures: CubeTexture[]
+  reflectionProbeTextures: Texture[]
 }) {
   const [model, setModel] = useState<Group | null>(null)
+  const monsterCellPosition = useMemo(
+    () => getMazeCellWorldPosition(layout.maze, monster.cell, GROUND_Y),
+    [layout.maze, monster.cell.x, monster.cell.y]
+  )
+  const reflectionProbeBlend = useMemo(
+    () => getReflectionProbeBlendForPosition(layout, {
+      x: monsterCellPosition.x,
+      z: monsterCellPosition.z
+    }),
+    [layout, monsterCellPosition.x, monsterCellPosition.z]
+  )
+  const probeTextures = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeTextures[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeTextures]
+  )
+  const probeDepthTextures = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeDepthTextures[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeDepthTextures]
+  )
+  const probeCoefficients = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeCoefficients[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeCoefficients]
+  )
+  const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
+  const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
+  const diffuseProbeIntensity =
+    lightmapContributionIntensity + iblContributionIntensity
+  const diffuseProbeActive =
+    diffuseProbeIntensity > EFFECT_EPSILON &&
+    hasProbeCoefficients
+  const probeBlend = useMemo(
+    () =>
+      buildProbeBlendConfig(
+        layout,
+        reflectionProbeBlend.probeIndices,
+        probeTextures,
+        probeDepthTextures,
+        probeCoefficients,
+        'disabled',
+        {
+          diffuseIntensity: diffuseProbeIntensity,
+          probeCoefficientTextures,
+          radianceIntensity: reflectionContributionIntensity,
+          radianceMode: 'none',
+          vlmMode: diffuseProbeActive ? 'cell5' : 'disabled'
+        }
+      ),
+    [
+      diffuseProbeActive,
+      diffuseProbeIntensity,
+      layout,
+      probeCoefficientTextures,
+      probeCoefficients,
+      probeDepthTextures,
+      probeTextures,
+      reflectionContributionIntensity,
+      reflectionProbeBlend.probeIndices
+    ]
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -6896,16 +7687,25 @@ function MonsterModel({
           return
         }
 
-        const clone = gltf.scene.clone(true)
+        const clone = cloneSkeleton(gltf.scene)
 
         clone.traverse((object) => {
           if (object instanceof Mesh) {
+            if (Array.isArray(object.material)) {
+              object.material = object.material.map((material) =>
+                material instanceof Material ? material.clone() : material
+              )
+            } else if (object.material instanceof Material) {
+              object.material = object.material.clone()
+            }
             object.castShadow = true
             object.receiveShadow = true
+            object.userData.debugIndex = debugIndex
             object.userData.debugRole = 'monster'
             object.userData.monsterType = monster.type
           }
         })
+
         setModel(clone)
       },
       undefined,
@@ -6920,13 +7720,69 @@ function MonsterModel({
       cancelled = true
       setModel(null)
     }
-  }, [monster.type])
+  }, [debugIndex, monster.type])
+
+  useEffect(() => {
+    if (!model) {
+      return
+    }
+
+    model.traverse((object) => {
+      if (!(object instanceof Mesh)) {
+        return
+      }
+
+      const materials = Array.isArray(object.material)
+        ? object.material
+        : [object.material]
+
+      materials.forEach((material) => {
+        if (
+          !(material instanceof ThreeMeshStandardMaterial) &&
+          !(material instanceof ThreeMeshPhysicalMaterial)
+        ) {
+          return
+        }
+
+        material.envMap = null
+        material.envMapIntensity = 0
+        const attachment = material.userData.monsterProbeBlendAttachment as
+          | {
+            set: (
+              nextProbeBlend: ProbeBlendConfig,
+              nextPatchConfig?: MaterialShaderPatchConfig
+            ) => void
+          }
+          | undefined
+
+        if (attachment) {
+          attachment.set(probeBlend)
+        } else {
+          material.userData.monsterProbeBlendAttachment = attachProbeBlendMaterialShader(
+            material,
+            probeBlend,
+            {},
+            { current: null }
+          )
+        }
+        material.needsUpdate = true
+      })
+    })
+  }, [
+    environmentIntensity,
+    environmentTexture,
+    model,
+    probeBlend,
+    probeTextures
+  ])
+
   const transform = useMemo(() => {
     if (!model) {
       return null
     }
 
-    const bounds = new Box3().setFromObject(model)
+    model.updateMatrixWorld(true)
+    const bounds = new Box3().setFromObject(model, true)
     const size = new Vector3()
     const center = new Vector3()
 
@@ -6944,13 +7800,20 @@ function MonsterModel({
     return {
       modelOffset: new Vector3(
         -center.x * scale,
-        (-bounds.min.y * scale) + (monster.type === 'minotaur' ? -0.25 : 0),
+        (-bounds.min.y * scale) +
+          (monster.type === 'minotaur' ? -0.25 : monster.type === 'werewolf' ? 0.02 : 0),
         -center.z * scale
       ),
       modelRotationZ:
         monster.type === 'spider'
           ? (monster.hand === 'left' ? Math.PI / 4 : -Math.PI / 4)
           : 0,
+      scaledSize: new Vector3(
+        size.x * scale,
+        size.y * scale,
+        size.z * scale
+      ),
+      targetSize,
       scale
     }
   }, [model, monster.hand, monster.type])
@@ -6958,6 +7821,15 @@ function MonsterModel({
   if (!model || !transform) {
     return null
   }
+
+  model.userData.debugIndex = debugIndex
+  model.userData.debugRole = 'monster'
+  model.userData.monsterScaledSize = [
+    transform.scaledSize.x,
+    transform.scaledSize.y,
+    transform.scaledSize.z
+  ]
+  model.userData.monsterTargetSize = transform.targetSize
 
   return (
     <primitive
@@ -6974,11 +7846,31 @@ function MonsterModel({
 }
 
 function MonsterActor({
+  debugIndex,
+  environmentIntensity,
+  environmentTexture,
+  iblContributionIntensity,
   layout,
-  monster
+  lightmapContributionIntensity,
+  monster,
+  probeCoefficientTextures,
+  reflectionContributionIntensity,
+  reflectionProbeCoefficients,
+  reflectionProbeDepthTextures,
+  reflectionProbeTextures
 }: {
+  debugIndex: number
+  environmentIntensity: number
+  environmentTexture: Texture | null
+  iblContributionIntensity: number
   layout: MazeLayout
+  lightmapContributionIntensity: number
   monster: TurnMonster
+  probeCoefficientTextures: [Texture, Texture, Texture, Texture]
+  reflectionContributionIntensity: number
+  reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
+  reflectionProbeDepthTextures: CubeTexture[]
+  reflectionProbeTextures: Texture[]
 }) {
   const group = useRef<Group>(null)
   const targetPosition = useMemo(
@@ -7021,30 +7913,72 @@ function MonsterActor({
     <group
       ref={group}
       userData={{
+        debugIndex,
         debugRole: 'monster',
         monsterId: monster.id,
         monsterType: monster.type
       }}
     >
-      <MonsterModel monster={monster} />
+      <MonsterModel
+        debugIndex={debugIndex}
+        environmentIntensity={environmentIntensity}
+        environmentTexture={environmentTexture}
+        iblContributionIntensity={iblContributionIntensity}
+        layout={layout}
+        lightmapContributionIntensity={lightmapContributionIntensity}
+        monster={monster}
+        probeCoefficientTextures={probeCoefficientTextures}
+        reflectionContributionIntensity={reflectionContributionIntensity}
+        reflectionProbeCoefficients={reflectionProbeCoefficients}
+        reflectionProbeDepthTextures={reflectionProbeDepthTextures}
+        reflectionProbeTextures={reflectionProbeTextures}
+      />
     </group>
   )
 }
 
 function MonsterActors({
+  environmentIntensity,
+  environmentTexture,
+  iblContributionIntensity,
   layout,
+  lightmapContributionIntensity,
+  probeCoefficientTextures,
+  reflectionContributionIntensity,
+  reflectionProbeCoefficients,
+  reflectionProbeDepthTextures,
+  reflectionProbeTextures,
   turnState
 }: {
+  environmentIntensity: number
+  environmentTexture: Texture | null
+  iblContributionIntensity: number
   layout: MazeLayout
+  lightmapContributionIntensity: number
+  probeCoefficientTextures: [Texture, Texture, Texture, Texture]
+  reflectionContributionIntensity: number
+  reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
+  reflectionProbeDepthTextures: CubeTexture[]
+  reflectionProbeTextures: Texture[]
   turnState: TurnState
 }) {
   return (
     <>
-      {turnState.monsters.map((monster) => (
+      {turnState.monsters.map((monster, index) => (
         <MonsterActor
+          debugIndex={index}
+          environmentIntensity={environmentIntensity}
+          environmentTexture={environmentTexture}
+          iblContributionIntensity={iblContributionIntensity}
           key={monster.id}
           layout={layout}
+          lightmapContributionIntensity={lightmapContributionIntensity}
           monster={monster}
+          probeCoefficientTextures={probeCoefficientTextures}
+          reflectionContributionIntensity={reflectionContributionIntensity}
+          reflectionProbeCoefficients={reflectionProbeCoefficients}
+          reflectionProbeDepthTextures={reflectionProbeDepthTextures}
+          reflectionProbeTextures={reflectionProbeTextures}
         />
       ))}
     </>
@@ -7069,7 +8003,7 @@ class ThreeComposerCompatPass<TThreePass extends {
   constructor(name: string, inner: TThreePass) {
     super(name)
     this.inner = inner
-    this.needsSwap = inner.needsSwap ?? true
+    this.needsSwap = true
   }
 
   override render(
@@ -7146,7 +8080,8 @@ void main() {
       depthBuffer: false,
       format: RGBAFormat,
       magFilter: LinearFilter,
-      minFilter: LinearFilter
+      minFilter: LinearFilter,
+      type: HalfFloatType
     })
   }
 
@@ -7269,11 +8204,9 @@ function isSsrReflectiveMesh(object: Mesh) {
       return false
     }
 
-    const metalness = typeof material.metalness === 'number' ? material.metalness : 0
-    const roughness = typeof material.roughness === 'number' ? material.roughness : 1
     const hasReflectionSource = Boolean(material.envMap) || Boolean(material.userData?.probeBlendDebug)
 
-    return hasReflectionSource && (metalness > 0.05 || roughness < 0.65)
+    return hasReflectionSource
   })
 }
 
@@ -7304,20 +8237,10 @@ function SSRPassPrimitive({
   )
 
   useEffect(() => {
-    const selects: Mesh[] = []
-
-    scene.traverse((object) => {
-      if (!(object instanceof Mesh) || !isSsrReflectiveMesh(object)) {
-        return
-      }
-
-      selects.push(object)
-    })
-
-    // three.js SSRPass uses `selects` as its documented selective-reflection
-    // path; keeping this list PBR-only prevents sky, billboards, and helpers
-    // from contaminating the SSR g-buffer.
-    pass.selects = selects
+    // The authored puddle floor relies on map-driven reflectivity, and the
+    // selective list can under-select those surfaces enough to make SSR inert.
+    // Use the pass-wide scene path here so SSR remains visibly active.
+    pass.selects = null
     pass.blur = settings.blur
     pass.bouncing = settings.bouncing
     pass.distanceAttenuation = settings.distanceAttenuation
@@ -7333,7 +8256,6 @@ function SSRPassPrimitive({
     pass.thickness = settings.thickness
   }, [
     pass,
-    scene,
     settings.blur,
     settings.bouncing,
     settings.distanceAttenuation,
@@ -7479,6 +8401,7 @@ function TorchLensFlare({
   const activeLensPosition = useMemo(() => new Vector3(), [])
   const projectedPosition = useMemo(() => new Vector3(), [])
   const raycasterPosition = useMemo(() => new Vector2(), [])
+  const occlusionMeshes = useRef<Mesh[]>([])
   const lensPositions = useMemo(
     () =>
       layout.lights.map(
@@ -7577,6 +8500,28 @@ function TorchLensFlare({
   }, [effect, settings])
 
   useEffect(() => {
+      const nextOcclusionMeshes: Mesh[] = []
+
+      scene.traverse((object) => {
+        if (!(object instanceof Mesh)) {
+          return
+      }
+
+      const debugRoles = object.userData?.debugRoles
+      const isMazeWall =
+        object.userData?.debugRole === 'maze-wall' ||
+        (Array.isArray(debugRoles) && debugRoles.includes('maze-wall'))
+      const isMonster = object.userData?.debugRole === 'monster'
+
+      if (isMazeWall || isMonster) {
+        nextOcclusionMeshes.push(object)
+      }
+    })
+
+    occlusionMeshes.current = nextOcclusionMeshes
+  }, [layout.maze.id, scene])
+
+  useEffect(() => {
     if (!screenResUniform) {
       return
     }
@@ -7606,43 +8551,13 @@ function TorchLensFlare({
       raycasterPosition.set(projectedPosition.x, projectedPosition.y)
       raycaster.setFromCamera(raycasterPosition, camera)
 
-      const intersections = raycaster.intersectObjects(scene.children, true)
+      const intersections = raycaster.intersectObjects(occlusionMeshes.current, false)
       const distanceToLight = camera.position.distanceTo(lensPosition)
       let occluded = false
 
       for (const intersection of intersections) {
-        const hitObject = intersection.object
-
-        if (
-          hitObject.userData?.debugRole === 'torch-lens-flare' ||
-          hitObject.userData?.debugRole === 'reflection-probe-visual' ||
-          hitObject.userData?.debugRole === 'global-fog-volume' ||
-          hitObject.userData?.debugRole === 'torch-billboard' ||
-          hitObject.userData?.debugRole === 'sconce-body' ||
-          hitObject.userData?.lensflare === 'ignore-occlusion'
-        ) {
-          continue
-        }
-
         if (intersection.distance >= distanceToLight - LENS_FLARE_OCCLUSION_MARGIN) {
           break
-        }
-
-        if (hitObject instanceof Mesh) {
-          const candidateMaterial = Array.isArray(hitObject.material)
-            ? hitObject.material[0]
-            : hitObject.material
-
-          if (
-            candidateMaterial &&
-            'transparent' in candidateMaterial &&
-            candidateMaterial.transparent &&
-            'opacity' in candidateMaterial &&
-            typeof candidateMaterial.opacity === 'number' &&
-            candidateMaterial.opacity < 0.95
-          ) {
-            continue
-          }
         }
 
         occluded = true
@@ -7734,7 +8649,10 @@ function FlightRig({
   const freeCamera = useRef(false)
   const inputQueue = useRef<TurnAction[]>([])
   const turnStateRef = useRef(turnState)
+  const cameraShake = useRef({ amplitude: 0, endsAt: 0 })
   const playerAnimation = useRef<{
+    action: TurnAction
+    blocked: boolean
     from: TurnState
     killed: boolean
     startedAt: number
@@ -7742,6 +8660,7 @@ function FlightRig({
   } | null>(null)
   const isPointerLocked = useRef(false)
   const up = useMemo(() => new Vector3(0, 1, 0), [])
+  const cameraShakeOffset = useRef(new Vector3())
   const resolvedMovementSettings = useMemo(
     () =>
       createMovementSettings({
@@ -7775,8 +8694,8 @@ function FlightRig({
     camera.rotation.order = 'YXZ'
     camera.position.set(cameraPosition.x, cameraPosition.y, cameraPosition.z)
     yaw.current = directionToYaw(turnState.player.direction)
-    camera.quaternion.setFromEuler(cameraEuler.set(0, yaw.current, 0, 'YXZ'))
-    pitch.current = 0
+    camera.quaternion.setFromEuler(cameraEuler.set(DEFAULT_CAMERA_PITCH, yaw.current, 0, 'YXZ'))
+    pitch.current = DEFAULT_CAMERA_PITCH
     playerPosition.current.copy(spawnPosition)
   }, [camera, layout.maze, turnState.player.cell, turnState.player.direction])
 
@@ -7870,11 +8789,11 @@ function FlightRig({
         const queuedAction =
           event.code === 'KeyW' || event.code === 'ArrowUp'
             ? 'move-forward'
-            : event.code === 'KeyD' || event.code === 'ArrowDown'
+            : event.code === 'KeyS' || event.code === 'ArrowDown'
               ? 'move-backward'
               : event.code === 'KeyA' || event.code === 'ArrowLeft'
                 ? 'rotate-left'
-                : event.code === 'KeyS' || event.code === 'ArrowRight'
+                : event.code === 'KeyD' || event.code === 'ArrowRight'
                   ? 'rotate-right'
                   : null
 
@@ -7893,7 +8812,11 @@ function FlightRig({
         event.code === 'KeyW' ||
         event.code === 'KeyA' ||
         event.code === 'KeyS' ||
-        event.code === 'KeyD'
+        event.code === 'KeyD' ||
+        event.code === 'ArrowUp' ||
+        event.code === 'ArrowDown' ||
+        event.code === 'ArrowLeft' ||
+        event.code === 'ArrowRight'
       ) {
         event.preventDefault()
       }
@@ -7985,11 +8908,21 @@ function FlightRig({
             probeBlendMode: number | null
             probeBlendRadianceIntensity: number | null
             probeBlendRadianceMode: number | null
+            probeVlmMode: number | null
           } | null
           scale: [number, number, number]
           visible: boolean
           worldQuaternion: [number, number, number, number]
           worldPosition: [number, number, number]
+        } | null
+        getMonsterRenderState?: (index: number) => {
+          boundsSize: [number, number, number] | null
+          hasLightMap: boolean
+          meshCount: number
+          targetSize: number | null
+          type: 'minotaur' | 'spider' | 'werewolf' | null
+          totalTriangleCount: number
+          visible: boolean
         } | null
         getReflectionProbeState?: () => {
           activeProbeId: string | null
@@ -8045,6 +8978,8 @@ function FlightRig({
     const existing = globalWindow.__levelsjamDebug ?? {}
     const worldPosition = new Vector3()
     const worldQuaternion = new Quaternion()
+    const monsterBounds = new Box3()
+    const monsterBoundsSize = new Vector3()
     const getDebugRoots = () => [scene]
 
     globalWindow.__levelsjamDebug = {
@@ -8116,6 +9051,7 @@ function FlightRig({
             localProbeTextureBoundCount: number
             probeBlendMode: number | null
             probeBlendRadianceMode: number | null
+            probeVlmMode: number | null
           } | null
           scale: [number, number, number]
           visible: boolean
@@ -8180,6 +9116,7 @@ function FlightRig({
                   probeBlendMode: number | null
                   probeBlendRadianceIntensity: number | null
                   probeBlendRadianceMode: number | null
+                  probeVlmMode: number | null
                 } | null
               }
             }>
@@ -8320,7 +9257,8 @@ function FlightRig({
           probeBlendDiffuseIntensity: null,
           probeBlendMode: null,
           probeBlendRadianceIntensity: null,
-          probeBlendRadianceMode: null
+          probeBlendRadianceMode: null,
+          probeVlmMode: null
         }
 
         const uniforms = Object.fromEntries(
@@ -8369,6 +9307,77 @@ function FlightRig({
           uniforms
         }
       },
+      getMonsterRenderState: (index) => {
+        let meshCount = 0
+        let totalTriangleCount = 0
+        let hasLightMap = false
+        let visible = false
+        let targetSize: number | null = null
+        let monsterType: 'minotaur' | 'spider' | 'werewolf' | null = null
+
+        monsterBounds.makeEmpty()
+
+        for (const root of getDebugRoots()) {
+          root.traverse((object) => {
+            if (
+              !matchesDebugRole(object, 'monster', index)
+            ) {
+              return
+            }
+
+            visible = visible || object.visible
+            monsterBounds.expandByObject(object)
+            targetSize =
+              typeof object.userData?.monsterTargetSize === 'number'
+                ? object.userData.monsterTargetSize
+                : targetSize
+            monsterType =
+              object.userData?.monsterType === 'minotaur' ||
+                object.userData?.monsterType === 'spider' ||
+                object.userData?.monsterType === 'werewolf'
+                ? object.userData.monsterType
+                : monsterType
+
+            if (!(object instanceof Mesh)) {
+              return
+            }
+
+            meshCount += 1
+            const materials = Array.isArray(object.material)
+              ? object.material
+              : [object.material]
+
+            hasLightMap = hasLightMap || materials.some(
+              (material) => Boolean((material as { lightMap?: Texture | null }).lightMap)
+            )
+
+            const positionAttribute = object.geometry.getAttribute('position')
+            totalTriangleCount += object.geometry.index
+              ? Math.floor(object.geometry.index.count / 3)
+              : Math.floor((positionAttribute?.count ?? 0) / 3)
+          })
+        }
+
+        if (meshCount === 0) {
+          return null
+        }
+
+        monsterBounds.getSize(monsterBoundsSize)
+
+        return {
+          boundsSize: [
+            monsterBoundsSize.x,
+            monsterBoundsSize.y,
+            monsterBoundsSize.z
+          ],
+          hasLightMap,
+          meshCount,
+          targetSize,
+          type: monsterType,
+          totalTriangleCount,
+          visible
+        }
+      },
       getReflectionProbeState: () => {
         return scene.userData.reflectionProbeState ?? null
       },
@@ -8397,6 +9406,7 @@ function FlightRig({
 
       delete globalWindow.__levelsjamDebug.getDebugPosition
       delete globalWindow.__levelsjamDebug.getDebugMeshState
+      delete globalWindow.__levelsjamDebug.getMonsterRenderState
       delete globalWindow.__levelsjamDebug.getDebugProgramUniformState
       delete globalWindow.__levelsjamDebug.getReflectionProbeState
       delete globalWindow.__levelsjamDebug.setView
@@ -8413,8 +9423,40 @@ function FlightRig({
 
         if (action) {
           const result = applyTurnAction(layout.maze, turnStateRef.current, action)
+          const previousMinotaur = result.previous.monsters.find(
+            (monster) => monster.type === 'minotaur'
+          )
+          const nextMinotaur = result.state.monsters.find(
+            (monster) => monster.type === 'minotaur'
+          )
+
+          if (
+            previousMinotaur &&
+            nextMinotaur &&
+            (
+              previousMinotaur.cell.x !== nextMinotaur.cell.x ||
+              previousMinotaur.cell.y !== nextMinotaur.cell.y
+            )
+          ) {
+            const distanceCells = Math.hypot(
+              nextMinotaur.cell.x - result.state.player.cell.x,
+              nextMinotaur.cell.y - result.state.player.cell.y
+            )
+            const amplitude = MathUtils.clamp(
+              0.12 / Math.max(distanceCells + 0.5, 1),
+              0.006,
+              0.03
+            )
+
+            cameraShake.current = {
+              amplitude,
+              endsAt: performance.now() + 1000
+            }
+          }
 
           playerAnimation.current = {
+            action,
+            blocked: Boolean(result.blocked),
             from: result.previous,
             killed: result.killed,
             startedAt: performance.now(),
@@ -8464,11 +9506,44 @@ function FlightRig({
       )
       const toYaw = directionToYaw(displayState.player.direction)
       const yawDelta = Math.atan2(Math.sin(toYaw - fromYaw), Math.cos(toYaw - fromYaw))
+      if (activeAnimation?.blocked) {
+        const moveDirection =
+          activeAnimation.action === 'move-backward'
+            ? (
+                activeAnimation.from.player.direction === 'north'
+                  ? 'south'
+                  : activeAnimation.from.player.direction === 'south'
+                    ? 'north'
+                    : activeAnimation.from.player.direction === 'east'
+                      ? 'west'
+                      : 'east'
+              )
+            : activeAnimation.from.player.direction
+        const bumpOffset = directionToWorldOffset(moveDirection)
+        const bumpAlpha = Math.sin(animationAlpha * Math.PI) * BLOCKED_MOVE_FRACTION
 
-      camera.position.lerpVectors(fromPosition, toPosition, animationAlpha)
+        camera.position.set(
+          fromPosition.x + (bumpOffset.x * bumpAlpha),
+          fromPosition.y,
+          fromPosition.z + (bumpOffset.z * bumpAlpha)
+        )
+      } else {
+        camera.position.lerpVectors(fromPosition, toPosition, animationAlpha)
+      }
       yaw.current = fromYaw + (yawDelta * animationAlpha)
-      pitch.current = 0
-      camera.quaternion.setFromEuler(cameraEuler.set(0, yaw.current, 0, 'YXZ'))
+      pitch.current = DEFAULT_CAMERA_PITCH
+      camera.quaternion.setFromEuler(cameraEuler.set(DEFAULT_CAMERA_PITCH, yaw.current, 0, 'YXZ'))
+      if (cameraShake.current.endsAt > performance.now()) {
+        const remaining = Math.max(0, (cameraShake.current.endsAt - performance.now()) / 1000)
+        const envelope = Math.min(1, remaining) * Math.min(1, remaining)
+        const timeSeconds = performance.now() / 1000
+        const lateral = Math.sin(timeSeconds * 31.3) * cameraShake.current.amplitude * envelope
+        const vertical = Math.sin((timeSeconds * 24.7) + 1.3) * cameraShake.current.amplitude * 0.6 * envelope
+
+        cameraShakeOffset.current.set(lateral, vertical, 0)
+        cameraShakeOffset.current.applyQuaternion(camera.quaternion)
+        camera.position.add(cameraShakeOffset.current)
+      }
       camera.updateMatrixWorld()
       return
     }
@@ -8481,9 +9556,11 @@ function FlightRig({
     }
     right.current.crossVectors(forward.current, up).normalize()
     keyboardLocal.current.set(
-      Number(Boolean(keys.current.KeyD)) - Number(Boolean(keys.current.KeyA)),
+      (Number(Boolean(keys.current.KeyD)) + Number(Boolean(keys.current.ArrowRight))) -
+        (Number(Boolean(keys.current.KeyA)) + Number(Boolean(keys.current.ArrowLeft))),
       Number(Boolean(keys.current.KeyQ)) - Number(Boolean(keys.current.KeyE)),
-      Number(Boolean(keys.current.KeyW)) - Number(Boolean(keys.current.KeyS))
+      (Number(Boolean(keys.current.KeyW)) + Number(Boolean(keys.current.ArrowUp))) -
+        (Number(Boolean(keys.current.KeyS)) + Number(Boolean(keys.current.ArrowDown)))
     )
     if (keyboardLocal.current.lengthSq() > 1) {
       keyboardLocal.current.normalize()
@@ -8519,11 +9596,9 @@ function Scene({
   useEffect(() => {
     setTurnState(createInitialTurnState(layout.maze))
   }, [layout.maze])
-
   useEffect(() => {
     recordStartupMarker('sceneMountedAt')
-    onAssetsReady()
-  }, [onAssetsReady])
+  }, [])
 
   const gl = useThree((state) => state.gl)
   const scene = useThree((state) => state.scene)
@@ -8535,6 +9610,10 @@ function Scene({
   const [reflectionProbeRawTextures, setReflectionProbeRawTextures] = useState<Texture[]>([])
   const [reflectionProbeTextures, setReflectionProbeTextures] = useState<Texture[]>([])
   const environmentIntensity = BAKED_ENVIRONMENT_INTENSITY
+  const playerWorldPosition = useMemo(
+    () => getMazeCellWorldPosition(layout.maze, turnState.player.cell, GROUND_Y),
+    [layout.maze, turnState.player.cell.x, turnState.player.cell.y]
+  )
 
   useEffect(() => {
     const globalWindow = window as Window & {
@@ -8583,6 +9662,13 @@ function Scene({
           label: string
         }> | null
         getReflectionCaptureSceneState?: () => ReturnType<typeof getReflectionCaptureSceneState>
+        getRendererStats?: () => {
+          calls: number
+          frame: number
+          lines: number
+          points: number
+          triangles: number
+        }
         bakeReflectionProbeAssets?: (
           probeIndex: number,
           size?: number
@@ -9041,6 +10127,13 @@ function Scene({
       clearDebugIsolation,
       getFogState,
       getReflectionCaptureSceneState: getReflectionCaptureSceneStateDebug,
+      getRendererStats: () => ({
+        calls: gl.info.render.calls,
+        frame: gl.info.render.frame,
+        lines: gl.info.render.lines,
+        points: gl.info.render.points,
+        triangles: gl.info.render.triangles
+      }),
       getReflectionProbeTextureState,
       isolateDebugRole,
       setDebugVisible
@@ -9060,6 +10153,7 @@ function Scene({
       delete globalWindow.__levelsjamDebug.clearDebugIsolation
       delete globalWindow.__levelsjamDebug.getFogState
       delete globalWindow.__levelsjamDebug.getReflectionCaptureSceneState
+      delete globalWindow.__levelsjamDebug.getRendererStats
       delete globalWindow.__levelsjamDebug.getReflectionProbeTextureState
       delete globalWindow.__levelsjamDebug.setDebugVisible
       delete globalWindow.__levelsjamDebug.isolateDebugRole
@@ -9077,12 +10171,20 @@ function Scene({
     () => colorFromHex(visualSettings.volumetricAmbientHex),
     [visualSettings.volumetricAmbientHex]
   )
+  const probeCoefficientTextures = useProbeCoefficientTextures(
+    layout,
+    reflectionProbeCoefficients
+  ) as [Texture, Texture, Texture, Texture]
   const vignetteActive = isEffectActive(visualSettings.vignette)
 
   return (
     <>
       <EnvironmentLighting
         layout={layout}
+        priorityPosition={{
+          x: playerWorldPosition.x,
+          z: playerWorldPosition.z
+        }}
         volumetricLighting={visualSettings.volumetricLighting}
         onEnvironmentFogColorChange={setEnvironmentFogColor}
         onEnvironmentTextureChange={setEnvironmentTexture}
@@ -9098,14 +10200,25 @@ function Scene({
         iblContributionIntensity={getEnabledContributionIntensity(visualSettings.iblContribution)}
         layout={layout}
         lightmapContributionIntensity={getEnabledContributionIntensity(visualSettings.lightmapContribution)}
+        onBasicTexturesReady={onAssetsReady}
         probeDebugMode={visualSettings.probeDebugMode}
+        probeCoefficientTextures={probeCoefficientTextures}
         reflectionProbeCoefficients={reflectionProbeCoefficients}
         reflectionProbeDepthTextures={reflectionProbeDepthTextures}
         reflectionContributionIntensity={getEnabledContributionIntensity(visualSettings.reflectionContribution)}
         reflectionProbeTextures={reflectionProbeTextures}
       />
       <MonsterActors
+        environmentIntensity={environmentIntensity}
+        environmentTexture={environmentTexture}
+        iblContributionIntensity={getEnabledContributionIntensity(visualSettings.iblContribution)}
         layout={layout}
+        lightmapContributionIntensity={getEnabledContributionIntensity(visualSettings.lightmapContribution)}
+        probeCoefficientTextures={probeCoefficientTextures}
+        reflectionContributionIntensity={getEnabledContributionIntensity(visualSettings.reflectionContribution)}
+        reflectionProbeCoefficients={reflectionProbeCoefficients}
+        reflectionProbeDepthTextures={reflectionProbeDepthTextures}
+        reflectionProbeTextures={reflectionProbeTextures}
         turnState={turnState}
       />
       <EffectComposer
@@ -9720,7 +10833,10 @@ function VisualControls({
             }}
             type="checkbox"
           />
-          <ResettableLabel onReset={onResetBloomSettings}>
+          <ResettableLabel onReset={() => {
+            onResetBloomSetting('enabled')
+            onResetBloomSetting('intensity')
+          }}>
             Bloom
           </ResettableLabel>
         </label>
@@ -9746,7 +10862,7 @@ function VisualControls({
             (option) => option.key === visualSettings.bloom.kernelSize
           )?.label ?? visualSettings.bloom.kernelSize}
         </output>
-        <ResettableLabel onReset={onResetBloomSettings}>
+        <ResettableLabel onReset={() => onResetBloomSetting('kernelSize')}>
           Bloom Kernel
         </ResettableLabel>
         <select
@@ -9774,7 +10890,7 @@ function VisualControls({
 
           <label className="visual-control-row">
         <output>{visualSettings.bloom.threshold.toFixed(2)}</output>
-        <ResettableLabel onReset={onResetBloomSettings}>
+        <ResettableLabel onReset={() => onResetBloomSetting('threshold')}>
           Bloom Threshold
         </ResettableLabel>
         <input
@@ -9795,7 +10911,7 @@ function VisualControls({
 
           <label className="visual-control-row">
         <output>{visualSettings.bloom.smoothing.toFixed(2)}</output>
-        <ResettableLabel onReset={onResetBloomSettings}>
+        <ResettableLabel onReset={() => onResetBloomSetting('smoothing')}>
           Bloom Smoothing
         </ResettableLabel>
         <input
@@ -9816,7 +10932,7 @@ function VisualControls({
 
           <label className="visual-control-row">
         <output>{visualSettings.bloom.resolutionScale.toFixed(2)}x</output>
-        <ResettableLabel onReset={onResetBloomSettings}>
+        <ResettableLabel onReset={() => onResetBloomSetting('resolutionScale')}>
           Bloom Resolution
         </ResettableLabel>
         <input
@@ -9855,7 +10971,10 @@ function VisualControls({
             }}
             type="checkbox"
           />
-          <ResettableLabel onReset={onResetDepthOfFieldSettings}>
+          <ResettableLabel onReset={() => {
+            onResetDepthOfFieldSetting('enabled')
+            onResetDepthOfFieldSetting('bokehScale')
+          }}>
             Depth Of Field
           </ResettableLabel>
         </label>
@@ -9877,7 +10996,7 @@ function VisualControls({
 
           <label className="visual-control-row">
         <output>{visualSettings.depthOfField.focusDistance.toFixed(3)}</output>
-        <ResettableLabel onReset={onResetDepthOfFieldSettings}>
+        <ResettableLabel onReset={() => onResetDepthOfFieldSetting('focusDistance')}>
           DOF Focus Distance (m)
         </ResettableLabel>
         <input
@@ -9898,7 +11017,7 @@ function VisualControls({
 
           <label className="visual-control-row">
         <output>{visualSettings.depthOfField.focalLength.toFixed(3)}</output>
-        <ResettableLabel onReset={onResetDepthOfFieldSettings}>
+        <ResettableLabel onReset={() => onResetDepthOfFieldSetting('focalLength')}>
           DOF Focal Length / Range (m)
         </ResettableLabel>
         <input
@@ -9919,7 +11038,7 @@ function VisualControls({
 
           <label className="visual-control-row">
         <output>{visualSettings.depthOfField.resolutionScale.toFixed(2)}x</output>
-        <ResettableLabel onReset={onResetDepthOfFieldSettings}>
+        <ResettableLabel onReset={() => onResetDepthOfFieldSetting('resolutionScale')}>
           DOF Resolution
         </ResettableLabel>
         <input
@@ -10013,21 +11132,21 @@ function VisualControls({
           </label>
 
           <label className="visual-control-row">
-        <output>{visualSettings.volumetricHeightFalloff.toFixed(2)}</output>
+        <output>{visualSettings.volumetricHeightFalloff.toFixed(2)}m</output>
         <ResettableLabel onReset={() => onResetScalarSetting('volumetricHeightFalloff')}>
-          Fog Height Falloff
+          Fog Height 50%
         </ResettableLabel>
         <input
-          aria-label="Fog Height Falloff"
-          max={4}
-          min={0.1}
+          aria-label="Fog Height 50%"
+          max={8}
+          min={0.01}
           onChange={(event) => {
             onScalarSettingChange(
               'volumetricHeightFalloff',
               Number(event.target.value)
             )
           }}
-          step={0.05}
+          step={0.01}
           type="range"
           value={visualSettings.volumetricHeightFalloff}
         />
@@ -10095,7 +11214,10 @@ function VisualControls({
             }}
             type="checkbox"
           />
-          <ResettableLabel onReset={onResetLensFlareSettings}>
+          <ResettableLabel onReset={() => {
+            onResetLensFlareSetting('enabled')
+            onResetLensFlareSetting('intensity')
+          }}>
             Lens Flares
           </ResettableLabel>
         </label>
@@ -10117,7 +11239,7 @@ function VisualControls({
 
           <label className="visual-control-row">
         <output>{visualSettings.lensFlare.opacity.toFixed(2)}</output>
-        <ResettableLabel onReset={onResetLensFlareSettings}>
+        <ResettableLabel onReset={() => onResetLensFlareSetting('opacity')}>
           Flare Opacity
         </ResettableLabel>
         <input
@@ -10138,7 +11260,7 @@ function VisualControls({
 
           <label className="visual-control-row">
         <output>{visualSettings.lensFlare.flareSize.toFixed(4)}</output>
-        <ResettableLabel onReset={onResetLensFlareSettings}>
+        <ResettableLabel onReset={() => onResetLensFlareSetting('flareSize')}>
           Flare Size
         </ResettableLabel>
         <input
@@ -10159,7 +11281,7 @@ function VisualControls({
 
           <label className="visual-control-row">
         <output>{visualSettings.lensFlare.glareSize.toFixed(3)}</output>
-        <ResettableLabel onReset={onResetLensFlareSettings}>
+        <ResettableLabel onReset={() => onResetLensFlareSetting('glareSize')}>
           Glare Size
         </ResettableLabel>
         <input
@@ -10180,7 +11302,7 @@ function VisualControls({
 
           <label className="visual-control-row">
         <output>{visualSettings.lensFlare.ghostScale.toFixed(3)}</output>
-        <ResettableLabel onReset={onResetLensFlareSettings}>
+        <ResettableLabel onReset={() => onResetLensFlareSetting('ghostScale')}>
           Ghost Scale
         </ResettableLabel>
         <input
@@ -10201,7 +11323,7 @@ function VisualControls({
 
           <label className="visual-control-row">
         <output>{visualSettings.lensFlare.haloScale.toFixed(3)}</output>
-        <ResettableLabel onReset={onResetLensFlareSettings}>
+        <ResettableLabel onReset={() => onResetLensFlareSetting('haloScale')}>
           Halo Scale
         </ResettableLabel>
         <input
@@ -10222,7 +11344,7 @@ function VisualControls({
 
           <label className="visual-control-row">
         <output>{visualSettings.lensFlare.flareShape.toFixed(3)}</output>
-        <ResettableLabel onReset={onResetLensFlareSettings}>
+        <ResettableLabel onReset={() => onResetLensFlareSetting('flareShape')}>
           Flare Shape
         </ResettableLabel>
         <input
@@ -10243,7 +11365,7 @@ function VisualControls({
 
           <label className="visual-control-row">
         <output>{visualSettings.lensFlare.flareSpeed.toFixed(3)}</output>
-        <ResettableLabel onReset={onResetLensFlareSettings}>
+        <ResettableLabel onReset={() => onResetLensFlareSetting('flareSpeed')}>
           Flare Speed
         </ResettableLabel>
         <input
@@ -10264,7 +11386,7 @@ function VisualControls({
 
           <label className="visual-control-row">
         <output>{visualSettings.lensFlare.starPoints}</output>
-        <ResettableLabel onReset={onResetLensFlareSettings}>
+        <ResettableLabel onReset={() => onResetLensFlareSetting('starPoints')}>
           Star Points
         </ResettableLabel>
         <input
@@ -10295,7 +11417,7 @@ function VisualControls({
             }}
             type="checkbox"
           />
-          <ResettableLabel onReset={onResetLensFlareSettings}>
+          <ResettableLabel onReset={() => onResetLensFlareSetting('animated')}>
             Animated
           </ResettableLabel>
         </label>
@@ -10313,7 +11435,7 @@ function VisualControls({
             }}
             type="checkbox"
           />
-          <ResettableLabel onReset={onResetLensFlareSettings}>
+          <ResettableLabel onReset={() => onResetLensFlareSetting('anamorphic')}>
             Flare Anamorphic
           </ResettableLabel>
         </label>
@@ -10331,7 +11453,7 @@ function VisualControls({
             }}
             type="checkbox"
           />
-          <ResettableLabel onReset={onResetLensFlareSettings}>
+          <ResettableLabel onReset={() => onResetLensFlareSetting('aditionalStreaks')}>
             Extra Streaks
           </ResettableLabel>
         </label>
@@ -10349,7 +11471,7 @@ function VisualControls({
             }}
             type="checkbox"
           />
-          <ResettableLabel onReset={onResetLensFlareSettings}>
+          <ResettableLabel onReset={() => onResetLensFlareSetting('secondaryGhosts')}>
             Secondary Ghosts
           </ResettableLabel>
         </label>
@@ -10367,7 +11489,7 @@ function VisualControls({
             }}
             type="checkbox"
           />
-          <ResettableLabel onReset={onResetLensFlareSettings}>
+          <ResettableLabel onReset={() => onResetLensFlareSetting('starBurst')}>
             Star Burst
           </ResettableLabel>
         </label>
@@ -10389,7 +11511,10 @@ function VisualControls({
             }}
             type="checkbox"
           />
-          <ResettableLabel onReset={onResetSsrSettings}>
+          <ResettableLabel onReset={() => {
+            onResetSsrSetting('enabled')
+            onResetSsrSetting('intensity')
+          }}>
             SSR
           </ResettableLabel>
         </label>
@@ -10409,7 +11534,7 @@ function VisualControls({
 
           <label className="visual-control-row">
         <output>{visualSettings.ssr.maxDistance.toFixed(1)}m</output>
-        <ResettableLabel onReset={onResetSsrSettings}>
+        <ResettableLabel onReset={() => onResetSsrSetting('maxDistance')}>
           SSR Distance
         </ResettableLabel>
         <input
@@ -10428,7 +11553,7 @@ function VisualControls({
 
           <label className="visual-control-row">
         <output>{visualSettings.ssr.thickness.toFixed(3)}</output>
-        <ResettableLabel onReset={onResetSsrSettings}>
+        <ResettableLabel onReset={() => onResetSsrSetting('thickness')}>
           SSR Thickness
         </ResettableLabel>
         <input
@@ -10447,7 +11572,7 @@ function VisualControls({
 
           <label className="visual-control-row">
         <output>{visualSettings.ssr.resolutionScale.toFixed(2)}x</output>
-        <ResettableLabel onReset={onResetSsrSettings}>
+        <ResettableLabel onReset={() => onResetSsrSetting('resolutionScale')}>
           SSR Resolution
         </ResettableLabel>
         <input
@@ -10470,7 +11595,7 @@ function VisualControls({
             (option) => option.key === visualSettings.ssr.output
           )?.label ?? visualSettings.ssr.output}
         </output>
-        <ResettableLabel onReset={onResetSsrSettings}>
+        <ResettableLabel onReset={() => onResetSsrSetting('output')}>
           SSR Output
         </ResettableLabel>
         <select
@@ -10505,7 +11630,7 @@ function VisualControls({
             }}
             type="checkbox"
           />
-          <ResettableLabel onReset={onResetSsrSettings}>
+          <ResettableLabel onReset={() => onResetSsrSetting('blur')}>
             SSR Blur
           </ResettableLabel>
         </label>
@@ -10522,7 +11647,7 @@ function VisualControls({
             }}
             type="checkbox"
           />
-          <ResettableLabel onReset={onResetSsrSettings}>
+          <ResettableLabel onReset={() => onResetSsrSetting('bouncing')}>
             SSR Bouncing
           </ResettableLabel>
         </label>
@@ -10539,7 +11664,7 @@ function VisualControls({
             }}
             type="checkbox"
           />
-          <ResettableLabel onReset={onResetSsrSettings}>
+          <ResettableLabel onReset={() => onResetSsrSetting('distanceAttenuation')}>
             SSR Distance Attenuation
           </ResettableLabel>
         </label>
@@ -10556,7 +11681,7 @@ function VisualControls({
             }}
             type="checkbox"
           />
-          <ResettableLabel onReset={onResetSsrSettings}>
+          <ResettableLabel onReset={() => onResetSsrSetting('fresnel')}>
             SSR Fresnel
           </ResettableLabel>
         </label>
@@ -10573,7 +11698,7 @@ function VisualControls({
             }}
             type="checkbox"
           />
-          <ResettableLabel onReset={onResetSsrSettings}>
+          <ResettableLabel onReset={() => onResetSsrSetting('infiniteThick')}>
             SSR Infinite Thick
           </ResettableLabel>
         </label>
@@ -10597,7 +11722,10 @@ function VisualControls({
             }}
             type="checkbox"
           />
-          <ResettableLabel onReset={onResetAnamorphicSettings}>
+          <ResettableLabel onReset={() => {
+            onResetAnamorphicSetting('enabled')
+            onResetAnamorphicSetting('intensity')
+          }}>
             Anamorphic
           </ResettableLabel>
         </label>
@@ -10617,7 +11745,7 @@ function VisualControls({
 
           <label className="visual-control-row">
         <output>{visualSettings.anamorphic.threshold.toFixed(2)}</output>
-        <ResettableLabel onReset={onResetAnamorphicSettings}>
+        <ResettableLabel onReset={() => onResetAnamorphicSetting('threshold')}>
           Anamorphic Threshold
         </ResettableLabel>
         <input
@@ -10636,7 +11764,7 @@ function VisualControls({
 
           <label className="visual-control-row">
         <output>{visualSettings.anamorphic.scale.toFixed(2)}x</output>
-        <ResettableLabel onReset={onResetAnamorphicSettings}>
+        <ResettableLabel onReset={() => onResetAnamorphicSetting('scale')}>
           Anamorphic Scale
         </ResettableLabel>
         <input
@@ -10655,7 +11783,7 @@ function VisualControls({
 
           <label className="visual-control-row">
         <output>{visualSettings.anamorphic.samples}</output>
-        <ResettableLabel onReset={onResetAnamorphicSettings}>
+        <ResettableLabel onReset={() => onResetAnamorphicSetting('samples')}>
           Anamorphic Samples
         </ResettableLabel>
         <input
@@ -10713,7 +11841,7 @@ function CreditsModal({
           "Minotaur" (<a href="https://skfb.ly/6TK77">https://skfb.ly/6TK77</a>) by yanbelmont is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
         </p>
         <p>
-          "Dopepope's zKUMONGA" (<a href="https://skfb.ly/pIBZW">https://skfb.ly/pIBZW</a>) by AllThingsSaurus is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
+          "PBR Jumping Spider Monster" (<a href="https://skfb.ly/6QVNq">https://skfb.ly/6QVNq</a>) by Toast is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
         </p>
         <p>
           "AWIL Werewolf" (<a href="https://skfb.ly/orBtB">https://skfb.ly/orBtB</a>) by Spinnee is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
@@ -10743,6 +11871,7 @@ export default function App() {
     []
   )
   const [mazeLayout, setMazeLayout] = useState<MazeLayout | null>(null)
+  const [mazeLoadError, setMazeLoadError] = useState<string | null>(null)
   const [sceneLoaded, setSceneLoaded] = useState(false)
   const [visualSettings, setVisualSettings] = useState(createDefaultVisualSettings)
   const composerEnabled = true
@@ -10756,18 +11885,35 @@ export default function App() {
 
     const loadLayout = async () => {
       setSceneLoaded(false)
+      setMazeLoadError(null)
       document.body.dataset.mazeLayoutRequestedAt = performance.now().toFixed(1)
       document.body.dataset.requestedMazeId = requestedMazeId ?? 'random'
 
-      const nextLayout =
-        (requestedMazeId
+      try {
+        const nextLayout = requestedMazeId
           ? await loadMazeLayoutById(requestedMazeId)
-          : null) ??
-        await loadRandomMazeLayout()
+          : await loadRandomMazeLayout()
 
-      if (!cancelled) {
-        document.body.dataset.mazeLayoutLoadedAt = performance.now().toFixed(1)
-        setMazeLayout(nextLayout)
+        if (requestedMazeId && !nextLayout) {
+          throw new Error(`Requested maze "${requestedMazeId}" could not be loaded`)
+        }
+        if (!nextLayout) {
+          throw new Error('No maze layout could be loaded')
+        }
+
+        if (!cancelled) {
+          document.body.dataset.mazeLayoutLoadedAt = performance.now().toFixed(1)
+          document.body.dataset.loadedMazeId = nextLayout.maze.id
+          setMazeLayout(nextLayout)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const message = error instanceof Error ? error.message : String(error)
+          document.body.dataset.mazeLayoutLoadFailedAt = performance.now().toFixed(1)
+          document.body.dataset.mazeLayoutLoadError = message
+          setMazeLayout(null)
+          setMazeLoadError(message)
+        }
       }
     }
 
@@ -11050,6 +12196,46 @@ export default function App() {
     }))
   }
 
+  const onResetBloomSetting = (key: keyof BloomSettings) => {
+    const defaults = createDefaultVisualSettings()
+
+    onBloomSettingChange({
+      [key]: defaults.bloom[key]
+    })
+  }
+
+  const onResetDepthOfFieldSetting = (key: keyof DepthOfFieldSettings) => {
+    const defaults = createDefaultVisualSettings()
+
+    onDepthOfFieldSettingChange({
+      [key]: defaults.depthOfField[key]
+    })
+  }
+
+  const onResetLensFlareSetting = (key: keyof LensFlareSettings) => {
+    const defaults = createDefaultVisualSettings()
+
+    onLensFlareSettingChange({
+      [key]: defaults.lensFlare[key]
+    })
+  }
+
+  const onResetSsrSetting = (key: keyof SSRSettings) => {
+    const defaults = createDefaultVisualSettings()
+
+    onSsrSettingChange({
+      [key]: defaults.ssr[key]
+    })
+  }
+
+  const onResetAnamorphicSetting = (key: keyof AnamorphicSettings) => {
+    const defaults = createDefaultVisualSettings()
+
+    onAnamorphicSettingChange({
+      [key]: defaults.anamorphic[key]
+    })
+  }
+
   const onResetSsrSettings = () => {
     const defaults = createDefaultVisualSettings()
 
@@ -11117,6 +12303,54 @@ export default function App() {
     onBooleanSettingChange(key, defaults[key])
   }
 
+  useEffect(() => {
+    const globalWindow = window as Window & {
+      __levelsjamGetVisualSettings?: () => VisualSettings
+      __levelsjamResetVisualSettings?: () => void
+      __levelsjamSetVisualSettings?: (patch: VisualSettingsPatch) => void
+      __levelsjamDebug?: {
+        getVisualSettings?: () => VisualSettings
+        resetVisualSettings?: () => void
+        setVisualSettings?: (patch: VisualSettingsPatch) => void
+      }
+    }
+    const existing = globalWindow.__levelsjamDebug ?? {}
+
+    globalWindow.__levelsjamDebug = {
+      ...existing,
+      getVisualSettings: () => visualSettings,
+      resetVisualSettings: () => {
+        setVisualSettings(createDefaultVisualSettings())
+      },
+      setVisualSettings: (patch) => {
+        setVisualSettings((current) => applyVisualSettingsPatch(current, patch))
+      }
+    }
+    globalWindow.__levelsjamGetVisualSettings = () => visualSettings
+    globalWindow.__levelsjamResetVisualSettings = () => {
+      setVisualSettings(createDefaultVisualSettings())
+    }
+    globalWindow.__levelsjamSetVisualSettings = (patch) => {
+      setVisualSettings((current) => applyVisualSettingsPatch(current, patch))
+    }
+
+    return () => {
+      delete globalWindow.__levelsjamGetVisualSettings
+      delete globalWindow.__levelsjamResetVisualSettings
+      delete globalWindow.__levelsjamSetVisualSettings
+      if (!globalWindow.__levelsjamDebug) {
+        return
+      }
+
+      delete globalWindow.__levelsjamDebug.getVisualSettings
+      delete globalWindow.__levelsjamDebug.resetVisualSettings
+      delete globalWindow.__levelsjamDebug.setVisualSettings
+      if (Object.keys(globalWindow.__levelsjamDebug).length === 0) {
+        delete globalWindow.__levelsjamDebug
+      }
+    }
+  }, [visualSettings])
+
   const onAssetsReady = () => {
     recordStartupMarker('sceneAssetsReadyAt')
     setSceneLoaded(true)
@@ -11125,7 +12359,17 @@ export default function App() {
   if (!mazeLayout) {
     return (
       <div className="app-shell">
-        <LoadingOverlay complete={false} />
+        {mazeLoadError
+          ? (
+            <div className="loading-overlay visible">
+              <div className="loading-panel">
+                <div className="loading-title">MINOTAUR</div>
+                <div className="loading-subtitle">Failed to load the labyrinth.</div>
+                <small>{mazeLoadError}</small>
+              </div>
+            </div>
+            )
+          : <LoadingOverlay complete={false} />}
       </div>
     )
   }

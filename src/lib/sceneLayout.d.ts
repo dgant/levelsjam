@@ -30,6 +30,7 @@ export type MazeLayout = {
       atlasWidth: number
       bakeMs: number
       dataBase64?: string
+      encoding?: 'rgbe8' | 'rgb16f'
       groundBounds: {
         centerX: number
         centerZ: number
