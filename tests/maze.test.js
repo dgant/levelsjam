@@ -97,7 +97,13 @@ test('persists at least five valid mazes', async () => {
     )
     const maze = module.default
     const validation = validateMaze(maze)
+    const lightCellKeys = new Set(
+      maze.lights.map((light) => `${light.cell.x},${light.cell.y}`)
+    )
+
     assert.equal(validation.valid, true, validation.errors.join('\n'))
+    assert.ok(lightCellKeys.has(`${maze.sword.cell.x},${maze.sword.cell.y}`))
+    assert.ok(lightCellKeys.has(`${maze.trophy.cell.x},${maze.trophy.cell.y}`))
     assert.ok(maze.lightmap)
   }
 })
@@ -255,6 +261,16 @@ test('bakes local sconce occlusion into the attached wall face', () => {
   assert.ok(
     center < left && center < right,
     `expected sconce occlusion shadow at row ${shadowRow}, got center=${center} left=${left} right=${right}`
+  )
+
+  const floorRow = 8
+  const floorCenter = sample(centerColumn, floorRow)
+  const floorLeft = sample(sideColumn, floorRow)
+  const floorRight = sample(rect.width - 1 - sideColumn, floorRow)
+
+  assert.ok(
+    floorCenter < floorLeft && floorCenter < floorRight,
+    `expected sconce contact shadow to continue to row ${floorRow}, got center=${floorCenter} left=${floorLeft} right=${floorRight}`
   )
 })
 

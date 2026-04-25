@@ -77,8 +77,10 @@ import {
 } from 'three'
 import {
   Suspense,
+  createContext,
   startTransition,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   type RefObject,
@@ -595,8 +597,8 @@ vec2 fogProbeGridCellToUv(vec2 cell) {
 
 vec2 fogProbeGridCellToWorld(vec2 cell) {
   return vec2(
-    probeAmbientBounds.x + ((cell.x + 0.5) * fogProbeCellSize(probeAmbientBounds.z, probeAmbientGrid.x)),
-    probeAmbientBounds.y + ((cell.y + 0.5) * fogProbeCellSize(probeAmbientBounds.w, probeAmbientGrid.y))
+    probeAmbientBounds.x + (cell.x * fogProbeCellSize(probeAmbientBounds.z, probeAmbientGrid.x)),
+    probeAmbientBounds.y + (cell.y * fogProbeCellSize(probeAmbientBounds.w, probeAmbientGrid.y))
   );
 }
 
@@ -693,7 +695,8 @@ float sampleFogProbeGridVisibility(vec3 worldPosition, vec2 cell) {
     return 1.0;
   }
 
-  vec2 probeWorldXZ = fogProbeGridCellToWorld(cell);
+  vec2 clampedCell = fogClampProbeGridCell(cell);
+  vec2 probeWorldXZ = fogProbeGridCellToWorld(clampedCell);
   vec3 probePosition = vec3(probeWorldXZ.x, probeHeight, probeWorldXZ.y);
   vec3 toPoint = worldPosition - probePosition;
   float pointDistance = length(toPoint);
@@ -702,7 +705,7 @@ float sampleFogProbeGridVisibility(vec3 worldPosition, vec2 cell) {
     return 1.0;
   }
 
-  float storedDistance = sampleFogProbeGridDepth(cell, toPoint);
+  float storedDistance = sampleFogProbeGridDepth(clampedCell, toPoint);
   float bias = 0.06;
 
   return 1.0 - smoothstep(
@@ -713,14 +716,15 @@ float sampleFogProbeGridVisibility(vec3 worldPosition, vec2 cell) {
 }
 
 vec4 sampleFogAmbientCandidate(vec3 worldPosition, vec2 cell) {
-  vec2 uv = fogProbeGridCellToUv(cell);
+  vec2 clampedCell = fogClampProbeGridCell(cell);
+  vec2 uv = fogProbeGridCellToUv(clampedCell);
   vec4 coeff0 = texture2D(probeCoeffTextureL0, uv);
 
   if (coeff0.a <= 0.0) {
     return vec4(0.0);
   }
 
-  float visibility = sampleFogProbeGridVisibility(worldPosition, cell);
+  float visibility = sampleFogProbeGridVisibility(worldPosition, clampedCell);
 
   if (visibility <= 0.0001) {
     return vec4(0.0);
@@ -732,6 +736,16 @@ vec4 sampleFogAmbientCandidate(vec3 worldPosition, vec2 cell) {
   return vec4(color * weight, weight);
 }
 
+float fogProbeKernelWeight(vec2 gridPosition, vec2 cell) {
+  vec2 distanceToCell = abs(gridPosition - cell);
+  vec2 axisWeight = vec2(
+    1.0 - smoothstep(0.5, 1.5, distanceToCell.x),
+    1.0 - smoothstep(0.5, 1.5, distanceToCell.y)
+  );
+
+  return axisWeight.x * axisWeight.y;
+}
+
 vec3 sampleFogAmbientColor(vec3 worldPosition) {
   if (useProbeCoefficientTexture < 0.5) {
     return vec3(0.0);
@@ -741,18 +755,23 @@ vec3 sampleFogAmbientColor(vec3 worldPosition) {
     (worldPosition.x - probeAmbientBounds.x) / max(fogProbeCellSize(probeAmbientBounds.z, probeAmbientGrid.x), 0.0001),
     (worldPosition.z - probeAmbientBounds.y) / max(fogProbeCellSize(probeAmbientBounds.w, probeAmbientGrid.y), 0.0001)
   );
-  vec2 cell = floor(worldGridPosition);
-  vec2 blend = clamp(fract(worldGridPosition), vec2(0.0), vec2(1.0));
-  float w0 = (1.0 - blend.x) * (1.0 - blend.y);
-  float w1 = blend.x * (1.0 - blend.y);
-  float w2 = (1.0 - blend.x) * blend.y;
-  float w3 = blend.x * blend.y;
-  vec4 c0 = sampleFogAmbientCandidate(worldPosition, cell) * w0;
-  vec4 c1 = sampleFogAmbientCandidate(worldPosition, cell + vec2(1.0, 0.0)) * w1;
-  vec4 c2 = sampleFogAmbientCandidate(worldPosition, cell + vec2(0.0, 1.0)) * w2;
-  vec4 c3 = sampleFogAmbientCandidate(worldPosition, cell + vec2(1.0, 1.0)) * w3;
-  vec3 color = c0.rgb + c1.rgb + c2.rgb + c3.rgb;
-  float weight = c0.a + c1.a + c2.a + c3.a;
+  vec2 nearestCell = floor(worldGridPosition + vec2(0.5));
+  vec4 accumulated = vec4(0.0);
+
+  for (int x = -1; x <= 1; x += 1) {
+    for (int y = -1; y <= 1; y += 1) {
+      vec2 cell = nearestCell + vec2(float(x), float(y));
+      float spatialWeight = fogProbeKernelWeight(worldGridPosition, cell);
+
+      if (spatialWeight <= 0.0001) {
+        continue;
+      }
+
+      accumulated += sampleFogAmbientCandidate(worldPosition, cell) * spatialWeight;
+    }
+  }
+  vec3 color = accumulated.rgb;
+  float weight = accumulated.a;
 
   if (weight <= 0.0001) {
     return vec3(0.0);
@@ -1060,6 +1079,7 @@ type VisualSettings = {
   volumetricNoiseFrequency: number
   volumetricNoisePeriod: number
   volumetricNoiseStrength: number
+  volumetricShadowsEnabled: boolean
   volumetricStepCount: number
   vignette: VignetteSettings
 }
@@ -1090,6 +1110,7 @@ type VisualSettingsPatch = Partial<{
   volumetricNoiseFrequency: number
   volumetricNoisePeriod: number
   volumetricNoiseStrength: number
+  volumetricShadowsEnabled: boolean
   volumetricStepCount: number
   vignette: Partial<VignetteSettings>
 }>
@@ -1102,6 +1123,7 @@ type BooleanSettingKey =
   | 'lightmapContributionEnabled'
   | 'reflectionContributionEnabled'
   | 'staticVolumetricContributionEnabled'
+  | 'volumetricShadowsEnabled'
 type ScalarSettingKey =
   | 'ambientOcclusionIntensity'
   | 'ambientOcclusionRadius'
@@ -1254,6 +1276,7 @@ type ProbeBlendConfig = {
   probeHeight?: number
   radianceIntensity?: number
   radianceMode?: ProbeBlendMode
+  useProbeDepthAtlases?: boolean
   vlmBoundaryNormal?: {
     x: number
     z: number
@@ -1361,6 +1384,8 @@ type MaterialShaderPatchConfig = {
 }
 
 type LightmapTextureEncoding = 'linear' | 'rgbe8'
+
+const VolumetricShadowContext = createContext(true)
 
 type WallMaterialContinuumStepKey =
   | 'basic-white'
@@ -1633,7 +1658,7 @@ function createDefaultVisualSettings(): VisualSettings {
       aditionalStreaks: false,
       animated: false,
       anamorphic: true,
-      enabled: true,
+      enabled: false,
       flareShape: 0.03,
       flareSize: 0.01,
       flareSpeed: 0.01,
@@ -1657,7 +1682,7 @@ function createDefaultVisualSettings(): VisualSettings {
     },
     toneMapping: 'agx',
     bloom: {
-      enabled: true,
+      enabled: false,
       intensity: 0.65,
       kernelSize: 'huge',
       resolutionScale: 0.25,
@@ -1699,6 +1724,7 @@ function createDefaultVisualSettings(): VisualSettings {
     volumetricNoiseFrequency: DEFAULT_VOLUMETRIC_NOISE_FREQUENCY,
     volumetricNoisePeriod: DEFAULT_VOLUMETRIC_NOISE_PERIOD,
     volumetricNoiseStrength: DEFAULT_VOLUMETRIC_NOISE_STRENGTH,
+    volumetricShadowsEnabled: true,
     volumetricStepCount: DEFAULT_VOLUMETRIC_STEP_COUNT,
     vignette: {
       enabled: true,
@@ -1766,6 +1792,9 @@ function applyVisualSettingsPatch(
     ...(patch.volumetricNoiseStrength === undefined
       ? null
       : { volumetricNoiseStrength: patch.volumetricNoiseStrength }),
+    ...(patch.volumetricShadowsEnabled === undefined
+      ? null
+      : { volumetricShadowsEnabled: patch.volumetricShadowsEnabled }),
     ...(patch.volumetricStepCount === undefined
       ? null
       : { volumetricStepCount: patch.volumetricStepCount }),
@@ -2229,7 +2258,7 @@ vec2 worldToProbeGridCell( vec2 worldXZ ) {
 }
 
 vec2 probeGridCellToWorld( vec2 cell ) {
-  return probeGridMin + ( ( cell + vec2( 0.5 ) ) * probeCellSize );
+  return probeGridMin + ( cell * probeCellSize );
 }
 
 vec2 probeGridCellToUv( vec2 cell ) {
@@ -2317,7 +2346,8 @@ float sampleProbeGridVisibility( vec3 worldPosition, vec2 cell ) {
     return 1.0;
   }
 
-  vec2 probeWorldXZ = probeGridCellToWorld( cell );
+  vec2 clampedCell = clampProbeGridCell( cell );
+  vec2 probeWorldXZ = probeGridCellToWorld( clampedCell );
   vec3 probePosition = vec3( probeWorldXZ.x, probeHeight, probeWorldXZ.y );
   vec3 toPoint = worldPosition - probePosition;
   float pointDistance = length( toPoint );
@@ -2326,7 +2356,7 @@ float sampleProbeGridVisibility( vec3 worldPosition, vec2 cell ) {
     return 1.0;
   }
 
-  float storedDistance = sampleProbeGridDepth( cell, toPoint );
+  float storedDistance = sampleProbeGridDepth( clampedCell, toPoint );
   float bias = 0.06;
 
   return 1.0 - smoothstep(
@@ -2341,14 +2371,15 @@ vec4 sampleProbeGridCandidate(
   vec3 direction,
   vec2 cell
 ) {
-  vec2 uv = probeGridCellToUv( cell );
+  vec2 clampedCell = clampProbeGridCell( cell );
+  vec2 uv = probeGridCellToUv( clampedCell );
   vec4 coeff0 = texture2D( localProbeCoeffTextureL0, uv );
 
   if ( coeff0.a <= 0.0 ) {
     return vec4( 0.0 );
   }
 
-  float visibility = sampleProbeGridVisibility( worldPosition, cell );
+  float visibility = sampleProbeGridVisibility( worldPosition, clampedCell );
 
   if ( visibility <= 0.0001 ) {
     return vec4( 0.0 );
@@ -2369,23 +2400,38 @@ vec4 sampleProbeGridCandidate(
   return vec4( color * weight, weight );
 }
 
+float probeGridKernelWeight( vec2 gridPosition, vec2 cell ) {
+  vec2 distanceToCell = abs( gridPosition - cell );
+  vec2 axisWeight = vec2(
+    1.0 - smoothstep( 0.5, 1.5, distanceToCell.x ),
+    1.0 - smoothstep( 0.5, 1.5, distanceToCell.y )
+  );
+
+  return axisWeight.x * axisWeight.y;
+}
+
 vec3 sampleProbeGridDiffuseCell5(
   vec3 worldPosition,
   vec3 direction
 ) {
   vec2 gridPosition = ( worldPosition.xz - probeGridMin ) / max( probeCellSize, 0.0001 );
-  vec2 cell = floor( gridPosition );
-  vec2 blend = clamp( fract( gridPosition ), vec2( 0.0 ), vec2( 1.0 ) );
-  float w0 = ( 1.0 - blend.x ) * ( 1.0 - blend.y );
-  float w1 = blend.x * ( 1.0 - blend.y );
-  float w2 = ( 1.0 - blend.x ) * blend.y;
-  float w3 = blend.x * blend.y;
-  vec4 c0 = sampleProbeGridCandidate( worldPosition, direction, cell ) * w0;
-  vec4 c1 = sampleProbeGridCandidate( worldPosition, direction, cell + vec2( 1.0, 0.0 ) ) * w1;
-  vec4 c2 = sampleProbeGridCandidate( worldPosition, direction, cell + vec2( 0.0, 1.0 ) ) * w2;
-  vec4 c3 = sampleProbeGridCandidate( worldPosition, direction, cell + vec2( 1.0, 1.0 ) ) * w3;
-  vec3 color = c0.rgb + c1.rgb + c2.rgb + c3.rgb;
-  float weight = c0.a + c1.a + c2.a + c3.a;
+  vec2 nearestCell = floor( gridPosition + vec2( 0.5 ) );
+  vec4 accumulated = vec4( 0.0 );
+
+  for ( int x = -1; x <= 1; x += 1 ) {
+    for ( int y = -1; y <= 1; y += 1 ) {
+      vec2 cell = nearestCell + vec2( float( x ), float( y ) );
+      float spatialWeight = probeGridKernelWeight( gridPosition, cell );
+
+      if ( spatialWeight <= 0.0001 ) {
+        continue;
+      }
+
+      accumulated += sampleProbeGridCandidate( worldPosition, direction, cell ) * spatialWeight;
+    }
+  }
+  vec3 color = accumulated.rgb;
+  float weight = accumulated.a;
 
   if ( weight <= 0.0001 ) {
     return vec3( 0.0 );
@@ -2988,6 +3034,7 @@ function updateProbeBlendShaderUniforms(
   }
   if (shader.uniforms.useProbeDepthAtlases) {
     shader.uniforms.useProbeDepthAtlases.value =
+      probeBlend.useProbeDepthAtlases !== false &&
       probeBlend.probeDepthAtlasTextures?.every(Boolean)
         ? 1
         : 0
@@ -3069,6 +3116,7 @@ function getProbeBlendUpdateKey(
     probeDepthAtlasTextureUUIDs: (probeBlend.probeDepthAtlasTextures ?? []).map(
       (texture) => texture?.uuid ?? null
     ),
+    useProbeDepthAtlases: probeBlend.useProbeDepthAtlases !== false,
     probeGridMin: probeBlend.probeGridMin
       ? [probeBlend.probeGridMin.x, probeBlend.probeGridMin.z]
       : null,
@@ -4112,6 +4160,7 @@ function buildProbeBlendConfig(
     }
     vlmMode?: ProbeVlmMode
     weights?: [number, number, number, number]
+    useProbeDepthAtlases?: boolean
   } = {}
 ) {
   return {
@@ -4132,8 +4181,8 @@ function buildProbeBlendConfig(
     probeCoefficients,
     probeDepthTextures,
     probeGridMin: {
-      x: -((layout.maze.width * MAZE_CELL_SIZE) / 2),
-      z: -((layout.maze.height * MAZE_CELL_SIZE) / 2)
+      x: layout.reflectionProbes[0]?.position.x ?? 0,
+      z: layout.reflectionProbes[0]?.position.z ?? 0
     },
     probeGridSize: {
       x: layout.maze.width,
@@ -4145,6 +4194,7 @@ function buildProbeBlendConfig(
     probeTextureInfos: probeTextures.map((texture) => getCubeUvTextureInfo(texture)),
     probeTextures,
     region: options.region,
+    useProbeDepthAtlases: options.useProbeDepthAtlases ?? true,
     vlmBoundaryNormal: options.vlmBoundaryNormal,
     vlmMode: options.vlmMode ?? 'disabled',
     weights: options.weights
@@ -7026,6 +7076,7 @@ function Ground({
   reflectionProbeTextures: Texture[]
 }) {
   const puddle = usePuddleTextures(PUDDLE_TEXTURE_REPEAT)
+  const volumetricShadowsEnabled = useContext(VolumetricShadowContext)
   const groundPatchRects = useMemo(
     () => buildGroundReflectionProbeRects(layout) as GroundPatchRect[],
     [layout]
@@ -7086,6 +7137,7 @@ function Ground({
               ? 'world'
               : 'disabled',
                   region: rect.region,
+                  useProbeDepthAtlases: volumetricShadowsEnabled,
                   vlmMode: probeIblActive ? 'cell5' : 'disabled'
                 }
               )}
@@ -7225,6 +7277,7 @@ function WallSconce({
   torchTexture: Texture | null
 }) {
   const metal = useStandardPbrTextures(METAL_TEXTURE_URLS, METAL_TEXTURE_REPEAT)
+  const volumetricShadowsEnabled = useContext(VolumetricShadowContext)
   const [material, setMaterial] = useState<ThreeMeshStandardMaterial | null>(null)
   const patchConfig = useMemo(
     () => ({
@@ -7310,6 +7363,7 @@ function WallSconce({
             : reflectionActive
               ? 'constant'
               : 'disabled',
+          useProbeDepthAtlases: volumetricShadowsEnabled,
           vlmBoundaryNormal:
             mazeLight.side === 'east'
               ? { x: 1, z: 0 }
@@ -7336,7 +7390,8 @@ function WallSconce({
       reflectionContributionIntensity,
       reflectionActive,
       reflectionProbeBlend.probeIndices,
-      reflectionProbeBlend.weights
+      reflectionProbeBlend.weights,
+      volumetricShadowsEnabled
     ]
   )
   const materialKey = useMemo(
@@ -7612,6 +7667,7 @@ function FogVolume({
 }) {
   const camera = useThree((state) => state.camera)
   const scene = useThree((state) => state.scene)
+  const volumetricShadowsEnabled = useContext(VolumetricShadowContext)
   const effect = useMemo(() => new FogVolumeEffectImpl(), [])
   const probeBounds = useMemo(() => {
     const firstProbe = layout.reflectionProbes[0]?.position
@@ -7654,7 +7710,8 @@ function FogVolume({
     effect.probeAmbientTexture = null
     effect.rayStepCount = rayStepCount
     effect.useProbeCoefficientTexture = probeCoefficientTextures[0] ? 1 : 0
-    effect.useProbeDepthAtlases = probeDepthAtlasTextures.every(Boolean) ? 1 : 0
+    effect.useProbeDepthAtlases =
+      volumetricShadowsEnabled && probeDepthAtlasTextures.every(Boolean) ? 1 : 0
     effect.useProbeAmbientTexture = 0
     effect.volumeHeight = FOG_VOLUME_HEIGHT
     scene.userData.fogEffectState = {
@@ -7685,7 +7742,8 @@ function FogVolume({
       rayStepCount,
       useProbeAmbientTexture: 0,
       useProbeCoefficientTexture: probeCoefficientTextures[0] ? 1 : 0,
-      useProbeDepthAtlases: probeDepthAtlasTextures.every(Boolean) ? 1 : 0
+      useProbeDepthAtlases:
+        volumetricShadowsEnabled && probeDepthAtlasTextures.every(Boolean) ? 1 : 0
     }
   }, [
     ambientColor,
@@ -7704,6 +7762,7 @@ function FogVolume({
     rayStepCount,
     scene,
     visible,
+    volumetricShadowsEnabled,
     volumeIntensity
   ])
 
@@ -8920,6 +8979,7 @@ function MazeWallMesh({
   wallIndex: number
   wallMaterialMaps: PbrMaps
 }) {
+  const volumetricShadowsEnabled = useContext(VolumetricShadowContext)
   const geometry = useMemo(
     () => createWallGeometry(lightmap, mazeWall.id),
     [lightmap, mazeWall.id]
@@ -8995,6 +9055,7 @@ function MazeWallMesh({
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
           radianceMode: 'disabled',
+          useProbeDepthAtlases: volumetricShadowsEnabled,
           vlmBoundaryNormal:
             mazeWall.axis === 'z'
               ? { x: 1, z: 0 }
@@ -9015,7 +9076,8 @@ function MazeWallMesh({
       reflectionActive,
       reflectionContributionIntensity,
       reflectionProbeBlend.probeIndices,
-      reflectionProbeBlend.weights
+      reflectionProbeBlend.weights,
+      volumetricShadowsEnabled
     ]
   )
   const wallFaceMaterialBaseKey = useMemo(
@@ -9205,6 +9267,7 @@ function GateActor({
   reflectionProbeDepthTextures: CubeTexture[]
   reflectionProbeTextures: Texture[]
 }) {
+  const volumetricShadowsEnabled = useContext(VolumetricShadowContext)
   const group = useRef<Group>(null)
   const model = useClonedRuntimeModel(
     GATE_MODEL_URL,
@@ -9264,6 +9327,7 @@ function GateActor({
             hasProbeTextures
               ? 'constant'
               : 'disabled',
+          useProbeDepthAtlases: volumetricShadowsEnabled,
           vlmBoundaryNormal:
             gate.axis === 'z'
               ? { x: 1, z: 0 }
@@ -9289,7 +9353,8 @@ function GateActor({
       probeTextures,
       reflectionContributionIntensity,
       reflectionProbeBlend.probeIndices,
-      reflectionProbeBlend.weights
+      reflectionProbeBlend.weights,
+      volumetricShadowsEnabled
     ]
   )
   const transform = useMemo(() => {
@@ -9457,6 +9522,7 @@ function MazeItemGroundActor({
   reflectionProbeDepthTextures: CubeTexture[]
   reflectionProbeTextures: Texture[]
 }) {
+  const volumetricShadowsEnabled = useContext(VolumetricShadowContext)
   const model = useClonedRuntimeModel(
     item.type === 'sword' ? SWORD_MODEL_URL : TROPHY_MODEL_URL,
     item.type,
@@ -9515,6 +9581,7 @@ function MazeItemGroundActor({
             hasProbeTextures
               ? 'constant'
               : 'disabled',
+          useProbeDepthAtlases: volumetricShadowsEnabled,
           vlmMode:
             iblContributionIntensity > EFFECT_EPSILON && hasProbeCoefficients
               ? 'cell5'
@@ -9533,7 +9600,8 @@ function MazeItemGroundActor({
       probeDepthTextures,
       probeTextures,
       reflectionContributionIntensity,
-      reflectionProbeBlend.probeIndices
+      reflectionProbeBlend.probeIndices,
+      volumetricShadowsEnabled
     ]
   )
   const transform = useMemo(() => {
@@ -9638,6 +9706,7 @@ function HeldItemView({
   reflectionProbeDepthTextures: CubeTexture[]
   reflectionProbeTextures: Texture[]
 }) {
+  const volumetricShadowsEnabled = useContext(VolumetricShadowContext)
   const group = useRef<Group>(null)
   const camera = useThree((state) => state.camera)
   const playerWorldPosition = useMemo(
@@ -9704,6 +9773,7 @@ function HeldItemView({
             hasProbeTextures
               ? 'constant'
               : 'disabled',
+          useProbeDepthAtlases: volumetricShadowsEnabled,
           vlmMode:
             diffuseIntensity > EFFECT_EPSILON && hasProbeCoefficients
               ? 'cell5'
@@ -9722,7 +9792,8 @@ function HeldItemView({
       probeDepthTextures,
       probeTextures,
       reflectionContributionIntensity,
-      reflectionProbeBlend.probeIndices
+      reflectionProbeBlend.probeIndices,
+      volumetricShadowsEnabled
     ]
   )
   const transform = useMemo(() => {
@@ -9937,6 +10008,7 @@ function MonsterModel({
   reflectionProbeDepthTextures: CubeTexture[]
   reflectionProbeTextures: Texture[]
 }) {
+  const volumetricShadowsEnabled = useContext(VolumetricShadowContext)
   const model = useClonedRuntimeModel(
     MONSTER_MODEL_URLS[monster.type],
     'monster',
@@ -9996,6 +10068,7 @@ function MonsterModel({
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
           radianceMode: diffuseProbeActive ? 'disabled' : 'none',
+          useProbeDepthAtlases: volumetricShadowsEnabled,
           vlmMode: diffuseProbeActive ? 'cell5' : 'disabled'
         }
       ),
@@ -10009,7 +10082,8 @@ function MonsterModel({
       probeDepthTextures,
       probeTextures,
       reflectionContributionIntensity,
-      reflectionProbeBlend.probeIndices
+      reflectionProbeBlend.probeIndices,
+      volumetricShadowsEnabled
     ]
   )
 
@@ -11054,7 +11128,6 @@ function TorchLensFlare({
 }
 
 function FlightRig({
-  controlsOpen,
   layout,
   movementSettings,
   onReplayActiveChange,
@@ -11064,7 +11137,6 @@ function FlightRig({
   turnState,
   wallBounds
 }: {
-  controlsOpen: boolean
   layout: MazeLayout
   movementSettings: MovementSettings
   onReplayActiveChange: (active: boolean) => void
@@ -11205,7 +11277,7 @@ function FlightRig({
     }
 
     const onPointerDown = (event: PointerEvent) => {
-      if (controlsOpen || !freeCamera.current) {
+      if (!freeCamera.current) {
         return
       }
 
@@ -11225,7 +11297,7 @@ function FlightRig({
       window.removeEventListener('mousemove', onMouseMove)
       window.removeEventListener('pointerdown', onPointerDown)
     }
-  }, [camera, canvas, controlsOpen])
+  }, [camera, canvas])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -11237,12 +11309,7 @@ function FlightRig({
         return
       }
 
-      if (controlsOpen) {
-        keys.current[event.code] = false
-        return
-      }
-
-      if (event.code === 'Digit1') {
+      if (event.code === 'F1') {
         event.preventDefault()
         freeCamera.current = !freeCamera.current
         keys.current = {}
@@ -11318,13 +11385,7 @@ function FlightRig({
       window.removeEventListener('keyup', onKeyUp)
       window.removeEventListener('blur', onBlur)
     }
-  }, [canvas, controlsOpen])
-
-  useEffect(() => {
-    if (controlsOpen) {
-      keys.current = {}
-    }
-  }, [controlsOpen])
+  }, [canvas])
 
   useEffect(() => {
     const globalWindow = window as Window & {
@@ -13120,39 +13181,40 @@ function Scene({
         onReflectionProbeRawTexturesChange={setReflectionProbeRawTextures}
         onReflectionProbeTexturesChange={setReflectionProbeTextures}
       />
-      <SceneGeometry
-        environmentTexture={environmentTexture}
-        environmentIntensity={environmentIntensity}
-        iblContributionIntensity={getEnabledContributionIntensity(visualSettings.iblContribution)}
-        layout={layout}
-        lightmapContributionIntensity={getEnabledContributionIntensity(visualSettings.lightmapContribution)}
-        openGateIds={openGateIds}
-        probeDebugMode={visualSettings.probeDebugMode}
-        probeDepthAtlasTextures={probeDepthAtlasTextures}
-        probeCoefficientTextures={probeCoefficientTextures}
-        reflectionProbeCoefficients={reflectionProbeCoefficients}
-        reflectionProbeDepthTextures={reflectionProbeDepthTextures}
-        reflectionContributionIntensity={getEnabledContributionIntensity(visualSettings.reflectionContribution)}
-        reflectionProbeTextures={reflectionProbeTextures}
-        staticVolumetricContributionIntensity={getEnabledContributionIntensity(visualSettings.staticVolumetricContribution)}
-        surfaceLightmap={surfaceLightmap}
-        turnState={turnState}
-      />
-      <MonsterActors
-        environmentIntensity={environmentIntensity}
-        environmentTexture={environmentTexture}
-        iblContributionIntensity={getEnabledContributionIntensity(visualSettings.iblContribution)}
-        layout={layout}
-        lightmapContributionIntensity={getEnabledContributionIntensity(visualSettings.lightmapContribution)}
-        probeDepthAtlasTextures={probeDepthAtlasTextures}
-        probeCoefficientTextures={probeCoefficientTextures}
-        reflectionContributionIntensity={getEnabledContributionIntensity(visualSettings.reflectionContribution)}
-        reflectionProbeCoefficients={reflectionProbeCoefficients}
-        reflectionProbeDepthTextures={reflectionProbeDepthTextures}
-        reflectionProbeTextures={reflectionProbeTextures}
-        turnState={turnState}
-      />
-      {composerEnabled ? (
+      <VolumetricShadowContext.Provider value={visualSettings.volumetricShadowsEnabled}>
+        <SceneGeometry
+          environmentTexture={environmentTexture}
+          environmentIntensity={environmentIntensity}
+          iblContributionIntensity={getEnabledContributionIntensity(visualSettings.iblContribution)}
+          layout={layout}
+          lightmapContributionIntensity={getEnabledContributionIntensity(visualSettings.lightmapContribution)}
+          openGateIds={openGateIds}
+          probeDebugMode={visualSettings.probeDebugMode}
+          probeDepthAtlasTextures={probeDepthAtlasTextures}
+          probeCoefficientTextures={probeCoefficientTextures}
+          reflectionProbeCoefficients={reflectionProbeCoefficients}
+          reflectionProbeDepthTextures={reflectionProbeDepthTextures}
+          reflectionContributionIntensity={getEnabledContributionIntensity(visualSettings.reflectionContribution)}
+          reflectionProbeTextures={reflectionProbeTextures}
+          staticVolumetricContributionIntensity={getEnabledContributionIntensity(visualSettings.staticVolumetricContribution)}
+          surfaceLightmap={surfaceLightmap}
+          turnState={turnState}
+        />
+        <MonsterActors
+          environmentIntensity={environmentIntensity}
+          environmentTexture={environmentTexture}
+          iblContributionIntensity={getEnabledContributionIntensity(visualSettings.iblContribution)}
+          layout={layout}
+          lightmapContributionIntensity={getEnabledContributionIntensity(visualSettings.lightmapContribution)}
+          probeDepthAtlasTextures={probeDepthAtlasTextures}
+          probeCoefficientTextures={probeCoefficientTextures}
+          reflectionContributionIntensity={getEnabledContributionIntensity(visualSettings.reflectionContribution)}
+          reflectionProbeCoefficients={reflectionProbeCoefficients}
+          reflectionProbeDepthTextures={reflectionProbeDepthTextures}
+          reflectionProbeTextures={reflectionProbeTextures}
+          turnState={turnState}
+        />
+        {composerEnabled ? (
       <EffectComposer
         enableNormalPass
         multisampling={0}
@@ -13242,20 +13304,20 @@ function Scene({
         />
         <DitherEffectPrimitive />
       </EffectComposer>
-      ) : null}
-      <FlightRig
-        controlsOpen={controlsOpen}
-        layout={layout}
-        movementSettings={visualSettings.movement}
-        onReplayActiveChange={onReplayActiveChange}
-        replayRequestId={replayRequestId}
-        setDisplayedOpenGateIds={setDisplayedOpenGateIds}
-        setTurnState={setTurnState}
-        turnState={turnState}
-        wallBounds={getWallBounds(layout)}
-      />
-      <PerformanceBenchmarkBridge />
-      <StartupReporter />
+        ) : null}
+        <FlightRig
+          layout={layout}
+          movementSettings={visualSettings.movement}
+          onReplayActiveChange={onReplayActiveChange}
+          replayRequestId={replayRequestId}
+          setDisplayedOpenGateIds={setDisplayedOpenGateIds}
+          setTurnState={setTurnState}
+          turnState={turnState}
+          wallBounds={getWallBounds(layout)}
+        />
+        <PerformanceBenchmarkBridge />
+        <StartupReporter />
+      </VolumetricShadowContext.Provider>
     </>
   )
 }
@@ -13649,6 +13711,24 @@ function VisualControls({
           type="range"
           value={visualSettings.staticVolumetricContribution.intensity}
         />
+          </div>
+
+          <div className="visual-control-row">
+        <output>{visualSettings.volumetricShadowsEnabled ? 'on' : 'off'}</output>
+        <label className="visual-effect-label">
+          <input
+            aria-label="Volumetric Shadows Enabled"
+            checked={visualSettings.volumetricShadowsEnabled}
+            onChange={(event) => {
+              onBooleanSettingChange('volumetricShadowsEnabled', event.target.checked)
+            }}
+            type="checkbox"
+          />
+          <ResettableLabel onReset={() => onResetBooleanSetting('volumetricShadowsEnabled')}>
+            Volumetric Shadows
+          </ResettableLabel>
+        </label>
+        <span aria-hidden="true" />
           </div>
 
           <div className="visual-control-row">

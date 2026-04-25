@@ -357,6 +357,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByLabel('Static Volumetric Enabled')).toBeVisible()
     await expect(page.getByLabel('Static Volumetric Enabled')).not.toBeChecked()
     await expect(page.getByRole('slider', { name: 'Static Volumetric' })).toHaveValue('1')
+    await expect(page.getByLabel('Volumetric Shadows Enabled')).toBeVisible()
+    await expect(page.getByLabel('Volumetric Shadows Enabled')).toBeChecked()
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeVisible()
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeChecked()
     await expect(page.getByRole('slider', { name: 'Reflection Intensity' })).toHaveValue('1')
@@ -495,7 +497,9 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         async () => page.evaluate(
           () => ({
             ground: window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4),
-            wall: window.__levelsjamDebug.getDebugMeshState('maze-wall', 10)
+            wall: Array.from({ length: 200 }, (_, index) =>
+              window.__levelsjamDebug.getDebugMeshState('maze-wall', index)
+            ).find(Boolean) ?? null
           })
         ),
         {
@@ -531,7 +535,9 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       .poll(
         async () => page.evaluate(() => ({
           ground: window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4),
-          wall: window.__levelsjamDebug.getDebugMeshState('maze-wall', 10)
+          wall: Array.from({ length: 200 }, (_, index) =>
+            window.__levelsjamDebug.getDebugMeshState('maze-wall', index)
+          ).find(Boolean) ?? null
         })),
         {
           timeout: 5_000,
@@ -590,7 +596,9 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       .poll(
         async () => page.evaluate(() => ({
           ground: window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4),
-          wall: window.__levelsjamDebug.getDebugMeshState('maze-wall', 10)
+          wall: Array.from({ length: 200 }, (_, index) =>
+            window.__levelsjamDebug.getDebugMeshState('maze-wall', index)
+          ).find((state) => state?.probeBlendUniforms) ?? null
         })),
         {
           timeout: 5_000,

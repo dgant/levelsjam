@@ -15,7 +15,7 @@ export const MAZE_CELL_SIZE = 2
 export const MAZE_WALL_THICKNESS = 0.25
 export const MAZE_WALL_HEIGHT = 2
 export const MAZE_TARGET_COUNT = 5
-export const MAZE_LIGHTMAP_VERSION = 20
+export const MAZE_LIGHTMAP_VERSION = 21
 export const MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS = 0.125
 
 const MAZE_LIGHTMAP_GROUND_TILE_SIZE = 256
@@ -428,9 +428,22 @@ function chooseMazeGates(maze, random, count = 4) {
   return chosen
 }
 
-function chooseMazeSwordCell(maze, random) {
+function hasClosedWallSide(maze, adjacency, cell) {
+  return getClosedSides(maze, adjacency, cell).length > 0
+}
+
+function chooseMazeSwordCell(maze, random, adjacency) {
   const reserved = getReservedCellKeys(maze)
-  const candidates = allCells(maze).filter((cell) => !reserved.has(cellKey(cell)))
+  let candidates = allCells(maze).filter(
+    (cell) =>
+      !reserved.has(cellKey(cell)) &&
+      hasClosedWallSide(maze, adjacency, cell)
+  )
+
+  if (candidates.length === 0) {
+    candidates = allCells(maze).filter((cell) => !reserved.has(cellKey(cell)))
+  }
+
   const index = integerFromRandom(random, candidates.length)
 
   return candidates[index] ?? { x: 0, y: 0 }
@@ -453,6 +466,7 @@ function getReservedCellKeys(maze) {
 function chooseMazeTrophyCell(maze, adjacency, reservedKeys) {
   let bestCell = { ...maze.opening.cell }
   let bestDistance = -1
+  let foundWallHostedCell = false
 
   for (let y = 0; y < maze.height; y += 1) {
     for (let x = 0; x < maze.width; x += 1) {
@@ -461,6 +475,15 @@ function chooseMazeTrophyCell(maze, adjacency, reservedKeys) {
 
       if (reservedKeys.has(key)) {
         continue
+      }
+
+      const hasClosedSide = hasClosedWallSide(maze, adjacency, cell)
+      if (foundWallHostedCell && !hasClosedSide) {
+        continue
+      }
+      if (!foundWallHostedCell && hasClosedSide) {
+        foundWallHostedCell = true
+        bestDistance = -1
       }
 
       const distance = shortestPathDistance(adjacency, maze.opening.cell, cell)
@@ -656,12 +679,15 @@ function validateMazeLights(maze) {
   const errors = []
   const adjacency = buildAdjacency(maze)
   const litCells = new Set()
+  const lightCellKeys = new Set()
 
   for (const light of maze.lights ?? []) {
     if (!isInsideMaze(light.cell, maze.width, maze.height)) {
       errors.push('Light cells must lie inside the maze bounds')
       continue
     }
+
+    lightCellKeys.add(cellKey(light.cell))
 
     if (!getClosedSides(maze, adjacency, light.cell).includes(light.side)) {
       errors.push(
@@ -672,6 +698,15 @@ function validateMazeLights(maze) {
 
     for (const coveredCell of computeLightCoverage(maze, light)) {
       litCells.add(coveredCell)
+    }
+  }
+
+  for (const [label, pickup] of [
+    ['sword', maze.sword],
+    ['trophy', maze.trophy]
+  ]) {
+    if (pickup?.cell && !lightCellKeys.has(cellKey(pickup.cell))) {
+      errors.push(`Maze ${label} cell ${cellKey(pickup.cell)} must contain a torch light`)
     }
   }
 
@@ -1088,7 +1123,7 @@ export function generateMaze(seed = Date.now(), options = {}) {
 
   maze.gates = chooseMazeGates(maze, random)
   maze.sword = {
-    cell: chooseMazeSwordCell(maze, random)
+    cell: chooseMazeSwordCell(maze, random, adjacency)
   }
   maze.trophy = {
     cell: chooseMazeTrophyCell(
@@ -1663,7 +1698,71 @@ function segmentIntersectsLowerHemisphereCap(start, end, center, radius) {
   return false
 }
 
-function isTorchBlockedBySconce(samplePosition, torchPlacement, sconceRadius) {
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value))
+}
+
+function smoothstep(edge0, edge1, value) {
+  const t = clamp01((value - edge0) / Math.max(edge1 - edge0, 1e-6))
+  return t * t * (3 - (2 * t))
+}
+
+function isAttachedWallFaceSample(samplePosition, sampleNormal, torchPlacement) {
+  const normalDot =
+    (sampleNormal.x * torchPlacement.normal.x) +
+    (sampleNormal.z * torchPlacement.normal.z)
+
+  if (normalDot < 0.99) {
+    return false
+  }
+
+  const wallCenter = torchPlacement.wallCenter
+  const acrossDistance =
+    Math.abs(
+      ((samplePosition.x - wallCenter.x) * torchPlacement.normal.x) +
+      ((samplePosition.z - wallCenter.z) * torchPlacement.normal.z)
+    )
+
+  if (acrossDistance > (MAZE_WALL_THICKNESS + MAZE_LIGHTMAP_SAMPLE_EPSILON)) {
+    return false
+  }
+
+  const alongDistance = torchPlacement.wallAxis === 'x'
+    ? Math.abs(samplePosition.x - wallCenter.x)
+    : Math.abs(samplePosition.z - wallCenter.z)
+
+  return alongDistance <= (MAZE_CELL_SIZE / 2) + MAZE_LIGHTMAP_SAMPLE_EPSILON
+}
+
+function getAttachedSconceContactShadow(samplePosition, sampleNormal, torchPlacement, sconceRadius) {
+  if (!isAttachedWallFaceSample(samplePosition, sampleNormal, torchPlacement)) {
+    return 0
+  }
+
+  if (samplePosition.y > torchPlacement.sconcePosition.y + (sconceRadius * 0.15)) {
+    return 0
+  }
+
+  const wallCenter = torchPlacement.wallCenter
+  const horizontalDistance = torchPlacement.wallAxis === 'x'
+    ? Math.abs(samplePosition.x - wallCenter.x)
+    : Math.abs(samplePosition.z - wallCenter.z)
+  const horizontalMask =
+    1 - smoothstep(sconceRadius * 0.55, sconceRadius * 1.45, horizontalDistance)
+  const verticalMask = smoothstep(
+    GROUND_Y,
+    torchPlacement.sconcePosition.y + sconceRadius,
+    samplePosition.y
+  )
+
+  return clamp01(horizontalMask * (0.75 + (0.25 * verticalMask)))
+}
+
+function isTorchBlockedBySconce(samplePosition, sampleNormal, torchPlacement, sconceRadius) {
+  if (!isAttachedWallFaceSample(samplePosition, sampleNormal, torchPlacement)) {
+    return false
+  }
+
   return segmentIntersectsLowerHemisphereCap(
     samplePosition,
     torchPlacement.torchPosition,
@@ -1826,23 +1925,20 @@ function accumulateTorchLighting(
     const sourceRadius = Math.max(sconceRadius, 0.01)
     const falloff = 1 / Math.max(distance * distance, sourceRadius * sourceRadius)
     const strength = lambert * falloff * MAZE_LIGHTMAP_TORCH_STRENGTH
+    const sconceContactShadow =
+      getAttachedSconceContactShadow(samplePosition, sampleNormal, torch, sconceRadius)
+    const contactShadowedStrength = strength * (1 - (0.98 * sconceContactShadow))
 
     if (strength < MAZE_LIGHTMAP_MIN_RAW_TORCH_CONTRIBUTION) {
       // Keep the inverse-square tail without paying per-texel wall tests for
       // contributions too small to cast a readable hard shadow in the 8-bit bake.
-      litColor[0] += MAZE_TORCH_LIGHT_COLOR[0] * strength
-      litColor[1] += MAZE_TORCH_LIGHT_COLOR[1] * strength
-      litColor[2] += MAZE_TORCH_LIGHT_COLOR[2] * strength
+      litColor[0] += MAZE_TORCH_LIGHT_COLOR[0] * contactShadowedStrength
+      litColor[1] += MAZE_TORCH_LIGHT_COLOR[1] * contactShadowedStrength
+      litColor[2] += MAZE_TORCH_LIGHT_COLOR[2] * contactShadowedStrength
       continue
     }
 
-    if (
-      isTorchBlockedBySconce(
-        samplePosition,
-        torch,
-        sconceRadius
-      )
-    ) {
+    if (isTorchBlockedBySconce(samplePosition, sampleNormal, torch, sconceRadius)) {
       continue
     }
 
@@ -1864,9 +1960,9 @@ function accumulateTorchLighting(
       continue
     }
 
-    litColor[0] += MAZE_TORCH_LIGHT_COLOR[0] * strength
-    litColor[1] += MAZE_TORCH_LIGHT_COLOR[1] * strength
-    litColor[2] += MAZE_TORCH_LIGHT_COLOR[2] * strength
+    litColor[0] += MAZE_TORCH_LIGHT_COLOR[0] * contactShadowedStrength
+    litColor[1] += MAZE_TORCH_LIGHT_COLOR[1] * contactShadowedStrength
+    litColor[2] += MAZE_TORCH_LIGHT_COLOR[2] * contactShadowedStrength
   }
 
   return litColor
@@ -2174,9 +2270,12 @@ export function getMazeTorchPlacements(maze, sconceRadius) {
       cell: light.cell,
       id: `maze-light-${index}`,
       index,
+      normal: { ...descriptor.normal },
       sconcePosition,
       side: light.side,
-      torchPosition
+      torchPosition,
+      wallAxis: descriptor.axis,
+      wallCenter: { ...descriptor.center }
     }
   })
 }

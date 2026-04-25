@@ -92,6 +92,64 @@ function needsMazeRewrite(maze) {
   return walls.some((wall) => !maze.lightmap?.wallRects?.[wall.id])
 }
 
+function createMazeCandidate(mazeFactory, seed) {
+  return mazeFactory === generateMaze
+    ? mazeFactory(seed, { bakeLightmap: false })
+    : mazeFactory(seed)
+}
+
+function normalizeCandidateTiming(maze) {
+  if (!Number.isFinite(maze.generationMs)) {
+    maze.generationMs = 0
+  }
+  if (!Number.isFinite(maze.totalGenerationMs)) {
+    maze.totalGenerationMs = maze.generationMs
+  }
+}
+
+function isAcceptableCandidate(maze, validation) {
+  return (
+    validation.valid &&
+    maze.generationMs <= 100 &&
+    maze.totalGenerationMs <= 5000
+  )
+}
+
+function generateReplacementMaze({
+  fileName,
+  mazeFactory,
+  maxGenerationAttempts,
+  signatures,
+  startingAttempt = 0
+}) {
+  for (let attempt = 0; attempt < maxGenerationAttempts; attempt += 1) {
+    const seed =
+      Date.now() +
+      (startingAttempt * 8191) +
+      (attempt * 131071)
+    const maze = createMazeCandidate(mazeFactory, seed)
+    normalizeCandidateTiming(maze)
+    maze.id = path.basename(fileName, '.js')
+    if (!maze.lightmap) {
+      maze.lightmap = bakeMazeLightmap(maze)
+    }
+    const validation = validateMaze(maze)
+
+    if (!isAcceptableCandidate(maze, validation)) {
+      continue
+    }
+
+    const signature = getMazeSignature(maze)
+    if (signatures.has(signature)) {
+      continue
+    }
+
+    return { maze, signature }
+  }
+
+  return null
+}
+
 function writeLightmapArtifactPng(filePath, width, height, pixelWriter) {
   const png = new PNG({ width, height })
 
@@ -366,11 +424,33 @@ export async function ensureMazeFiles({
     const validation = validateMaze(maze)
 
     if (!validation.valid) {
-      fs.rmSync(filePath, { force: true })
-      reportProgress({
-        action: 'remove-invalid-maze',
+      const replacement = generateReplacementMaze({
         fileName,
-        stage: 'inspect-existing'
+        mazeFactory,
+        maxGenerationAttempts,
+        signatures,
+        startingAttempt: fileIndex + 1
+      })
+
+      if (!replacement) {
+        fs.rmSync(filePath, { force: true })
+        reportProgress({
+          action: 'remove-invalid-maze',
+          fileName,
+          stage: 'inspect-existing'
+        })
+        continue
+      }
+
+      maze = replacement.maze
+      fs.writeFileSync(filePath, serializeMazeModule(maze))
+      signatures.add(replacement.signature)
+      validMazes.push({ fileName, maze })
+      reportProgress({
+        action: 'replace-invalid-maze-in-place',
+        fileName,
+        stage: 'inspect-existing',
+        validCount: validMazes.length
       })
       continue
     }
@@ -411,18 +491,13 @@ export async function ensureMazeFiles({
       (nextIndex * 97) +
       (generationAttempt * 8191)
     generationAttempt += 1
-    const maze = mazeFactory === generateMaze
-      ? mazeFactory(seed, { bakeLightmap: false })
-      : mazeFactory(seed)
+    const maze = createMazeCandidate(mazeFactory, seed)
+    normalizeCandidateTiming(maze)
     const validation = validateMaze(maze, {
       requireLightmap: maze.lightmap !== undefined
     })
 
-    if (
-      !validation.valid ||
-      maze.generationMs > 100 ||
-      maze.totalGenerationMs > 5000
-    ) {
+    if (!isAcceptableCandidate(maze, validation)) {
       continue
     }
 
