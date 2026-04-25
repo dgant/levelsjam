@@ -18,6 +18,17 @@
 - The scene does not use `@takram/three-atmosphere`.
 - The scene does not use the three.js `Water` helper.
 - The scene does not use a directional sunlight source.
+- The radiance-cascade experiment replaces baked surface-lightmap diffuse lighting at runtime with a generated two-dimensional maze radiance field evaluated over world XZ.
+- The generated radiance field applies to maze floor, maze walls, sconces, monsters, pickups, gates, volumetric fog, and other maze-local lit surfaces at every authored height unless a more specific height rule is documented.
+- The generated radiance field treats maze walls and closed gates as horizontal-plane occluders for torch visibility.
+- The generated radiance field treats torch billboards and sconces as emissive source markers rather than geometry occluders.
+- The generated radiance field is produced during ordinary browser runtime from the active maze layout and does not require offline surface-lightmap baking.
+- The generated radiance field may reuse the existing surface-lightmap UV channel and material hook when that is the shortest safe path to feed PBR materials.
+- Runtime baked surface-lightmap files may remain present as historical assets, but the active experiment does not depend on them for maze diffuse lighting.
+- Near-player realtime shadowed torch lights are blended as a smooth correction over the generated radiance field instead of abruptly replacing it.
+- Realtime torch shadow eligibility changes use continuous weights, temporal smoothing, and slot hysteresis so torch shadows do not flip on and off at selection boundaries.
+- Realtime shadowed torch lights are bounded to a small active set selected by player distance and visibility importance.
+- The generated radiance-field debug state exposes atlas dimensions, source light count, occluder count, generation time, and active shadow-light weights.
 - The scene contains maze-floor ground geometry covering the playable maze footprint and its required baked-lighting bounds.
 - The maze-floor ground uses the extracted ShareTextures `puddle-ground` PBR pack rather than preview imagery.
 - The maze-floor ground uses the full authored `puddle-ground` PBR material stack rather than a reduced compatibility material.
@@ -81,6 +92,8 @@
 - Each baked maze floor-patch lightmap uses a higher texel density than the previous full-ground bake.
 - Adjacent coplanar wall segments that form one continuous surface receive continuous baked torch lighting without artificial seam darkening or brightening at their shared edge.
 - The baked wall lighting includes local occlusion from the wall sconce body so the attached wall can show a shadow beneath the sconce.
+- The baked sconce-body occlusion applies only to the wall face hosting that sconce and does not cast unrelated upward or mirrored fixture shadows onto other walls.
+- The baked sconce-body contact shadow remains visible beneath the fixture down to the floor on the attached wall face instead of terminating partway down the wall in an arch.
 - The runtime wall lightmap upload preserves the bake's vertical orientation so wall-mounted torch shadows appear below the sconce rather than flipped above it.
 - The baked wall and maze-floor lightmaps include properly occluded skylight or HDRI contribution, so those baked surfaces do not rely on direct runtime scene diffuse IBL.
 - The current scene does not include realtime torch flicker.
@@ -112,8 +125,10 @@
 - Geometry that spans a boundary between maze cells, such as maze walls and wall-mounted sconces, evaluates diffuse volumetric-lightmap shading from the eight closest probes around that boundary.
 - Volumetric-lightmap diffuse shading blends probe influence continuously across surface position so adjacent surfaces do not show hard probe-selection seams.
 - Volumetric-lightmap diffuse shading remains continuous across probe axes rather than switching abruptly to unrelated lighting on each side of a probe.
+- Surface and fog volumetric-lightmap sampling use the same probe-center grid basis so cell boundaries and probe axes do not introduce discontinuities.
 - Volumetric-lightmap diffuse shading uses the baked probe depth or shadow data at runtime to reject probe contributions that are occluded from the shaded point by maze geometry.
 - Volumetric fog lighting uses the baked probe depth or shadow data at runtime to reject probe contributions that are occluded from the fog sample point by maze geometry.
+- A debug toggle can disable volumetric-lightmap shadowing; when disabled, surface and fog volumetric-lightmap samples treat every probe contribution as unshadowed while preserving the same smooth probe interpolation.
 - Volumetric fog blends volumetric-lightmap probes continuously at maze edges instead of creating seams through probe positions or cell boundaries.
 - Maze generation writes lightmap diagnostic artifact textures to a non-source-controlled inspection directory so a human can review the baked wall and floor outputs.
 - Maze artifact generation also writes per-maze reflection-probe capture dumps into the same non-source-controlled inspection directory so a human can inspect the exact runtime cubemap faces used by local reflections.
@@ -146,6 +161,7 @@
 - The maze grid stores walls and gates as obstacles on edges between cells.
 - Each generated maze inserts four gates on randomly chosen open edges after the base maze topology is created.
 - Maze torch placement starts by placing a torch in every cell containing a generated pickup item, including the sword and the trophy, before filling the remaining unlit cells.
+- Generated pickup cells are selected so each pickup can host a same-cell torch against a valid wall side.
 - Before the player resolves a move, every gate adjacent to the player opens if no monster occupies the cell on the opposite side of that gate.
 - After the player resolves a move, every gate closes unless it is already closed.
 - Gates not adjacent to the player are closed in both the headless rules state and the rendered animation state.
@@ -445,15 +461,19 @@
 - The debug controls panel can be opened and closed with backquote.
 - The debug controls panel exposes exposure.
 - The debug controls panel exposes the camera field of view as a live slider with a maximum of `120` degrees.
+- Free-camera inspection mode is toggled with `F1`, where `WASD` and arrow keys move freely with mouselook detached from the turn-based player.
 - The debug controls panel exposes numbered tabs selectable by keyboard shortcuts `1` through `9`, with `0` selecting the Solution tab.
+- Opening the debug controls panel does not globally swallow gameplay keyboard or mouse input; gameplay controls and the `F1` free-camera toggle remain usable while the panel is open.
 - The default debug tab exposes the core scene-lighting controls, including the active tone mapper, `Probe Debug`, `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, and `Reflection Intensity`.
 - The `Probe Debug` control appears above `Tone Mapper`.
 - The `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, and `Reflection Intensity` checkbox-plus-slider controls each occupy one line in the same style as other effect rows.
 - Separate debug tabs exist for Ambient Occlusion, Bloom, Depth of Field, Lens Flares, SSR, Volumetric Fog, Vignette, and Anamorphic.
 - The ambient-occlusion tab exposes mode, intensity, and radius.
 - The bloom tab exposes enabled state and all useful bloom parameters, including intensity, threshold, smoothing, resolution scale, and kernel size.
+- Bloom starts disabled by default.
 - The depth-of-field tab exposes enabled state and all useful depth-of-field parameters, including `focusDistance`, `focalLength`, `bokehScale`, and resolution scale.
 - The lens-flare tab exposes enabled state and all useful flare parameters needed to tune visibility and opacity, including flare size, glare size, ghost scale, halo scale, star-point count, and the wrapped effect's animated and anamorphic toggles.
+- Lens flares start disabled by default.
 - The SSR tab exposes enabled state and the core canonical tuning parameters needed to tune its documented implementation, including opacity, distance, thickness, resolution scale, and pass output mode.
 - The volumetric-fog tab exposes enabled state and the core fog parameters needed to tune its probe-lit volume implementation, including amount and noise frequency.
 - The volumetric-fog tab also exposes the high-impact density-shaping parameters needed to tune the current implementation, including noise strength, height falloff, lighting strength, and ray-march step count.

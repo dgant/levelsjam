@@ -1,25 +1,25 @@
 {
   "phases": [
     {
-      "durationMs": 5027,
-      "label": "reflection-captures"
-    },
-    {
-      "durationMs": 3174,
+      "durationMs": 3920,
       "label": "startup"
     },
     {
-      "durationMs": 443,
+      "durationMs": 3593,
+      "label": "reflection-captures"
+    },
+    {
+      "durationMs": 550,
       "label": "debug-controls"
     }
   ],
   "screenshotCount": 0,
   "screenshotMs": 0,
-  "startedAt": "2026-04-25T01:42:55.913Z",
-  "loadingCompleteAtMs": 2614,
-  "shellVisibleAtMs": 28.100000001490116,
-  "totalRunMs": 8654,
-  "finishedAt": "2026-04-25T01:43:04.568Z",
-  "totalPhaseMs": 8644,
-  "wroteAt": "2026-04-25T01:43:04.568Z"
+  "startedAt": "2026-04-25T14:37:47.015Z",
+  "loadingCompleteAtMs": 2938.8,
+  "shellVisibleAtMs": 23.5,
+  "totalRunMs": 8073,
+  "finishedAt": "2026-04-25T14:37:55.089Z",
+  "totalPhaseMs": 8063,
+  "wroteAt": "2026-04-25T14:37:55.089Z"
 }

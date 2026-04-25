@@ -117,3 +117,4 @@
 - When the scene uses the postprocessing composer by default, warm the composer passes before fade-out just like scene textures and mesh shaders. Otherwise the first visible gameplay frame can absorb the composer initialization cost even after mesh warmup passes.
 - When a movement-path performance regression can make the game unplayable even though static-camera benchmarks pass, add a browser test that drives the recorded solution replay and samples GPU render cost during the replay.
 - When gating fade-out on nearby volumetric-lightmap readiness, load coefficient/depth data separately from specular reflection textures so the diffuse/fog startup radius does not break the resident reflection-probe memory budget.
+- When multiple worktrees or branches are under development and testing at the same time, start this workspace's dev server on an explicit alternate port and verify which branch owns each port before testing or reporting a URL.

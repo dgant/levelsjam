@@ -357,6 +357,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByLabel('Static Volumetric Enabled')).toBeVisible()
     await expect(page.getByLabel('Static Volumetric Enabled')).not.toBeChecked()
     await expect(page.getByRole('slider', { name: 'Static Volumetric' })).toHaveValue('1')
+    await expect(page.getByLabel('Volumetric Shadows Enabled')).toBeVisible()
+    await expect(page.getByLabel('Volumetric Shadows Enabled')).toBeChecked()
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeVisible()
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeChecked()
     await expect(page.getByRole('slider', { name: 'Reflection Intensity' })).toHaveValue('1')
@@ -495,7 +497,9 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         async () => page.evaluate(
           () => ({
             ground: window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4),
-            wall: window.__levelsjamDebug.getDebugMeshState('maze-wall', 10)
+            wall: Array.from({ length: 200 }, (_, index) =>
+              window.__levelsjamDebug.getDebugMeshState('maze-wall', index)
+            ).find((state) => state?.probeBlendUniforms) ?? null
           })
         ),
         {
@@ -505,23 +509,35 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       )
       .toMatchObject({
         ground: {
-          hasLightMap: true,
+          hasLightMap: false,
           probeBlend: {
             diffuseIntensity: 0,
             mode: 'disabled',
             probeDepthAtlasCount: 6,
             radianceIntensity: 1,
-            radianceMode: 'world'
+            radianceMode: 'world',
+            runtimeRadianceIntensity: 1,
+            runtimeRadianceTextureUUID: expect.any(String)
           },
           probeBlendUniforms: {
             probeBlendDiffuseIntensity: 0,
             probeBlendMode: 3,
             probeBlendRadianceIntensity: 1,
-            probeBlendRadianceMode: 1
+            probeBlendRadianceMode: 1,
+            runtimeRadianceIntensity: 1,
+            runtimeRadianceTextureUUID: expect.any(String)
           }
         },
         wall: {
-          hasLightMap: true
+          hasLightMap: false,
+          probeBlend: {
+            runtimeRadianceIntensity: 1,
+            runtimeRadianceTextureUUID: expect.any(String)
+          },
+          probeBlendUniforms: {
+            runtimeRadianceIntensity: 1,
+            runtimeRadianceTextureUUID: expect.any(String)
+          }
         }
       })
     await setCheckbox(page, 'Static Volumetric Enabled', true)
@@ -531,7 +547,9 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       .poll(
         async () => page.evaluate(() => ({
           ground: window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4),
-          wall: window.__levelsjamDebug.getDebugMeshState('maze-wall', 10)
+          wall: Array.from({ length: 200 }, (_, index) =>
+            window.__levelsjamDebug.getDebugMeshState('maze-wall', index)
+          ).find((state) => state?.probeBlendUniforms) ?? null
         })),
         {
           timeout: 5_000,
@@ -546,17 +564,25 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
             mode: 'disabled',
             probeDepthAtlasCount: 6,
             radianceIntensity: 1,
-            radianceMode: 'disabled'
+            radianceMode: 'disabled',
+            runtimeRadianceIntensity: 0
           },
           probeBlendUniforms: {
             probeBlendDiffuseIntensity: 1,
             probeBlendMode: 3,
             probeBlendRadianceIntensity: 1,
-            probeBlendRadianceMode: 3
+            probeBlendRadianceMode: 3,
+            runtimeRadianceIntensity: 0
           }
         },
         wall: {
-          hasLightMap: false
+          hasLightMap: false,
+          probeBlend: {
+            runtimeRadianceIntensity: 0
+          },
+          probeBlendUniforms: {
+            runtimeRadianceIntensity: 0
+          }
         }
       })
     await expect
@@ -590,7 +616,9 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       .poll(
         async () => page.evaluate(() => ({
           ground: window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4),
-          wall: window.__levelsjamDebug.getDebugMeshState('maze-wall', 10)
+          wall: Array.from({ length: 200 }, (_, index) =>
+            window.__levelsjamDebug.getDebugMeshState('maze-wall', index)
+          ).find((state) => state?.probeBlendUniforms) ?? null
         })),
         {
           timeout: 5_000,

@@ -1,7 +1,7 @@
 # How To Work On This Project
 
 ## Current State
-The repository contains a runnable browser game prototype for GitHub Pages. The intended build serves a three.js scene with turn-based grid movement, a `1` free-camera inspection toggle, a `C` credits modal, a local Poly Haven `overcast_soil` HDRI used for the visible skybox, an infinite `puddle-ground` base plane plus a maze-local lit floor patch, one randomly selected persisted maze built from `stone-wall-29` wall meshes, maze-mounted metal sconces with asynchronously loaded animated torch billboards, baked per-maze torch lightmaps, static local reflection probes for in-maze specular response, volumetric-lightmap probe data, and a backquote visual-controls panel with exposure, `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, `Reflection Intensity`, ambient-occlusion mode, tone-mapper, post-effect controls, and build metadata in the FPS overlay.
+The repository contains a runnable browser game prototype for GitHub Pages. The intended build serves a three.js scene with turn-based grid movement, an `F1` free-camera inspection toggle, a `C` credits modal, a local Poly Haven `overcast_soil` HDRI used for the visible skybox, an infinite `puddle-ground` base plane plus a maze-local lit floor patch, one randomly selected persisted maze built from `stone-wall-29` wall meshes, maze-mounted metal sconces with asynchronously loaded animated torch billboards, baked per-maze torch lightmaps, static local reflection probes for in-maze specular response, volumetric-lightmap probe data, and a backquote visual-controls panel with exposure, `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, `Reflection Intensity`, ambient-occlusion mode, tone-mapper, post-effect controls, and build metadata in the FPS overlay.
 The initial `MINOTAUR` loading shell now appears directly from inline HTML in [index.html](/E:/p/levelsjam/index.html) before the React bundle finishes booting.
 The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutRuntime.ts](/E:/p/levelsjam/src/lib/sceneLayoutRuntime.ts) so the main app bundle stays small, while Node tests and scripts continue to use the synchronous [sceneLayout.js](/E:/p/levelsjam/src/lib/sceneLayout.js) path.
 
@@ -55,7 +55,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - If you change the loading overlay markup or styling, update both the inline bootstrap shell in [index.html](/E:/p/levelsjam/index.html) and the React overlay in [App.tsx](/E:/p/levelsjam/src/App.tsx) so the immediate first paint and the live app stay visually aligned.
 - Verify `W` and `D` move the player one grid cell forward or backward relative to the current camera direction.
 - Verify `A`, `S`, left-arrow, and right-arrow rotate the player camera by 90 degrees without consuming a turn.
-- Verify pressing `1` toggles free-camera inspection mode, where `WASD` moves freely, mouse-look is detached from the player, and `Q`/`E` move vertically.
+- Verify pressing `F1` toggles free-camera inspection mode, where `WASD` moves freely, mouse-look is detached from the player, and `Q`/`E` move vertically.
 - Verify pressing `C` opens the credits modal and any subsequent key closes it.
 - Verify the top-right overlay shows the active maze ID, Git revision, and revision timestamp.
 - Verify `F9` toggles the top-right overlay.
@@ -110,6 +110,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify the `DOF Focus Distance` slider reaches 8 meters.
 - Verify double-clicking a debug label resets only the associated control.
 - Verify the `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, and `Reflection Intensity` controls each produce a visible material change when enabled.
+- Verify the `Volumetric Shadows` checkbox changes surface and fog volumetric-lightmap shadowing while preserving smooth probe blending.
 - Verify the Vignette tab exposes Vignette Intensity, Vignette Noise Period, Vignette Noise Intensity, and Exposure Noise Intensity, with the two noise intensities defaulting to zero.
 - Verify Bloom, Depth Of Field, Lens Flares, and SSR start disabled.
 - Verify the default `Exposure` value is `0`.
