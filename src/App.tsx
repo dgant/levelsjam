@@ -92,7 +92,6 @@ import {
 import {
   BlendFunction,
   Effect,
-  EffectComposer as PostEffectComposer,
   EffectAttribute,
   EffectPass,
   Pass,
@@ -240,8 +239,8 @@ const MAX_LIGHTING_CONTRIBUTION_INTENSITY = 4
 const BLOCKED_MOVE_FRACTION = 0.25
 const RUNTIME_RADIANCE_RESOLUTION = 192
 const RUNTIME_RADIANCE_CASCADE_COUNT = 4
-const RUNTIME_RADIANCE_DIRECT_GAIN = 18
-const RUNTIME_RADIANCE_INDIRECT_GAIN = 0.22
+const RUNTIME_RADIANCE_DIRECT_GAIN = 0.045
+const RUNTIME_RADIANCE_INDIRECT_GAIN = 0.5
 const RUNTIME_RADIANCE_MAX_DISTANCE = 18
 const RUNTIME_RADIANCE_SOURCE_RADIUS = 0.45
 const RUNTIME_SHADOW_SLOT_COUNT = 2
@@ -250,7 +249,7 @@ const RUNTIME_SHADOW_OUTER_RADIUS = 8
 const RUNTIME_SHADOW_SWITCH_MARGIN = 0.15
 const RUNTIME_SHADOW_FADE_IN_SECONDS = 0.25
 const RUNTIME_SHADOW_FADE_OUT_SECONDS = 0.75
-const RUNTIME_SHADOW_TORCH_INTENSITY = 75
+const RUNTIME_SHADOW_TORCH_INTENSITY = 0.35
 const RUNTIME_SHADOW_TORCH_DISTANCE = 7
 
 function recordStartupMarker(name: string) {
@@ -284,8 +283,6 @@ const MATERIAL_TEXTURE_PROPERTY_NAMES = [
   'specularIntensityMap',
   'transmissionMap'
 ] as const
-const SCENE_RENDER_WARM_OBJECTS_PER_FRAME = 1
-
 function collectSceneMaterialTextures(scene: ThreeScene) {
   const textures: Texture[] = []
   const seenTextureIds = new Set<string>()
@@ -339,69 +336,6 @@ async function warmSceneTextures(
     gl.initTexture(texture)
     await waitForNextAnimationFrame()
   }
-}
-
-function collectSceneRenderableObjects(scene: ThreeScene) {
-  const objects: Mesh[] = []
-
-  scene.traverse((object) => {
-    const maybeMesh = object as Mesh
-
-    if (maybeMesh.isMesh && maybeMesh.material) {
-      objects.push(maybeMesh)
-    }
-  })
-
-  return objects
-}
-
-async function warmSceneRenderables(
-  gl: WebGLRenderer,
-  scene: ThreeScene,
-  camera: ThreeCamera,
-  isCancelled: () => boolean
-) {
-  const objects = collectSceneRenderableObjects(scene)
-  const visibility = objects.map((object) => object.visible)
-
-  try {
-    for (const object of objects) {
-      object.visible = false
-    }
-
-    for (let objectIndex = 0; objectIndex < objects.length; objectIndex += 1) {
-      if (isCancelled()) {
-        return
-      }
-
-      const object = objects[objectIndex]
-      object.visible = true
-      gl.render(scene, camera)
-      object.visible = false
-
-      if ((objectIndex + 1) % SCENE_RENDER_WARM_OBJECTS_PER_FRAME === 0) {
-        await waitForNextAnimationFrame()
-      }
-    }
-
-    await waitForNextAnimationFrame()
-  } finally {
-    objects.forEach((object, index) => {
-      object.visible = visibility[index] ?? object.visible
-    })
-  }
-}
-
-async function warmEffectComposer(
-  composer: PostEffectComposer | null,
-  isCancelled: () => boolean
-) {
-  if (!composer || isCancelled()) {
-    return
-  }
-
-  composer.render(0)
-  await waitForNextAnimationFrame()
 }
 
 const MAZE_GROUND_PATCH_OFFSET_Y = 0.002
@@ -4816,8 +4750,6 @@ function useFireFlipbookTexture() {
   useEffect(() => {
     let cancelled = false
     let loadedTexture: Texture | null = null
-    let overlayPollHandle = 0
-    let loadDelayHandle = 0
 
     const configureTexture = (nextTexture: Texture) => {
       if (cancelled) {
@@ -4851,27 +4783,10 @@ function useFireFlipbookTexture() {
       new TextureLoader().load(FIRE_FLIPBOOK_URL, configureTexture)
     }
 
-    const scheduleAfterOverlay = () => {
-      if (cancelled) {
-        return
-      }
-
-      const overlayCompleteAt = document.body.dataset.loadingOverlayCompleteAt
-
-      if (overlayCompleteAt && overlayCompleteAt !== 'pending') {
-        loadDelayHandle = window.setTimeout(startLoading, 1500)
-        return
-      }
-
-      overlayPollHandle = window.setTimeout(scheduleAfterOverlay, 250)
-    }
-
-    scheduleAfterOverlay()
+    startLoading()
 
     return () => {
       cancelled = true
-      window.clearTimeout(overlayPollHandle)
-      window.clearTimeout(loadDelayHandle)
       loadedTexture?.dispose()
       setTexture(null)
     }
@@ -7537,10 +7452,12 @@ function getRuntimeShadowScore(
 
 function RuntimeShadowedTorchLights({
   layout,
+  openGateIds,
   playerWorldPosition,
   visualIntensity
 }: {
   layout: MazeLayout
+  openGateIds: Set<string>
   playerWorldPosition: Vector3
   visualIntensity: number
 }) {
@@ -7556,6 +7473,18 @@ function RuntimeShadowedTorchLights({
     () => new Map(layout.lights.map((light) => [light.id, light])),
     [layout.lights]
   )
+  const openGateKey = useMemo(
+    () => Array.from(openGateIds).sort().join('|'),
+    [openGateIds]
+  )
+
+  useEffect(() => {
+    lightRefs.current.forEach((light) => {
+      if (light) {
+        light.shadow.needsUpdate = true
+      }
+    })
+  }, [openGateKey])
 
   useFrame((_, delta) => {
     const candidates = layout.lights
@@ -7569,6 +7498,7 @@ function RuntimeShadowedTorchLights({
 
     for (let slotIndex = 0; slotIndex < RUNTIME_SHADOW_SLOT_COUNT; slotIndex += 1) {
       const slot = slotStates.current[slotIndex]
+      const previousLightId = slot.lightId
       const currentLight = slot.lightId ? lightById.get(slot.lightId) ?? null : null
       const currentScore = currentLight
         ? getRuntimeShadowScore(currentLight, playerWorldPosition)
@@ -7580,7 +7510,7 @@ function RuntimeShadowedTorchLights({
         (
           !currentLight ||
           slot.weight < 0.02 ||
-          replacement.score > currentScore + RUNTIME_SHADOW_SWITCH_MARGIN
+          currentScore <= RUNTIME_SHADOW_SWITCH_MARGIN * 0.25
         )
       ) {
         slot.lightId = replacement.light.id
@@ -7591,6 +7521,7 @@ function RuntimeShadowedTorchLights({
       }
 
       const selectedLight = slot.lightId ? lightById.get(slot.lightId) ?? null : null
+      const slotLightChanged = previousLightId !== slot.lightId
       const targetWeight = selectedLight
         ? getRuntimeShadowScore(selectedLight, playerWorldPosition)
         : 0
@@ -7620,11 +7551,14 @@ function RuntimeShadowedTorchLights({
         selectedLight.torchPosition.y,
         selectedLight.torchPosition.z
       )
-      pointLight.color.copy(TORCH_LIGHTMAP_TINT)
+      pointLight.color.copy(FIRE_COLOR)
       pointLight.distance = RUNTIME_SHADOW_TORCH_DISTANCE
       pointLight.decay = 2
       pointLight.intensity =
         slot.weight * visualIntensity * RUNTIME_SHADOW_TORCH_INTENSITY
+      if (slotLightChanged) {
+        pointLight.shadow.needsUpdate = true
+      }
     }
   })
 
@@ -7669,6 +7603,7 @@ function RuntimeShadowedTorchLights({
             lightRefs.current[index] = light
             if (light) {
               light.shadow.bias = -0.0005
+              light.shadow.autoUpdate = false
               light.shadow.mapSize.set(256, 256)
               light.shadow.camera.near = 0.05
               light.shadow.camera.far = RUNTIME_SHADOW_TORCH_DISTANCE
@@ -13041,7 +12976,6 @@ function Scene({
   const [reflectionProbeDepthTextures, setReflectionProbeDepthTextures] = useState<CubeTexture[]>([])
   const [reflectionProbeRawTextures, setReflectionProbeRawTextures] = useState<Texture[]>([])
   const [reflectionProbeTextures, setReflectionProbeTextures] = useState<Texture[]>([])
-  const composerRef = useRef<PostEffectComposer | null>(null)
   const environmentIntensity = BAKED_ENVIRONMENT_INTENSITY
   const playerWorldPosition = useMemo(
     () => getMazeCellWorldPosition(layout.maze, turnState.player.cell, GROUND_Y),
@@ -13105,27 +13039,7 @@ function Scene({
         return
       }
 
-      recordStartupMarker('sceneRenderWarmStartedAt')
-      await warmSceneRenderables(gl, scene, camera, () => cancelled)
-
-      if (cancelled) {
-        return
-      }
-
       recordStartupMarker('sceneRenderWarmCompleteAt')
-
-      if (cancelled) {
-        return
-      }
-
-      recordStartupMarker('scenePostWarmStartedAt')
-      await warmEffectComposer(composerRef.current, () => cancelled)
-
-      if (cancelled) {
-        return
-      }
-
-      recordStartupMarker('scenePostWarmCompleteAt')
     }
 
     const waitForSceneObjects = () => {
@@ -13936,6 +13850,7 @@ function Scene({
       <VolumetricShadowContext.Provider value={visualSettings.volumetricShadowsEnabled}>
         <RuntimeShadowedTorchLights
           layout={layout}
+          openGateIds={openGateIds}
           playerWorldPosition={playerWorldPosition}
           visualIntensity={getEnabledContributionIntensity(visualSettings.lightmapContribution)}
         />
@@ -13977,7 +13892,6 @@ function Scene({
       <EffectComposer
         enableNormalPass
         multisampling={0}
-        ref={composerRef}
         resolutionScale={0.5}
       >
         {visualSettings.ssr.enabled ? (
