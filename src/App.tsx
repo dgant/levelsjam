@@ -139,6 +139,7 @@ import {
 } from './lib/sceneLayoutRuntime'
 import type { MazeLayout } from './lib/sceneLayout.js'
 import { computeLocalBillboardQuaternion } from './lib/billboard.js'
+import { mapGroundWorldToLightmapLocalUv } from './lib/groundLightmapUv.js'
 import {
   buildGroundReflectionProbeRects,
   getReflectionProbeBlendForPosition
@@ -5596,8 +5597,8 @@ function createGroundPatchGeometry(
     const worldZ = rect.centerZ - localY
     const mapU = (worldX + (GROUND_SIZE / 2)) / GROUND_SIZE
     const mapV = 1 - ((worldZ + (GROUND_SIZE / 2)) / GROUND_SIZE)
-    const localLightmapU = (worldX - groundBounds.minX) / groundBounds.width
-    const localLightmapV = 1 - ((worldZ - groundBounds.minZ) / groundBounds.depth)
+    const { u: localLightmapU, v: localLightmapV } =
+      mapGroundWorldToLightmapLocalUv(groundBounds, worldX, worldZ)
     const [lightmapU, lightmapV] = mapLightmapRectUvToAtlas(
       lightmap.groundRect,
       lightmap.atlasWidth,

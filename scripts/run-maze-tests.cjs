@@ -14,6 +14,7 @@ const testCases = [
   { name: 'dumps persisted maze lightmap artifacts into the gitignored logs directory', thresholdMs: 5_000 },
   { name: 'deletes invalid maze files and regenerates replacements', thresholdMs: 5_000 },
   { name: 'converts persisted mazes into wall segments and torch placements', thresholdMs: 5_000 },
+  { name: 'maps runtime floor lightmap UVs to the same world-space orientation used by baking', thresholdMs: 5_000 },
   { name: 'keeps baked lighting continuous across an open coplanar wall run', thresholdMs: 5_000 },
   { name: 'bakes local sconce occlusion into the attached wall face', thresholdMs: 5_000 },
   { name: 'keeps mid-wall torch lighting visible below the sconce top', thresholdMs: 5_000 },

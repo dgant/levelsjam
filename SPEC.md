@@ -63,6 +63,7 @@
 - The maze-floor ground bounds expand beyond the maze footprint by the baked-lighting radius so the lit area covers the maze and its nearby spill.
 - The scene does not include the previous infinite background ground plane.
 - The maze-floor ground preserves the authored world-space puddle-texture texel density rather than retileing the puddle textures at a different density.
+- The maze-floor ground samples the baked surface lightmap with the same world-space X/Z orientation used by the bake, so floor light appears under the torch sources that produced it.
 - The maze-floor ground and maze walls integrate the baked HDR lightmap directly into their PBR material path rather than drawing it as a separate transparent overlay mesh.
 - The maze walls apply their baked torch lightmap on the actual wall mesh through authored lightmap UVs instead of through duplicate front-face or back-face overlay planes.
 - Runtime maze walls sample a shared baked surface-lightmap atlas through wall-specific atlas UVs rather than allocating separate lightmap textures for each wall face.

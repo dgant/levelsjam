@@ -22,6 +22,7 @@ import {
   dumpMazeLightmapArtifacts,
   ensureMazeFiles
 } from '../src/lib/mazePersistence.js'
+import { mapGroundWorldToLightmapLocalUv } from '../src/lib/groundLightmapUv.js'
 import { decodeRgbE8, reconstructProbeRadiance } from '../src/lib/probeSphericalHarmonics.js'
 import { SCONCE_RADIUS } from '../src/lib/sceneConstants.js'
 
@@ -198,6 +199,51 @@ test('converts persisted mazes into wall segments and torch placements', async (
     assert.equal(light.torchPosition.x, light.sconcePosition.x)
     assert.equal(light.torchPosition.z, light.sconcePosition.z)
     assert.ok(light.torchPosition.y > light.sconcePosition.y)
+  }
+})
+
+test('maps runtime floor lightmap UVs to the same world-space orientation used by baking', async () => {
+  const maze = await importPersistedMaze()
+  const layout = getMazeSceneLayout(maze, SCONCE_RADIUS)
+  const lightmap = layout.maze.lightmap
+  const bytes = Buffer.from(lightmap.dataBase64, 'base64')
+
+  const sampleGroundAt = (worldX, worldZ) => {
+    const localUv = mapGroundWorldToLightmapLocalUv(
+      lightmap.groundBounds,
+      worldX,
+      worldZ
+    )
+    const column = Math.max(
+      0,
+      Math.min(
+        lightmap.groundRect.width - 1,
+        Math.round(localUv.u * (lightmap.groundRect.width - 1))
+      )
+    )
+    const row = Math.max(
+      0,
+      Math.min(
+        lightmap.groundRect.height - 1,
+        Math.round(localUv.v * (lightmap.groundRect.height - 1))
+      )
+    )
+
+    return sampleLightmapLuminance(bytes, lightmap, lightmap.groundRect, column, row)
+  }
+
+  for (const light of layout.lights) {
+    const directLuminance = sampleGroundAt(light.torchPosition.x, light.torchPosition.z)
+    const mirroredLuminance = sampleGroundAt(light.torchPosition.x, -light.torchPosition.z)
+
+    assert.ok(
+      directLuminance > 8,
+      `expected floor lightmap to be bright at torch ${light.cell.x},${light.cell.y}:${light.side}, got ${directLuminance}`
+    )
+    assert.ok(
+      directLuminance > mirroredLuminance * 2,
+      `expected floor lightmap orientation to match bake at torch ${light.cell.x},${light.cell.y}:${light.side}, got direct=${directLuminance} mirrored=${mirroredLuminance}`
+    )
   }
 })
 
