@@ -25,6 +25,27 @@ function parseCellKey(key) {
   return { x, y }
 }
 
+function normalizeBackwardActions(actions) {
+  const normalized = []
+
+  for (const action of actions) {
+    if (action === 'move-backward') {
+      normalized.push(
+        'rotate-right',
+        'rotate-right',
+        'move-forward',
+        'rotate-right',
+        'rotate-right'
+      )
+      continue
+    }
+
+    normalized.push(action)
+  }
+
+  return normalized
+}
+
 function cloneCell(cell) {
   return {
     x: cell.x,
@@ -730,8 +751,10 @@ export function solveMaze(maze, options = {}) {
     })
 
     if (actualState.escaped) {
+      const normalizedActions = normalizeBackwardActions(actions)
+
       return {
-        actions,
+        actions: normalizedActions,
         moveCount: memory.moveCount,
         observedCellCount: memory.observedCells.size,
         visibilityLimited: true

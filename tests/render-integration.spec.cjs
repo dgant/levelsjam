@@ -310,9 +310,12 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByLabel('Surface Lightmap Enabled')).toBeVisible()
     await expect(page.getByLabel('Surface Lightmap Enabled')).toBeChecked()
     await expect(page.getByRole('slider', { name: 'Surface Lightmap' })).toHaveValue('1')
-    await expect(page.getByLabel('Volumetric Lightmap Enabled')).toBeVisible()
-    await expect(page.getByLabel('Volumetric Lightmap Enabled')).not.toBeChecked()
-    await expect(page.getByRole('slider', { name: 'Volumetric Lightmap' })).toHaveValue('1')
+    await expect(page.getByLabel('Dynamic Volumetric Enabled')).toBeVisible()
+    await expect(page.getByLabel('Dynamic Volumetric Enabled')).toBeChecked()
+    await expect(page.getByRole('slider', { name: 'Dynamic Volumetric' })).toHaveValue('1')
+    await expect(page.getByLabel('Static Volumetric Enabled')).toBeVisible()
+    await expect(page.getByLabel('Static Volumetric Enabled')).not.toBeChecked()
+    await expect(page.getByRole('slider', { name: 'Static Volumetric' })).toHaveValue('1')
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeVisible()
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeChecked()
     await expect(page.getByRole('slider', { name: 'Reflection Intensity' })).toHaveValue('1')
@@ -429,8 +432,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
           hasLightMap: true
         }
       })
-    await setCheckbox(page, 'Volumetric Lightmap Enabled', true)
-    await setSlider(page, 'Volumetric Lightmap', 1)
+    await setCheckbox(page, 'Static Volumetric Enabled', true)
+    await setSlider(page, 'Static Volumetric', 1)
     await setCheckbox(page, 'Surface Lightmap Enabled', false)
     await expect
       .poll(
@@ -491,11 +494,11 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await page.waitForTimeout(250)
     await page.keyboard.press('Backquote')
     await page.keyboard.press('Backquote')
-    await setCheckbox(page, 'Volumetric Lightmap Enabled', false)
+    await setCheckbox(page, 'Static Volumetric Enabled', false)
     await setCheckbox(page, 'Surface Lightmap Enabled', true)
     await setCheckbox(page, 'Reflection Intensity Enabled', false)
     await setCheckbox(page, 'Reflection Intensity Enabled', true)
-    await setCheckbox(page, 'Volumetric Lightmap Enabled', false)
+    await setCheckbox(page, 'Static Volumetric Enabled', false)
     await setCheckbox(page, 'Surface Lightmap Enabled', true)
   })
 

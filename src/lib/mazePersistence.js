@@ -411,8 +411,12 @@ export async function ensureMazeFiles({
       (nextIndex * 97) +
       (generationAttempt * 8191)
     generationAttempt += 1
-    const maze = mazeFactory(seed)
-    const validation = validateMaze(maze)
+    const maze = mazeFactory === generateMaze
+      ? mazeFactory(seed, { bakeLightmap: false })
+      : mazeFactory(seed)
+    const validation = validateMaze(maze, {
+      requireLightmap: maze.lightmap !== undefined
+    })
 
     if (
       !validation.valid ||
@@ -430,6 +434,9 @@ export async function ensureMazeFiles({
     const fileName = `maze-${String(nextIndex).padStart(3, '0')}.js`
     nextIndex += 1
     maze.id = path.basename(fileName, '.js')
+    if (!maze.lightmap) {
+      maze.lightmap = bakeMazeLightmap(maze)
+    }
     fs.writeFileSync(
       path.join(directory, fileName),
       serializeMazeModule(maze)

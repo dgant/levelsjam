@@ -240,3 +240,21 @@ Regenerate the mazes, and give each one randomly placed minotaur, wolf, spider (
  [x] Apply DOF before bloom and after the billboard pass
 [x] Add a camera FOV slider to the debug controls, going up to 120
 [x] The camera fade when slaying a monster should be 125ms in, 125ms out. And right now it fades to white, then jumps to black and fades back to the camera view. That jump to black shouldn't exist; it should just fade white and back
+[x] Let's clamp down on our sampler counts. As a rule, let's say our PBR materials must use multichannel ORM (Occlusion, Roughness, Metalness) textures. Enforce this as a rule for all materials going forward including materials imported from models. At development time, when preparing models for use in the game, combine their textures and ensure the textures are no larger than 1k each. Each maze should attempt to have only one volumetric lightmap atlas, one surface lightmap atlas, and one reflection atlas. We are only applying an environment map during bake time, so do not employ it for materials during runtime.
+[x] Vignette noise should be sampled every frame from a continuous noise source. Right now it jumps every second or so
+. The intensity should be additive on the base vignetting on base intensity + [0, 1] * noise intensity
+[x] There are still very strong hard seams in volumetric lighting along the axes of the probes; on each side of the probe the lighting completely changes. The volumetric lighting needs to be continuous.
+[x] Split the volumetric lightmap slider in two: Dynamic Volumetric which affects non-lightmapped objects, and Static Volumetric which affects lightmapped objects. By default, Dynamic Volumetric is enabled at 1.0, and Static is default disabled at 1.0
+[x] Divide torch point light brightness by 5 (and re-b``ake)
+[x] Torch billboards should blend additively, adding to the background scene color rather than replacing it.
+[x] Monsters should move by sliding over 250ms, just like how the player slides.
+[x] Don't buffer commands repeatedly when a key is held; require a keyup before accepting another keydown
+[x] Limit the number of buffered commands to 10
+[x] Increase the spider's size by 1.5x. Make sure they are positioned such that their bottom point, post-scaling and rotation, is on the floor and their legs, which are lifted up by their rotation, are up against the wall.
+[x] Animation on killing monster: Fade in/out of a (0.5, 0, 0) red instead of white, 125ms in and 375ms out
+[x] Animation on being killed by monster: Fade in/out of black, 125ms in and 1s out
+[x] Kill/being killed animations: Apply them before vignette (so vignette is added on top of them)
+[x] When gates lower for the player, they never appear to raise again. Both in rules and in animation, gates the player is not adjacent to should be closed
+[x] The maze solving agent should not be allowed to move backwards, only forwards. This should have no impact on the agent's ability to solve the maze (since turning is free) but will result in much more watchable solution replays (watching the agent walk backwards the whole way is confusing
+[x] If the player buffers one or more turn commands after a move command, and before any other forwards/backwards commands, start animating the turns immediately. If a player commands a right turn while a left turn is animating, or vice versa, immediately reverse the turning direction towards the subsequent turn. The player should wind up facing where they were going to face anyway; the goal is to make the turning more immediately responsive
+[x] When generating a maze, begin the torch placement process by placing a torch on each cell with pickup item (sword, trophy)

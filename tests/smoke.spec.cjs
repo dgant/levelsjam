@@ -351,9 +351,12 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByLabel('Surface Lightmap Enabled')).toBeVisible()
     await expect(page.getByLabel('Surface Lightmap Enabled')).toBeChecked()
     await expect(page.getByRole('slider', { name: 'Surface Lightmap' })).toHaveValue('1')
-    await expect(page.getByLabel('Volumetric Lightmap Enabled')).toBeVisible()
-    await expect(page.getByLabel('Volumetric Lightmap Enabled')).not.toBeChecked()
-    await expect(page.getByRole('slider', { name: 'Volumetric Lightmap' })).toHaveValue('1')
+    await expect(page.getByLabel('Dynamic Volumetric Enabled')).toBeVisible()
+    await expect(page.getByLabel('Dynamic Volumetric Enabled')).toBeChecked()
+    await expect(page.getByRole('slider', { name: 'Dynamic Volumetric' })).toHaveValue('1')
+    await expect(page.getByLabel('Static Volumetric Enabled')).toBeVisible()
+    await expect(page.getByLabel('Static Volumetric Enabled')).not.toBeChecked()
+    await expect(page.getByRole('slider', { name: 'Static Volumetric' })).toHaveValue('1')
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeVisible()
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeChecked()
     await expect(page.getByRole('slider', { name: 'Reflection Intensity' })).toHaveValue('1')
@@ -366,32 +369,23 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await page.keyboard.press('Digit1')
     await expect(page.getByRole('slider', { name: 'Exposure' })).toBeVisible()
 
-    const swordStrikeFadeStyles = await page.evaluate(async () => {
-      const readOverlay = () => {
-        const style = getComputedStyle(document.body, '::after')
-
-        return {
-          backgroundColor: style.backgroundColor,
-          opacity: style.opacity,
-          transitionDuration: style.transitionDuration
-        }
-      }
-
+    const swordStrikeFadeState = await page.evaluate(async () => {
       document.body.dataset.playerEffect = 'sword-strike'
-      await new Promise((resolve) => requestAnimationFrame(resolve))
-      const fadeIn = readOverlay()
+      await new Promise((resolve) => setTimeout(resolve, 150))
+      const fadeIn = window.__levelsjamDebug.getPlayerFadeState()
       document.body.dataset.playerEffect = 'sword-strike-out'
       await new Promise((resolve) => requestAnimationFrame(resolve))
-      const fadeOut = readOverlay()
+      const fadeOut = window.__levelsjamDebug.getPlayerFadeState()
       delete document.body.dataset.playerEffect
 
       return { fadeIn, fadeOut }
     })
 
-    expect(swordStrikeFadeStyles.fadeIn.backgroundColor).toBe('rgb(255, 255, 255)')
-    expect(swordStrikeFadeStyles.fadeIn.transitionDuration).toBe('0.125s')
-    expect(swordStrikeFadeStyles.fadeOut.backgroundColor).toBe('rgb(255, 255, 255)')
-    expect(swordStrikeFadeStyles.fadeOut.transitionDuration).toBe('0.125s')
+    expect(swordStrikeFadeState.fadeIn.name).toBe('sword-strike')
+    expect(swordStrikeFadeState.fadeIn.alpha).toBeGreaterThan(0.9)
+    expect(swordStrikeFadeState.fadeIn.color).toEqual([0.5, 0, 0])
+    expect(swordStrikeFadeState.fadeOut.name).toBe('sword-strike-out')
+    expect(swordStrikeFadeState.fadeOut.color).toEqual([0.5, 0, 0])
 
     await page.getByLabel('Probe Debug', { exact: true }).selectOption('reflection')
     await expect
@@ -530,8 +524,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
           hasLightMap: true
         }
       })
-    await setCheckbox(page, 'Volumetric Lightmap Enabled', true)
-    await setSlider(page, 'Volumetric Lightmap', 1)
+    await setCheckbox(page, 'Static Volumetric Enabled', true)
+    await setSlider(page, 'Static Volumetric', 1)
     await setCheckbox(page, 'Surface Lightmap Enabled', false)
     await expect
       .poll(
@@ -618,7 +612,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         }
       })
     await setCheckbox(page, 'Reflection Intensity Enabled', true)
-    await setCheckbox(page, 'Volumetric Lightmap Enabled', false)
+    await setCheckbox(page, 'Static Volumetric Enabled', false)
     await setCheckbox(page, 'Surface Lightmap Enabled', true)
     await page.keyboard.press('7')
     await expect

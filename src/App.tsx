@@ -169,26 +169,19 @@ const GATE_MODEL_URL = `${assetBase}models/metal_gate_runtime/scene.gltf`
 const SWORD_MODEL_URL = `${assetBase}models/bronze_sword_mycean/scene.gltf`
 const TROPHY_MODEL_URL = `${assetBase}models/head_of_a_bull_runtime/scene.gltf`
 const PUDDLE_TEXTURE_URLS = {
-  ao: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_AO.jpg`,
   color: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_Diffuse.jpg`,
-  displacement: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_Displacement.jpg`,
   gloss: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_Gloss.jpg`,
   normal: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_Normal.jpg`
 }
 const WALL_TEXTURE_URLS = {
-  ao: `${assetBase}textures/runtime/stone-wall-29/stonewall_29_ambientocclusion-1K.png`,
   color: `${assetBase}textures/runtime/stone-wall-29/stonewall_29_basecolor-1K.png`,
-  height: `${assetBase}textures/runtime/stone-wall-29/stonewall_29_height-1K.png`,
   normal: `${assetBase}textures/runtime/stone-wall-29/stonewall_29_normal-1K.png`,
-  roughness: `${assetBase}textures/runtime/stone-wall-29/stonewall_29_roughness-1K.png`
+  orm: `${assetBase}textures/runtime/stone-wall-29/stonewall_29_orm-1K.png`
 }
 const METAL_TEXTURE_URLS = {
-  ao: `${assetBase}textures/runtime/metal-13/metal_13_ambientocclusion-1K.png`,
   color: `${assetBase}textures/runtime/metal-13/metal_13_basecolor-1K.png`,
-  height: `${assetBase}textures/runtime/metal-13/metal_13_height-1K.png`,
-  metallic: `${assetBase}textures/metal-13/metal_13-1K/metal_13_metallic-1K.png`,
   normal: `${assetBase}textures/runtime/metal-13/metal_13_normal-1K.png`,
-  roughness: `${assetBase}textures/runtime/metal-13/metal_13_roughness-1K.png`
+  orm: `${assetBase}textures/runtime/metal-13/metal_13_orm-1K.png`
 }
 const LOOK_SENSITIVITY = 0.003
 const MAX_PITCH = Math.PI / 2 - 0.05
@@ -473,6 +466,14 @@ uniform float exposure;
 
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
   outputColor = vec4(inputColor.rgb * exposure, inputColor.a);
+}
+`
+const playerFadeEffectShader = `
+uniform vec3 fadeColor;
+uniform float fadeAlpha;
+
+void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
+  outputColor = vec4(mix(inputColor.rgb, fadeColor, clamp(fadeAlpha, 0.0, 1.0)), inputColor.a);
 }
 `
 const anamorphicEffectShader = `
@@ -1015,6 +1016,7 @@ const DEFAULT_VOLUMETRIC_HEIGHT_FALLOFF = 0.5
 const DEFAULT_VOLUMETRIC_LIGHTING_STRENGTH = 1
 const DEFAULT_VOLUMETRIC_STEP_COUNT = 16
 const MAX_SIMULTANEOUS_LENS_FLARES = 5
+const MAX_BUFFERED_TURN_COMMANDS = 10
 const GIT_REVISION = __GIT_REVISION__
 const GIT_REVISION_TIMESTAMP = __GIT_REVISION_TIMESTAMP__
 const PROBE_DEBUG_MODE_OPTIONS: Array<{ key: ProbeDebugMode, label: string }> = [
@@ -1044,6 +1046,7 @@ type VisualSettings = {
   lensFlare: LensFlareSettings
   probeDebugMode: ProbeDebugMode
   reflectionContribution: LightingContributionSettings
+  staticVolumetricContribution: LightingContributionSettings
   toneMapping: ToneMappingMode
   bloom: BloomSettings
   depthOfField: DepthOfFieldSettings
@@ -1076,6 +1079,7 @@ type VisualSettingsPatch = Partial<{
   movement: Partial<MovementSettings>
   probeDebugMode: ProbeDebugMode
   reflectionContribution: Partial<LightingContributionSettings>
+  staticVolumetricContribution: Partial<LightingContributionSettings>
   ssr: Partial<SSRSettings>
   toneMapping: ToneMappingMode
   volumetricAmbientHex: string
@@ -1097,6 +1101,7 @@ type BooleanSettingKey =
   | 'iblContributionEnabled'
   | 'lightmapContributionEnabled'
   | 'reflectionContributionEnabled'
+  | 'staticVolumetricContributionEnabled'
 type ScalarSettingKey =
   | 'ambientOcclusionIntensity'
   | 'ambientOcclusionRadius'
@@ -1105,6 +1110,7 @@ type ScalarSettingKey =
   | 'iblContributionIntensity'
   | 'lightmapContributionIntensity'
   | 'reflectionContributionIntensity'
+  | 'staticVolumetricContributionIntensity'
   | 'volumetricDistance'
   | 'volumetricHeightFalloff'
   | 'volumetricLightingStrength'
@@ -1375,6 +1381,7 @@ type StandardPbrTextureUrls = {
   height?: string
   metallic?: string
   normal?: string
+  orm?: string
   roughness?: string
 }
 
@@ -1387,6 +1394,25 @@ class ExposureEffectImpl extends Effect {
 
   set exposure(value: number) {
     this.uniforms.get('exposure').value = value
+  }
+}
+
+class PlayerFadeEffectImpl extends Effect {
+  constructor() {
+    super('PlayerFadeEffect', playerFadeEffectShader, {
+      uniforms: new Map([
+        ['fadeAlpha', new Uniform(0)],
+        ['fadeColor', new Uniform(new Color(0, 0, 0))]
+      ])
+    })
+  }
+
+  set fadeAlpha(value: number) {
+    this.uniforms.get('fadeAlpha').value = MathUtils.clamp(value, 0, 1)
+  }
+
+  set fadeColor(value: Color) {
+    this.uniforms.get('fadeColor').value.copy(value)
   }
 }
 
@@ -1596,7 +1622,7 @@ function createDefaultVisualSettings(): VisualSettings {
     cameraFov: 60,
     exposureStops: DEFAULT_EXPOSURE_STOPS,
     iblContribution: {
-      enabled: false,
+      enabled: true,
       intensity: DEFAULT_PROBE_IBL_INTENSITY
     },
     lightmapContribution: {
@@ -1624,6 +1650,10 @@ function createDefaultVisualSettings(): VisualSettings {
     reflectionContribution: {
       enabled: true,
       intensity: DEFAULT_REFLECTION_INTENSITY
+    },
+    staticVolumetricContribution: {
+      enabled: false,
+      intensity: DEFAULT_PROBE_IBL_INTENSITY
     },
     toneMapping: 'agx',
     bloom: {
@@ -1787,6 +1817,12 @@ function applyVisualSettingsPatch(
           ...patch.reflectionContribution
         }
       : settings.reflectionContribution,
+    staticVolumetricContribution: patch.staticVolumetricContribution
+      ? {
+          ...settings.staticVolumetricContribution,
+          ...patch.staticVolumetricContribution
+        }
+      : settings.staticVolumetricContribution,
     ssr: patch.ssr
       ? {
           ...settings.ssr,
@@ -4424,8 +4460,6 @@ function getReflectionCaptureSceneState(scene: ThreeScene, layout: MazeLayout) {
     if (object.userData?.debugRole === 'maze-ground-lightmap') {
       groundPatchCount += 1
       if (isMeshMaterialReady(object, {
-        aoMap: true,
-        bumpMap: true,
         lightMap: true,
         map: true,
         normalMap: true,
@@ -4445,8 +4479,6 @@ function getReflectionCaptureSceneState(scene: ThreeScene, layout: MazeLayout) {
     ) {
       wallCount += 1
       if (isMeshMaterialReady(object, {
-        aoMap: true,
-        bumpMap: true,
         lightMap: true,
         map: true,
         normalMap: true,
@@ -4460,7 +4492,6 @@ function getReflectionCaptureSceneState(scene: ThreeScene, layout: MazeLayout) {
     if (object.userData?.debugRole === 'sconce-body') {
       sconceCount += 1
       if (isMeshMaterialReady(object, {
-        bumpMap: true,
         map: true,
         metalnessMap: true,
         normalMap: true,
@@ -4541,12 +4572,10 @@ function usePuddleTextures(repeat: number) {
   const sourceTextures = useLoader(TextureLoader, [
     PUDDLE_TEXTURE_URLS.color,
     PUDDLE_TEXTURE_URLS.normal,
-    PUDDLE_TEXTURE_URLS.gloss,
-    PUDDLE_TEXTURE_URLS.displacement,
-    PUDDLE_TEXTURE_URLS.ao
-  ]) as [Texture, Texture, Texture, Texture, Texture]
+    PUDDLE_TEXTURE_URLS.gloss
+  ]) as [Texture, Texture, Texture]
   const textures = useMemo(
-    () => sourceTextures.map((texture) => texture.clone()) as [Texture, Texture, Texture, Texture, Texture],
+    () => sourceTextures.map((texture) => texture.clone()) as [Texture, Texture, Texture],
     [sourceTextures]
   )
   const roughnessTexture = useMemo(
@@ -4558,8 +4587,6 @@ function usePuddleTextures(repeat: number) {
     const anisotropy = Math.min(maxAnisotropy, 8)
     configureRepeatedTexture(textures[0], repeat, anisotropy, true)
     configureRepeatedTexture(textures[1], repeat, anisotropy)
-    configureRepeatedTexture(textures[3], repeat, anisotropy)
-    configureRepeatedTexture(textures[4], repeat, anisotropy)
     configureRepeatedTexture(roughnessTexture, repeat, anisotropy)
   }, [maxAnisotropy, repeat, roughnessTexture, textures])
 
@@ -4574,8 +4601,6 @@ function usePuddleTextures(repeat: number) {
   )
 
   return {
-    aoMap: textures[4],
-    bumpMap: textures[3],
     map: textures[0],
     normalMap: textures[1],
     roughnessMap: roughnessTexture
@@ -4587,11 +4612,10 @@ function useStandardPbrTextures(urls: StandardPbrTextureUrls, repeat: number) {
   const textureOrder = useMemo(
     () =>
       [
-        ['ao', urls.ao],
         ['color', urls.color],
-        ['height', urls.height],
         ['metallic', urls.metallic],
         ['normal', urls.normal],
+        ['orm', urls.orm],
         ['roughness', urls.roughness]
       ].filter((entry): entry is [keyof StandardPbrTextureUrls, string] => Boolean(entry[1])),
     [urls]
@@ -4613,12 +4637,10 @@ function useStandardPbrTextures(urls: StandardPbrTextureUrls, repeat: number) {
   }, [keyedTextures, maxAnisotropy, repeat])
 
   return {
-    aoMap: keyedTextures.ao,
-    bumpMap: keyedTextures.height,
     map: keyedTextures.color!,
-    metalnessMap: keyedTextures.metallic,
+    metalnessMap: keyedTextures.orm ?? keyedTextures.metallic,
     normalMap: keyedTextures.normal,
-    roughnessMap: keyedTextures.roughness
+    roughnessMap: keyedTextures.orm ?? keyedTextures.roughness
   } satisfies PbrMaps
 }
 
@@ -4721,6 +4743,8 @@ function createLitCloneMaterial(
     sourceMaterial instanceof ThreeMeshPhysicalMaterial
   ) {
     const clonedMaterial = sourceMaterial.clone()
+    clonedMaterial.aoMap = null
+    clonedMaterial.bumpMap = null
     clonedMaterial.side = side
     return clonedMaterial
   }
@@ -6881,7 +6905,6 @@ function GroundSurfaceMaterial({
   return (
     <meshPhysicalMaterial
       {...maps}
-      bumpScale={0.08}
       customProgramCacheKey={probeBlendMaterialProps.customProgramCacheKey}
       envMap={getProbeBlendEnvMap(normalizedProbeBlend)}
       envMapIntensity={0}
@@ -7260,8 +7283,7 @@ function WallSconce({
   const hasProbeTextures = Boolean(monsterRadianceProbeTextures[0])
   const hasProbeDepthTextures = Boolean(monsterRadianceProbeDepthTextures[0])
   const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
-  const diffuseProbeIntensity =
-    lightmapContributionIntensity + iblContributionIntensity
+  const diffuseProbeIntensity = iblContributionIntensity
   const diffuseProbeActive =
     diffuseProbeIntensity > EFFECT_EPSILON &&
     hasProbeCoefficients
@@ -7307,7 +7329,6 @@ function WallSconce({
       hasProbeTextures,
       iblContributionIntensity,
       layout,
-      lightmapContributionIntensity,
       probeCoefficients,
       probeDepthAtlasTextures,
       probeDepthTextures,
@@ -7337,8 +7358,6 @@ function WallSconce({
         debugRole="sconce-body"
         material={
           <meshStandardMaterial
-            bumpMap={metal.bumpMap}
-            bumpScale={0.02}
             color="white"
             customProgramCacheKey={probeBlendMaterialProps.customProgramCacheKey}
             envMap={getProbeBlendEnvMap(probeBlend)}
@@ -8749,6 +8768,7 @@ function MazeWalls({
   reflectionProbeCoefficients,
   reflectionProbeDepthTextures,
   reflectionProbeTextures,
+  staticVolumetricContributionIntensity,
 }: {
   environmentTexture: Texture | null
   environmentIntensity: number
@@ -8763,6 +8783,7 @@ function MazeWalls({
   reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
   reflectionProbeDepthTextures: CubeTexture[]
   reflectionProbeTextures: Texture[]
+  staticVolumetricContributionIntensity: number
 }) {
   const wall = useStandardPbrTextures(WALL_TEXTURE_URLS, WALL_TEXTURE_REPEAT)
   const torchTexture = useFireFlipbookTexture()
@@ -8773,7 +8794,7 @@ function MazeWalls({
         <MazeWallMesh
           environmentTexture={environmentTexture}
           environmentIntensity={environmentIntensity}
-          iblContributionIntensity={iblContributionIntensity}
+          iblContributionIntensity={staticVolumetricContributionIntensity}
           key={mazeWall.id}
           lightmap={layout.maze.lightmap}
           lightmapTexture={lightmapTexture}
@@ -8847,7 +8868,6 @@ function WallFaceMaterial({
     <meshStandardMaterial
       {...maps}
       attach={attach}
-      bumpScale={0.05}
       customProgramCacheKey={probeBlendMaterialProps.customProgramCacheKey}
       envMap={getProbeBlendEnvMap(probeBlend)}
       envMapIntensity={0}
@@ -9060,6 +9080,7 @@ function SceneGeometry({
   reflectionProbeDepthTextures,
   reflectionContributionIntensity,
   reflectionProbeTextures,
+  staticVolumetricContributionIntensity,
   surfaceLightmap,
   turnState
 }: {
@@ -9076,6 +9097,7 @@ function SceneGeometry({
   reflectionProbeDepthTextures: CubeTexture[]
   reflectionContributionIntensity: number
   reflectionProbeTextures: Texture[]
+  staticVolumetricContributionIntensity: number
   surfaceLightmap: {
     encoding: LightmapTextureEncoding
     ready: boolean
@@ -9088,7 +9110,7 @@ function SceneGeometry({
       <Ground
         environmentTexture={environmentTexture}
         environmentIntensity={environmentIntensity}
-        iblContributionIntensity={iblContributionIntensity}
+        iblContributionIntensity={staticVolumetricContributionIntensity}
         layout={layout}
         lightmapContributionIntensity={lightmapContributionIntensity}
         groundLightmapTexture={surfaceLightmap.texture}
@@ -9114,6 +9136,7 @@ function SceneGeometry({
         reflectionProbeCoefficients={reflectionProbeCoefficients}
         reflectionProbeDepthTextures={reflectionProbeDepthTextures}
         reflectionProbeTextures={reflectionProbeTextures}
+        staticVolumetricContributionIntensity={staticVolumetricContributionIntensity}
       />
       <MazeGates
         environmentTexture={environmentTexture}
@@ -10006,7 +10029,7 @@ function MonsterModel({
       monster.type === 'minotaur'
         ? 2.7
         : monster.type === 'spider'
-          ? 1.4
+          ? 2.1
           : 1.6
     const maxDimension = Math.max(size.x, size.y, size.z, 0.0001)
     const scale = targetSize / maxDimension
@@ -10094,6 +10117,11 @@ function MonsterActor({
   reflectionProbeTextures: Texture[]
 }) {
   const group = useRef<Group>(null)
+  const positionAnimation = useRef<{
+    from: Vector3
+    startedAt: number
+    to: Vector3
+  } | null>(null)
   const targetPosition = useMemo(
     () => getMazeCellWorldPosition(layout.maze, monster.cell, GROUND_Y),
     [layout.maze, monster.cell.x, monster.cell.y]
@@ -10113,6 +10141,13 @@ function MonsterActor({
     }
 
     if (group.current.userData.initialized) {
+      if (!group.current.position.equals(targetPosition)) {
+        positionAnimation.current = {
+          from: group.current.position.clone(),
+          startedAt: performance.now(),
+          to: targetPosition.clone()
+        }
+      }
       return
     }
 
@@ -10126,9 +10161,27 @@ function MonsterActor({
       return
     }
 
-    const alpha = Math.min(1, delta / 0.25)
+    const activePositionAnimation = positionAnimation.current
 
-    group.current.position.lerp(targetPosition, alpha)
+    if (activePositionAnimation) {
+      const alpha = Math.min(
+        1,
+        (performance.now() - activePositionAnimation.startedAt) / 250
+      )
+
+      group.current.position.lerpVectors(
+        activePositionAnimation.from,
+        activePositionAnimation.to,
+        alpha
+      )
+
+      if (alpha >= 1) {
+        positionAnimation.current = null
+      }
+    } else {
+      group.current.position.copy(targetPosition)
+    }
+
     group.current.rotation.y = MathUtils.damp(
       group.current.rotation.y,
       targetYaw,
@@ -10642,25 +10695,98 @@ function ExposureEffectPrimitive({
   return <primitive object={effect as unknown as Effect} />
 }
 
-function AnimatedVignette({ settings }: { settings: VignetteSettings }) {
-  const [darkness, setDarkness] = useState(settings.intensity)
+function PlayerFadeEffectPrimitive() {
+  const effect = useMemo(() => new PlayerFadeEffectImpl(), [])
+  const latestFadeState = useRef({
+    alpha: 0,
+    color: [0, 0, 0] as [number, number, number],
+    name: ''
+  })
+  const stateRef = useRef<{ name: string, startedAt: number }>({
+    name: '',
+    startedAt: 0
+  })
+  const strikeColor = useMemo(() => new Color(0.5, 0, 0), [])
+  const deathColor = useMemo(() => new Color(0, 0, 0), [])
 
-  useEffect(() => {
-    if (settings.noiseIntensity <= 0) {
-      setDarkness(settings.intensity)
+  useFrame(() => {
+    const name = document.body.dataset.playerEffect ?? ''
+    const now = performance.now()
+    const setFade = (color: Color, alpha: number) => {
+      effect.fadeColor = color
+      effect.fadeAlpha = alpha
+      latestFadeState.current = {
+        alpha: MathUtils.clamp(alpha, 0, 1),
+        color: [color.r, color.g, color.b],
+        name
+      }
     }
-  }, [settings.intensity, settings.noiseIntensity])
 
-  useFrame((state) => {
-    if (settings.noiseIntensity <= 0) {
+    if (stateRef.current.name !== name) {
+      stateRef.current = { name, startedAt: now }
+    }
+
+    const elapsed = now - stateRef.current.startedAt
+
+    if (name === 'sword-strike') {
+      setFade(strikeColor, elapsed / 125)
       return
     }
 
+    if (name === 'sword-strike-out') {
+      setFade(strikeColor, 1 - (elapsed / 375))
+      return
+    }
+
+    if (name === 'death') {
+      setFade(deathColor, elapsed / 125)
+      return
+    }
+
+    if (name === 'death-out') {
+      setFade(deathColor, 1 - (elapsed / 1000))
+      return
+    }
+
+    setFade(deathColor, 0)
+  })
+
+  useEffect(() => {
+    const globalWindow = window as Window & {
+      __levelsjamDebug?: Record<string, unknown>
+    }
+
+    globalWindow.__levelsjamDebug = globalWindow.__levelsjamDebug ?? {}
+    globalWindow.__levelsjamDebug.getPlayerFadeState = () => latestFadeState.current
+
+    return () => {
+      effect.dispose()
+      if (!globalWindow.__levelsjamDebug) {
+        return
+      }
+
+      delete globalWindow.__levelsjamDebug.getPlayerFadeState
+      if (Object.keys(globalWindow.__levelsjamDebug).length === 0) {
+        delete globalWindow.__levelsjamDebug
+      }
+    }
+  }, [effect])
+
+  return <primitive object={effect as unknown as Effect} />
+}
+
+function AnimatedVignette({ settings }: { settings: VignetteSettings }) {
+  const [darkness, setDarkness] = useState(settings.intensity)
+
+  useFrame((state) => {
     const period = Math.max(settings.noisePeriod, 0.0001)
     const phase = (state.clock.getElapsedTime() / period) * Math.PI * 2
-    const flicker = Math.sin(phase) * settings.noiseIntensity
+    const noise = 0.5 + (0.5 * Math.sin(phase))
+    const nextDarkness = settings.noiseIntensity > 0
+      ? settings.intensity + (noise * settings.noiseIntensity)
+      : settings.intensity
 
-    setDarkness(MathUtils.clamp(settings.intensity + flicker, 0, 1))
+    setDarkness(MathUtils.clamp(nextDarkness, 0, 1))
   })
 
   return <Vignette darkness={darkness} />
@@ -11148,8 +11274,10 @@ function FlightRig({
 
         if (queuedAction) {
           event.preventDefault()
-          inputQueue.current.push(queuedAction)
-          keys.current[event.code] = false
+          if (!keys.current[event.code] && inputQueue.current.length < MAX_BUFFERED_TURN_COMMANDS) {
+            inputQueue.current.push(queuedAction)
+          }
+          keys.current[event.code] = true
           return
         }
       }
@@ -11948,14 +12076,15 @@ function FlightRig({
                   delete document.body.dataset.playerEffect
                 }
                 playerEffectClearTimeout.current = null
-              }, 150)
+              }, 375)
             } else {
+              document.body.dataset.playerEffect = 'death-out'
               playerEffectClearTimeout.current = window.setTimeout(() => {
-                if (document.body.dataset.playerEffect === 'death') {
+                if (document.body.dataset.playerEffect === 'death-out') {
                   delete document.body.dataset.playerEffect
                 }
                 playerEffectClearTimeout.current = null
-              }, 2000)
+              }, 1000)
             }
           }
 
@@ -11974,7 +12103,24 @@ function FlightRig({
       const fromYaw = directionToYaw(
         activeAnimation?.from.player.direction ?? displayState.player.direction
       )
-      const toYaw = directionToYaw(displayState.player.direction)
+      let toYaw = directionToYaw(displayState.player.direction)
+      if (
+        activeAnimation &&
+        (activeAnimation.action === 'move-forward' || activeAnimation.action === 'move-backward') &&
+        !replayActive.current
+      ) {
+        let queuedTurnSteps = 0
+
+        for (const queuedAction of inputQueue.current) {
+          if (queuedAction === 'move-forward' || queuedAction === 'move-backward') {
+            break
+          }
+
+          queuedTurnSteps += queuedAction === 'rotate-left' ? 1 : -1
+        }
+
+        toYaw += queuedTurnSteps * (Math.PI / 2)
+      }
       const yawDelta = Math.atan2(Math.sin(toYaw - fromYaw), Math.cos(toYaw - fromYaw))
       if (activeAnimation?.blocked) {
         const moveDirection =
@@ -12050,6 +12196,7 @@ function FlightRig({
       }
       if (
         document.body.dataset.playerEffect === 'death' ||
+        document.body.dataset.playerEffect === 'death-out' ||
         document.body.dataset.playerEffect === 'sword-strike' ||
         document.body.dataset.playerEffect === 'sword-strike-out'
       ) {
@@ -12987,6 +13134,7 @@ function Scene({
         reflectionProbeDepthTextures={reflectionProbeDepthTextures}
         reflectionContributionIntensity={getEnabledContributionIntensity(visualSettings.reflectionContribution)}
         reflectionProbeTextures={reflectionProbeTextures}
+        staticVolumetricContributionIntensity={getEnabledContributionIntensity(visualSettings.staticVolumetricContribution)}
         surfaceLightmap={surfaceLightmap}
         turnState={turnState}
       />
@@ -13079,6 +13227,7 @@ function Scene({
             layout={layout}
           />
         ) : null}
+        <PlayerFadeEffectPrimitive />
         {vignetteActive ? (
           <AnimatedVignette settings={visualSettings.vignette} />
         ) : null}
@@ -13444,7 +13593,7 @@ function VisualControls({
         </output>
         <label className="visual-effect-label">
           <input
-            aria-label="Volumetric Lightmap Enabled"
+            aria-label="Dynamic Volumetric Enabled"
             checked={visualSettings.iblContribution.enabled}
             onChange={(event) => {
               onBooleanSettingChange('iblContributionEnabled', event.target.checked)
@@ -13452,11 +13601,11 @@ function VisualControls({
             type="checkbox"
           />
           <ResettableLabel onReset={() => onResetScalarSetting('iblContributionIntensity')}>
-            Volumetric Lightmap
+            Dynamic Volumetric
           </ResettableLabel>
         </label>
         <input
-          aria-label="Volumetric Lightmap"
+          aria-label="Dynamic Volumetric"
           disabled={!visualSettings.iblContribution.enabled}
           max={MAX_LIGHTING_CONTRIBUTION_INTENSITY}
           min={0}
@@ -13466,6 +13615,39 @@ function VisualControls({
           step={0.05}
           type="range"
           value={visualSettings.iblContribution.intensity}
+        />
+          </div>
+
+          <div className="visual-control-row">
+        <output>
+          {visualSettings.staticVolumetricContribution.enabled
+            ? `${visualSettings.staticVolumetricContribution.intensity.toFixed(2)}x`
+            : 'off'}
+        </output>
+        <label className="visual-effect-label">
+          <input
+            aria-label="Static Volumetric Enabled"
+            checked={visualSettings.staticVolumetricContribution.enabled}
+            onChange={(event) => {
+              onBooleanSettingChange('staticVolumetricContributionEnabled', event.target.checked)
+            }}
+            type="checkbox"
+          />
+          <ResettableLabel onReset={() => onResetScalarSetting('staticVolumetricContributionIntensity')}>
+            Static Volumetric
+          </ResettableLabel>
+        </label>
+        <input
+          aria-label="Static Volumetric"
+          disabled={!visualSettings.staticVolumetricContribution.enabled}
+          max={MAX_LIGHTING_CONTRIBUTION_INTENSITY}
+          min={0}
+          onChange={(event) => {
+            onScalarSettingChange('staticVolumetricContributionIntensity', Number(event.target.value))
+          }}
+          step={0.05}
+          type="range"
+          value={visualSettings.staticVolumetricContribution.intensity}
         />
           </div>
 
@@ -15153,6 +15335,16 @@ export default function App() {
         }
       }
 
+      if (key === 'staticVolumetricContributionIntensity') {
+        return {
+          ...current,
+          staticVolumetricContribution: {
+            ...current.staticVolumetricContribution,
+            intensity: value
+          }
+        }
+      }
+
       if (key === 'vignetteIntensity') {
         return {
           ...current,
@@ -15326,6 +15518,16 @@ export default function App() {
         }
       }
 
+      if (key === 'staticVolumetricContributionEnabled') {
+        return {
+          ...current,
+          staticVolumetricContribution: {
+            ...current.staticVolumetricContribution,
+            enabled: value
+          }
+        }
+      }
+
       return {
         ...current,
         [key]: value
@@ -15348,6 +15550,11 @@ export default function App() {
 
     if (key === 'reflectionContributionIntensity') {
       onScalarSettingChange(key, defaults.reflectionContribution.intensity)
+      return
+    }
+
+    if (key === 'staticVolumetricContributionIntensity') {
+      onScalarSettingChange(key, defaults.staticVolumetricContribution.intensity)
       return
     }
 
@@ -15519,6 +15726,11 @@ export default function App() {
 
     if (key === 'reflectionContributionEnabled') {
       onBooleanSettingChange(key, defaults.reflectionContribution.enabled)
+      return
+    }
+
+    if (key === 'staticVolumetricContributionEnabled') {
+      onBooleanSettingChange(key, defaults.staticVolumetricContribution.enabled)
       return
     }
 

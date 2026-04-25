@@ -19,34 +19,6 @@ body {
   overflow: hidden;
 }
 
-body::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: 6;
-  pointer-events: none;
-  background: #000;
-  opacity: 0;
-  transition: opacity 2s ease;
-}
-
-body[data-player-effect='death']::after {
-  opacity: 1;
-  transition-duration: 250ms;
-}
-
-body[data-player-effect='sword-strike']::after {
-  background: #fff;
-  opacity: 1;
-  transition-duration: 125ms;
-}
-
-body[data-player-effect='sword-strike-out']::after {
-  background: #fff;
-  opacity: 0;
-  transition-duration: 125ms;
-}
-
 .app-shell {
   width: 100%;
   height: 100%;

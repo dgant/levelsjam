@@ -10,7 +10,7 @@ import {
 import { createInitialTurnState } from '../src/lib/turnRules.js'
 
 test('generated mazes include gates, items, and a recorded winning solution', () => {
-  const maze = generateMaze(24680, { bakeLightmap: false })
+  const maze = generateMaze(7, { bakeLightmap: false })
   const validation = validateMaze(maze, { requireLightmap: false })
 
   assert.equal(validation.valid, true, validation.errors.join('\n'))
@@ -19,6 +19,7 @@ test('generated mazes include gates, items, and a recorded winning solution', ()
   assert.ok(maze.trophy?.cell)
   assert.ok(Array.isArray(maze.solution?.actions))
   assert.ok(maze.solution.actions.length > 0)
+  assert.equal(maze.solution.actions.includes('move-backward'), false)
   assert.equal(maze.solution.visibilityLimited, true)
   assert.ok(maze.solution.observedCellCount > 0)
 })

@@ -75,6 +75,16 @@ test('generates valid mazes under 100ms', () => {
   assert.ok(maze.totalGenerationMs < 5000, `full generation took ${maze.totalGenerationMs}ms`)
 })
 
+test('places initial torch lights on pickup cells', () => {
+  const maze = generateMaze(123456, { bakeLightmap: false })
+  const lightCellKeys = new Set(
+    maze.lights.map((light) => `${light.cell.x},${light.cell.y}`)
+  )
+
+  assert.ok(lightCellKeys.has(`${maze.sword.cell.x},${maze.sword.cell.y}`))
+  assert.ok(lightCellKeys.has(`${maze.trophy.cell.x},${maze.trophy.cell.y}`))
+})
+
 test('persists at least five valid mazes', async () => {
   const mazeDirectory = path.join(process.cwd(), 'src', 'data', 'mazes')
   const files = await ensureMazeFiles({ directory: mazeDirectory })

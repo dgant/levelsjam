@@ -15,7 +15,7 @@ export const MAZE_CELL_SIZE = 2
 export const MAZE_WALL_THICKNESS = 0.25
 export const MAZE_WALL_HEIGHT = 2
 export const MAZE_TARGET_COUNT = 5
-export const MAZE_LIGHTMAP_VERSION = 19
+export const MAZE_LIGHTMAP_VERSION = 20
 export const MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS = 0.125
 
 const MAZE_LIGHTMAP_GROUND_TILE_SIZE = 256
@@ -24,7 +24,7 @@ const MAZE_LIGHTMAP_WALL_TILE_HEIGHT = 128
 const MAZE_LIGHTMAP_NEUTRAL_TILE_SIZE = 4
 const MAZE_LIGHTMAP_GROUND_MARGIN = 16
 const MAZE_LIGHTMAP_SAMPLE_EPSILON = 0.02
-const MAZE_LIGHTMAP_TORCH_STRENGTH = AUTHORED_LIGHTING_SOURCE_SCALE
+const MAZE_LIGHTMAP_TORCH_STRENGTH = AUTHORED_LIGHTING_SOURCE_SCALE / 5
 const MAZE_LIGHTMAP_MIN_RAW_TORCH_CONTRIBUTION = 1
 const MAZE_LIGHTMAP_GROUND_SUPERSAMPLE_GRID = 1
 const MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID = 2
@@ -892,6 +892,35 @@ function generateMazeLights(maze, random) {
   }
 
   const lights = []
+  const addLightForCell = (cell) => {
+    const key = cellKey(cell)
+
+    if (!unlit.has(key)) {
+      return false
+    }
+
+    const closedSides = getClosedSides(maze, adjacency, cell)
+
+    if (closedSides.length === 0) {
+      return false
+    }
+
+    const side = closedSides[integerFromRandom(random, closedSides.length)]
+    const light = { cell: { ...cell }, side }
+
+    lights.push(light)
+    for (const coveredCell of computeLightCoverage(maze, light)) {
+      unlit.delete(coveredCell)
+    }
+
+    return true
+  }
+
+  for (const pickup of [maze.sword, maze.trophy]) {
+    if (pickup?.cell) {
+      addLightForCell(pickup.cell)
+    }
+  }
 
   while (unlit.size > 0) {
     const candidates = [...unlit]
@@ -902,15 +931,7 @@ function generateMazeLights(maze, random) {
       break
     }
 
-    const cell = candidates[integerFromRandom(random, candidates.length)]
-    const closedSides = getClosedSides(maze, adjacency, cell)
-    const side = closedSides[integerFromRandom(random, closedSides.length)]
-    const light = { cell, side }
-
-    lights.push(light)
-    for (const coveredCell of computeLightCoverage(maze, light)) {
-      unlit.delete(coveredCell)
-    }
+    addLightForCell(candidates[integerFromRandom(random, candidates.length)])
   }
 
   return lights
