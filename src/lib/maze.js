@@ -15,7 +15,7 @@ export const MAZE_CELL_SIZE = 2
 export const MAZE_WALL_THICKNESS = 0.25
 export const MAZE_WALL_HEIGHT = 2
 export const MAZE_TARGET_COUNT = 5
-export const MAZE_LIGHTMAP_VERSION = 21
+export const MAZE_LIGHTMAP_VERSION = 22
 export const MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS = 0.125
 
 const MAZE_LIGHTMAP_GROUND_TILE_SIZE = 256
@@ -25,7 +25,7 @@ const MAZE_LIGHTMAP_NEUTRAL_TILE_SIZE = 4
 const MAZE_LIGHTMAP_GROUND_MARGIN = 16
 const MAZE_LIGHTMAP_SAMPLE_EPSILON = 0.02
 const MAZE_LIGHTMAP_TORCH_STRENGTH = AUTHORED_LIGHTING_SOURCE_SCALE / 5
-const MAZE_LIGHTMAP_MIN_RAW_TORCH_CONTRIBUTION = 1
+const MAZE_LIGHTMAP_MIN_RAW_WALL_OCCLUSION_CONTRIBUTION = 1
 const MAZE_LIGHTMAP_GROUND_SUPERSAMPLE_GRID = 1
 const MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID = 2
 const MAZE_LIGHTMAP_GROUND_AMBIENT_SAMPLE_GRID = 40
@@ -1739,7 +1739,7 @@ function getAttachedSconceContactShadow(samplePosition, sampleNormal, torchPlace
     return 0
   }
 
-  if (samplePosition.y > torchPlacement.sconcePosition.y + (sconceRadius * 0.15)) {
+  if (samplePosition.y > torchPlacement.sconcePosition.y + sconceRadius) {
     return 0
   }
 
@@ -1755,7 +1755,7 @@ function getAttachedSconceContactShadow(samplePosition, sampleNormal, torchPlace
     samplePosition.y
   )
 
-  return clamp01(horizontalMask * (0.75 + (0.25 * verticalMask)))
+  return clamp01(horizontalMask * (0.9 + (0.1 * verticalMask)))
 }
 
 function isTorchBlockedBySconce(samplePosition, sampleNormal, torchPlacement, sconceRadius) {
@@ -1929,16 +1929,16 @@ function accumulateTorchLighting(
       getAttachedSconceContactShadow(samplePosition, sampleNormal, torch, sconceRadius)
     const contactShadowedStrength = strength * (1 - (0.98 * sconceContactShadow))
 
-    if (strength < MAZE_LIGHTMAP_MIN_RAW_TORCH_CONTRIBUTION) {
+    if (isTorchBlockedBySconce(samplePosition, sampleNormal, torch, sconceRadius)) {
+      continue
+    }
+
+    if (strength < MAZE_LIGHTMAP_MIN_RAW_WALL_OCCLUSION_CONTRIBUTION) {
       // Keep the inverse-square tail without paying per-texel wall tests for
       // contributions too small to cast a readable hard shadow in the 8-bit bake.
       litColor[0] += MAZE_TORCH_LIGHT_COLOR[0] * contactShadowedStrength
       litColor[1] += MAZE_TORCH_LIGHT_COLOR[1] * contactShadowedStrength
       litColor[2] += MAZE_TORCH_LIGHT_COLOR[2] * contactShadowedStrength
-      continue
-    }
-
-    if (isTorchBlockedBySconce(samplePosition, sampleNormal, torch, sconceRadius)) {
       continue
     }
 
@@ -1966,6 +1966,100 @@ function accumulateTorchLighting(
   }
 
   return litColor
+}
+
+const PROBE_SH_BASIS_WEIGHTS = [
+  () => 0.282095,
+  (direction) => 0.488603 * direction.x,
+  (direction) => 0.488603 * direction.y,
+  (direction) => 0.488603 * direction.z
+]
+
+function addIsotropicProbeRadiance(coefficients, color) {
+  for (let channel = 0; channel < 3; channel += 1) {
+    coefficients[0][channel] += color[channel] * PROBE_SH_BASIS_WEIGHTS[0]()
+  }
+}
+
+function addDirectionalProbeRadiance(coefficients, direction, color) {
+  const scale = 0.25
+
+  for (let basisIndex = 0; basisIndex < PROBE_SH_BASIS_WEIGHTS.length; basisIndex += 1) {
+    const basis = PROBE_SH_BASIS_WEIGHTS[basisIndex](direction) * scale
+
+    coefficients[basisIndex][0] += color[0] * basis
+    coefficients[basisIndex][1] += color[1] * basis
+    coefficients[basisIndex][2] += color[2] * basis
+  }
+}
+
+function sampleProbeSkylightVisibility(samplePosition, walls) {
+  let visibleCount = 0
+
+  for (const direction of MAZE_SKY_SAMPLE_DIRECTIONS) {
+    if (!isSkyOccluded(samplePosition, direction, walls, null, null)) {
+      visibleCount += 1
+    }
+  }
+
+  return visibleCount / MAZE_SKY_SAMPLE_DIRECTIONS.length
+}
+
+export function computeMazeVolumetricLightmapCoefficients(
+  maze,
+  probePosition,
+  sconceRadius = MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS
+) {
+  const walls = getMazeWallSegments(maze)
+  const torchPlacements = getMazeTorchPlacements(maze, sconceRadius)
+  const coefficients = PROBE_SH_BASIS_WEIGHTS.map(() => [0, 0, 0])
+  const skylightVisibility = sampleProbeSkylightVisibility(probePosition, walls)
+
+  addIsotropicProbeRadiance(
+    coefficients,
+    MAZE_SKY_LIGHT_COLOR.map((component) => component * skylightVisibility)
+  )
+
+  for (const torch of torchPlacements) {
+    const toTorchX = torch.torchPosition.x - probePosition.x
+    const toTorchY = torch.torchPosition.y - probePosition.y
+    const toTorchZ = torch.torchPosition.z - probePosition.z
+    const distance = Math.hypot(toTorchX, toTorchY, toTorchZ)
+
+    if (distance <= 1e-6) {
+      continue
+    }
+
+    if (
+      isTorchOccluded(
+        probePosition,
+        torch.torchPosition,
+        walls,
+        null,
+        null
+      )
+    ) {
+      continue
+    }
+
+    const sourceRadius = Math.max(sconceRadius, 0.01)
+    const falloff = 1 / Math.max(distance * distance, sourceRadius * sourceRadius)
+    const strength = falloff * MAZE_LIGHTMAP_TORCH_STRENGTH
+    const direction = {
+      x: toTorchX / distance,
+      y: toTorchY / distance,
+      z: toTorchZ / distance
+    }
+    const color = [
+      MAZE_TORCH_LIGHT_COLOR[0] * strength,
+      MAZE_TORCH_LIGHT_COLOR[1] * strength,
+      MAZE_TORCH_LIGHT_COLOR[2] * strength
+    ]
+
+    addDirectionalProbeRadiance(coefficients, direction, color)
+  }
+
+  return coefficients
 }
 
 export function bakeMazeLightmap(

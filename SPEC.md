@@ -105,6 +105,8 @@
 - Each offline reflection probe stores an HDR processed runtime reflection texture derived from that raw cubemap.
 - Each offline reflection probe stores an offline-captured depth or shadow cubemap suitable for probe-space visibility tests during local reflections.
 - Each offline volumetric-lightmap probe stores HDR directional lighting data that is separate from the reflection texture and is intended for diffuse probe lighting rather than specular reflections.
+- Offline volumetric-lightmap coefficients are generated from the baked maze lighting model directly, including occluded torch point-light contribution and occluded skylight, rather than inferred only from reflection beauty captures.
+- A volumetric-lightmap probe in a cell with a same-cell visible torch receives directional warm torch energy unless maze geometry occludes the torch from the probe.
 - Reflection probes and volumetric-lightmap probes share the same probe positions, local areas of influence, and capture-time occluders.
 - Gates, monsters, ground pickup items, and held pickup items are omitted from offline lightmap, volumetric-lightmap, and reflection-probe baking.
 - Diffuse volumetric-lightmap shading is evaluated per pixel rather than from one constant probe blend per mesh.

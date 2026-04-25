@@ -3,7 +3,6 @@ const net = require('node:net')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
 const { chromium } = require('@playwright/test')
-const { PNG } = require('pngjs')
 
 const rootDir = path.resolve(__dirname, '..')
 const servePort = Number(process.env.LEVELSJAM_REFLECTION_ARTIFACT_PORT ?? '42735')
@@ -19,7 +18,6 @@ const requestedMazeIds = (
   .split(',')
   .map((mazeId) => mazeId.trim())
   .filter(Boolean)
-let probeSphericalHarmonics = null
 
 function writeAtlasArtifacts(outputDirectory, label, atlas) {
   fs.mkdirSync(outputDirectory, { recursive: true })
@@ -43,32 +41,6 @@ function writeDataUrlPng(filePath, dataUrl) {
       dataUrl.replace(/^data:image\/png;base64,/, ''),
       'base64'
     )
-  )
-}
-
-function computeVolumetricLightmapCoefficients(rawRgbEAtlas) {
-  if (!probeSphericalHarmonics) {
-    throw new Error('Probe spherical harmonics helpers were not loaded')
-  }
-
-  const faces = rawRgbEAtlas.map((faceDataUrl) =>
-    PNG.sync.read(
-      Buffer.from(faceDataUrl.replace(/^data:image\/png;base64,/, ''), 'base64')
-    )
-  )
-
-  return probeSphericalHarmonics.computeVolumetricLightmapCoefficientsFromPixels(
-    faces,
-    (face, column, row) => {
-      const pixelIndex = ((row * face.width) + column) * 4
-
-      return probeSphericalHarmonics.decodeRgbE8(
-        face.data[pixelIndex],
-        face.data[pixelIndex + 1],
-        face.data[pixelIndex + 2],
-        face.data[pixelIndex + 3]
-      )
-    }
   )
 }
 
@@ -105,12 +77,20 @@ function waitForPort(port, timeoutMs) {
   })
 }
 
-async function captureMazeReflectionArtifacts(page, maze, artifactRoot) {
+async function captureMazeReflectionArtifacts(
+  page,
+  maze,
+  artifactRoot,
+  getMazeSceneLayout,
+  sconceRadius,
+  computeMazeVolumetricLightmapCoefficients
+) {
   const outputDirectory = path.join(
     artifactRoot,
     maze.id,
     'reflection-probes'
   )
+  const mazeLayout = getMazeSceneLayout(maze, sconceRadius)
 
   fs.rmSync(outputDirectory, { force: true, recursive: true })
   fs.mkdirSync(outputDirectory, { recursive: true })
@@ -235,7 +215,11 @@ async function captureMazeReflectionArtifacts(page, maze, artifactRoot) {
     }
 
     runtimeManifest.probes.push({
-      coefficients: computeVolumetricLightmapCoefficients(capture.rawRgbEAtlas),
+      coefficients: computeMazeVolumetricLightmapCoefficients(
+        maze,
+        mazeLayout.reflectionProbes[probeIndex].position,
+        sconceRadius
+      ),
       depthFaces: runtimeDepthFiles.map((fileName) =>
         path.posix.join(runtimeProbeDirectoryRelative, fileName)
       ),
@@ -273,11 +257,16 @@ async function captureMazeReflectionArtifacts(page, maze, artifactRoot) {
 }
 
 async function main() {
-  probeSphericalHarmonics = await import('../src/lib/probeSphericalHarmonics.js')
-
   const {
     MAZES
   } = await import('../src/data/mazes/index.js')
+  const {
+    computeMazeVolumetricLightmapCoefficients,
+    getMazeSceneLayout
+  } = await import('../src/lib/maze.js')
+  const {
+    SCONCE_RADIUS
+  } = await import('../src/lib/sceneConstants.js')
   const {
     DEFAULT_LIGHTMAP_ARTIFACT_DIRECTORY
   } = await import('../src/lib/mazePersistence.js')
@@ -311,7 +300,10 @@ async function main() {
       await captureMazeReflectionArtifacts(
         page,
         maze,
-        DEFAULT_LIGHTMAP_ARTIFACT_DIRECTORY
+        DEFAULT_LIGHTMAP_ARTIFACT_DIRECTORY,
+        getMazeSceneLayout,
+        SCONCE_RADIUS,
+        computeMazeVolumetricLightmapCoefficients
       )
     }
 

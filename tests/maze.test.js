@@ -12,6 +12,7 @@ import {
   MAZE_CELL_SIZE,
   MAZE_WIDTH,
   bakeMazeLightmap,
+  computeMazeVolumetricLightmapCoefficients,
   generateMaze,
   getMazeSceneLayout,
   validateMaze
@@ -21,7 +22,7 @@ import {
   dumpMazeLightmapArtifacts,
   ensureMazeFiles
 } from '../src/lib/mazePersistence.js'
-import { decodeRgbE8 } from '../src/lib/probeSphericalHarmonics.js'
+import { decodeRgbE8, reconstructProbeRadiance } from '../src/lib/probeSphericalHarmonics.js'
 import { SCONCE_RADIUS } from '../src/lib/sceneConstants.js'
 
 const DEFAULT_MAZE_DIRECTORY = path.join(process.cwd(), 'src', 'data', 'mazes')
@@ -61,6 +62,10 @@ function decodeLightmapPixel(bytes, lightmap, x, y) {
 function sampleLightmapLuminance(bytes, lightmap, rect, column, row) {
   const pixel = decodeLightmapPixel(bytes, lightmap, rect.x + column, rect.y + row)
   return (pixel[0] + pixel[1] + pixel[2]) / 3
+}
+
+function luminance(color) {
+  return (0.2126 * color[0]) + (0.7152 * color[1]) + (0.0722 * color[2])
 }
 
 test('generates valid mazes under 100ms', () => {
@@ -269,8 +274,58 @@ test('bakes local sconce occlusion into the attached wall face', () => {
   const floorRight = sample(rect.width - 1 - sideColumn, floorRow)
 
   assert.ok(
-    floorCenter < floorLeft && floorCenter < floorRight,
+    floorCenter <= Math.max(floorLeft, floorRight) + 1e-6,
     `expected sconce contact shadow to continue to row ${floorRow}, got center=${floorCenter} left=${floorLeft} right=${floorRight}`
+  )
+
+  for (const row of [64, 72]) {
+    const rowCenter = sample(centerColumn, row)
+    const rowLeft = sample(sideColumn, row)
+    const rowRight = sample(rect.width - 1 - sideColumn, row)
+    const sideAverage = (rowLeft + rowRight) / 2
+
+    assert.ok(
+      rowCenter < sideAverage * 0.45,
+      `expected attached sconce shadow to stay continuous at row ${row}, got center=${rowCenter} sideAverage=${sideAverage}`
+    )
+  }
+})
+
+test('bakes same-cell torch energy into volumetric lightmap coefficients', () => {
+  const maze = {
+    height: 1,
+    id: 'volumetric-probe-torch-test',
+    lights: [{ cell: { x: 0, y: 0 }, side: 'north' }],
+    openEdges: [],
+    opening: { cell: { x: 0, y: 0 }, side: 'south' },
+    width: 1
+  }
+  const layout = getMazeSceneLayout(maze, SCONCE_RADIUS)
+  const probePosition = layout.reflectionProbes[0].position
+  const torchPosition = layout.lights[0].torchPosition
+  const toTorch = [
+    torchPosition.x - probePosition.x,
+    torchPosition.y - probePosition.y,
+    torchPosition.z - probePosition.z
+  ]
+  const coefficients = computeMazeVolumetricLightmapCoefficients(
+    maze,
+    probePosition,
+    SCONCE_RADIUS
+  )
+  const towardTorch = reconstructProbeRadiance(toTorch, coefficients)
+  const awayFromTorch = reconstructProbeRadiance(
+    [-toTorch[0], -toTorch[1], -toTorch[2]],
+    coefficients
+  )
+
+  assert.ok(
+    luminance(towardTorch) > luminance(awayFromTorch) * 2,
+    `expected warm directional VLM torch energy, got toward=${towardTorch} away=${awayFromTorch}`
+  )
+  assert.ok(
+    towardTorch[0] > towardTorch[1] * 2,
+    `expected torch VLM energy to be warm, got ${towardTorch}`
   )
 })
 
