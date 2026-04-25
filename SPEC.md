@@ -301,7 +301,7 @@
 - The debug panel fog intensity defaults to `1.0`.
 - The debug panel fog height-falloff control is denominated in meters per 50% fog-density drop, ranges from `0.01m` to `8m`, and is implemented using that same half-distance interpretation.
 - The debug panel does not expose obsolete atmosphere or sun-direction controls.
-- The page shows an FPS counter in the top-right corner together with the current Git revision and revision timestamp.
+- The page shows an FPS counter in the top-right corner together with the active maze ID, current Git branch, current Git revision, and revision timestamp.
 - The top-right overlay also shows the active maze ID.
 - Pressing `F9` toggles the visibility of the top-right overlay.
 

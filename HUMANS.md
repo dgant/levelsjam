@@ -57,7 +57,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify `A`, `S`, left-arrow, and right-arrow rotate the player camera by 90 degrees without consuming a turn.
 - Verify pressing `F1` toggles free-camera inspection mode, where `WASD` moves freely, mouse-look is detached from the player, and `Q`/`E` move vertically.
 - Verify pressing `C` opens the credits modal and any subsequent key closes it.
-- Verify the top-right overlay shows the active maze ID, Git revision, and revision timestamp.
+- Verify the top-right overlay shows the active maze ID, Git branch, Git revision, and revision timestamp.
 - Verify `F9` toggles the top-right overlay.
 - Verify the ground, walls, and sconces are using their full requested PBR material stacks when the current task calls for full-fidelity rendering rather than compatibility simplification.
 - Verify mouse movement changes view direction after an explicit click locks the pointer to the canvas.
@@ -144,7 +144,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify enabling Depth Of Field with `0` bokeh scale produces no visible scene change.
 - Verify Depth Of Field runs after the torch-billboard composite and before Bloom in the postprocess stack.
 - Verify each control row in the visual controls panel keeps the value, label, and control on one line in that order.
-- Verify the FPS counter appears in the top-right corner and includes the Git revision and revision timestamp.
+- Verify the FPS counter appears in the top-right corner and includes the Git branch, Git revision, and revision timestamp.
 - Verify pressing backquote opens the visual controls panel.
 - Verify the panel no longer exposes obsolete atmosphere or sun controls.
 - Verify opening the panel releases mouse lock and clicking inside the panel does not relock the pointer.

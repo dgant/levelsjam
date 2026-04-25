@@ -1,5 +1,6 @@
 const fs = require('node:fs')
 const path = require('node:path')
+const { execSync } = require('node:child_process')
 const { PNG } = require('pngjs')
 const { expect, test } = require('@playwright/test')
 
@@ -12,6 +13,10 @@ const SMOKE_TIMING_LOG_PATH = path.resolve(
   'latest-smoke-profile.json'
 )
 let activeSmokeTimingProfile = null
+const CURRENT_GIT_BRANCH = execSync('git branch --show-current', {
+  cwd: path.resolve(__dirname, '..'),
+  encoding: 'utf8'
+}).trim()
 
 function createSmokeTimingProfile() {
   return {
@@ -326,6 +331,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   await timedStep(timingProfile, 'debug-controls', async () => {
     await expect(page.locator('.fps-counter')).toContainText('FPS', { timeout: 5_000 })
     await expect(page.locator('.fps-counter')).toContainText('maze-001')
+    await expect(page.locator('.fps-counter')).toContainText(`${CURRENT_GIT_BRANCH}@`)
     await expect(page.locator('.fps-counter')).not.toContainText('unknown')
 
     await page.keyboard.press('Backquote')

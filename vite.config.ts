@@ -5,6 +5,10 @@ import react from '@vitejs/plugin-react'
 
 function readGitMetadata() {
   try {
+    const branch = execSync('git branch --show-current', {
+      cwd: __dirname,
+      encoding: 'utf8'
+    }).trim()
     const revision = execSync('git rev-parse --short=12 HEAD', {
       cwd: __dirname,
       encoding: 'utf8'
@@ -15,11 +19,13 @@ function readGitMetadata() {
     }).trim()
 
     return {
+      branch: branch || 'detached',
       revision,
       revisionTimestamp
     }
   } catch {
     return {
+      branch: 'unknown',
       revision: 'unknown',
       revisionTimestamp: 'unknown'
     }
@@ -38,6 +44,7 @@ export default defineConfig({
     host: '127.0.0.1'
   },
   define: {
+    __GIT_BRANCH__: JSON.stringify(gitMetadata.branch),
     __GIT_REVISION__: JSON.stringify(gitMetadata.revision),
     __GIT_REVISION_TIMESTAMP__: JSON.stringify(gitMetadata.revisionTimestamp)
   },

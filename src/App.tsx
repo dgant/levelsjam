@@ -155,6 +155,7 @@ import {
 } from './lib/turnRules.js'
 import { cloneCachedGltfRoot, getCachedGltfRootUrls } from './lib/gltfRuntimeCache'
 
+declare const __GIT_BRANCH__: string
 declare const __GIT_REVISION__: string
 declare const __GIT_REVISION_TIMESTAMP__: string
 
@@ -1036,7 +1037,7 @@ const DEFAULT_VOLUMETRIC_LIGHTING_STRENGTH = 1
 const DEFAULT_VOLUMETRIC_STEP_COUNT = 16
 const MAX_SIMULTANEOUS_LENS_FLARES = 5
 const MAX_BUFFERED_TURN_COMMANDS = 10
-const GIT_REVISION = __GIT_REVISION__
+const GIT_REVISION = `${__GIT_BRANCH__}@${__GIT_REVISION__}`
 const GIT_REVISION_TIMESTAMP = __GIT_REVISION_TIMESTAMP__
 const PROBE_DEBUG_MODE_OPTIONS: Array<{ key: ProbeDebugMode, label: string }> = [
   { key: 'none', label: 'None' },
