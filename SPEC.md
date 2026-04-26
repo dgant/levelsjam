@@ -36,6 +36,7 @@
 - Near-player realtime shadowed torch lights are blended as a smooth correction over the generated radiance field instead of abruptly replacing it.
 - Realtime torch shadow eligibility changes use continuous weights, temporal smoothing, and slot hysteresis so torch shadows do not flip on and off at selection boundaries.
 - Realtime shadowed torch lights are bounded to a small active set selected by player distance and visibility importance.
+- Realtime shadowed torch lights are near-field correction lights for local contact shadows and do not act as the primary cross-cell torch illumination source.
 - Realtime shadowed torch slots keep their selected torch while it fades out, and newly eligible torches fade into another available slot instead of stealing an already visible slot.
 - Realtime shadow maps for selected torch slots refresh when a slot selects a different torch or when gate occluder state changes, not every animation frame.
 - The generated radiance-field debug state exposes scene-map dimensions, cascade dimensions, cascade count, source light count, occluder count, GPU update count, latest GPU update time, and active shadow-light weights.

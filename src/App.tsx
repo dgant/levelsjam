@@ -242,10 +242,11 @@ const RUNTIME_RADIANCE_CASCADE_COUNT = 4
 const RUNTIME_RADIANCE_BASE_RAY_COUNT = 16
 const RUNTIME_RADIANCE_DIRECT_GAIN = 3
 const RUNTIME_RADIANCE_FOG_SCATTER_GAIN = 24
-const RUNTIME_RADIANCE_INDIRECT_GAIN = 0.8
+const RUNTIME_RADIANCE_INDIRECT_GAIN = 0.55
 const RUNTIME_RADIANCE_MAX_DISTANCE = 18
-const RUNTIME_RADIANCE_OCCLUDER_PADDING = WALL_WIDTH * 0.35
-const RUNTIME_RADIANCE_SOURCE_RADIUS = 0.45
+const RUNTIME_RADIANCE_OCCLUDER_NORMAL_PADDING = WALL_WIDTH * 0.75
+const RUNTIME_RADIANCE_OCCLUDER_TANGENT_PADDING = WALL_WIDTH * 0.1
+const RUNTIME_RADIANCE_SOURCE_RADIUS = 0.32
 const RUNTIME_RADIANCE_SURFACE_NORMAL_OFFSET = WALL_WIDTH * 0.75
 const RUNTIME_TORCH_FLICKER_INTENSITY = 0.15
 const RUNTIME_SHADOW_SLOT_COUNT = 2
@@ -255,8 +256,8 @@ const RUNTIME_SHADOW_SWITCH_MARGIN = 0.15
 const RUNTIME_SHADOW_FADE_IN_SECONDS = 0.25
 const RUNTIME_SHADOW_FADE_OUT_SECONDS = 0.75
 const RUNTIME_SHADOW_REFRESH_SECONDS = 0.5
-const RUNTIME_SHADOW_TORCH_INTENSITY = 0.35
-const RUNTIME_SHADOW_TORCH_DISTANCE = 7
+const RUNTIME_SHADOW_TORCH_INTENSITY = 0.12
+const RUNTIME_SHADOW_TORCH_DISTANCE = 2.35
 
 function recordStartupMarker(name: string) {
   if (document.body.dataset[name] && document.body.dataset[name] !== 'pending') {
@@ -5466,13 +5467,15 @@ function pointInRuntimeRadianceOccluder2D(
 }
 
 function padRuntimeRadianceOccluder(
-  occluder: RuntimeRadianceOccluder
+  occluder: RuntimeRadianceOccluder,
+  padX: number,
+  padZ: number
 ): RuntimeRadianceOccluder {
   return {
-    maxX: occluder.maxX + RUNTIME_RADIANCE_OCCLUDER_PADDING,
-    maxZ: occluder.maxZ + RUNTIME_RADIANCE_OCCLUDER_PADDING,
-    minX: occluder.minX - RUNTIME_RADIANCE_OCCLUDER_PADDING,
-    minZ: occluder.minZ - RUNTIME_RADIANCE_OCCLUDER_PADDING
+    maxX: occluder.maxX + padX,
+    maxZ: occluder.maxZ + padZ,
+    minX: occluder.minX - padX,
+    minZ: occluder.minZ - padZ
   }
 }
 
@@ -5520,33 +5523,60 @@ function buildRuntimeRadianceOccluders(
   layout: MazeLayout,
   openGateIds: Set<string>
 ) {
-  const wallOccluders = layout.walls.map((wall) => padRuntimeRadianceOccluder({
-    maxX: wall.bounds.maxX,
-    maxZ: wall.bounds.maxZ,
-    minX: wall.bounds.minX,
-    minZ: wall.bounds.minZ
-  }))
+  const wallOccluders = layout.walls.map((wall) => {
+    const padX = wall.axis === 'z'
+      ? RUNTIME_RADIANCE_OCCLUDER_NORMAL_PADDING
+      : RUNTIME_RADIANCE_OCCLUDER_TANGENT_PADDING
+    const padZ = wall.axis === 'x'
+      ? RUNTIME_RADIANCE_OCCLUDER_NORMAL_PADDING
+      : RUNTIME_RADIANCE_OCCLUDER_TANGENT_PADDING
+
+    return padRuntimeRadianceOccluder(
+      {
+        maxX: wall.bounds.maxX,
+        maxZ: wall.bounds.maxZ,
+        minX: wall.bounds.minX,
+        minZ: wall.bounds.minZ
+      },
+      padX,
+      padZ
+    )
+  })
   const gateOccluders = layout.gates
     .filter((gate) => !openGateIds.has(gate.id))
     .map((gate) => {
       const halfLength = MAZE_CELL_SIZE / 2
       const halfWidth = WALL_WIDTH / 2
+      const padX = gate.axis === 'z'
+        ? RUNTIME_RADIANCE_OCCLUDER_NORMAL_PADDING
+        : RUNTIME_RADIANCE_OCCLUDER_TANGENT_PADDING
+      const padZ = gate.axis === 'x'
+        ? RUNTIME_RADIANCE_OCCLUDER_NORMAL_PADDING
+        : RUNTIME_RADIANCE_OCCLUDER_TANGENT_PADDING
 
       if (gate.axis === 'x') {
-        return padRuntimeRadianceOccluder({
-          maxX: gate.center.x + halfLength,
-          maxZ: gate.center.z + halfWidth,
-          minX: gate.center.x - halfLength,
-          minZ: gate.center.z - halfWidth
-        })
+        return padRuntimeRadianceOccluder(
+          {
+            maxX: gate.center.x + halfLength,
+            maxZ: gate.center.z + halfWidth,
+            minX: gate.center.x - halfLength,
+            minZ: gate.center.z - halfWidth
+          },
+          padX,
+          padZ
+        )
       }
 
-      return padRuntimeRadianceOccluder({
-        maxX: gate.center.x + halfWidth,
-        maxZ: gate.center.z + halfLength,
-        minX: gate.center.x - halfWidth,
-        minZ: gate.center.z - halfLength
-      })
+      return padRuntimeRadianceOccluder(
+        {
+          maxX: gate.center.x + halfWidth,
+          maxZ: gate.center.z + halfLength,
+          minX: gate.center.x - halfWidth,
+          minZ: gate.center.z - halfLength
+        },
+        padX,
+        padZ
+      )
     })
 
   return [...wallOccluders, ...gateOccluders]
@@ -5593,6 +5623,18 @@ vec4 sampleSceneMap(vec2 worldPosition) {
   return texture2D(sceneMap, uv);
 }
 
+float segmentVisibility(vec2 startWorld, vec2 endWorld) {
+  for (int sampleIndex = 1; sampleIndex <= 6; sampleIndex += 1) {
+    float t = float(sampleIndex) / 7.0;
+
+    if (sampleSceneMap(mix(startWorld, endWorld, t)).a > 0.5) {
+      return 0.0;
+    }
+  }
+
+  return 1.0;
+}
+
 vec2 cascadeTexelUv(float probeGridSize, float rayCount, vec2 probeCell, float rayIndex) {
   float probeIndex =
     floor(probeCell.y) * probeGridSize +
@@ -5635,7 +5677,9 @@ vec3 sampleHigherCascade(vec2 worldPosition, float angle) {
       vec2 probeWorld =
         radianceBounds.xy +
         ((probeCell + vec2(0.5)) / nextProbeGridSize) * radianceBounds.zw;
-      probeWeight *= sampleSceneMap(probeWorld).a > 0.5 ? 0.0 : 1.0;
+      probeWeight *= sampleSceneMap(probeWorld).a > 0.5
+        ? 0.0
+        : segmentVisibility(worldPosition, probeWorld);
 
       if (probeWeight > 0.0) {
         for (int rayOffset = 0; rayOffset <= 1; rayOffset += 1) {
@@ -5690,7 +5734,7 @@ void main() {
   float transmittance = 1.0;
 
   for (int stepIndex = 0; stepIndex < 160; stepIndex += 1) {
-    float distance = intervalStart + (float(stepIndex) + 0.5) * stepLength;
+    float distance = (float(stepIndex) + 0.5) * stepLength;
 
     if (distance >= intervalEnd) {
       break;
@@ -5704,7 +5748,7 @@ void main() {
       break;
     }
 
-    if (max(max(sceneSample.r, sceneSample.g), sceneSample.b) > 0.0001) {
+    if (distance >= intervalStart && max(max(sceneSample.r, sceneSample.g), sceneSample.b) > 0.0001) {
       float falloff = 1.0 / max(
         distance * distance + ${RUNTIME_RADIANCE_SOURCE_RADIUS.toFixed(6)} * ${RUNTIME_RADIANCE_SOURCE_RADIUS.toFixed(6)},
         0.0001
@@ -5728,10 +5772,39 @@ const runtimeRadianceResolveFragmentShader = `
 precision highp float;
 
 uniform sampler2D cascadeTexture;
+uniform sampler2D sceneMap;
+uniform vec4 radianceBounds;
+uniform vec2 sceneMapSize;
 uniform vec2 cascadeTextureSize;
 uniform float baseRayCount;
 uniform float baseProbeCount;
 varying vec2 vUv;
+
+vec2 worldToSceneUv(vec2 worldPosition) {
+  return (worldPosition - radianceBounds.xy) / max(radianceBounds.zw, vec2(0.0001));
+}
+
+vec4 sampleSceneMap(vec2 worldPosition) {
+  vec2 uv = worldToSceneUv(worldPosition);
+
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+    return vec4(0.0);
+  }
+
+  return texture2D(sceneMap, uv);
+}
+
+float segmentVisibility(vec2 startWorld, vec2 endWorld) {
+  for (int sampleIndex = 1; sampleIndex <= 6; sampleIndex += 1) {
+    float t = float(sampleIndex) / 7.0;
+
+    if (sampleSceneMap(mix(startWorld, endWorld, t)).a > 0.5) {
+      return 0.0;
+    }
+  }
+
+  return 1.0;
+}
 
 vec2 cascadeTexelUv(float probeGridSize, float rayCount, vec2 probeCell, float rayIndex) {
   float probeIndex =
@@ -5744,7 +5817,7 @@ vec2 cascadeTexelUv(float probeGridSize, float rayCount, vec2 probeCell, float r
   return (vec2(texelX, texelY) + vec2(0.5)) / cascadeTextureSize;
 }
 
-vec3 sampleCascade0(vec2 uv, float rayIndex) {
+vec3 sampleCascade0(vec2 uv, vec2 worldPosition, float rayIndex) {
   float probeGridSize = baseProbeCount;
   float rayCount = baseRayCount;
   vec2 gridPosition = uv * probeGridSize - vec2(0.5);
@@ -5763,12 +5836,20 @@ vec3 sampleCascade0(vec2 uv, float rayIndex) {
       float weight =
         (xOffset == 0 ? 1.0 - cellFract.x : cellFract.x) *
         (yOffset == 0 ? 1.0 - cellFract.y : cellFract.y);
+      vec2 probeWorld =
+        radianceBounds.xy +
+        ((probeCell + vec2(0.5)) / probeGridSize) * radianceBounds.zw;
+      weight *= sampleSceneMap(probeWorld).a > 0.5
+        ? 0.0
+        : segmentVisibility(worldPosition, probeWorld);
 
-      sumColor += texture2D(
-        cascadeTexture,
-        cascadeTexelUv(probeGridSize, rayCount, probeCell, rayIndex)
-      ).rgb * weight;
-      sumWeight += weight;
+      if (weight > 0.0) {
+        sumColor += texture2D(
+          cascadeTexture,
+          cascadeTexelUv(probeGridSize, rayCount, probeCell, rayIndex)
+        ).rgb * weight;
+        sumWeight += weight;
+      }
     }
   }
 
@@ -5776,10 +5857,17 @@ vec3 sampleCascade0(vec2 uv, float rayIndex) {
 }
 
 void main() {
+  vec2 worldPosition = radianceBounds.xy + vUv * radianceBounds.zw;
+
+  if (sampleSceneMap(worldPosition).a > 0.5) {
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    return;
+  }
+
   vec3 irradiance = vec3(0.0);
 
   for (int rayIndex = 0; rayIndex < ${RUNTIME_RADIANCE_BASE_RAY_COUNT}; rayIndex += 1) {
-    irradiance += sampleCascade0(vUv, float(rayIndex));
+    irradiance += sampleCascade0(vUv, worldPosition, float(rayIndex));
   }
 
   gl_FragColor = vec4(irradiance / ${RUNTIME_RADIANCE_BASE_RAY_COUNT.toFixed(1)}, 1.0);
@@ -5867,12 +5955,15 @@ function createRuntimeRadianceSceneTexture(
 
   for (const light of layout.lights) {
     const lightDirection = getRuntimeRadianceLightDirection(light.side)
+    const sourceOffset =
+      RUNTIME_RADIANCE_OCCLUDER_NORMAL_PADDING +
+      (RUNTIME_RADIANCE_SOURCE_RADIUS * 0.9)
     const sourceX =
       light.torchPosition.x +
-      (lightDirection.x * RUNTIME_RADIANCE_OCCLUDER_PADDING)
+      (lightDirection.x * sourceOffset)
     const sourceZ =
       light.torchPosition.z +
-      (lightDirection.z * RUNTIME_RADIANCE_OCCLUDER_PADDING)
+      (lightDirection.z * sourceOffset)
     const centerColumn = MathUtils.clamp(
       Math.floor(((sourceX - bounds.minX) / bounds.width) * resolution),
       0,
@@ -6046,7 +6137,10 @@ function useRuntimeRadianceCascadeSurface(
         baseProbeCount: new Uniform(RUNTIME_RADIANCE_RESOLUTION),
         baseRayCount: new Uniform(RUNTIME_RADIANCE_BASE_RAY_COUNT),
         cascadeTexture: new Uniform<Texture>(cascadeTargets[0].texture),
-        cascadeTextureSize: new Uniform(new Vector2(cascadeWidth, cascadeHeight))
+        cascadeTextureSize: new Uniform(new Vector2(cascadeWidth, cascadeHeight)),
+        radianceBounds: new Uniform(new Vector4()),
+        sceneMap: new Uniform<Texture>(sceneTextureState.texture),
+        sceneMapSize: new Uniform(new Vector2(RUNTIME_RADIANCE_RESOLUTION, RUNTIME_RADIANCE_RESOLUTION))
       },
       vertexShader: runtimeRadianceFullscreenVertexShader
     })
@@ -6093,6 +6187,7 @@ function useRuntimeRadianceCascadeSurface(
 
   useEffect(() => {
     resources.cascadeMaterial.uniforms.sceneMap.value = sceneTextureState.texture
+    resources.resolveMaterial.uniforms.sceneMap.value = sceneTextureState.texture
     resources.debug.bounds = bounds
     resources.debug.emitterFlicker = sceneTextureState.emitters.map((emitter) => ({
       lightId: emitter.id,
@@ -6125,6 +6220,12 @@ function useRuntimeRadianceCascadeSurface(
     updateRuntimeRadianceEmitterTexture(sceneTextureState, elapsed)
     gl.autoClear = false
     resources.cascadeMaterial.uniforms.radianceBounds.value.set(
+      bounds.minX,
+      bounds.minZ,
+      bounds.width,
+      bounds.depth
+    )
+    resources.resolveMaterial.uniforms.radianceBounds.value.set(
       bounds.minX,
       bounds.minZ,
       bounds.width,
