@@ -15,7 +15,7 @@ export const MAZE_CELL_SIZE = 2
 export const MAZE_WALL_THICKNESS = 0.25
 export const MAZE_WALL_HEIGHT = 2
 export const MAZE_TARGET_COUNT = 5
-export const MAZE_LIGHTMAP_VERSION = 24
+export const MAZE_LIGHTMAP_VERSION = 25
 export const MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS = 0.125
 
 const MAZE_LIGHTMAP_GROUND_TILE_SIZE = 256
@@ -627,16 +627,21 @@ function validateMazeCore(maze) {
 
 function getClosedSides(maze, adjacency, cell) {
   const closed = []
+  const exteriorOpenings = [
+    maze.opening,
+    ...(Array.isArray(maze.levelExits) ? maze.levelExits : []),
+    ...(Array.isArray(maze.exteriorOpenings) ? maze.exteriorOpenings : [])
+  ].filter(Boolean)
 
   for (const direction of CARDINAL_DIRECTIONS) {
     const neighbor = getNeighbor(cell, direction.side)
 
     if (!isInsideMaze(neighbor, maze.width, maze.height)) {
-      if (
-        maze.opening.cell.x === cell.x &&
-        maze.opening.cell.y === cell.y &&
-        maze.opening.side === direction.side
-      ) {
+      if (exteriorOpenings.some((opening) => (
+        opening.cell?.x === cell.x &&
+        opening.cell?.y === cell.y &&
+        opening.side === direction.side
+      ))) {
         continue
       }
 
@@ -1605,6 +1610,28 @@ function getWallSurfaceGroups(walls) {
   })
 }
 
+function getExteriorWallSide(wall) {
+  const match = String(wall.id).match(/:(north|east|south|west):exterior$/)
+  return match ? match[1] : null
+}
+
+function getOuterLongWallFaceKey(wall) {
+  switch (getExteriorWallSide(wall)) {
+    case 'north':
+    case 'west':
+      return 'nz'
+    case 'south':
+    case 'east':
+      return 'pz'
+    default:
+      return null
+  }
+}
+
+function shouldLightmapWallLongFace(wall, faceKey) {
+  return getOuterLongWallFaceKey(wall) !== faceKey
+}
+
 function allocateLightmapRect(state, width, height) {
   if (state.cursorX + width > state.atlasWidth) {
     state.cursorX = 0
@@ -2355,17 +2382,20 @@ export function bakeMazeLightmap(
     const groupWidth = surfaceGroup.walls.length === 1
       ? MAZE_LIGHTMAP_WALL_TILE_WIDTH
       : (surfaceGroup.walls.length * (MAZE_LIGHTMAP_WALL_TILE_WIDTH - 1)) + 1
-    const groupRects = {
-      nz: allocateLightmapRect(
-        packer,
-        groupWidth,
-        MAZE_LIGHTMAP_WALL_TILE_HEIGHT
-      ),
-      pz: allocateLightmapRect(
-        packer,
-        groupWidth,
-        MAZE_LIGHTMAP_WALL_TILE_HEIGHT
-      )
+    const groupRects = {}
+
+    for (const faceKey of ['nz', 'pz']) {
+      if (
+        surfaceGroup.walls.some((wall) =>
+          shouldLightmapWallLongFace(wall, faceKey)
+        )
+      ) {
+        groupRects[faceKey] = allocateLightmapRect(
+          packer,
+          groupWidth,
+          MAZE_LIGHTMAP_WALL_TILE_HEIGHT
+        )
+      }
     }
 
     surfaceGroupRects[surfaceGroup.id] = groupRects
@@ -2374,14 +2404,19 @@ export function bakeMazeLightmap(
       const wall = surfaceGroup.walls[index]
       const offsetX = index * (MAZE_LIGHTMAP_WALL_TILE_WIDTH - 1)
 
-      wallRects[wall.id] = {
-        nz: {
+      wallRects[wall.id] = {}
+
+      if (groupRects.nz && shouldLightmapWallLongFace(wall, 'nz')) {
+        wallRects[wall.id].nz = {
           height: MAZE_LIGHTMAP_WALL_TILE_HEIGHT,
           width: MAZE_LIGHTMAP_WALL_TILE_WIDTH,
           x: groupRects.nz.x + offsetX,
           y: groupRects.nz.y
-        },
-        pz: {
+        }
+      }
+
+      if (groupRects.pz && shouldLightmapWallLongFace(wall, 'pz')) {
+        wallRects[wall.id].pz = {
           height: MAZE_LIGHTMAP_WALL_TILE_HEIGHT,
           width: MAZE_LIGHTMAP_WALL_TILE_WIDTH,
           x: groupRects.pz.x + offsetX,
@@ -2554,9 +2589,15 @@ export function bakeMazeLightmap(
 
   for (const surfaceGroup of surfaceGroups) {
     for (const faceKey of ['nz', 'pz']) {
+      const rect = surfaceGroupRects[surfaceGroup.id][faceKey]
+
+      if (!rect) {
+        continue
+      }
+
       writeColorRect(
         atlasFloatData,
-        surfaceGroupRects[surfaceGroup.id][faceKey],
+        rect,
         MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID,
         (u, v) => {
           const sample = getWallSurfaceFaceSample(surfaceGroup, faceKey, u, v)
@@ -2574,7 +2615,7 @@ export function bakeMazeLightmap(
       )
       writeUpscaledAmbientRect(
         atlasFloatData,
-        surfaceGroupRects[surfaceGroup.id][faceKey],
+        rect,
         MAZE_LIGHTMAP_WALL_AMBIENT_SAMPLE_GRID,
         (u, v) => {
           const sample = getWallSurfaceFaceSample(surfaceGroup, faceKey, u, v)

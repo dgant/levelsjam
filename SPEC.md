@@ -20,6 +20,13 @@
 - Player movement through an authored level exit transitions seamlessly into the connected level without fading, showing a loading transition, or exposing the boundary between levels.
 - The runtime renders the current level and the levels directly adjacent to it so ordinary walking between connected levels does not reveal level streaming.
 - The initial startup path may defer non-current adjacent level geometry until after the current level is visible, while still loading and retaining adjacent level data early enough that ordinary walking does not expose the deferral.
+- The runtime level graph is a directed acyclic graph rooted at `Entrance`; renderer streaming may use the corresponding undirected neighborhood only as a loading and rendering optimization.
+- Each runtime level occupies world cells that do not overlap any other runtime level's world cells.
+- Runtime levels do not share maze wall volumes with any other runtime level.
+- Each level transition is represented visually by a single destination-owned ingress cell; non-`Entrance` player starts are placed in that ingress cell and face into the destination level.
+- When precomputed visibility is enabled, adjacent streamed levels render only the destination ingress cell that is visible through the current level's transition rather than rendering the entire adjacent maze.
+- When precomputed visibility is disabled, adjacent streamed levels may render their full geometry for debugging.
+- Level floor meshes are spawned only inside the level's own cell footprint and not in the lightmap margin or any neighboring level's footprint.
 - Once a level's gameplay-rule state has been loaded, the runtime keeps that state available for the rest of the session instead of unloading or resetting it during ordinary level traversal.
 - Player movement between connected levels is a level transition, not an escape state.
 
@@ -96,6 +103,7 @@
 - Each baked maze lightmap uses an HDR encoding that preserves headroom instead of clipping bright torch-adjacent texels to full white during bake generation.
 - Each baked maze lightmap uses supersampled texel evaluation so torch gradients on walls and the maze floor patch are smoother than a single-sample bake.
 - Baked torch lighting uses physical inverse-square falloff across all represented lightmapped surfaces without an authored hard maximum distance cutoff.
+- Exterior wall faces that are not expected to be player-visible omit baked lightmap rectangles and sample the neutral lightmap region at runtime.
 - Baked torch lighting clamps only the mathematical point-light singularity at the finite torch source radius needed for numerical stability.
 - Baked torch point-light brightness uses one fifth of the previous authored baseline while preserving the same torch color and inverse-square falloff model.
 - Baked torch point-light brightness is reduced by another factor of ten from the previous baked baseline while preserving the same torch color and inverse-square falloff model.

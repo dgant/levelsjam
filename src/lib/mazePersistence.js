@@ -383,6 +383,7 @@ export function dumpMazeLightmapArtifacts({
 
 export async function ensureMazeFiles({
   artifactsDirectory = DEFAULT_LIGHTMAP_ARTIFACT_DIRECTORY,
+  bakeLightmaps = true,
   directory,
   mazeFactory = generateMaze,
   maxGenerationAttempts = 200,
@@ -418,7 +419,7 @@ export async function ensureMazeFiles({
       continue
     }
 
-    const shouldRewrite = needsMazeRewrite(maze)
+    const shouldRewrite = bakeLightmaps && needsMazeRewrite(maze)
     if (shouldRewrite) {
       maze.visibility = computeMazeCellVisibility(maze)
       maze.lightmap = bakeMazeLightmap(maze)
@@ -430,7 +431,9 @@ export async function ensureMazeFiles({
       })
     }
 
-    const validation = validateMaze(maze)
+    const validation = validateMaze(maze, {
+      requireLightmap: bakeLightmaps && maze.lightmap !== undefined
+    })
 
     if (!validation.valid) {
       const replacement = generateReplacementMaze({
@@ -503,7 +506,7 @@ export async function ensureMazeFiles({
     const maze = createMazeCandidate(mazeFactory, seed)
     normalizeCandidateTiming(maze)
     const validation = validateMaze(maze, {
-      requireLightmap: maze.lightmap !== undefined
+      requireLightmap: bakeLightmaps && maze.lightmap !== undefined
     })
 
     if (!isAcceptableCandidate(maze, validation)) {
@@ -521,7 +524,7 @@ export async function ensureMazeFiles({
     if (!maze.visibility) {
       maze.visibility = computeMazeCellVisibility(maze)
     }
-    if (!maze.lightmap) {
+    if (bakeLightmaps && !maze.lightmap) {
       maze.lightmap = bakeMazeLightmap(maze)
     }
     fs.writeFileSync(
@@ -538,7 +541,7 @@ export async function ensureMazeFiles({
     })
   }
 
-  if (artifactsDirectory) {
+  if (artifactsDirectory && bakeLightmaps) {
     pruneObsoleteMazeArtifactDirectories(
       artifactsDirectory,
       validMazes.map(({ maze }) => maze.id)

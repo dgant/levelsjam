@@ -91,9 +91,9 @@ export type MazeLayout = {
         string,
         {
           nx?: { height: number; width: number; x: number; y: number }
-          nz: { height: number; width: number; x: number; y: number }
+          nz?: { height: number; width: number; x: number; y: number }
           px?: { height: number; width: number; x: number; y: number }
-          pz: { height: number; width: number; x: number; y: number }
+          pz?: { height: number; width: number; x: number; y: number }
         }
       >
     }

@@ -11,6 +11,15 @@ const AUTHORED_LEVEL_NAMES = Object.freeze(
   )
 )
 
+const RUNTIME_LEVEL_GRAPH = Object.freeze({
+  entrance: ['chamber-1'],
+  'chamber-1': ['maze-001', 'maze-002', 'maze-003', 'maze-005'],
+  'maze-001': [],
+  'maze-002': [],
+  'maze-003': [],
+  'maze-005': []
+})
+
 const RUNTIME_LEVEL_ADJACENCY = Object.freeze({
   entrance: ['chamber-1'],
   'chamber-1': ['entrance', 'maze-001', 'maze-002', 'maze-003', 'maze-005'],
@@ -22,11 +31,11 @@ const RUNTIME_LEVEL_ADJACENCY = Object.freeze({
 
 const RUNTIME_LEVEL_WORLD_TRANSFORMS = Object.freeze({
   entrance: { x: 0, z: 0, rotationY: 0 },
-  'chamber-1': { x: 0, z: -17, rotationY: 0 },
-  'maze-001': { x: -12, z: -20, rotationY: Math.PI },
-  'maze-002': { x: -12, z: -27, rotationY: Math.PI },
-  'maze-003': { x: 12, z: -22, rotationY: 0 },
-  'maze-005': { x: 12, z: -10, rotationY: 0 }
+  'chamber-1': { x: 0, z: -21, rotationY: 0 },
+  'maze-001': { x: -12, z: -28, rotationY: Math.PI },
+  'maze-002': { x: -12, z: -12, rotationY: Math.PI },
+  'maze-003': { x: 12, z: -30, rotationY: 0 },
+  'maze-005': { x: 12, z: -12, rotationY: 0 }
 })
 
 const authoredLevelMazeCache = new Map()
@@ -92,6 +101,21 @@ function openRoomEdges(width, height) {
   return edges
 }
 
+function withoutEdges(edges, blockedEdges) {
+  const blocked = new Set(blockedEdges.map(({ from, to }) => {
+    const a = `${from.x},${from.y}`
+    const b = `${to.x},${to.y}`
+    return a < b ? `${a}|${b}` : `${b}|${a}`
+  }))
+
+  return edges.filter(({ from, to }) => {
+    const a = `${from.x},${from.y}`
+    const b = `${to.x},${to.y}`
+    const key = a < b ? `${a}|${b}` : `${b}|${a}`
+    return !blocked.has(key)
+  })
+}
+
 function createAuthoredMazeDefinition(id) {
   if (id === 'entrance') {
     return {
@@ -131,36 +155,46 @@ function createAuthoredMazeDefinition(id) {
   if (id === 'chamber-1') {
     return {
       exitRequiresTrophy: false,
+      exteriorOpenings: [
+        { cell: { x: 1, y: 17 }, side: 'south' },
+        { cell: { x: 3, y: 17 }, side: 'south' }
+      ],
       gates: [],
-      height: 14,
+      height: 18,
       id,
       isAuthoredLevel: true,
       levelExits: [
-        { cell: { x: 2, y: 13 }, side: 'south', targetLevelId: 'entrance' },
+        { cell: { x: 2, y: 17 }, side: 'south', targetLevelId: 'entrance' },
         { cell: { x: 0, y: 3 }, side: 'west', targetLevelId: 'maze-001' },
-        { cell: { x: 0, y: 9 }, side: 'west', targetLevelId: 'maze-002' },
+        { cell: { x: 0, y: 12 }, side: 'west', targetLevelId: 'maze-002' },
         { cell: { x: 4, y: 3 }, side: 'east', targetLevelId: 'maze-003' },
-        { cell: { x: 4, y: 9 }, side: 'east', targetLevelId: 'maze-005' }
+        { cell: { x: 4, y: 12 }, side: 'east', targetLevelId: 'maze-005' }
       ],
       levelName: AUTHORED_LEVEL_NAMES[id],
       lights: [
         { cell: { x: 0, y: 2 }, side: 'west' },
         { cell: { x: 0, y: 4 }, side: 'west' },
-        { cell: { x: 0, y: 8 }, side: 'west' },
-        { cell: { x: 0, y: 10 }, side: 'west' },
+        { cell: { x: 0, y: 11 }, side: 'west' },
+        { cell: { x: 0, y: 13 }, side: 'west' },
         { cell: { x: 4, y: 2 }, side: 'east' },
         { cell: { x: 4, y: 4 }, side: 'east' },
-        { cell: { x: 4, y: 8 }, side: 'east' },
-        { cell: { x: 4, y: 10 }, side: 'east' }
+        { cell: { x: 4, y: 11 }, side: 'east' },
+        { cell: { x: 4, y: 13 }, side: 'east' }
       ],
       monsters: [],
-      openEdges: openRoomEdges(5, 14),
+      openEdges: withoutEdges(
+        openRoomEdges(5, 18),
+        [
+          { from: { x: 1, y: 17 }, to: { x: 2, y: 17 } },
+          { from: { x: 2, y: 17 }, to: { x: 3, y: 17 } }
+        ]
+      ),
       opening: {
-        cell: { x: 2, y: 13 },
+        cell: { x: 2, y: 17 },
         side: 'south'
       },
       playerStart: {
-        cell: { x: 2, y: 13 },
+        cell: { x: 2, y: 17 },
         direction: 'north'
       },
       sword: null,
@@ -190,6 +224,16 @@ export function getAuthoredRuntimeLevelIds() {
 
 export function getAdjacentRuntimeLevelIds(id) {
   return [...(RUNTIME_LEVEL_ADJACENCY[id] ?? [])]
+}
+
+export function getDirectedRuntimeLevelGraph() {
+  return Object.fromEntries(
+    Object.entries(RUNTIME_LEVEL_GRAPH).map(([id, targets]) => [id, [...targets]])
+  )
+}
+
+export function getRuntimeLevelGraphRootId() {
+  return AUTHORED_LEVEL_IDS.Entrance
 }
 
 export function getRuntimeLevelWorldTransform(id) {

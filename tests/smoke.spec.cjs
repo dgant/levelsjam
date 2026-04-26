@@ -289,7 +289,7 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
     expect.arrayContaining(['entrance', 'chamber-1', 'maze-001', 'maze-002', 'maze-003', 'maze-005'])
   )
   expect(transitionedState.turn.escaped).toBe(false)
-  expect(transitionedState.turn.player.cell).toEqual({ x: 2, y: 13 })
+  expect(transitionedState.turn.player.cell).toEqual({ x: 2, y: 17 })
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
 })
@@ -604,7 +604,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
           ).find(Boolean) ?? null,
           wall: Array.from({ length: 200 }, (_, index) =>
             window.__levelsjamDebug.getDebugMeshState('maze-wall', index)
-          ).find((state) => state?.probeBlendUniforms) ?? null
+          ).find((state) => state?.probeBlend) ?? null
         })),
         {
           timeout: 5_000,
@@ -624,11 +624,11 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         },
         wall: {
           hasLightMap: false,
-          probeBlendUniforms: {
-            probeBlendDiffuseIntensity: 1,
-            probeBlendMode: 3,
-            probeBlendRadianceIntensity: 1,
-            probeBlendRadianceMode: 3
+          probeBlend: {
+            diffuseIntensity: 1,
+            radianceIntensity: 1,
+            mode: 'disabled',
+            radianceMode: 'disabled'
           }
         }
       })

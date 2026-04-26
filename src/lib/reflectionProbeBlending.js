@@ -115,11 +115,14 @@ export function getReflectionProbeBlendForPosition(layout, position) {
 }
 
 export function buildGroundReflectionProbeRects(layout) {
-  const groundBounds = layout.maze.lightmap.groundBounds
   const xCenters = getProbeCenterCoordinates(layout.maze.width, MAZE_CELL_SIZE)
   const zCenters = getProbeCenterCoordinates(layout.maze.height, MAZE_CELL_SIZE)
-  const xBoundaries = [groundBounds.minX, ...xCenters, groundBounds.maxX]
-  const zBoundaries = [groundBounds.minZ, ...zCenters, groundBounds.maxZ]
+  const mazeMinX = -((layout.maze.width * MAZE_CELL_SIZE) / 2)
+  const mazeMaxX = (layout.maze.width * MAZE_CELL_SIZE) / 2
+  const mazeMinZ = -((layout.maze.height * MAZE_CELL_SIZE) / 2)
+  const mazeMaxZ = (layout.maze.height * MAZE_CELL_SIZE) / 2
+  const xBoundaries = [mazeMinX, ...xCenters, mazeMaxX]
+  const zBoundaries = [mazeMinZ, ...zCenters, mazeMaxZ]
   const rects = []
 
   for (let zSegment = 0; zSegment < zBoundaries.length - 1; zSegment += 1) {

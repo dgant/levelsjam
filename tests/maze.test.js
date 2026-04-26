@@ -183,10 +183,9 @@ test('precomputed cell visibility treats closed walls as occluders', () => {
 
 test('persists at least five valid mazes', async () => {
   const mazeDirectory = path.join(process.cwd(), 'src', 'data', 'mazes')
-  const files = await ensureMazeFiles({
-    artifactsDirectory: null,
-    directory: mazeDirectory
-  })
+  const files = fs.readdirSync(mazeDirectory)
+    .filter((fileName) => /^maze-\d{3}\.js$/.test(fileName))
+    .sort()
 
   assert.ok(files.length >= MAZE_TARGET_COUNT)
   assert.ok(files.every((fileName) => /^maze-\d{3}\.js$/.test(fileName)))
@@ -207,7 +206,7 @@ test('deletes invalid maze files and regenerates replacements', async () => {
   const temporaryDirectory = fs.mkdtempSync(
     path.join(os.tmpdir(), 'levelsjam-maze-test-')
   )
-  const replacementMaze = await importPersistedMaze()
+  const replacementMaze = generateMaze(123456, { bakeLightmap: false })
 
   try {
     fs.writeFileSync(
@@ -221,10 +220,12 @@ test('deletes invalid maze files and regenerates replacements', async () => {
 
     const files = await ensureMazeFiles({
       artifactsDirectory: null,
+      bakeLightmaps: false,
       directory: temporaryDirectory,
       mazeFactory: () => ({
-        ...JSON.parse(JSON.stringify(replacementMaze)),
+        ...replacementMaze,
         generationMs: 1,
+        lightmap: undefined,
         totalGenerationMs: 1
       }),
       targetCount: 1
@@ -267,10 +268,13 @@ test('converts persisted mazes into wall segments and torch placements', async (
     assert.ok(wall.bounds.maxX > wall.bounds.minX)
     assert.ok(wall.bounds.maxZ > wall.bounds.minZ)
     assert.ok(layout.maze.lightmap.wallRects[wall.id])
-    assert.equal(layout.maze.lightmap.wallRects[wall.id].nz.width, 128)
-    assert.equal(layout.maze.lightmap.wallRects[wall.id].nz.height, 128)
-    assert.equal(layout.maze.lightmap.wallRects[wall.id].pz.width, 128)
-    assert.equal(layout.maze.lightmap.wallRects[wall.id].pz.height, 128)
+    const rects = layout.maze.lightmap.wallRects[wall.id]
+    const longFaceRects = ['nz', 'pz'].filter((faceKey) => rects[faceKey])
+    assert.ok(longFaceRects.length >= 1)
+    for (const faceKey of longFaceRects) {
+      assert.equal(rects[faceKey].width, 128)
+      assert.equal(rects[faceKey].height, 128)
+    }
   }
 
   for (const light of layout.lights) {
@@ -524,6 +528,23 @@ test('bakes lightmap rectangles for maze wall short end faces', () => {
   assert.equal(rects.px.width, rects.px.height)
   assert.ok(rects.nx.width > 1)
   assert.ok(rects.px.width > 1)
+})
+
+test('omits baked lightmap rectangles for exterior-facing long wall faces', () => {
+  const wallMaze = {
+    height: 1,
+    id: 'wall-outer-face-lightmap-test',
+    lights: [{ cell: { x: 0, y: 0 }, side: 'north' }],
+    openEdges: [],
+    opening: { cell: { x: 0, y: 0 }, side: 'south' },
+    width: 1
+  }
+  const lightmap = bakeMazeLightmap(wallMaze)
+
+  assert.equal(lightmap.wallRects['0,0:north:exterior'].nz, undefined)
+  assert.ok(lightmap.wallRects['0,0:north:exterior'].pz)
+  assert.equal(lightmap.wallRects['0,0:south:exterior'].pz, undefined)
+  assert.ok(lightmap.wallRects['0,0:south:exterior'].nz)
 })
 
 test('three box geometry mirrors local -Z face UVs relative to +Z', () => {

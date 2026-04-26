@@ -115,6 +115,7 @@ import {
   resolveRuntimeMazeIdForLevel,
   type AuthoredLevel
 } from './lib/levels.js'
+import { getAdjacentLevelVisibleCellKeys } from './lib/levelVisibility.js'
 import levelsMarkdown from '../LEVELS.md?raw'
 import { decodeRgbE8 } from './lib/probeSphericalHarmonics.js'
 import {
@@ -12990,7 +12991,8 @@ function RenderedLevelGeometry({
   reflectionProbeTextures,
   staticVolumetricContributionIntensity,
   transform,
-  turnState
+  turnState,
+  visibilityState
 }: {
   environmentTexture: Texture | null
   environmentIntensity: number
@@ -13007,6 +13009,7 @@ function RenderedLevelGeometry({
   staticVolumetricContributionIntensity: number
   transform: LevelWorldTransform
   turnState: TurnState
+  visibilityState: PrecomputedVisibilityState
 }) {
   const surfaceLightmap = useSurfaceLightmapAtlasTexture(layout.maze.lightmap)
   const openGateIds = useMemo(
@@ -13043,6 +13046,7 @@ function RenderedLevelGeometry({
         staticVolumetricContributionIntensity={staticVolumetricContributionIntensity}
         surfaceLightmap={surfaceLightmap}
         turnState={turnState}
+        visibilityState={visibilityState}
         />
         <MonsterActors
         environmentIntensity={environmentIntensity}
@@ -13057,7 +13061,7 @@ function RenderedLevelGeometry({
         reflectionProbeDepthTextures={reflectionProbeDepthTextures}
         reflectionProbeTextures={reflectionProbeTextures}
         turnState={turnState}
-        visibilityState={DISABLED_PRECOMPUTED_VISIBILITY}
+        visibilityState={visibilityState}
       />
       </group>
     </LevelRenderTransformContext.Provider>
@@ -14031,6 +14035,37 @@ function Scene({
   const effectiveVisibilityState = startupGeometryExpanded
     ? precomputedVisibilityState
     : startupVisibilityState
+  const adjacentLevelVisibilityStates = useMemo(() => {
+    const states = new Map<string, PrecomputedVisibilityState>()
+
+    for (const renderedLayout of renderedLayouts) {
+      if (renderedLayout.maze.id === layout.maze.id) {
+        continue
+      }
+
+      if (
+        !effectiveVisibilityState.enabled ||
+        !effectiveVisibilityState.visibleCells
+      ) {
+        states.set(renderedLayout.maze.id, DISABLED_PRECOMPUTED_VISIBILITY)
+        continue
+      }
+
+      states.set(renderedLayout.maze.id, {
+        enabled: true,
+        playerCell: { ...effectiveVisibilityState.playerCell },
+        visibleCells: new Set(
+          getAdjacentLevelVisibleCellKeys(
+            layout.maze,
+            renderedLayout.maze,
+            effectiveVisibilityState.visibleCells
+          ) ?? []
+        )
+      })
+    }
+
+    return states
+  }, [effectiveVisibilityState, layout.maze, renderedLayouts])
 
   return (
     <>
@@ -14116,6 +14151,10 @@ function Scene({
               staticVolumetricContributionIntensity={0}
               transform={getRuntimeLevelWorldTransform(renderedLayout.maze.id)}
               turnState={createInitialTurnState(renderedLayout.maze)}
+              visibilityState={
+                adjacentLevelVisibilityStates.get(renderedLayout.maze.id) ??
+                DISABLED_PRECOMPUTED_VISIBILITY
+              }
             />
           ))}
         {composerEnabled ? (
