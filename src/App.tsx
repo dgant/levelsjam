@@ -6111,6 +6111,25 @@ function EnvironmentLighting({
       })
 
       const loadProbeManifest = async () => {
+        const finishWithoutProbeAssets = () => {
+          disposeProbeTargets(previousTargets)
+          disposeProbeTargets(previousRawTargets)
+          reflectionProbeTargets.current = []
+          reflectionProbeRawTargets.current = []
+          startTransition(() => {
+            onReflectionProbeAmbientColorsChange([])
+            onReflectionProbeCoefficientsChange([])
+            onReflectionProbeDepthTexturesChange([])
+            onReflectionProbeRawTexturesChange([])
+            onReflectionProbeTexturesChange([])
+          })
+          latestCaptureSceneState = getReflectionCaptureSceneState(scene, layout)
+          scene.userData.reflectionProbeState = {
+            ...buildReflectionProbeState(latestCaptureSceneState),
+            ready: true
+          }
+        }
+
         try {
           const response = await fetch(
             resolveMazeDataUrl(`${layout.maze.id}/probe-assets.json`)
@@ -6119,6 +6138,14 @@ function EnvironmentLighting({
           if (!response.ok) {
             throw new Error(
               `Failed to load probe asset manifest for ${layout.maze.id}: ${response.status}`
+            )
+          }
+
+          const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
+
+          if (contentType.includes('text/html')) {
+            throw new Error(
+              `Probe asset manifest for ${layout.maze.id} resolved to HTML instead of JSON`
             )
           }
 
@@ -6287,9 +6314,7 @@ function EnvironmentLighting({
           scheduleProbeLoads()
         } catch (error) {
           console.error(error)
-          scene.userData.reflectionProbeState = buildReflectionProbeState(
-            latestCaptureSceneState
-          )
+          finishWithoutProbeAssets()
         }
       }
 

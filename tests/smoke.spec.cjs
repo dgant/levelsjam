@@ -234,6 +234,42 @@ async function measureRafLatency(page) {
   }))
 }
 
+test('default route loads the authored Entrance level to scene-ready', async ({ page }) => {
+  const consoleErrors = []
+  const pageErrors = []
+
+  page.on('console', (message) => {
+    if (message.type() === 'error') {
+      consoleErrors.push(message.text())
+    }
+  })
+
+  page.on('pageerror', (error) => {
+    pageErrors.push(String(error))
+  })
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await page.waitForFunction(
+    () => document.querySelector('canvas')?.dataset.sceneReady === 'true',
+    undefined,
+    { timeout: 30_000 }
+  )
+
+  const state = await page.evaluate(() => ({
+    error: document.body.dataset.mazeLayoutLoadError ?? null,
+    loadedMazeId: document.body.dataset.loadedMazeId ?? null,
+    requestedMazeId: document.body.dataset.requestedMazeId ?? null
+  }))
+
+  expect(state).toEqual({
+    error: null,
+    loadedMazeId: 'entrance',
+    requestedMazeId: 'entrance'
+  })
+  expect(consoleErrors).toEqual([])
+  expect(pageErrors).toEqual([])
+})
+
 test('loads the maze scene and exposes working debug/render controls', async ({ page }) => {
   const consoleErrors = []
   const pageErrors = []
@@ -546,10 +582,10 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         async () => page.evaluate(() => ({
           ground: Array.from({ length: 200 }, (_, index) =>
             window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', index)
-          ).find((state) => state?.probeBlendUniforms) ?? null,
+          ).find(Boolean) ?? null,
           wall: Array.from({ length: 200 }, (_, index) =>
             window.__levelsjamDebug.getDebugMeshState('maze-wall', index)
-          ).find(Boolean) ?? null
+          ).find((state) => state?.probeBlendUniforms) ?? null
         })),
         {
           timeout: 5_000,
@@ -565,16 +601,16 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
             probeConnectivity: true,
             radianceIntensity: 1,
             radianceMode: 'disabled'
-          },
+          }
+        },
+        wall: {
+          hasLightMap: false,
           probeBlendUniforms: {
             probeBlendDiffuseIntensity: 1,
             probeBlendMode: 3,
             probeBlendRadianceIntensity: 1,
             probeBlendRadianceMode: 3
           }
-        },
-        wall: {
-          hasLightMap: false
         }
       })
     await expect

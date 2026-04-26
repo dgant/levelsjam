@@ -246,6 +246,10 @@ async function main() {
     MAZES
   } = await import('../src/data/mazes/index.js')
   const {
+    createAuthoredRuntimeMaze,
+    getAuthoredRuntimeLevelIds
+  } = await import('../src/lib/levels.js')
+  const {
     computeMazeVolumetricLightmapCoefficients,
     getMazeSceneLayout
   } = await import('../src/lib/maze.js')
@@ -273,9 +277,13 @@ async function main() {
     const page = await browser.newPage({
       viewport: { width: 800, height: 450 }
     })
+    const authoredMazes = getAuthoredRuntimeLevelIds()
+      .map((id) => createAuthoredRuntimeMaze(id))
+      .filter(Boolean)
+    const allMazes = [...authoredMazes, ...MAZES]
     const mazesToCapture = requestedMazeIds.length > 0
-      ? MAZES.filter((maze) => requestedMazeIds.includes(maze.id))
-      : MAZES
+      ? allMazes.filter((maze) => requestedMazeIds.includes(maze.id))
+      : allMazes
 
     if (mazesToCapture.length === 0) {
       throw new Error(`No mazes matched requested ids: ${requestedMazeIds.join(', ')}`)
