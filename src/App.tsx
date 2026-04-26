@@ -246,10 +246,12 @@ const RUNTIME_RADIANCE_FOG_SCATTER_GAIN = 12
 const RUNTIME_RADIANCE_INDIRECT_GAIN = 0.35
 const RUNTIME_RADIANCE_MAX_DISTANCE = 18
 const RUNTIME_RADIANCE_MAX_LIGHTS = 32
-const RUNTIME_RADIANCE_OCCLUDER_NORMAL_PADDING = WALL_WIDTH * 0.75
+const RUNTIME_RADIANCE_OCCLUDER_NORMAL_PADDING = WALL_WIDTH * 0.15
 const RUNTIME_RADIANCE_OCCLUDER_TANGENT_PADDING = WALL_WIDTH * 0.1
 const RUNTIME_RADIANCE_SOURCE_RADIUS = 0.32
 const RUNTIME_RADIANCE_SURFACE_NORMAL_OFFSET = WALL_WIDTH * 0.75
+const RUNTIME_RADIANCE_TORCH_HEIGHT = GROUND_Y + 1.1 + (TORCH_BILLBOARD_SIZE / 2)
+const RUNTIME_RADIANCE_VERTICAL_FALLOFF_RADIUS = 0.95
 const RUNTIME_TORCH_FLICKER_INTENSITY = 0.15
 const RUNTIME_SHADOW_SLOT_COUNT = 2
 const RUNTIME_SHADOW_INNER_RADIUS = 3.5
@@ -509,7 +511,9 @@ uniform sampler2D probeAmbientTexture;
 uniform float rayStepCount;
 uniform vec4 runtimeRadianceBounds;
 uniform float runtimeRadianceIntensity;
+uniform float runtimeRadianceTorchHeight;
 uniform sampler2D runtimeRadianceTexture;
+uniform float runtimeRadianceVerticalFalloffRadius;
 uniform float time;
 uniform float useProbeCoefficientTexture;
 uniform float useProbeDepthAtlases;
@@ -725,9 +729,16 @@ vec3 sampleFogAmbientColor(vec3 worldPosition) {
     return vec3(0.0);
   }
 
+  float verticalDistance = worldPosition.y - runtimeRadianceTorchHeight;
+  float verticalRadius = max(runtimeRadianceVerticalFalloffRadius, 0.0001);
+  float verticalWeight =
+    (verticalRadius * verticalRadius) /
+    ((verticalDistance * verticalDistance) + (verticalRadius * verticalRadius));
+
   return
     texture2D(runtimeRadianceTexture, runtimeRadianceUv).rgb *
     runtimeRadianceIntensity *
+    verticalWeight *
     ${RUNTIME_RADIANCE_FOG_SCATTER_GAIN.toFixed(1)};
 }
 
@@ -1338,7 +1349,9 @@ type ProbeBlendShader = Shader & {
   runtimeRadianceBounds?: Uniform<Vector4>
   runtimeRadianceIntensity?: Uniform<number>
   runtimeRadianceNormalOffset?: Uniform<number>
+  runtimeRadianceTorchHeight?: Uniform<number>
   runtimeRadianceTexture?: Uniform<Texture | null>
+  runtimeRadianceVerticalFalloffRadius?: Uniform<number>
     useProbeDepthAtlases?: Uniform<number>
     probeVlmMode?: Uniform<number>
   }
@@ -1351,7 +1364,9 @@ type MaterialShaderPatchConfig = {
   runtimeRadianceBounds?: RuntimeRadianceBounds
   runtimeRadianceIntensity?: number
   runtimeRadianceNormalOffset?: number
+  runtimeRadianceTorchHeight?: number
   runtimeRadianceTexture?: Texture | null
+  runtimeRadianceVerticalFalloffRadius?: number
 }
 
 type LightmapTextureEncoding = 'linear' | 'rgbe8'
@@ -1530,7 +1545,9 @@ class FogVolumeEffectImpl extends Effect {
         ['rayStepCount', new Uniform(DEFAULT_VOLUMETRIC_STEP_COUNT)],
         ['runtimeRadianceBounds', new Uniform(new Vector4(0, 0, 1, 1))],
         ['runtimeRadianceIntensity', new Uniform(0)],
+        ['runtimeRadianceTorchHeight', new Uniform(RUNTIME_RADIANCE_TORCH_HEIGHT)],
         ['runtimeRadianceTexture', new Uniform<Texture | null>(null)],
+        ['runtimeRadianceVerticalFalloffRadius', new Uniform(RUNTIME_RADIANCE_VERTICAL_FALLOFF_RADIUS)],
         ['time', new Uniform(0)],
         ['useProbeCoefficientTexture', new Uniform(0)],
         ['useProbeDepthAtlases', new Uniform(0)],
@@ -1638,8 +1655,16 @@ class FogVolumeEffectImpl extends Effect {
     this.uniforms.get('runtimeRadianceIntensity').value = value
   }
 
+  set runtimeRadianceTorchHeight(value: number) {
+    this.uniforms.get('runtimeRadianceTorchHeight').value = value
+  }
+
   set runtimeRadianceTexture(value: Texture | null) {
     this.uniforms.get('runtimeRadianceTexture').value = value
+  }
+
+  set runtimeRadianceVerticalFalloffRadius(value: number) {
+    this.uniforms.get('runtimeRadianceVerticalFalloffRadius').value = value
   }
 
   set time(value: number) {
@@ -2772,6 +2797,14 @@ const LEVELSJAM_LIGHTS_FRAGMENT_MAPS = `
 \t\tvec2 runtimeRadianceNormalOffsetDirection = runtimeRadianceWorldNormal.xz;
 \t\tfloat runtimeRadianceNormalOffsetLength = length( runtimeRadianceNormalOffsetDirection );
 \t\tvec2 runtimeRadianceSamplePosition = vProbeBlendWorldPosition.xz;
+\t\tfloat runtimeRadianceVerticalDistance = vProbeBlendWorldPosition.y - runtimeRadianceTorchHeight;
+\t\tfloat runtimeRadianceVerticalRadius = max( runtimeRadianceVerticalFalloffRadius, 0.0001 );
+\t\tfloat runtimeRadianceVerticalWeight =
+\t\t\t( runtimeRadianceVerticalRadius * runtimeRadianceVerticalRadius ) /
+\t\t\t(
+\t\t\t\t( runtimeRadianceVerticalDistance * runtimeRadianceVerticalDistance ) +
+\t\t\t\t( runtimeRadianceVerticalRadius * runtimeRadianceVerticalRadius )
+\t\t\t);
 
 \t\tif ( runtimeRadianceNormalOffsetLength > 0.0001 ) {
 \t\t\truntimeRadianceSamplePosition += (
@@ -2783,6 +2816,8 @@ const LEVELSJAM_LIGHTS_FRAGMENT_MAPS = `
 \t\tvec2 runtimeRadianceUv = (
 \t\t\truntimeRadianceSamplePosition - runtimeRadianceBounds.xy
 \t\t) / max( runtimeRadianceBounds.zw, vec2( 0.0001 ) );
+\t\tvec3 runtimeRadianceColor = vec3( 0.0 );
+\t\tfloat runtimeRadianceWeight = 0.0;
 
 \t\tif (
 \t\t\truntimeRadianceUv.x >= 0.0 &&
@@ -2790,7 +2825,52 @@ const LEVELSJAM_LIGHTS_FRAGMENT_MAPS = `
 \t\t\truntimeRadianceUv.y >= 0.0 &&
 \t\t\truntimeRadianceUv.y <= 1.0
 \t\t) {
-\t\t\tirradiance += texture2D( runtimeRadianceTexture, runtimeRadianceUv ).rgb * runtimeRadianceIntensity;
+\t\t\tvec4 runtimeRadianceTexel = texture2D( runtimeRadianceTexture, runtimeRadianceUv );
+\t\t\truntimeRadianceColor += runtimeRadianceTexel.rgb * step( 0.5, runtimeRadianceTexel.a );
+\t\t\truntimeRadianceWeight += step( 0.5, runtimeRadianceTexel.a );
+\t\t}
+
+\t\tif ( runtimeRadianceWeight <= 0.0 && runtimeRadianceNormalOffsetLength <= 0.0001 ) {
+\t\t\tfloat runtimeRadianceHorizontalFallbackOffset =
+\t\t\t\tmax( runtimeRadianceNormalOffset, ${RUNTIME_RADIANCE_SURFACE_NORMAL_OFFSET.toFixed(6)} );
+
+\t\t\tfor ( int runtimeRadianceAxis = 0; runtimeRadianceAxis < 4; runtimeRadianceAxis += 1 ) {
+\t\t\t\tvec2 runtimeRadianceFallbackOffset =
+\t\t\t\t\truntimeRadianceAxis == 0
+\t\t\t\t\t\t? vec2( runtimeRadianceHorizontalFallbackOffset, 0.0 )
+\t\t\t\t\t\t: runtimeRadianceAxis == 1
+\t\t\t\t\t\t\t? vec2( -runtimeRadianceHorizontalFallbackOffset, 0.0 )
+\t\t\t\t\t\t\t: runtimeRadianceAxis == 2
+\t\t\t\t\t\t\t\t? vec2( 0.0, runtimeRadianceHorizontalFallbackOffset )
+\t\t\t\t\t\t\t\t: vec2( 0.0, -runtimeRadianceHorizontalFallbackOffset );
+\t\t\t\tvec2 runtimeRadianceFallbackUv = (
+\t\t\t\t\truntimeRadianceSamplePosition +
+\t\t\t\t\truntimeRadianceFallbackOffset -
+\t\t\t\t\truntimeRadianceBounds.xy
+\t\t\t\t) / max( runtimeRadianceBounds.zw, vec2( 0.0001 ) );
+
+\t\t\t\tif (
+\t\t\t\t\truntimeRadianceFallbackUv.x >= 0.0 &&
+\t\t\t\t\truntimeRadianceFallbackUv.x <= 1.0 &&
+\t\t\t\t\truntimeRadianceFallbackUv.y >= 0.0 &&
+\t\t\t\t\truntimeRadianceFallbackUv.y <= 1.0
+\t\t\t\t) {
+\t\t\t\t\tvec4 runtimeRadianceFallbackTexel =
+\t\t\t\t\t\ttexture2D( runtimeRadianceTexture, runtimeRadianceFallbackUv );
+\t\t\t\t\tfloat runtimeRadianceFallbackWeight =
+\t\t\t\t\t\tstep( 0.5, runtimeRadianceFallbackTexel.a );
+\t\t\t\t\truntimeRadianceColor +=
+\t\t\t\t\t\truntimeRadianceFallbackTexel.rgb * runtimeRadianceFallbackWeight;
+\t\t\t\t\truntimeRadianceWeight += runtimeRadianceFallbackWeight;
+\t\t\t\t}
+\t\t\t}
+\t\t}
+
+\t\tif ( runtimeRadianceWeight > 0.0 ) {
+\t\t\tirradiance +=
+\t\t\t\t( runtimeRadianceColor / runtimeRadianceWeight ) *
+\t\t\t\truntimeRadianceIntensity *
+\t\t\t\truntimeRadianceVerticalWeight;
 \t\t}
 
 \t#endif
@@ -2876,6 +2956,14 @@ function updateProbeBlendShaderUniforms(
   }
   if (shader.uniforms.runtimeRadianceNormalOffset) {
     shader.uniforms.runtimeRadianceNormalOffset.value = patchConfig.runtimeRadianceNormalOffset ?? 0
+  }
+  if (shader.uniforms.runtimeRadianceTorchHeight) {
+    shader.uniforms.runtimeRadianceTorchHeight.value =
+      patchConfig.runtimeRadianceTorchHeight ?? RUNTIME_RADIANCE_TORCH_HEIGHT
+  }
+  if (shader.uniforms.runtimeRadianceVerticalFalloffRadius) {
+    shader.uniforms.runtimeRadianceVerticalFalloffRadius.value =
+      patchConfig.runtimeRadianceVerticalFalloffRadius ?? RUNTIME_RADIANCE_VERTICAL_FALLOFF_RADIUS
   }
 
   const probePositions = probeBlend.probePositions ?? []
@@ -3188,7 +3276,12 @@ function getProbeBlendUpdateKey(
       : null,
     runtimeRadianceIntensity: patchConfig.runtimeRadianceIntensity ?? 0,
     runtimeRadianceNormalOffset: patchConfig.runtimeRadianceNormalOffset ?? 0,
+    runtimeRadianceTorchHeight:
+      patchConfig.runtimeRadianceTorchHeight ?? RUNTIME_RADIANCE_TORCH_HEIGHT,
     runtimeRadianceTextureUUID: patchConfig.runtimeRadianceTexture?.uuid ?? null,
+    runtimeRadianceVerticalFalloffRadius:
+      patchConfig.runtimeRadianceVerticalFalloffRadius ??
+        RUNTIME_RADIANCE_VERTICAL_FALLOFF_RADIUS,
     diffuseIntensity: probeBlend.diffuseIntensity ?? 1,
     mode: probeBlend.mode,
     probeCellSize: probeBlend.probeCellSize ?? MAZE_CELL_SIZE,
@@ -3363,7 +3456,10 @@ function updateProbeBlendUniformDebugState(
       : null,
     runtimeRadianceIntensity: shader.uniforms.runtimeRadianceIntensity?.value ?? null,
     runtimeRadianceNormalOffset: shader.uniforms.runtimeRadianceNormalOffset?.value ?? null,
-    runtimeRadianceTextureUUID: shader.uniforms.runtimeRadianceTexture?.value?.uuid ?? null
+    runtimeRadianceTorchHeight: shader.uniforms.runtimeRadianceTorchHeight?.value ?? null,
+    runtimeRadianceTextureUUID: shader.uniforms.runtimeRadianceTexture?.value?.uuid ?? null,
+    runtimeRadianceVerticalFalloffRadius:
+      shader.uniforms.runtimeRadianceVerticalFalloffRadius?.value ?? null
   }
 }
 
@@ -3399,7 +3495,10 @@ function patchProbeBlendMaterialShader(
   probeBlendShader.uniforms.runtimeRadianceBounds = new Uniform(new Vector4(0, 0, 1, 1))
   probeBlendShader.uniforms.runtimeRadianceIntensity = new Uniform(0)
   probeBlendShader.uniforms.runtimeRadianceNormalOffset = new Uniform(0)
+  probeBlendShader.uniforms.runtimeRadianceTorchHeight = new Uniform(RUNTIME_RADIANCE_TORCH_HEIGHT)
   probeBlendShader.uniforms.runtimeRadianceTexture = new Uniform<Texture | null>(null)
+  probeBlendShader.uniforms.runtimeRadianceVerticalFalloffRadius =
+    new Uniform(RUNTIME_RADIANCE_VERTICAL_FALLOFF_RADIUS)
   probeBlendShader.uniforms.localProbePosition0 = new Uniform(DEFAULT_PROBE_POSITION.clone())
   probeBlendShader.uniforms.localProbePosition1 = new Uniform(DEFAULT_PROBE_POSITION.clone())
   probeBlendShader.uniforms.localProbePosition2 = new Uniform(DEFAULT_PROBE_POSITION.clone())
@@ -3489,7 +3588,7 @@ function patchProbeBlendMaterialShader(
 \t#include <project_vertex>`
       )
   probeBlendShader.fragmentShader =
-    `${shaderFeatureDefines}${vlmFeatureDefines}${lightMapFeatureDefines}${currentPatchConfig.runtimeRadianceTexture ? '#define LEVELSJAM_RUNTIME_RADIANCE 1\n' : ''}uniform vec3 lightMapAmbientTint;\nuniform vec3 lightMapTorchTint;\nuniform sampler2D runtimeRadianceTexture;\nuniform vec4 runtimeRadianceBounds;\nuniform float runtimeRadianceIntensity;\nuniform float runtimeRadianceNormalOffset;\nuniform float probeBlendDiffuseIntensity;\nuniform float probeBlendRadianceIntensity;\nvarying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
+    `${shaderFeatureDefines}${vlmFeatureDefines}${lightMapFeatureDefines}${currentPatchConfig.runtimeRadianceTexture ? '#define LEVELSJAM_RUNTIME_RADIANCE 1\n' : ''}uniform vec3 lightMapAmbientTint;\nuniform vec3 lightMapTorchTint;\nuniform sampler2D runtimeRadianceTexture;\nuniform vec4 runtimeRadianceBounds;\nuniform float runtimeRadianceIntensity;\nuniform float runtimeRadianceNormalOffset;\nuniform float runtimeRadianceTorchHeight;\nuniform float runtimeRadianceVerticalFalloffRadius;\nuniform float probeBlendDiffuseIntensity;\nuniform float probeBlendRadianceIntensity;\nvarying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
       .replace(
         '#include <envmap_physical_pars_fragment>',
         PROBE_BLEND_SHADER_CHUNK
@@ -5997,7 +6096,7 @@ void main() {
   vec2 worldPosition = radianceBounds.xy + vUv * radianceBounds.zw;
 
   if (sampleSceneMap(worldPosition).a > 0.5) {
-    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
     return;
   }
 
@@ -9015,7 +9114,9 @@ function FogVolume({
     effect.rayStepCount = rayStepCount
     effect.runtimeRadianceBounds = runtimeRadiance.bounds
     effect.runtimeRadianceIntensity = runtimeRadianceIntensity
+    effect.runtimeRadianceTorchHeight = RUNTIME_RADIANCE_TORCH_HEIGHT
     effect.runtimeRadianceTexture = runtimeRadiance.texture
+    effect.runtimeRadianceVerticalFalloffRadius = RUNTIME_RADIANCE_VERTICAL_FALLOFF_RADIUS
     effect.useProbeCoefficientTexture = 0
     effect.useProbeDepthAtlases = 0
     effect.useProbeAmbientTexture = 0
@@ -9048,7 +9149,9 @@ function FogVolume({
       rayStepCount,
       useProbeAmbientTexture: 0,
       runtimeRadianceIntensity,
+      runtimeRadianceTorchHeight: RUNTIME_RADIANCE_TORCH_HEIGHT,
       runtimeRadianceTextureUUID: runtimeRadiance.texture.uuid,
+      runtimeRadianceVerticalFalloffRadius: RUNTIME_RADIANCE_VERTICAL_FALLOFF_RADIUS,
       useProbeCoefficientTexture: 0,
       useProbeDepthAtlases: 0
     }

@@ -33,6 +33,8 @@
 - The active experiment does not use runtime volumetric-lightmap diffuse data; maze-local diffuse lighting for fog, monsters, pickups, gates, sconces, walls, and floor comes from the generated radiance field.
 - The generated radiance field propagates indirect light only through horizontally visible samples so walls and closed gates block cascade spread instead of permitting blur leakage.
 - Vertical maze-local surfaces sample the generated radiance field from the visible side of the surface rather than from inside wall or gate volume.
+- Horizontal maze-local surfaces sample generated radiance from nearby non-occluder texels when their primary XZ sample lands in a wall or closed-gate mask, so floors remain lit up to wall bases instead of forming black moats.
+- Runtime material and fog sampling attenuate generated radiance by inverse-square vertical distance from the authored torch height so the two-dimensional radiance field reads as torch-height lighting in the three-dimensional scene.
 - The generated radiance field is spatially smooth enough that ordinary wall and floor views do not show obvious block-sized probe cells.
 - Near-player realtime shadowed torch lights are blended as a smooth correction over the generated radiance field instead of abruptly replacing it.
 - Realtime torch shadow eligibility changes use continuous weights, temporal smoothing, and slot hysteresis so torch shadows do not flip on and off at selection boundaries.
