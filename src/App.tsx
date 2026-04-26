@@ -240,10 +240,12 @@ const BLOCKED_MOVE_FRACTION = 0.25
 const RUNTIME_RADIANCE_RESOLUTION = 256
 const RUNTIME_RADIANCE_CASCADE_COUNT = 4
 const RUNTIME_RADIANCE_BASE_RAY_COUNT = 16
-const RUNTIME_RADIANCE_DIRECT_GAIN = 3
-const RUNTIME_RADIANCE_FOG_SCATTER_GAIN = 24
-const RUNTIME_RADIANCE_INDIRECT_GAIN = 0.55
+const RUNTIME_RADIANCE_DIRECT_GAIN = 0.7
+const RUNTIME_RADIANCE_DIRECT_RESOLVE_GAIN = 0.55
+const RUNTIME_RADIANCE_FOG_SCATTER_GAIN = 12
+const RUNTIME_RADIANCE_INDIRECT_GAIN = 0.35
 const RUNTIME_RADIANCE_MAX_DISTANCE = 18
+const RUNTIME_RADIANCE_MAX_LIGHTS = 32
 const RUNTIME_RADIANCE_OCCLUDER_NORMAL_PADDING = WALL_WIDTH * 0.75
 const RUNTIME_RADIANCE_OCCLUDER_TANGENT_PADDING = WALL_WIDTH * 0.1
 const RUNTIME_RADIANCE_SOURCE_RADIUS = 0.32
@@ -5493,6 +5495,18 @@ function getRuntimeTorchFlicker(lightIndex: number, elapsed: number) {
   )
 }
 
+function getRuntimeRadianceLightSource2D(light: MazeLayout['lights'][number]) {
+  const lightDirection = getRuntimeRadianceLightDirection(light.side)
+  const sourceOffset =
+    RUNTIME_RADIANCE_OCCLUDER_NORMAL_PADDING +
+    (RUNTIME_RADIANCE_SOURCE_RADIUS * 0.9)
+
+  return {
+    x: light.torchPosition.x + (lightDirection.x * sourceOffset),
+    z: light.torchPosition.z + (lightDirection.z * sourceOffset)
+  }
+}
+
 function updateRuntimeRadianceEmitterTexture(
   sceneTextureState: RuntimeRadianceSceneTextureState,
   elapsed: number
@@ -5517,6 +5531,49 @@ function updateRuntimeRadianceEmitterTexture(
   }
 
   sceneTextureState.texture.needsUpdate = true
+}
+
+function updateRuntimeRadianceDirectLightUniforms(
+  material: ShaderMaterial,
+  layout: MazeLayout,
+  elapsed: number
+) {
+  const directLights = material.uniforms.directLights?.value as Vector4[] | undefined
+  const directLightColors = material.uniforms.directLightColors?.value as Vector4[] | undefined
+
+  if (!directLights || !directLightColors) {
+    return
+  }
+
+  const lightCount = Math.min(layout.lights.length, RUNTIME_RADIANCE_MAX_LIGHTS)
+
+  material.uniforms.directLightCount.value = lightCount
+
+  for (let index = 0; index < RUNTIME_RADIANCE_MAX_LIGHTS; index += 1) {
+    const light = layout.lights[index]
+
+    if (!light || index >= lightCount) {
+      directLights[index].set(0, 0, RUNTIME_RADIANCE_SOURCE_RADIUS, 0)
+      directLightColors[index].set(0, 0, 0, 0)
+      continue
+    }
+
+    const source = getRuntimeRadianceLightSource2D(light)
+    const flicker = getRuntimeTorchFlicker(light.index, elapsed)
+
+    directLights[index].set(
+      source.x,
+      source.z,
+      RUNTIME_RADIANCE_SOURCE_RADIUS,
+      flicker
+    )
+    directLightColors[index].set(
+      TORCH_LIGHTMAP_TINT.r,
+      TORCH_LIGHTMAP_TINT.g,
+      TORCH_LIGHTMAP_TINT.b,
+      1
+    )
+  }
 }
 
 function buildRuntimeRadianceOccluders(
@@ -5624,8 +5681,20 @@ vec4 sampleSceneMap(vec2 worldPosition) {
 }
 
 float segmentVisibility(vec2 startWorld, vec2 endWorld) {
-  for (int sampleIndex = 1; sampleIndex <= 6; sampleIndex += 1) {
-    float t = float(sampleIndex) / 7.0;
+  float segmentLength = length(endWorld - startWorld);
+  float texelWorldSize = max(
+    max(radianceBounds.z, radianceBounds.w) /
+      max(max(sceneMapSize.x, sceneMapSize.y), 1.0),
+    0.0001
+  );
+  float sampleCount = clamp(ceil(segmentLength / (texelWorldSize * 0.65)), 2.0, 64.0);
+
+  for (int sampleIndex = 1; sampleIndex <= 64; sampleIndex += 1) {
+    if (float(sampleIndex) > sampleCount) {
+      break;
+    }
+
+    float t = float(sampleIndex) / (sampleCount + 1.0);
 
     if (sampleSceneMap(mix(startWorld, endWorld, t)).a > 0.5) {
       return 0.0;
@@ -5776,6 +5845,9 @@ uniform sampler2D sceneMap;
 uniform vec4 radianceBounds;
 uniform vec2 sceneMapSize;
 uniform vec2 cascadeTextureSize;
+uniform vec4 directLightColors[${RUNTIME_RADIANCE_MAX_LIGHTS}];
+uniform vec4 directLights[${RUNTIME_RADIANCE_MAX_LIGHTS}];
+uniform int directLightCount;
 uniform float baseRayCount;
 uniform float baseProbeCount;
 varying vec2 vUv;
@@ -5795,8 +5867,20 @@ vec4 sampleSceneMap(vec2 worldPosition) {
 }
 
 float segmentVisibility(vec2 startWorld, vec2 endWorld) {
-  for (int sampleIndex = 1; sampleIndex <= 6; sampleIndex += 1) {
-    float t = float(sampleIndex) / 7.0;
+  float segmentLength = length(endWorld - startWorld);
+  float texelWorldSize = max(
+    max(radianceBounds.z, radianceBounds.w) /
+      max(max(sceneMapSize.x, sceneMapSize.y), 1.0),
+    0.0001
+  );
+  float sampleCount = clamp(ceil(segmentLength / (texelWorldSize * 0.65)), 2.0, 64.0);
+
+  for (int sampleIndex = 1; sampleIndex <= 64; sampleIndex += 1) {
+    if (float(sampleIndex) > sampleCount) {
+      break;
+    }
+
+    float t = float(sampleIndex) / (sampleCount + 1.0);
 
     if (sampleSceneMap(mix(startWorld, endWorld, t)).a > 0.5) {
       return 0.0;
@@ -5804,6 +5888,55 @@ float segmentVisibility(vec2 startWorld, vec2 endWorld) {
   }
 
   return 1.0;
+}
+
+float directSegmentVisibility(vec2 startWorld, vec2 endWorld) {
+  for (int sampleIndex = 1; sampleIndex <= 96; sampleIndex += 1) {
+    float t = float(sampleIndex) / 97.0;
+
+    if (sampleSceneMap(mix(startWorld, endWorld, t)).a > 0.5) {
+      return 0.0;
+    }
+  }
+
+  return 1.0;
+}
+
+vec3 sampleDirectLights(vec2 worldPosition) {
+  vec3 directRadiance = vec3(0.0);
+
+  for (int lightIndex = 0; lightIndex < ${RUNTIME_RADIANCE_MAX_LIGHTS}; lightIndex += 1) {
+    if (lightIndex >= directLightCount) {
+      break;
+    }
+
+    vec4 light = directLights[lightIndex];
+    vec2 lightPosition = light.xy;
+    float lightRadius = max(light.z, 0.0001);
+    float lightStrength = light.w;
+    vec2 toLight = lightPosition - worldPosition;
+    float distance = length(toLight);
+
+    if (distance > ${RUNTIME_RADIANCE_MAX_DISTANCE.toFixed(1)}) {
+      continue;
+    }
+
+    float visibility = directSegmentVisibility(worldPosition, lightPosition);
+
+    if (visibility <= 0.0) {
+      continue;
+    }
+
+    float falloff = 1.0 / max((distance * distance) + (lightRadius * lightRadius), 0.0001);
+    float rangeFade = 1.0 - smoothstep(
+      ${ (RUNTIME_RADIANCE_MAX_DISTANCE * 0.75).toFixed(1) },
+      ${ RUNTIME_RADIANCE_MAX_DISTANCE.toFixed(1) },
+      distance
+    );
+    directRadiance += directLightColors[lightIndex].rgb * falloff * rangeFade * lightStrength * visibility;
+  }
+
+  return directRadiance;
 }
 
 vec2 cascadeTexelUv(float probeGridSize, float rayCount, vec2 probeCell, float rayIndex) {
@@ -5870,7 +6003,10 @@ void main() {
     irradiance += sampleCascade0(vUv, worldPosition, float(rayIndex));
   }
 
-  gl_FragColor = vec4(irradiance / ${RUNTIME_RADIANCE_BASE_RAY_COUNT.toFixed(1)}, 1.0);
+  vec3 cascadeIrradiance = irradiance / ${RUNTIME_RADIANCE_BASE_RAY_COUNT.toFixed(1)};
+  vec3 directIrradiance = sampleDirectLights(worldPosition) * ${RUNTIME_RADIANCE_DIRECT_RESOLVE_GAIN.toFixed(1)};
+
+  gl_FragColor = vec4(max(cascadeIrradiance + directIrradiance, vec3(0.0)), 1.0);
 }
 `
 
@@ -5955,22 +6091,14 @@ function createRuntimeRadianceSceneTexture(
 
   for (const light of layout.lights) {
     const lightDirection = getRuntimeRadianceLightDirection(light.side)
-    const sourceOffset =
-      RUNTIME_RADIANCE_OCCLUDER_NORMAL_PADDING +
-      (RUNTIME_RADIANCE_SOURCE_RADIUS * 0.9)
-    const sourceX =
-      light.torchPosition.x +
-      (lightDirection.x * sourceOffset)
-    const sourceZ =
-      light.torchPosition.z +
-      (lightDirection.z * sourceOffset)
+    const lightSource = getRuntimeRadianceLightSource2D(light)
     const centerColumn = MathUtils.clamp(
-      Math.floor(((sourceX - bounds.minX) / bounds.width) * resolution),
+      Math.floor(((lightSource.x - bounds.minX) / bounds.width) * resolution),
       0,
       resolution - 1
     )
     const centerRow = MathUtils.clamp(
-      Math.floor(((sourceZ - bounds.minZ) / bounds.depth) * resolution),
+      Math.floor(((lightSource.z - bounds.minZ) / bounds.depth) * resolution),
       0,
       resolution - 1
     )
@@ -6004,8 +6132,8 @@ function createRuntimeRadianceSceneTexture(
         const x = xByColumn[column]
         const z = zByRow[row]
         const sourceSideDistance =
-          ((x - sourceX) * lightDirection.x) +
-          ((z - sourceZ) * lightDirection.z)
+          ((x - lightSource.x) * lightDirection.x) +
+          ((z - lightSource.z) * lightDirection.z)
 
         if (sourceSideDistance < -RUNTIME_RADIANCE_SOURCE_RADIUS * 0.2) {
           continue
@@ -6138,6 +6266,13 @@ function useRuntimeRadianceCascadeSurface(
         baseRayCount: new Uniform(RUNTIME_RADIANCE_BASE_RAY_COUNT),
         cascadeTexture: new Uniform<Texture>(cascadeTargets[0].texture),
         cascadeTextureSize: new Uniform(new Vector2(cascadeWidth, cascadeHeight)),
+        directLightColors: new Uniform(
+          Array.from({ length: RUNTIME_RADIANCE_MAX_LIGHTS }, () => new Vector4())
+        ),
+        directLightCount: new Uniform(0),
+        directLights: new Uniform(
+          Array.from({ length: RUNTIME_RADIANCE_MAX_LIGHTS }, () => new Vector4())
+        ),
         radianceBounds: new Uniform(new Vector4()),
         sceneMap: new Uniform<Texture>(sceneTextureState.texture),
         sceneMapSize: new Uniform(new Vector2(RUNTIME_RADIANCE_RESOLUTION, RUNTIME_RADIANCE_RESOLUTION))
@@ -6218,6 +6353,7 @@ function useRuntimeRadianceCascadeSurface(
     const previousAutoClear = gl.autoClear
 
     updateRuntimeRadianceEmitterTexture(sceneTextureState, elapsed)
+    updateRuntimeRadianceDirectLightUniforms(resources.resolveMaterial, layout, elapsed)
     gl.autoClear = false
     resources.cascadeMaterial.uniforms.radianceBounds.value.set(
       bounds.minX,

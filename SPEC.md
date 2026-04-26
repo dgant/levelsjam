@@ -27,6 +27,7 @@
 - The radiance-cascade pipeline updates on the GPU every rendered frame rather than precomputing diffuse lighting on the CPU.
 - The radiance-cascade pipeline stores directional ray-interval radiance in cascade render targets and merges higher-angular, lower-spatial cascades down to the material-sampled output field.
 - The radiance-cascade scene input is a runtime GPU texture containing XZ-plane wall, closed-gate, and emissive torch data for ray marching.
+- The generated radiance-field output includes a per-texel GPU direct-visibility solve from torch emitters through the same wall and closed-gate occluder map so primary torch light does not depend on cross-wall probe interpolation.
 - The generated radiance field may reuse the existing surface-lightmap UV channel and material hook when that is the shortest safe path to feed PBR materials.
 - Runtime baked surface-lightmap files may remain present as historical assets, but the active experiment does not depend on them for maze diffuse lighting.
 - The active experiment does not use runtime volumetric-lightmap diffuse data; maze-local diffuse lighting for fog, monsters, pickups, gates, sconces, walls, and floor comes from the generated radiance field.
