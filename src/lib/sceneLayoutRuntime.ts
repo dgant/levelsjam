@@ -18,6 +18,11 @@ import {
 import {
   getMazeSceneLayout
 } from './maze.js'
+import {
+  createAuthoredRuntimeMaze,
+  getAuthoredRuntimeLevelIds,
+  isAuthoredRuntimeLevelId
+} from './levels.js'
 import type { MazeLayout, WallBounds } from './sceneLayout.js'
 
 export {
@@ -41,6 +46,7 @@ export {
 type PersistedMaze = {
   height: number
   id: string
+  isAuthoredLevel?: boolean
   lightmap?: unknown
   width: number
 }
@@ -82,7 +88,10 @@ async function loadAvailableMazeIds() {
           : []
 
         AVAILABLE_MAZE_IDS.length = 0
-        AVAILABLE_MAZE_IDS.push(...mazeIds)
+        AVAILABLE_MAZE_IDS.push(...Array.from(new Set([
+          ...getAuthoredRuntimeLevelIds(),
+          ...mazeIds
+        ])))
         return [...AVAILABLE_MAZE_IDS]
       })
   }
@@ -109,6 +118,10 @@ async function loadPersistedMaze(id: string) {
 
   if (!response.ok) {
     if (response.status === 404) {
+      if (isAuthoredRuntimeLevelId(id)) {
+        return createAuthoredRuntimeMaze(id) as PersistedMaze | null
+      }
+
       return null
     }
 
@@ -194,7 +207,8 @@ export function getLoadedMazeLayoutIds() {
 export async function loadRandomMazeLayout(
   random: () => number = Math.random
 ): Promise<MazeLayout> {
-  const mazeIds = await loadAvailableMazeIds()
+  const mazeIds = (await loadAvailableMazeIds())
+    .filter((id) => !isAuthoredRuntimeLevelId(id))
   const index = Math.floor(random() * mazeIds.length)
   const mazeId = mazeIds[index] ?? mazeIds[0]
 

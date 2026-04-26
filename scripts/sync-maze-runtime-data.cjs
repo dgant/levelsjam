@@ -37,6 +37,10 @@ async function main() {
     DEFAULT_LIGHTMAP_ARTIFACT_DIRECTORY,
     dumpMazeLightmapArtifacts
   } = await import('../src/lib/mazePersistence.js')
+  const {
+    createAuthoredRuntimeMaze,
+    getAuthoredRuntimeLevelIds
+  } = await import('../src/lib/levels.js')
 
   fs.mkdirSync(outputDirectory, { recursive: true })
 
@@ -48,22 +52,19 @@ async function main() {
     }
   }
 
+  const authoredLevelIds = getAuthoredRuntimeLevelIds()
   const mazeFileNames = fs.readdirSync(sourceDirectory)
     .filter((fileName) => mazeFilePattern.test(fileName))
     .sort()
   const mazeIds = []
 
-  for (let index = 0; index < mazeFileNames.length; index += 1) {
-    const fileName = mazeFileNames[index]
-    const filePath = path.join(sourceDirectory, fileName)
-    const maze = await importMazeModule(filePath)
-    const mazeId = path.basename(fileName, '.js')
+  const writeRuntimeMaze = (maze, mazeId, position, total) => {
     const mazeOutputDirectory = path.join(outputDirectory, mazeId)
     const runtimeMaze = replaceMazeLightmapWithRuntimeAssetUrls(maze)
     const lightmapBuffers = buildMazeLightmapArtifactBuffers(maze)
 
     console.log(
-      `[sync-maze-runtime-data] writing ${index + 1}/${mazeFileNames.length} ${mazeId}.json`
+      `[sync-maze-runtime-data] writing ${position}/${total} ${mazeId}.json`
     )
     fs.mkdirSync(mazeOutputDirectory, { recursive: true })
     if (lightmapBuffers) {
@@ -104,6 +105,33 @@ async function main() {
       maze
     })
     mazeIds.push(mazeId)
+  }
+
+  const totalPayloads = authoredLevelIds.length + mazeFileNames.length
+
+  for (let index = 0; index < authoredLevelIds.length; index += 1) {
+    const authoredLevelId = authoredLevelIds[index]
+    const maze = createAuthoredRuntimeMaze(authoredLevelId)
+
+    if (!maze) {
+      throw new Error(`Failed to create authored runtime level ${authoredLevelId}`)
+    }
+
+    writeRuntimeMaze(maze, authoredLevelId, index + 1, totalPayloads)
+  }
+
+  for (let index = 0; index < mazeFileNames.length; index += 1) {
+    const fileName = mazeFileNames[index]
+    const filePath = path.join(sourceDirectory, fileName)
+    const maze = await importMazeModule(filePath)
+    const mazeId = path.basename(fileName, '.js')
+
+    writeRuntimeMaze(
+      maze,
+      mazeId,
+      authoredLevelIds.length + index + 1,
+      totalPayloads
+    )
   }
 
   fs.writeFileSync(

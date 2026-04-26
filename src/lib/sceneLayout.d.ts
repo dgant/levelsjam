@@ -104,8 +104,16 @@ export type MazeLayout = {
     }>
     height: number
     id: string
+    isAuthoredLevel?: boolean
+    levelExits?: Array<{
+      cell: { x: number; y: number }
+      side: 'north' | 'east' | 'south' | 'west'
+      targetLevelId?: string
+    }>
+    levelName?: string
     monsters?: Array<{
       cell: { x: number; y: number }
+      direction?: 'north' | 'east' | 'south' | 'west'
       hand?: 'left' | 'right'
       type: 'minotaur' | 'spider' | 'werewolf'
     }>
@@ -113,6 +121,10 @@ export type MazeLayout = {
       from: { x: number; y: number }
       to: { x: number; y: number }
     }>
+    playerStart?: {
+      cell: { x: number; y: number }
+      direction: 'north' | 'east' | 'south' | 'west'
+    }
     width: number
     solution?: {
       actions: Array<'move-forward' | 'move-backward' | 'rotate-left' | 'rotate-right'>

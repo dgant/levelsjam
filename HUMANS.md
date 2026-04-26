@@ -110,7 +110,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify the `DOF Focus Distance` slider reaches 8 meters.
 - Verify double-clicking a debug label resets only the associated control.
 - Verify the `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, and `Reflection Intensity` controls each produce a visible material change when enabled.
-- Verify the `Volumetric Connectivity` checkbox changes surface and fog volumetric-lightmap wall blocking while preserving smooth probe blending.
+- Verify the `Volumetric Occlusion` checkbox changes surface and fog volumetric-lightmap wall blocking while preserving smooth probe blending.
 - Verify the Vignette tab exposes Vignette Intensity, Vignette Noise Period, Vignette Noise Intensity, and Exposure Noise Intensity, with the two noise intensities defaulting to zero.
 - Verify Bloom, Depth Of Field, Lens Flares, and SSR start disabled.
 - Verify the default `Exposure` value is `0`.

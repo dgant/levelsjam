@@ -18,13 +18,20 @@ import {
   validateMaze
 } from '../src/lib/maze.js'
 import {
+  canMove,
+  chooseSpiderDirection,
+  createInitialTurnState,
+  createMonsterMoveEdgeSet,
+  cellKey
+} from '../src/lib/turnRules.js'
+import {
   DEFAULT_LIGHTMAP_ARTIFACT_DIRECTORY,
   dumpMazeLightmapArtifacts,
   ensureMazeFiles
 } from '../src/lib/mazePersistence.js'
 import { mapGroundWorldToLightmapLocalUv } from '../src/lib/groundLightmapUv.js'
 import { decodeRgbE8, reconstructProbeRadiance } from '../src/lib/probeSphericalHarmonics.js'
-import { SCONCE_RADIUS } from '../src/lib/sceneConstants.js'
+import { SCONCE_RADIUS, WALL_WIDTH } from '../src/lib/sceneConstants.js'
 
 const DEFAULT_MAZE_DIRECTORY = path.join(process.cwd(), 'src', 'data', 'mazes')
 
@@ -89,6 +96,66 @@ test('places initial torch lights on pickup cells', () => {
 
   assert.ok(lightCellKeys.has(`${maze.sword.cell.x},${maze.sword.cell.y}`))
   assert.ok(lightCellKeys.has(`${maze.trophy.cell.x},${maze.trophy.cell.y}`))
+})
+
+test('initial monsters face legal movement cells', () => {
+  const maze = generateMaze(123456, { bakeLightmap: false })
+  const state = createInitialTurnState(maze)
+  const openEdges = createMonsterMoveEdgeSet(maze)
+
+  for (const monster of state.monsters) {
+    assert.equal(
+      canMove(maze, openEdges, monster.cell, monster.direction),
+      true,
+      `${monster.type} at ${cellKey(monster.cell)} faces blocked ${monster.direction}`
+    )
+
+    if (monster.type === 'spider') {
+      assert.equal(
+        chooseSpiderDirection(maze, openEdges, monster),
+        monster.direction,
+        'spider should begin facing the cell its wall-following rule will enter'
+      )
+    }
+  }
+})
+
+test('generated wall decals avoid torch-bearing wall faces', () => {
+  const maze = generateMaze(123456, { bakeLightmap: false })
+  const layout = getMazeSceneLayout(maze, SCONCE_RADIUS)
+  const lightFaceKeys = new Set(
+    layout.lights.map((light) => {
+      const normal =
+        light.side === 'north'
+          ? { x: 0, z: 1 }
+          : light.side === 'south'
+            ? { x: 0, z: -1 }
+            : light.side === 'east'
+              ? { x: -1, z: 0 }
+              : { x: 1, z: 0 }
+      const wallClearance = (WALL_WIDTH / 2) + SCONCE_RADIUS
+      const wallX = light.sconcePosition.x - (normal.x * wallClearance)
+      const wallZ = light.sconcePosition.z - (normal.z * wallClearance)
+
+      return [
+        wallX.toFixed(3),
+        wallZ.toFixed(3),
+        normal.x,
+        normal.z
+      ].join(':')
+    })
+  )
+
+  for (const decal of layout.decals) {
+    const key = [
+      decal.position.x - (decal.normal.x * 0.006),
+      decal.position.z - (decal.normal.z * 0.006),
+      decal.normal.x,
+      decal.normal.z
+    ].map((value, index) => index < 2 ? Number(value).toFixed(3) : value).join(':')
+
+    assert.equal(lightFaceKeys.has(key), false, `${decal.id} was placed on a lit wall face`)
+  }
 })
 
 test('persists at least five valid mazes', async () => {

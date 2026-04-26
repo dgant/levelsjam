@@ -1314,6 +1314,17 @@ function wallIntersectionKey(point) {
   return `${point.x.toFixed(6)},${point.z.toFixed(6)}`
 }
 
+function getWallEndpointDirectionFromIntersection(point, wall) {
+  const dx = wall.center.x - point.x
+  const dz = wall.center.z - point.z
+  const length = Math.hypot(dx, dz) || 1
+
+  return {
+    x: Math.round(dx / length),
+    z: Math.round(dz / length)
+  }
+}
+
 export function getMazeCornerFillers(maze) {
   const endpointMap = new Map()
   const walls = getMazeWallSegments(maze)
@@ -1341,17 +1352,32 @@ export function getMazeCornerFillers(maze) {
       continue
     }
 
+    const firstDirection = getWallEndpointDirectionFromIntersection(
+      first.point,
+      first.wall
+    )
+    const secondDirection = getWallEndpointDirectionFromIntersection(
+      second.point,
+      second.wall
+    )
+    const fillerSize = MAZE_WALL_THICKNESS / 2
+    const halfFillerSize = fillerSize / 2
+    const center = {
+      x: first.point.x - ((firstDirection.x + secondDirection.x) * halfFillerSize),
+      z: first.point.z - ((firstDirection.z + secondDirection.z) * halfFillerSize)
+    }
+
     fillers.push({
       bounds: {
         id: `corner-filler-${key}`,
-        maxX: first.point.x + (MAZE_WALL_THICKNESS / 2),
+        maxX: center.x + halfFillerSize,
         maxY: GROUND_Y + MAZE_WALL_HEIGHT,
-        maxZ: first.point.z + (MAZE_WALL_THICKNESS / 2),
-        minX: first.point.x - (MAZE_WALL_THICKNESS / 2),
+        maxZ: center.z + halfFillerSize,
+        minX: center.x - halfFillerSize,
         minY: GROUND_Y,
-        minZ: first.point.z - (MAZE_WALL_THICKNESS / 2)
+        minZ: center.z - halfFillerSize
       },
-      center: { x: first.point.x, z: first.point.z },
+      center,
       id: `corner-filler-${key}`,
       type: 'corner-filler'
     })
@@ -2613,17 +2639,37 @@ function hashString(value) {
 
 export function getMazeDecalPlacements(maze) {
   const walls = getMazeWallSegments(maze)
+  const torchPlacements = getMazeTorchPlacements(maze, MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS)
+  const litWallFaces = new Set(
+    torchPlacements.map((torch) => [
+      torch.wallCenter.x.toFixed(6),
+      torch.wallCenter.z.toFixed(6),
+      torch.normal.x.toFixed(6),
+      torch.normal.z.toFixed(6)
+    ].join(':'))
+  )
   const decals = []
 
   for (const wall of walls) {
     for (const faceKey of ['pz', 'nz']) {
+      const sample = getWallFaceSample(wall, faceKey, 0.5, 0.5)
+      const litFaceKey = [
+        wall.center.x.toFixed(6),
+        wall.center.z.toFixed(6),
+        sample.normal.x.toFixed(6),
+        sample.normal.z.toFixed(6)
+      ].join(':')
+
+      if (litWallFaces.has(litFaceKey)) {
+        continue
+      }
+
       const hash = hashString(`${maze.id}:${wall.id}:${faceKey}`)
 
       if (hash % 5 !== 0) {
         continue
       }
 
-      const sample = getWallFaceSample(wall, faceKey, 0.5, 0.5)
       decals.push({
         faceKey,
         id: `decal-${wall.id}-${faceKey}`,

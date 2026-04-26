@@ -172,19 +172,149 @@ function cloneMonster(monster) {
 
 function createPlayerState(maze, direction) {
   return {
-    cell: { ...maze.opening.cell },
+    cell: { ...(maze.playerStart?.cell ?? maze.opening.cell) },
     direction,
     hasSword: false,
     hasTrophy: false
   }
 }
 
+function getExitForMove(maze, cell, direction) {
+  const exits = Array.isArray(maze.levelExits) && maze.levelExits.length > 0
+    ? maze.levelExits
+    : [maze.opening]
+
+  return exits.find((exit) => (
+    cellKey(exit.cell) === cellKey(cell) &&
+    exit.side === direction
+  )) ?? null
+}
+
+function getPathDistanceToEntrance(maze, openEdges, from) {
+  if (cellKey(from) === cellKey(maze.opening.cell)) {
+    return 0
+  }
+
+  const queue = [{ cell: from, distance: 0 }]
+  const visited = new Set([cellKey(from)])
+
+  while (queue.length > 0) {
+    const current = queue.shift()
+
+    if (cellKey(current.cell) === cellKey(maze.opening.cell)) {
+      return current.distance
+    }
+
+    for (const direction of DIRECTIONS) {
+      if (!canMove(maze, openEdges, current.cell, direction)) {
+        continue
+      }
+
+      const next = getNeighbor(current.cell, direction)
+      const key = cellKey(next)
+
+      if (visited.has(key)) {
+        continue
+      }
+
+      visited.add(key)
+      queue.push({
+        cell: next,
+        distance: current.distance + 1
+      })
+    }
+  }
+
+  return Number.POSITIVE_INFINITY
+}
+
+function chooseShortestEntranceDirection(maze, openEdges, cell) {
+  let best = null
+
+  for (const direction of DIRECTIONS) {
+    if (!canMove(maze, openEdges, cell, direction)) {
+      continue
+    }
+
+    const nextCell = getNeighbor(cell, direction)
+    const distance = getPathDistanceToEntrance(maze, openEdges, nextCell)
+
+    if (!best || distance < best.distance) {
+      best = { direction, distance }
+    }
+  }
+
+  return best?.direction ?? null
+}
+
+function chooseInitialSpiderDirection(maze, openEdges, monster) {
+  let best = null
+
+  for (const facingDirection of DIRECTIONS) {
+    const candidateMoveDirection = chooseSpiderDirection(maze, openEdges, {
+      ...monster,
+      direction: facingDirection
+    })
+
+    if (!candidateMoveDirection) {
+      continue
+    }
+
+    const nextCell = getNeighbor(monster.cell, candidateMoveDirection)
+    const distance = getPathDistanceToEntrance(maze, openEdges, nextCell)
+    const facesMoveCell = facingDirection === candidateMoveDirection ? 0 : 1
+
+    if (
+      !best ||
+      facesMoveCell < best.facesMoveCell ||
+      (
+        facesMoveCell === best.facesMoveCell &&
+        distance < best.distance
+      )
+    ) {
+      best = {
+        direction: candidateMoveDirection,
+        distance,
+        facesMoveCell
+      }
+    }
+  }
+
+  return best?.direction ?? null
+}
+
+function chooseInitialMonsterDirection(maze, openEdges, monster) {
+  if (monster.direction && canMove(maze, openEdges, monster.cell, monster.direction)) {
+    return monster.direction
+  }
+
+  if (monster.type === 'spider') {
+    return (
+      chooseInitialSpiderDirection(maze, openEdges, monster) ??
+      chooseShortestEntranceDirection(maze, openEdges, monster.cell) ??
+      monster.direction ??
+      'south'
+    )
+  }
+
+  return (
+    chooseShortestEntranceDirection(maze, openEdges, monster.cell) ??
+    monster.direction ??
+    'south'
+  )
+}
+
 export function createInitialTurnState(maze) {
-  const playerDirection = OPPOSITE_DIRECTIONS[maze.opening.side] ?? 'north'
+  const playerDirection =
+    maze.playerStart?.direction ??
+    OPPOSITE_DIRECTIONS[maze.opening.side] ??
+    'north'
+  const playerStartCell = maze.playerStart?.cell ?? maze.opening.cell
+  const monsterMoveEdges = createMonsterMoveEdgeSet(maze)
 
   return {
     checkpoint: {
-      cell: { ...maze.opening.cell },
+      cell: { ...playerStartCell },
       direction: playerDirection
     },
     dead: false,
@@ -192,7 +322,7 @@ export function createInitialTurnState(maze) {
     monsters: chooseMonsterPlacements(maze).map((monster, index) => ({
       awake: false,
       cell: { ...monster.cell },
-      direction: 'south',
+      direction: chooseInitialMonsterDirection(maze, monsterMoveEdges, monster),
       hand: monster.hand ?? null,
       id: `${monster.type}-${index}`,
       lastMoveDirection: null,
@@ -428,10 +558,7 @@ function createPlayerMoveEdgeSet(maze, state) {
 }
 
 function isExitMove(maze, state, direction) {
-  return (
-    cellKey(state.player.cell) === cellKey(maze.opening.cell) &&
-    direction === maze.opening.side
-  )
+  return Boolean(getExitForMove(maze, state.player.cell, direction))
 }
 
 function consumeSword(state) {
@@ -549,7 +676,7 @@ export function applyTurnAction(maze, state, action) {
     : next.player.direction
 
   if (isExitMove(maze, next, moveDirection)) {
-    if (!next.player.hasTrophy) {
+    if (maze.exitRequiresTrophy !== false && !next.player.hasTrophy) {
       outcome.blocked = true
       return outcome
     }
@@ -638,6 +765,7 @@ export {
   canSeeCell,
   canMove,
   cellKey,
+  chooseSpiderDirection,
   createBaseOpenEdgeSet,
   createMonsterMoveEdgeSet,
   createPlayerMoveEdgeSet,

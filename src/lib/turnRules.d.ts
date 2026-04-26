@@ -68,6 +68,11 @@ export declare function canSeeCell(
   to: MazeCell
 ): boolean
 export declare function cellKey(cell: MazeCell): string
+export declare function chooseSpiderDirection(
+  maze: unknown,
+  openEdges: Set<string>,
+  monster: TurnMonster
+): CardinalDirection | null
 export declare function createBaseOpenEdgeSet(maze: unknown): Set<string>
 export declare function createInitialTurnState(maze: unknown): TurnState
 export declare function createMonsterMoveEdgeSet(maze: unknown): Set<string>

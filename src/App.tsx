@@ -107,6 +107,7 @@ import {
   getRendererExposure
 } from './lib/lightingCalibration.js'
 import {
+  getDefaultRuntimeLevelId,
   parseLevelSpec,
   resolveRuntimeMazeIdForLevel,
   type AuthoredLevel
@@ -132,7 +133,6 @@ import {
   getWallBounds,
   unloadMazeLayoutById,
   loadMazeLayoutById,
-  loadRandomMazeLayout,
   PLAYER_EYE_HEIGHT,
   PLAYER_SPAWN_POSITION,
   resolveMazeDataUrl,
@@ -1987,6 +1987,8 @@ vec4 probeBlendTextureCubeUV(
 
 const PROBE_BLEND_SHADER_CHUNK = `
 
+const float LEVELSJAM_VLM_IRRADIANCE_TO_THREE_IBL_RADIANCE = 0.10132118364233778;
+
 #if defined(PROBE_BLEND_ENABLE_LOCAL_RADIANCE) && defined(USE_ENVMAP)
 uniform sampler2D localProbeEnvMap0;
 uniform sampler2D localProbeEnvMap1;
@@ -2155,7 +2157,7 @@ vec3 reconstructProbeIrradiance(
     ( coeffL1 * basisL1 * bandKernelL1 ) +
     ( coeffL2 * basisL2 * bandKernelL1 ) +
     ( coeffL3 * basisL3 * bandKernelL1 )
-  ) * 12.566370614359172;
+  ) * 12.566370614359172 * LEVELSJAM_VLM_IRRADIANCE_TO_THREE_IBL_RADIANCE;
 }
 
 vec3 sampleProbeBlendDiffuse(
@@ -3994,14 +3996,19 @@ function useProbeBlendMaterialShader(
     () => () => {
       const currentMaterial = materialRef.current
 
-      if (appliedProbeBlendUpdateKeyRef.current === probeBlendUpdateKeyRef.current) {
+      if (
+        shaderRef.current &&
+        appliedProbeBlendUpdateKeyRef.current === probeBlendUpdateKeyRef.current
+      ) {
         return
       }
 
       updateProbeBlendMaterialDebugState(currentMaterial, probeBlendRef.current)
       updateProbeBlendShaderUniforms(shaderRef.current, probeBlendRef.current, patchConfigRef.current)
       updateProbeBlendUniformDebugState(currentMaterial, shaderRef.current)
-      appliedProbeBlendUpdateKeyRef.current = probeBlendUpdateKeyRef.current
+      appliedProbeBlendUpdateKeyRef.current = shaderRef.current
+        ? probeBlendUpdateKeyRef.current
+        : null
     },
     []
   )
@@ -4015,7 +4022,9 @@ function useProbeBlendMaterialShader(
     updateProbeBlendMaterialDebugState(material, probeBlend)
     updateProbeBlendShaderUniforms(shaderRef.current, probeBlend, patchConfig)
     updateProbeBlendUniformDebugState(material, shaderRef.current)
-    appliedProbeBlendUpdateKeyRef.current = probeBlendUpdateKeyRef.current
+    appliedProbeBlendUpdateKeyRef.current = shaderRef.current
+      ? probeBlendUpdateKeyRef.current
+      : null
   }, [material, materialKey, patchConfig, probeBlend])
 
   return {
@@ -4060,7 +4069,10 @@ function attachProbeBlendMaterialShader(
   material.onBeforeRender = () => {
     const currentMaterial = materialRef.current
 
-    if (appliedProbeBlendUpdateKeyRef.current === probeBlendUpdateKeyRef.current) {
+    if (
+      shaderRef.current &&
+      appliedProbeBlendUpdateKeyRef.current === probeBlendUpdateKeyRef.current
+    ) {
       return
     }
 
@@ -4071,13 +4083,17 @@ function attachProbeBlendMaterialShader(
       patchConfigRef.current
     )
     updateProbeBlendUniformDebugState(currentMaterial, shaderRef.current)
-    appliedProbeBlendUpdateKeyRef.current = probeBlendUpdateKeyRef.current
+    appliedProbeBlendUpdateKeyRef.current = shaderRef.current
+      ? probeBlendUpdateKeyRef.current
+      : null
   }
   material.needsUpdate = true
   updateProbeBlendMaterialDebugState(material, probeBlend)
   updateProbeBlendShaderUniforms(shaderRef.current, probeBlend, patchConfig)
   updateProbeBlendUniformDebugState(material, shaderRef.current)
-  appliedProbeBlendUpdateKeyRef.current = probeBlendUpdateKeyRef.current
+  appliedProbeBlendUpdateKeyRef.current = shaderRef.current
+    ? probeBlendUpdateKeyRef.current
+    : null
 
   return {
     set(nextProbeBlend: ProbeBlendConfig, nextPatchConfig: MaterialShaderPatchConfig = patchConfig) {
@@ -4092,7 +4108,9 @@ function attachProbeBlendMaterialShader(
       updateProbeBlendMaterialDebugState(materialRef.current, nextProbeBlend)
       updateProbeBlendShaderUniforms(shaderRef.current, nextProbeBlend, nextPatchConfig)
       updateProbeBlendUniformDebugState(materialRef.current, shaderRef.current)
-      appliedProbeBlendUpdateKeyRef.current = probeBlendUpdateKeyRef.current
+      appliedProbeBlendUpdateKeyRef.current = shaderRef.current
+        ? probeBlendUpdateKeyRef.current
+        : null
 
       if (previousProgramKey !== nextProgramKey) {
         materialRef.current.needsUpdate = true
@@ -5417,13 +5435,47 @@ function createWallGeometry(lightmap: MazeLightmap, wallId: string) {
   return geometry
 }
 
+function createDecalGeometry(lightmap: MazeLightmap, decal: MazeLayout['decals'][number]) {
+  const decalSize = 1.55
+  const geometry = new PlaneGeometry(decalSize, decalSize)
+  const uv = geometry.getAttribute('uv')
+  const uv1 = new Float32Array(uv.count * 2)
+  const rects = lightmap.wallRects[decal.wallId]
+  const rect = decal.faceKey === 'pz'
+    ? rects?.pz ?? lightmap.neutralRect
+    : rects?.nz ?? lightmap.neutralRect
+  const mirrorX = decal.faceKey === 'nz'
+  const wallUScale = decalSize / WALL_LENGTH
+  const wallVScale = decalSize / WALL_HEIGHT
+
+  for (let vertexIndex = 0; vertexIndex < uv.count; vertexIndex += 1) {
+    const localU = 0.5 + ((uv.getX(vertexIndex) - 0.5) * wallUScale)
+    const localV = 0.5 + ((uv.getY(vertexIndex) - 0.5) * wallVScale)
+    const [atlasU, atlasV] = mapLightmapRectUvToAtlas(
+      rect,
+      lightmap.atlasWidth,
+      lightmap.atlasHeight,
+      localU,
+      localV,
+      { mirrorX }
+    )
+
+    uv1[vertexIndex * 2] = atlasU
+    uv1[(vertexIndex * 2) + 1] = atlasV
+  }
+
+  geometry.setAttribute('uv1', new Float32BufferAttribute(uv1, 2))
+  return geometry
+}
+
 function createCornerFillerGeometry() {
-  const geometry = new BoxGeometry(WALL_WIDTH, WALL_HEIGHT, WALL_WIDTH)
+  const fillerSize = WALL_WIDTH / 2
+  const geometry = new BoxGeometry(fillerSize, WALL_HEIGHT, fillerSize)
   const uv = geometry.getAttribute('uv')
   const scaledUvs: number[] = []
 
   for (let index = 0; index < uv.count; index += 1) {
-    scaledUvs.push(uv.getX(index) * (WALL_WIDTH / WALL_LENGTH), uv.getY(index))
+    scaledUvs.push(uv.getX(index) * (fillerSize / WALL_LENGTH), uv.getY(index))
   }
 
   geometry.setAttribute('uv', new Float32BufferAttribute(scaledUvs, 2))
@@ -8525,29 +8577,21 @@ function MazeWalls({
         />
       ))}
       {layout.decals.map((decal, decalIndex) => (
-        <mesh
+        <MazeWallDecal
+          decal={decal}
+          decalIndex={decalIndex}
+          decalTexture={decalTextures[decal.textureIndex % decalTextures.length]}
+          iblContributionIntensity={staticVolumetricContributionIntensity}
           key={decal.id}
-          position={[
-            decal.position.x,
-            decal.position.y,
-            decal.position.z
-          ]}
-          rotation-y={decal.yaw}
-          userData={{
-            debugIndex: decalIndex,
-            debugRole: 'maze-wall-decal'
-          }}
-        >
-          <planeGeometry args={[1.55, 1.55]} />
-          <meshBasicMaterial
-            alphaTest={0.04}
-            depthWrite={false}
-            map={decalTextures[decal.textureIndex % decalTextures.length]}
-            side={DoubleSide}
-            toneMapped
-            transparent
-          />
-        </mesh>
+          layout={layout}
+          lightmap={layout.maze.lightmap}
+          lightmapContributionIntensity={lightmapContributionIntensity}
+          lightmapTexture={lightmapTexture}
+          lightmapTextureEncoding={lightmapTextureEncoding}
+          probeDepthAtlasTextures={probeDepthAtlasTextures}
+          probeCoefficientTextures={probeCoefficientTextures}
+          reflectionProbeCoefficients={reflectionProbeCoefficients}
+        />
       ))}
       {layout.cornerFillers.map((filler, fillerIndex) => (
         <WallDetailMesh
@@ -8557,7 +8601,7 @@ function MazeWalls({
           environmentIntensity={environmentIntensity}
           environmentTexture={environmentTexture}
           geometryKind="corner-filler"
-          iblContributionIntensity={staticVolumetricContributionIntensity + lightmapContributionIntensity}
+          iblContributionIntensity={staticVolumetricContributionIntensity}
           key={filler.id}
           layout={layout}
           probeDepthAtlasTextures={probeDepthAtlasTextures}
@@ -8577,7 +8621,7 @@ function MazeWalls({
           environmentIntensity={environmentIntensity}
           environmentTexture={environmentTexture}
           geometryKind="gate-post"
-          iblContributionIntensity={staticVolumetricContributionIntensity + lightmapContributionIntensity}
+          iblContributionIntensity={staticVolumetricContributionIntensity}
           key={post.id}
           layout={layout}
           postRadius={post.radius}
@@ -8820,6 +8864,196 @@ function WallFaceMaterial({
       ref={setMaterial}
       roughness={0.92}
     />
+  )
+}
+
+function LitDecalMaterial({
+  alphaMap,
+  lightMap,
+  lightMapIntensity,
+  materialKey,
+  patchConfig,
+  probeBlend
+}: {
+  alphaMap: Texture
+  lightMap?: Texture
+  lightMapIntensity: number
+  materialKey: string
+  patchConfig: MaterialShaderPatchConfig
+  probeBlend: ProbeBlendConfig
+}) {
+  const [material, setMaterial] = useState<ThreeMeshStandardMaterial | null>(null)
+  const probeBlendMaterialProps = useProbeBlendMaterialShader(
+    material,
+    probeBlend,
+    patchConfig,
+    materialKey
+  )
+
+  return (
+    <meshStandardMaterial
+      alphaTest={0.04}
+      customProgramCacheKey={probeBlendMaterialProps.customProgramCacheKey}
+      depthWrite={false}
+      envMap={getProbeBlendEnvMap(probeBlend)}
+      envMapIntensity={0}
+      key={materialKey}
+      lightMap={lightMap}
+      lightMapIntensity={lightMapIntensity}
+      map={alphaMap}
+      metalness={0}
+      onBeforeCompile={probeBlendMaterialProps.onBeforeCompile}
+      onBeforeRender={probeBlendMaterialProps.onBeforeRender}
+      ref={setMaterial}
+      roughness={1}
+      side={DoubleSide}
+      toneMapped
+      transparent
+    />
+  )
+}
+
+function MazeWallDecal({
+  decal,
+  decalIndex,
+  decalTexture,
+  iblContributionIntensity,
+  layout,
+  lightmap,
+  lightmapContributionIntensity,
+  lightmapTexture,
+  lightmapTextureEncoding,
+  probeDepthAtlasTextures,
+  probeCoefficientTextures,
+  reflectionProbeCoefficients
+}: {
+  decal: MazeLayout['decals'][number]
+  decalIndex: number
+  decalTexture: Texture
+  iblContributionIntensity: number
+  layout: MazeLayout
+  lightmap: MazeLightmap
+  lightmapContributionIntensity: number
+  lightmapTexture: Texture
+  lightmapTextureEncoding: LightmapTextureEncoding
+  probeDepthAtlasTextures: ProbeDepthAtlasTextures
+  probeCoefficientTextures: [Texture, Texture, Texture, Texture]
+  reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
+}) {
+  const volumetricShadowsEnabled = useContext(VolumetricShadowContext)
+  const geometry = useMemo(
+    () => createDecalGeometry(lightmap, decal),
+    [decal, lightmap]
+  )
+  const reflectionProbeBlend = useMemo(
+    () =>
+      getReflectionProbeBlendForPosition(layout, {
+        x: decal.position.x,
+        z: decal.position.z
+      }),
+    [decal.position.x, decal.position.z, layout]
+  )
+  const probeCoefficients = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeCoefficients[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeCoefficients]
+  )
+  const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
+  const surfaceLightmapsEnabled =
+    lightmapContributionIntensity > EFFECT_EPSILON
+  const probeIblActive =
+    iblContributionIntensity > EFFECT_EPSILON &&
+    hasProbeCoefficients
+  const lightMapIntensity =
+    surfaceLightmapsEnabled
+      ? lightmapContributionIntensity * WALL_LIGHTMAP_INTENSITY_SCALE
+      : 0
+  const patchConfig = useMemo(
+    () => ({
+      lightMapAmbientTint:
+        surfaceLightmapsEnabled
+          ? LIGHTMAP_AMBIENT_TINT.clone().multiplyScalar(lightmapContributionIntensity)
+          : BLACK_COLOR,
+      lightMapEncoding: lightmapTextureEncoding,
+      lightMapTorchTint: TORCH_LIGHTMAP_TINT
+    }),
+    [lightmapContributionIntensity, lightmapTextureEncoding, surfaceLightmapsEnabled]
+  )
+  const probeBlend = useMemo(
+    () =>
+      buildProbeBlendConfig(
+        layout,
+        reflectionProbeBlend.probeIndices,
+        [],
+        [],
+        probeDepthAtlasTextures,
+        probeCoefficients,
+        'disabled',
+        {
+          diffuseIntensity: iblContributionIntensity,
+          probeCoefficientTextures,
+          radianceIntensity: 0,
+          radianceMode: 'disabled',
+          useProbeConnectivity: volumetricShadowsEnabled,
+          vlmBoundaryNormal:
+            Math.abs(decal.normal.x) > Math.abs(decal.normal.z)
+              ? { x: 1, z: 0 }
+              : { x: 0, z: 1 },
+          vlmMode: probeIblActive ? 'boundary8' : 'disabled',
+          weights: reflectionProbeBlend.weights as [number, number, number, number]
+        }
+      ),
+    [
+      decal.normal.x,
+      decal.normal.z,
+      iblContributionIntensity,
+      layout,
+      probeCoefficients,
+      probeCoefficientTextures,
+      probeDepthAtlasTextures,
+      probeIblActive,
+      reflectionProbeBlend.probeIndices,
+      reflectionProbeBlend.weights,
+      volumetricShadowsEnabled
+    ]
+  )
+  const materialKey = useMemo(
+    () => getProbeBlendMaterialKey('maze-wall-decal', probeBlend, patchConfig),
+    [patchConfig, probeBlend]
+  )
+
+  useEffect(
+    () => () => {
+      geometry.dispose()
+    },
+    [geometry]
+  )
+
+  return (
+    <mesh
+      position={[
+        decal.position.x,
+        decal.position.y,
+        decal.position.z
+      ]}
+      rotation-y={decal.yaw}
+      userData={{
+        debugIndex: decalIndex,
+        debugRole: 'maze-wall-decal'
+      }}
+    >
+      <primitive attach="geometry" object={geometry} />
+      <LitDecalMaterial
+        alphaMap={decalTexture}
+        lightMap={surfaceLightmapsEnabled ? lightmapTexture : undefined}
+        lightMapIntensity={lightMapIntensity}
+        materialKey={materialKey}
+        patchConfig={patchConfig}
+        probeBlend={probeBlend}
+      />
+    </mesh>
   )
 }
 
@@ -9688,7 +9922,7 @@ function HeldItemView({
           -(bounds.min.z * scale)
         ),
         rotationX: 0,
-        rotationY: Math.PI,
+        rotationY: 0,
         scale
       }
     }
@@ -9730,8 +9964,8 @@ function HeldItemView({
     const cameraQuaternion = camera.quaternion
 
     if (itemType === 'sword') {
-      const handleLocal = new Vector3(0.34, -0.42, -0.62)
-      const targetLocal = new Vector3(0.04, -0.18, -1.32)
+      const handleLocal = new Vector3(0.34, -0.42, -0.50)
+      const targetLocal = new Vector3(0.04, -0.18, -1.18)
       const handleWorld = handleLocal.applyQuaternion(cameraQuaternion).add(camera.position)
       const targetWorld = targetLocal.applyQuaternion(cameraQuaternion).add(camera.position)
 
@@ -9740,7 +9974,7 @@ function HeldItemView({
       return
     }
 
-    const trophyLocal = new Vector3(-0.28, -0.38, -0.62)
+    const trophyLocal = new Vector3(-0.42, -0.52, -0.62)
     const trophyWorld = trophyLocal.applyQuaternion(cameraQuaternion).add(camera.position)
 
     group.current.position.copy(trophyWorld)
@@ -13694,7 +13928,7 @@ function VisualControls({
         <output>{visualSettings.volumetricShadowsEnabled ? 'on' : 'off'}</output>
         <label className="visual-effect-label">
           <input
-            aria-label="Volumetric Connectivity Enabled"
+            aria-label="Volumetric Occlusion Enabled"
             checked={visualSettings.volumetricShadowsEnabled}
             onChange={(event) => {
               onBooleanSettingChange('volumetricShadowsEnabled', event.target.checked)
@@ -13702,7 +13936,7 @@ function VisualControls({
             type="checkbox"
           />
           <ResettableLabel onReset={() => onResetBooleanSetting('volumetricShadowsEnabled')}>
-            Volumetric Connectivity
+            Volumetric Occlusion
           </ResettableLabel>
         </label>
         <span aria-hidden="true" />
@@ -15249,12 +15483,13 @@ export default function App() {
       setSceneLoaded(false)
       setMazeLoadError(null)
       document.body.dataset.mazeLayoutRequestedAt = performance.now().toFixed(1)
-      document.body.dataset.requestedMazeId = requestedMazeId ?? 'random'
+      document.body.dataset.requestedMazeId = requestedMazeId ?? getDefaultRuntimeLevelId()
 
       try {
+        const defaultMazeId = requestedMazeId ?? getDefaultRuntimeLevelId()
         const nextLayout = requestedMazeId
           ? await loadMazeLayoutById(requestedMazeId)
-          : await loadRandomMazeLayout()
+          : await loadMazeLayoutById(defaultMazeId)
 
         if (requestedMazeId && !nextLayout) {
           throw new Error(`Requested maze "${requestedMazeId}" could not be loaded`)

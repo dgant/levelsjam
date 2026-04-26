@@ -10,6 +10,8 @@ const testFile = 'tests/maze.test.js'
 const testCases = [
   { name: 'generates valid mazes under 100ms', thresholdMs: 5_000 },
   { name: 'places initial torch lights on pickup cells', thresholdMs: 5_000 },
+  { name: 'initial monsters face legal movement cells', thresholdMs: 5_000 },
+  { name: 'generated wall decals avoid torch-bearing wall faces', thresholdMs: 5_000 },
   { name: 'persists at least five valid mazes', thresholdMs: 12_000 },
   { name: 'dumps persisted maze lightmap artifacts into the gitignored logs directory', thresholdMs: 5_000 },
   { name: 'deletes invalid maze files and regenerates replacements', thresholdMs: 5_000 },

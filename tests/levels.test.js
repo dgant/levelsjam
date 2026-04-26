@@ -2,6 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  createAuthoredRuntimeMaze,
+  getDefaultRuntimeLevelId,
   parseLevelSpec,
   resolveRuntimeMazeIdForLevel
 } from '../src/lib/levels.js'
@@ -39,10 +41,41 @@ test('level runtime maze resolver maps numbered maze levels when possible', () =
   )
   assert.equal(
     resolveRuntimeMazeIdForLevel('Entrance', 0, mazeIds, null),
-    'maze-001'
+    'entrance'
   )
   assert.equal(
     resolveRuntimeMazeIdForLevel('Unknown', 8, [], 'maze-003'),
     'maze-003'
   )
+})
+
+test('authored runtime levels are real level ids with authored payloads', () => {
+  assert.equal(getDefaultRuntimeLevelId(), 'entrance')
+  assert.equal(
+    resolveRuntimeMazeIdForLevel(
+      'Chamber 1',
+      1,
+      ['entrance', 'chamber-1', 'maze-001'],
+      null
+    ),
+    'chamber-1'
+  )
+  assert.equal(
+    resolveRuntimeMazeIdForLevel(
+      'Maze 1',
+      2,
+      ['entrance', 'chamber-1', 'maze-001'],
+      null
+    ),
+    'maze-001'
+  )
+
+  const entrance = createAuthoredRuntimeMaze('entrance')
+
+  assert.equal(entrance.id, 'entrance')
+  assert.equal(entrance.width, 3)
+  assert.equal(entrance.height, 3)
+  assert.equal(entrance.playerStart.direction, 'north')
+  assert.equal(entrance.exitRequiresTrophy, false)
+  assert.ok(entrance.lightmap)
 })

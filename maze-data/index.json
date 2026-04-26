@@ -1,5 +1,7 @@
 {
   "mazeIds": [
+    "entrance",
+    "chamber-1",
     "maze-001",
     "maze-002",
     "maze-003",

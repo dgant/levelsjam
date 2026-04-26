@@ -363,8 +363,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByLabel('Static Volumetric Enabled')).toBeVisible()
     await expect(page.getByLabel('Static Volumetric Enabled')).not.toBeChecked()
     await expect(page.getByRole('slider', { name: 'Static Volumetric' })).toHaveValue('1')
-    await expect(page.getByLabel('Volumetric Connectivity Enabled')).toBeVisible()
-    await expect(page.getByLabel('Volumetric Connectivity Enabled')).toBeChecked()
+    await expect(page.getByLabel('Volumetric Occlusion Enabled')).toBeVisible()
+    await expect(page.getByLabel('Volumetric Occlusion Enabled')).toBeChecked()
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeVisible()
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeChecked()
     await expect(page.getByRole('slider', { name: 'Reflection Intensity' })).toHaveValue('1')
@@ -544,7 +544,9 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect
       .poll(
         async () => page.evaluate(() => ({
-          ground: window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4),
+          ground: Array.from({ length: 200 }, (_, index) =>
+            window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', index)
+          ).find((state) => state?.probeBlendUniforms) ?? null,
           wall: Array.from({ length: 200 }, (_, index) =>
             window.__levelsjamDebug.getDebugMeshState('maze-wall', index)
           ).find(Boolean) ?? null

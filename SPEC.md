@@ -14,8 +14,10 @@
 - If a requested maze cannot be loaded, the runtime fails that request explicitly instead of swapping to another maze.
 - `LEVELS.md` is the plain-English source for the authored level order.
 - The runtime parses `LEVELS.md` into an ordered level list using each `+ Level Name` heading as one selectable level entry and the following prose as that level's description.
-- The initial runtime level menu can route authored level selections to the current persisted-maze runtime while preserving a clean data path for future non-maze level payloads.
+- Authored levels named `Entrance` and `Chamber 1` are real runtime levels rather than aliases for numbered maze payloads.
 - Selecting a level through the runtime menu resets that level's character and maze state before placing the player at that level's entrance.
+- The game begins in the authored `Entrance` level.
+- Player movement through an authored level exit transitions out of that level rather than being blocked by the numbered-maze trophy escape rule.
 
 ## Current Scope
 - The scene uses image-based lighting from the Poly Haven `overcast_soil` environment.
@@ -62,6 +64,11 @@
 - Each torch billboard samples the linked atlas so the visible flame fills the specified quad and sits on the sconce instead of floating above it due to transparent frame padding.
 - Each torch billboard is rendered through a dedicated translucent composite path after the opaque AO and SSR inputs have been generated.
 - Each torch billboard blends additively into the already-rendered scene color rather than replacing the background color under its alpha.
+- Maze corner filler wall pieces occupy only the missing wall-corner volume needed to close L-shaped joins and must not overlap adjacent wall meshes enough to create z-fighting.
+- Maze corner filler wall pieces receive lighting through the same volumetric probe path as other non-lightmapped wall-detail geometry and must not add surface-lightmap intensity on top of probe lighting.
+- Wall decals use OpenAI-generated Minoan fresco-style painting assets instead of procedural placeholder drawings.
+- Wall decals are lit through the same wall-surface lighting path as the wall face they are attached to.
+- Wall decals are never placed on wall faces that contain a torch/sconce light.
 - Each maze includes a baked torch lightmap generated as a late step in maze generation.
 - Each maze lightmap stores the baked static direct and skylight contribution for the maze floor and wall faces.
 - Each maze wall face receives baked torch lighting on the side that faces the lit cell rather than on the wall's opposite face.
@@ -236,6 +243,9 @@
 - The werewolf runtime model loads from an offline-joined asset derived from `public/models/awil_werewolf.zip`, preserves the authored PBR texture set, and reduces the source asset's static over-split skinned meshes to a single regular mesh.
 - Monster GLTF materials preserve their authored PBR texture and material inputs where those inputs load successfully.
 - Monster GLTF materials participate in the local volumetric-lightmap diffuse path and the local reflection-probe specular path.
+- Maze generation initializes each monster facing a legal neighboring cell when one exists.
+- Non-spider monsters prefer their legal neighbor with the shortest path back to the maze entrance.
+- Spiders initialize facing the next cell they would move into under their left-hand or right-hand wall-following rule.
 - Awake minotaurs and werewolves face the player during idle, rotation, and movement animations.
 - Pressing `1` toggles a free-camera inspection mode that detaches the camera from the player.
 - Free-camera inspection mode uses WASD plus mouse look, has no collisions, supports the arrow keys as movement aliases, and maps `E` to move down and `Q` to move up.
@@ -245,7 +255,9 @@
 - Pressing `Escape` opens a centered level menu modal when the level menu is closed.
 - Pressing `Escape` closes the level menu modal when it is open.
 - The level menu lists the levels parsed from `LEVELS.md` in their authored order.
-- Clicking a level name closes the level menu, loads the corresponding runtime maze or placeholder-backed current maze integration, resets its state, and teleports the player to that level's entrance.
+- Clicking a level name closes the level menu, loads the corresponding authored level or numbered runtime maze, resets its state, and teleports the player to that level's entrance.
+- The first-person held sword is oriented with the blade pointing forward and is pulled back far enough to remain inside the player's current cell.
+- The first-person held trophy appears lower and farther left on screen than the held sword.
 - The character collision volume is a capsule that is 1.75 meters tall and 0.25 meters in radius.
 - The player spawns 1 meter above the ground plane.
 - The camera eye height remains derived from the character capsule.
@@ -569,6 +581,10 @@
 - Automated coverage verifies the solution-replay debug path can reset a maze and replay the recorded successful path while player controls are disabled.
 - Automated coverage verifies solution replay resets character state, pickup state, monster state, gates, and player position before replaying recorded actions.
 - Automated coverage verifies the `LEVELS.md` parser preserves authored level order and descriptions.
+- Automated coverage verifies authored levels resolve to authored runtime level ids instead of numbered maze ids.
+- Automated coverage verifies the runtime default level is the authored `Entrance`.
+- Automated coverage verifies decals are not generated on torch-bearing wall faces.
+- Automated coverage verifies monster initial facings point toward legal movement cells and apply the spider wall-following rule.
 - Automated coverage verifies maze data and instantiated maze scene objects can be loaded, unloaded, reset, and reloaded repeatedly without stale assets or scene objects surviving the unload.
 - The scene-instantiation path is checked in the browser and verified to load one of the persisted mazes, build the correct wall meshes, and place sconces and torches only at the maze-defined light positions.
 - The maze-artifact generation path is checked end to end so the dumped per-maze artifact directory contains reflection-probe capture images, volumetric-lightmap artifacts, and baked lightmap images.
