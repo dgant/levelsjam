@@ -11,6 +11,24 @@ const AUTHORED_LEVEL_NAMES = Object.freeze(
   )
 )
 
+const RUNTIME_LEVEL_ADJACENCY = Object.freeze({
+  entrance: ['chamber-1'],
+  'chamber-1': ['entrance', 'maze-001', 'maze-002', 'maze-003', 'maze-005'],
+  'maze-001': ['chamber-1'],
+  'maze-002': ['chamber-1'],
+  'maze-003': ['chamber-1'],
+  'maze-005': ['chamber-1']
+})
+
+const RUNTIME_LEVEL_WORLD_TRANSFORMS = Object.freeze({
+  entrance: { x: 0, z: 0, rotationY: 0 },
+  'chamber-1': { x: 0, z: -17, rotationY: 0 },
+  'maze-001': { x: -12, z: -20, rotationY: Math.PI },
+  'maze-002': { x: -12, z: -27, rotationY: Math.PI },
+  'maze-003': { x: 12, z: -22, rotationY: 0 },
+  'maze-005': { x: 12, z: -10, rotationY: 0 }
+})
+
 const authoredLevelMazeCache = new Map()
 
 export function parseLevelSpec(markdown) {
@@ -168,6 +186,18 @@ export function isAuthoredRuntimeLevelId(id) {
 
 export function getAuthoredRuntimeLevelIds() {
   return Object.values(AUTHORED_LEVEL_IDS)
+}
+
+export function getAdjacentRuntimeLevelIds(id) {
+  return [...(RUNTIME_LEVEL_ADJACENCY[id] ?? [])]
+}
+
+export function getRuntimeLevelWorldTransform(id) {
+  const transform = RUNTIME_LEVEL_WORLD_TRANSFORMS[id]
+
+  return transform
+    ? { ...transform }
+    : { x: 0, z: 0, rotationY: 0 }
 }
 
 export function createAuthoredRuntimeMaze(id) {

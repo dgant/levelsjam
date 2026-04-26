@@ -49,6 +49,15 @@ export declare function applyTurnAction(
   blocked: boolean
   escaped: boolean
   killed: boolean
+  levelTransition: {
+    direction: CardinalDirection
+    exit: {
+      cell: MazeCell
+      side: CardinalDirection
+      targetLevelId?: string
+    }
+    targetLevelId: string
+  } | null
   pickedUpSword: boolean
   pickedUpTrophy: boolean
   playerEffect: 'death' | 'escape' | 'sword-strike' | null
@@ -78,6 +87,15 @@ export declare function createInitialTurnState(maze: unknown): TurnState
 export declare function createMonsterMoveEdgeSet(maze: unknown): Set<string>
 export declare function createPlayerMoveEdgeSet(maze: unknown, state: TurnState): Set<string>
 export declare function getNeighbor(cell: MazeCell, direction: CardinalDirection): MazeCell
+export declare function getExitForMove(
+  maze: unknown,
+  cell: MazeCell,
+  direction: CardinalDirection
+): {
+  cell: MazeCell
+  side: CardinalDirection
+  targetLevelId?: string
+} | null
 export declare function getOpenGateIds(maze: unknown, state: TurnState): string[]
 export declare function getVisibleCells(maze: unknown, state: TurnState): Set<string>
 export declare function normalizeEdge(from: MazeCell, to: MazeCell): string

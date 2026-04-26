@@ -17,7 +17,10 @@
 - Authored levels named `Entrance` and `Chamber 1` are real runtime levels rather than aliases for numbered maze payloads.
 - Selecting a level through the runtime menu resets that level's character and maze state before placing the player at that level's entrance.
 - The game begins in the authored `Entrance` level.
-- Player movement through an authored level exit transitions out of that level rather than being blocked by the numbered-maze trophy escape rule.
+- Player movement through an authored level exit transitions seamlessly into the connected level without fading, showing a loading transition, or exposing the boundary between levels.
+- The runtime renders the current level and the levels directly adjacent to it so ordinary walking between connected levels does not reveal level streaming.
+- Once a level's gameplay-rule state has been loaded, the runtime keeps that state available for the rest of the session instead of unloading or resetting it during ordinary level traversal.
+- Player movement between connected levels is a level transition, not an escape state.
 
 ## Current Scope
 - The scene uses image-based lighting from the Poly Haven `overcast_soil` environment.

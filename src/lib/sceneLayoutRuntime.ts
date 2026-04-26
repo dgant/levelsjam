@@ -47,7 +47,16 @@ type PersistedMaze = {
   height: number
   id: string
   isAuthoredLevel?: boolean
+  levelExits?: Array<{
+    cell: { x: number; y: number }
+    side: 'north' | 'east' | 'south' | 'west'
+    targetLevelId?: string
+  }>
   lightmap?: unknown
+  opening?: {
+    cell: { x: number; y: number }
+    side: 'north' | 'east' | 'south' | 'west'
+  }
   width: number
 }
 
@@ -143,6 +152,29 @@ async function loadPersistedMaze(id: string) {
   }
 }
 
+function withRuntimeLevelExits(maze: PersistedMaze) {
+  if (
+    !maze.id.match(/^maze-\d{3}$/) ||
+    !maze.opening ||
+    maze.levelExits?.some((exit) => exit.targetLevelId === 'chamber-1')
+  ) {
+    return maze
+  }
+
+  return {
+    ...maze,
+    exitRequiresTrophy: false,
+    levelExits: [
+      ...(maze.levelExits ?? []),
+      {
+        cell: { ...maze.opening.cell },
+        side: maze.opening.side,
+        targetLevelId: 'chamber-1'
+      }
+    ]
+  }
+}
+
 export function getDebugMazeLayoutById(id: string): MazeLayout | null {
   const maze = loadedDebugMazes.get(id)
 
@@ -171,7 +203,7 @@ export async function loadMazeLayoutById(id: string): Promise<MazeLayout | null>
       return null
     }
 
-    const layout = getMazeSceneLayout(persistedMaze, SCONCE_RADIUS) as MazeLayout
+    const layout = getMazeSceneLayout(withRuntimeLevelExits(persistedMaze), SCONCE_RADIUS) as MazeLayout
 
     mazeLayoutCache.set(id, layout)
     return layout

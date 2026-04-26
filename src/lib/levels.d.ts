@@ -13,6 +13,14 @@ export function isAuthoredRuntimeLevelId(id: string): boolean
 
 export function getAuthoredRuntimeLevelIds(): string[]
 
+export function getAdjacentRuntimeLevelIds(id: string): string[]
+
+export function getRuntimeLevelWorldTransform(id: string): {
+  rotationY: number
+  x: number
+  z: number
+}
+
 export function createAuthoredRuntimeMaze(id: string): unknown | null
 
 export function resolveRuntimeMazeIdForLevel(

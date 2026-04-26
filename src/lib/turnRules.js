@@ -179,7 +179,7 @@ function createPlayerState(maze, direction) {
   }
 }
 
-function getExitForMove(maze, cell, direction) {
+export function getExitForMove(maze, cell, direction) {
   const exits = Array.isArray(maze.levelExits) && maze.levelExits.length > 0
     ? maze.levelExits
     : [maze.opening]
@@ -656,6 +656,7 @@ export function applyTurnAction(maze, state, action) {
     pickedUpTrophy: false,
     playerEffect: null,
     previous: state,
+    levelTransition: null,
     state: next
   }
 
@@ -675,9 +676,25 @@ export function applyTurnAction(maze, state, action) {
     ? OPPOSITE_DIRECTIONS[next.player.direction]
     : next.player.direction
 
-  if (isExitMove(maze, next, moveDirection)) {
+  const levelExit = getExitForMove(maze, next.player.cell, moveDirection)
+
+  if (levelExit) {
     if (maze.exitRequiresTrophy !== false && !next.player.hasTrophy) {
       outcome.blocked = true
+      return outcome
+    }
+
+    if (levelExit.targetLevelId) {
+      next.player.cell = getNeighbor(next.player.cell, moveDirection)
+      next.turn += 1
+      outcome.levelTransition = {
+        direction: moveDirection,
+        exit: {
+          ...levelExit,
+          cell: { ...levelExit.cell }
+        },
+        targetLevelId: levelExit.targetLevelId
+      }
       return outcome
     }
 

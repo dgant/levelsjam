@@ -1,4 +1,5 @@
- Levels follow below "+ Name" indicates the name of a level, and its description follows
+ "+ Name" indicates the name of a level, and its description follows.
+ Treat North/East/South/West as relative directions within the context of a single level description, where North is the direction of the room's entrance from a previous room (in the directed graph that begins with Entrance)
  
  + Entrance
  A 3x3 room. The player's starting position is along the south wall, facing north. The middle of the north-center side is a gate that exits to Chamber 1. The walls next to the gate each have a torch.

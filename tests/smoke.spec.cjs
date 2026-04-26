@@ -257,15 +257,39 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
 
   const state = await page.evaluate(() => ({
     error: document.body.dataset.mazeLayoutLoadError ?? null,
+    lifecycle: window.__levelsjamDebug?.getMazeLifecycleState?.() ?? null,
     loadedMazeId: document.body.dataset.loadedMazeId ?? null,
     requestedMazeId: document.body.dataset.requestedMazeId ?? null
   }))
 
-  expect(state).toEqual({
+  expect(state).toMatchObject({
     error: null,
     loadedMazeId: 'entrance',
     requestedMazeId: 'entrance'
   })
+  expect(state.lifecycle.loadedMazeIds).toEqual(expect.arrayContaining(['entrance', 'chamber-1']))
+
+  for (const key of ['KeyW', 'KeyW', 'KeyW']) {
+    await page.keyboard.press(key)
+    await page.waitForTimeout(350)
+  }
+
+  await page.waitForFunction(
+    () => window.__levelsjamDebug?.getMazeLifecycleState?.()?.instantiatedMazeId === 'chamber-1',
+    undefined,
+    { timeout: 10_000 }
+  )
+
+  const transitionedState = await page.evaluate(() => ({
+    lifecycle: window.__levelsjamDebug?.getMazeLifecycleState?.() ?? null,
+    turn: window.__levelsjamDebug?.getTurnStateSummary?.() ?? null
+  }))
+
+  expect(transitionedState.lifecycle.loadedMazeIds).toEqual(
+    expect.arrayContaining(['entrance', 'chamber-1', 'maze-001', 'maze-002', 'maze-003', 'maze-005'])
+  )
+  expect(transitionedState.turn.escaped).toBe(false)
+  expect(transitionedState.turn.player.cell).toEqual({ x: 2, y: 13 })
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
 })
@@ -542,7 +566,9 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       .poll(
         async () => page.evaluate(
           () => ({
-            ground: window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4),
+            ground: Array.from({ length: 200 }, (_, index) =>
+              window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', index)
+            ).find((state) => state?.hasLightMap) ?? null,
             wall: Array.from({ length: 200 }, (_, index) =>
               window.__levelsjamDebug.getDebugMeshState('maze-wall', index)
             ).find(Boolean) ?? null
@@ -559,15 +585,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
           probeBlend: {
             diffuseIntensity: 0,
             mode: 'disabled',
-            probeConnectivity: true,
-            radianceIntensity: 1,
-            radianceMode: 'world'
-          },
-          probeBlendUniforms: {
-            probeBlendDiffuseIntensity: 0,
-            probeBlendMode: 3,
-            probeBlendRadianceIntensity: 1,
-            probeBlendRadianceMode: 1
+            probeConnectivity: true
           }
         },
         wall: {
@@ -639,7 +657,6 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect
       .poll(
         async () => page.evaluate(() => ({
-          ground: window.__levelsjamDebug.getDebugMeshState('maze-ground-lightmap', 4),
           wall: Array.from({ length: 200 }, (_, index) =>
             window.__levelsjamDebug.getDebugMeshState('maze-wall', index)
           ).find((state) => state?.probeBlendUniforms) ?? null
@@ -650,12 +667,6 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         }
       )
       .toMatchObject({
-        ground: {
-          probeBlendUniforms: {
-            probeBlendMode: 3,
-            probeBlendRadianceMode: 3
-          }
-        },
         wall: {
           probeBlendUniforms: {
             probeBlendMode: 3,

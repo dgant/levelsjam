@@ -3,7 +3,9 @@ import assert from 'node:assert/strict'
 
 import {
   createAuthoredRuntimeMaze,
+  getAdjacentRuntimeLevelIds,
   getDefaultRuntimeLevelId,
+  getRuntimeLevelWorldTransform,
   parseLevelSpec,
   resolveRuntimeMazeIdForLevel
 } from '../src/lib/levels.js'
@@ -78,4 +80,18 @@ test('authored runtime levels are real level ids with authored payloads', () => 
   assert.equal(entrance.playerStart.direction, 'north')
   assert.equal(entrance.exitRequiresTrophy, false)
   assert.ok(entrance.lightmap)
+})
+
+test('runtime level graph keeps authored neighbors and spatial transforms explicit', () => {
+  assert.deepEqual(getAdjacentRuntimeLevelIds('entrance'), ['chamber-1'])
+  assert.deepEqual(
+    getAdjacentRuntimeLevelIds('chamber-1'),
+    ['entrance', 'maze-001', 'maze-002', 'maze-003', 'maze-005']
+  )
+
+  assert.deepEqual(
+    getRuntimeLevelWorldTransform('entrance'),
+    { x: 0, z: 0, rotationY: 0 }
+  )
+  assert.equal(getRuntimeLevelWorldTransform('maze-001').rotationY, Math.PI)
 })

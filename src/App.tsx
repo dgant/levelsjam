@@ -48,6 +48,7 @@ import {
   NoToneMapping,
   NeutralToneMapping,
   NoColorSpace,
+  Object3D,
   OrthographicCamera,
   PMREMGenerator,
   PlaneGeometry,
@@ -107,7 +108,9 @@ import {
   getRendererExposure
 } from './lib/lightingCalibration.js'
 import {
+  getAdjacentRuntimeLevelIds,
   getDefaultRuntimeLevelId,
+  getRuntimeLevelWorldTransform,
   parseLevelSpec,
   resolveRuntimeMazeIdForLevel,
   type AuthoredLevel
@@ -3352,6 +3355,29 @@ function getMazeCellWorldPosition(
   )
 }
 
+type LevelWorldTransform = {
+  rotationY: number
+  x: number
+  z: number
+}
+
+function getTransformedMazeCellWorldPosition(
+  maze: MazeLayout['maze'],
+  transform: LevelWorldTransform,
+  cell: { x: number; y: number },
+  y = GROUND_Y
+) {
+  const localPosition = getMazeCellWorldPosition(maze, cell, y)
+  const cos = Math.cos(transform.rotationY)
+  const sin = Math.sin(transform.rotationY)
+
+  return new Vector3(
+    transform.x + (localPosition.x * cos) + (localPosition.z * sin),
+    localPosition.y,
+    transform.z - (localPosition.x * sin) + (localPosition.z * cos)
+  )
+}
+
 function directionToYaw(direction: CardinalDirection) {
   switch (direction) {
     case 'east':
@@ -4243,6 +4269,19 @@ function isMeshMaterialReady(
   })
 }
 
+function hasReflectionCaptureExcludedAncestor(object: Object3D) {
+  let current: Object3D | null = object
+
+  while (current) {
+    if (current.userData?.reflectionCaptureExcluded) {
+      return true
+    }
+    current = current.parent
+  }
+
+  return false
+}
+
 function getReflectionCaptureSceneState(scene: ThreeScene, layout: MazeLayout) {
   const expectedGroundPatchCount = buildGroundReflectionProbeRects(layout).length
   let groundPatchCount = 0
@@ -4253,7 +4292,7 @@ function getReflectionCaptureSceneState(scene: ThreeScene, layout: MazeLayout) {
   let readySconceCount = 0
 
   scene.traverse((object) => {
-    if (!(object instanceof Mesh)) {
+    if (!(object instanceof Mesh) || hasReflectionCaptureExcludedAncestor(object)) {
       return
     }
 
@@ -11292,7 +11331,9 @@ function TorchLensFlare({
 
 function FlightRig({
   layout,
+  levelTransform,
   movementSettings,
+  onLevelTransition,
   onReplayActiveChange,
   replayRequestId,
   setDisplayedOpenGateIds,
@@ -11301,7 +11342,9 @@ function FlightRig({
   wallBounds
 }: {
   layout: MazeLayout
+  levelTransform: LevelWorldTransform
   movementSettings: MovementSettings
+  onLevelTransition: (targetLevelId: string) => void
   onReplayActiveChange: (active: boolean) => void
   replayRequestId: number
   setDisplayedOpenGateIds: (gateIds: string[]) => void
@@ -11343,6 +11386,9 @@ function FlightRig({
     blocked: boolean
     from: TurnState
     killed: boolean
+    levelTransition: {
+      targetLevelId: string
+    } | null
     playerEffect: 'death' | 'escape' | 'sword-strike' | null
     startedAt: number
     to: TurnState
@@ -11387,8 +11433,9 @@ function FlightRig({
     replayActive.current = replayActions.length > 0
     freeCamera.current = false
     turnStateRef.current = nextState
-    const spawnPosition = getMazeCellWorldPosition(
+    const spawnPosition = getTransformedMazeCellWorldPosition(
       layout.maze,
+      levelTransform,
       nextState.player.cell,
       GROUND_Y
     )
@@ -11399,7 +11446,7 @@ function FlightRig({
       GROUND_Y + PLAYER_EYE_HEIGHT,
       spawnPosition.z
     )
-    yaw.current = directionToYaw(nextState.player.direction)
+    yaw.current = directionToYaw(nextState.player.direction) + levelTransform.rotationY
     pitch.current = DEFAULT_CAMERA_PITCH
     camera.quaternion.setFromEuler(
       cameraEuler.set(DEFAULT_CAMERA_PITCH, yaw.current, 0, 'YXZ')
@@ -11408,11 +11455,12 @@ function FlightRig({
     setDisplayedOpenGateIds(getOpenGateIds(layout.maze, nextState))
     setTurnState(nextState)
     onReplayActiveChange(replayActive.current)
-  }, [camera, layout.maze, onReplayActiveChange, replayRequestId, setDisplayedOpenGateIds, setTurnState])
+  }, [camera, layout.maze, levelTransform, onReplayActiveChange, replayRequestId, setDisplayedOpenGateIds, setTurnState])
 
   useEffect(() => {
-    const spawnPosition = getMazeCellWorldPosition(
+    const spawnPosition = getTransformedMazeCellWorldPosition(
       layout.maze,
+      levelTransform,
       turnState.player.cell,
       GROUND_Y
     )
@@ -11424,11 +11472,11 @@ function FlightRig({
 
     camera.rotation.order = 'YXZ'
     camera.position.set(cameraPosition.x, cameraPosition.y, cameraPosition.z)
-    yaw.current = directionToYaw(turnState.player.direction)
+    yaw.current = directionToYaw(turnState.player.direction) + levelTransform.rotationY
     camera.quaternion.setFromEuler(cameraEuler.set(DEFAULT_CAMERA_PITCH, yaw.current, 0, 'YXZ'))
     pitch.current = DEFAULT_CAMERA_PITCH
     playerPosition.current.copy(spawnPosition)
-  }, [camera, layout.maze])
+  }, [camera, layout.maze, levelTransform])
 
   useEffect(() => {
     const updateRotation = () => {
@@ -12301,6 +12349,7 @@ function FlightRig({
             blocked: Boolean(result.blocked),
             from: result.previous,
             killed: result.killed,
+            levelTransition: result.levelTransition,
             playerEffect: result.playerEffect,
             startedAt: performance.now(),
             to: result.state
@@ -12327,6 +12376,14 @@ function FlightRig({
         displayState = activeAnimation.to
 
         if (animationAlpha >= 1) {
+          if (activeAnimation.levelTransition) {
+            playerAnimation.current = null
+            inputQueue.current = []
+            replayQueue.current = []
+            onLevelTransition(activeAnimation.levelTransition.targetLevelId)
+            return
+          }
+
           let finalState = activeAnimation.killed
             ? resetTurnStateToCheckpoint(layout.maze, activeAnimation.to)
             : activeAnimation.to
@@ -12388,12 +12445,22 @@ function FlightRig({
       const fromCell =
         activeAnimation?.from.player.cell ?? displayState.player.cell
       const toCell = displayState.player.cell
-      const fromPosition = getMazeCellWorldPosition(layout.maze, fromCell, GROUND_Y + PLAYER_EYE_HEIGHT)
-      const toPosition = getMazeCellWorldPosition(layout.maze, toCell, GROUND_Y + PLAYER_EYE_HEIGHT)
+      const fromPosition = getTransformedMazeCellWorldPosition(
+        layout.maze,
+        levelTransform,
+        fromCell,
+        GROUND_Y + PLAYER_EYE_HEIGHT
+      )
+      const toPosition = getTransformedMazeCellWorldPosition(
+        layout.maze,
+        levelTransform,
+        toCell,
+        GROUND_Y + PLAYER_EYE_HEIGHT
+      )
       const fromYaw = directionToYaw(
         activeAnimation?.from.player.direction ?? displayState.player.direction
-      )
-      let toYaw = directionToYaw(displayState.player.direction)
+      ) + levelTransform.rotationY
+      let toYaw = directionToYaw(displayState.player.direction) + levelTransform.rotationY
       if (
         activeAnimation &&
         (
@@ -12432,11 +12499,17 @@ function FlightRig({
             : activeAnimation.from.player.direction
         const bumpOffset = directionToWorldOffset(moveDirection)
         const bumpAlpha = Math.sin(animationAlpha * Math.PI) * BLOCKED_MOVE_FRACTION
+        const bumpCos = Math.cos(levelTransform.rotationY)
+        const bumpSin = Math.sin(levelTransform.rotationY)
+        const worldBumpOffset = {
+          x: (bumpOffset.x * bumpCos) + (bumpOffset.z * bumpSin),
+          z: -(bumpOffset.x * bumpSin) + (bumpOffset.z * bumpCos)
+        }
 
         camera.position.set(
-          fromPosition.x + (bumpOffset.x * bumpAlpha),
+          fromPosition.x + (worldBumpOffset.x * bumpAlpha),
           fromPosition.y,
-          fromPosition.z + (bumpOffset.z * bumpAlpha)
+          fromPosition.z + (worldBumpOffset.z * bumpAlpha)
         )
       } else {
         camera.position.lerpVectors(fromPosition, toPosition, animationAlpha)
@@ -12505,36 +12578,140 @@ function FlightRig({
   return null
 }
 
+function RenderedLevelGeometry({
+  environmentTexture,
+  environmentIntensity,
+  iblContributionIntensity,
+  layout,
+  lightmapContributionIntensity,
+  probeDebugMode,
+  probeDepthAtlasTextures,
+  probeCoefficientTextures,
+  reflectionProbeCoefficients,
+  reflectionProbeDepthTextures,
+  reflectionContributionIntensity,
+  reflectionProbeTextures,
+  staticVolumetricContributionIntensity,
+  transform,
+  turnState
+}: {
+  environmentTexture: Texture | null
+  environmentIntensity: number
+  iblContributionIntensity: number
+  layout: MazeLayout
+  lightmapContributionIntensity: number
+  probeDebugMode: ProbeDebugMode
+  probeDepthAtlasTextures: ProbeDepthAtlasTextures
+  probeCoefficientTextures: [Texture, Texture, Texture, Texture]
+  reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
+  reflectionProbeDepthTextures: CubeTexture[]
+  reflectionContributionIntensity: number
+  reflectionProbeTextures: Texture[]
+  staticVolumetricContributionIntensity: number
+  transform: LevelWorldTransform
+  turnState: TurnState
+}) {
+  const surfaceLightmap = useSurfaceLightmapAtlasTexture(layout.maze.lightmap)
+  const openGateIds = useMemo(
+    () => new Set(getOpenGateIds(layout.maze, turnState)),
+    [layout.maze, turnState]
+  )
+
+  return (
+    <group
+      position={[transform.x, 0, transform.z]}
+      rotation={[0, transform.rotationY, 0]}
+      userData={{
+        reflectionCaptureExcluded: true,
+        streamedLevelId: layout.maze.id
+      }}
+    >
+      <SceneGeometry
+        environmentTexture={environmentTexture}
+        environmentIntensity={environmentIntensity}
+        iblContributionIntensity={iblContributionIntensity}
+        layout={layout}
+        lightmapContributionIntensity={lightmapContributionIntensity}
+        openGateIds={openGateIds}
+        probeDebugMode={probeDebugMode}
+        probeDepthAtlasTextures={probeDepthAtlasTextures}
+        probeCoefficientTextures={probeCoefficientTextures}
+        reflectionProbeCoefficients={reflectionProbeCoefficients}
+        reflectionProbeDepthTextures={reflectionProbeDepthTextures}
+        reflectionContributionIntensity={reflectionContributionIntensity}
+        reflectionProbeTextures={reflectionProbeTextures}
+        staticVolumetricContributionIntensity={staticVolumetricContributionIntensity}
+        surfaceLightmap={surfaceLightmap}
+        turnState={turnState}
+      />
+      <MonsterActors
+        environmentIntensity={environmentIntensity}
+        environmentTexture={environmentTexture}
+        iblContributionIntensity={iblContributionIntensity}
+        layout={layout}
+        lightmapContributionIntensity={lightmapContributionIntensity}
+        probeDepthAtlasTextures={probeDepthAtlasTextures}
+        probeCoefficientTextures={probeCoefficientTextures}
+        reflectionContributionIntensity={reflectionContributionIntensity}
+        reflectionProbeCoefficients={reflectionProbeCoefficients}
+        reflectionProbeDepthTextures={reflectionProbeDepthTextures}
+        reflectionProbeTextures={reflectionProbeTextures}
+        turnState={turnState}
+      />
+    </group>
+  )
+}
+
 function Scene({
   composerEnabled,
   controlsOpen,
   layout,
+  levelTransform,
+  renderedLayouts,
   onAssetsReady,
+  onLevelTransition,
   onReplayActiveChange,
+  onTurnStateChange,
+  initialTurnState,
   replayRequestId,
   visualSettings
 }: {
   composerEnabled: boolean
   controlsOpen: boolean
   layout: MazeLayout
+  levelTransform: LevelWorldTransform
+  renderedLayouts: MazeLayout[]
   onAssetsReady: () => void
+  onLevelTransition: (targetLevelId: string) => void
   onReplayActiveChange: (active: boolean) => void
+  onTurnStateChange: (mazeId: string, turnState: TurnState) => void
+  initialTurnState: TurnState
   replayRequestId: number
   visualSettings: VisualSettings
 }) {
   recordStartupMarker('sceneRenderStartedAt')
-  const [turnState, setTurnState] = useState<TurnState>(() =>
-    createInitialTurnState(layout.maze)
-  )
+  const [turnState, rawSetTurnState] = useState<TurnState>(() => initialTurnState)
   const [displayedOpenGateIds, setDisplayedOpenGateIds] = useState<string[]>([])
   const hasReportedBasicAssetsReady = useRef(false)
+  const setTurnState = useCallback(
+    (value: TurnState | ((current: TurnState) => TurnState)) => {
+      rawSetTurnState((current) => {
+        const next = typeof value === 'function'
+          ? (value as (current: TurnState) => TurnState)(current)
+          : value
+
+        onTurnStateChange(layout.maze.id, next)
+        return next
+      })
+    },
+    [layout.maze.id, onTurnStateChange]
+  )
 
   useEffect(() => {
-    const nextState = createInitialTurnState(layout.maze)
-
-    setTurnState(nextState)
-    setDisplayedOpenGateIds(getOpenGateIds(layout.maze, nextState))
-  }, [layout.maze])
+    rawSetTurnState(initialTurnState)
+    onTurnStateChange(layout.maze.id, initialTurnState)
+    setDisplayedOpenGateIds(getOpenGateIds(layout.maze, initialTurnState))
+  }, [initialTurnState, layout.maze, onTurnStateChange])
   useEffect(() => {
     hasReportedBasicAssetsReady.current = false
   }, [layout.maze.id])
@@ -12556,8 +12733,13 @@ function Scene({
   const composerRef = useRef<PostEffectComposer | null>(null)
   const environmentIntensity = BAKED_ENVIRONMENT_INTENSITY
   const playerWorldPosition = useMemo(
-    () => getMazeCellWorldPosition(layout.maze, turnState.player.cell, GROUND_Y),
-    [layout.maze, turnState.player.cell.x, turnState.player.cell.y]
+    () => getTransformedMazeCellWorldPosition(
+      layout.maze,
+      levelTransform,
+      turnState.player.cell,
+      GROUND_Y
+    ),
+    [layout.maze, levelTransform, turnState.player.cell.x, turnState.player.cell.y]
   )
   const openGateIds = useMemo(
     () => new Set(displayedOpenGateIds),
@@ -13404,38 +13586,65 @@ function Scene({
         onReflectionProbeTexturesChange={setReflectionProbeTextures}
       />
       <VolumetricShadowContext.Provider value={visualSettings.volumetricShadowsEnabled}>
-        <SceneGeometry
-          environmentTexture={environmentTexture}
-          environmentIntensity={environmentIntensity}
-          iblContributionIntensity={runtimeDynamicVolumetricIntensity}
-          layout={layout}
-          lightmapContributionIntensity={runtimeLightmapIntensity}
-          openGateIds={openGateIds}
-          probeDebugMode={visualSettings.probeDebugMode}
-          probeDepthAtlasTextures={probeDepthAtlasTextures}
-          probeCoefficientTextures={probeCoefficientTextures}
-          reflectionProbeCoefficients={reflectionProbeCoefficients}
-          reflectionProbeDepthTextures={reflectionProbeDepthTextures}
-          reflectionContributionIntensity={runtimeReflectionIntensity}
-          reflectionProbeTextures={reflectionProbeTextures}
-          staticVolumetricContributionIntensity={runtimeStaticVolumetricIntensity}
-          surfaceLightmap={surfaceLightmap}
-          turnState={turnState}
-        />
-        <MonsterActors
-          environmentIntensity={environmentIntensity}
-          environmentTexture={environmentTexture}
-          iblContributionIntensity={runtimeDynamicVolumetricIntensity}
-          layout={layout}
-          lightmapContributionIntensity={runtimeLightmapIntensity}
-          probeDepthAtlasTextures={probeDepthAtlasTextures}
-          probeCoefficientTextures={probeCoefficientTextures}
-          reflectionContributionIntensity={runtimeReflectionIntensity}
-          reflectionProbeCoefficients={reflectionProbeCoefficients}
-          reflectionProbeDepthTextures={reflectionProbeDepthTextures}
-          reflectionProbeTextures={reflectionProbeTextures}
-          turnState={turnState}
-        />
+        <group
+          position={[levelTransform.x, 0, levelTransform.z]}
+          rotation={[0, levelTransform.rotationY, 0]}
+        >
+          <SceneGeometry
+            environmentTexture={environmentTexture}
+            environmentIntensity={environmentIntensity}
+            iblContributionIntensity={runtimeDynamicVolumetricIntensity}
+            layout={layout}
+            lightmapContributionIntensity={runtimeLightmapIntensity}
+            openGateIds={openGateIds}
+            probeDebugMode={visualSettings.probeDebugMode}
+            probeDepthAtlasTextures={probeDepthAtlasTextures}
+            probeCoefficientTextures={probeCoefficientTextures}
+            reflectionProbeCoefficients={reflectionProbeCoefficients}
+            reflectionProbeDepthTextures={reflectionProbeDepthTextures}
+            reflectionContributionIntensity={runtimeReflectionIntensity}
+            reflectionProbeTextures={reflectionProbeTextures}
+            staticVolumetricContributionIntensity={runtimeStaticVolumetricIntensity}
+            surfaceLightmap={surfaceLightmap}
+            turnState={turnState}
+          />
+          <MonsterActors
+            environmentIntensity={environmentIntensity}
+            environmentTexture={environmentTexture}
+            iblContributionIntensity={runtimeDynamicVolumetricIntensity}
+            layout={layout}
+            lightmapContributionIntensity={runtimeLightmapIntensity}
+            probeDepthAtlasTextures={probeDepthAtlasTextures}
+            probeCoefficientTextures={probeCoefficientTextures}
+            reflectionContributionIntensity={runtimeReflectionIntensity}
+            reflectionProbeCoefficients={reflectionProbeCoefficients}
+            reflectionProbeDepthTextures={reflectionProbeDepthTextures}
+            reflectionProbeTextures={reflectionProbeTextures}
+            turnState={turnState}
+          />
+        </group>
+        {renderedLayouts
+          .filter((renderedLayout) => renderedLayout.maze.id !== layout.maze.id)
+          .map((renderedLayout) => (
+            <RenderedLevelGeometry
+              environmentTexture={environmentTexture}
+              environmentIntensity={environmentIntensity}
+              iblContributionIntensity={runtimeDynamicVolumetricIntensity}
+              key={`rendered-level-${renderedLayout.maze.id}`}
+              layout={renderedLayout}
+              lightmapContributionIntensity={runtimeLightmapIntensity}
+              probeDebugMode="none"
+              probeDepthAtlasTextures={probeDepthAtlasTextures}
+              probeCoefficientTextures={probeCoefficientTextures}
+              reflectionProbeCoefficients={reflectionProbeCoefficients}
+              reflectionProbeDepthTextures={reflectionProbeDepthTextures}
+              reflectionContributionIntensity={0}
+              reflectionProbeTextures={reflectionProbeTextures}
+              staticVolumetricContributionIntensity={0}
+              transform={getRuntimeLevelWorldTransform(renderedLayout.maze.id)}
+              turnState={createInitialTurnState(renderedLayout.maze)}
+            />
+          ))}
         {composerEnabled ? (
       <EffectComposer
         enableNormalPass
@@ -13529,7 +13738,9 @@ function Scene({
         ) : null}
         <FlightRig
           layout={layout}
+          levelTransform={levelTransform}
           movementSettings={visualSettings.movement}
+          onLevelTransition={onLevelTransition}
           onReplayActiveChange={onReplayActiveChange}
           replayRequestId={replayRequestId}
           setDisplayedOpenGateIds={setDisplayedOpenGateIds}
@@ -15348,6 +15559,7 @@ export default function App() {
   const [overlayVisible, setOverlayVisible] = useState(true)
   const availableMazeIdsRef = useRef<string[]>([])
   const loadedMazeLayoutsRef = useRef(new Map<string, MazeLayout>())
+  const levelTurnStatesRef = useRef(new Map<string, TurnState>())
   const memoryHighWaterRef = useRef({
     estimatedTextureBytes: 0,
     jsHeapBytes: 0,
@@ -15360,6 +15572,7 @@ export default function App() {
   )
   const [instantiatedMazeId, setInstantiatedMazeId] = useState<string | null>(null)
   const [mazeLayout, setMazeLayout] = useState<MazeLayout | null>(null)
+  const [renderedMazeLayouts, setRenderedMazeLayouts] = useState<MazeLayout[]>([])
   const [mazeLoadError, setMazeLoadError] = useState<string | null>(null)
   const [replayActive, setReplayActive] = useState(false)
   const [replayRequestId, setReplayRequestId] = useState(0)
@@ -15391,6 +15604,49 @@ export default function App() {
       })
   }, [])
 
+  const getOrCreateLevelTurnState = useCallback((layout: MazeLayout) => {
+    const existing = levelTurnStatesRef.current.get(layout.maze.id)
+
+    if (existing) {
+      return existing
+    }
+
+    const nextState = createInitialTurnState(layout.maze)
+
+    levelTurnStatesRef.current.set(layout.maze.id, nextState)
+    return nextState
+  }, [])
+
+  const updateRenderedMazeLayouts = useCallback(() => {
+    setRenderedMazeLayouts(Array.from(loadedMazeLayoutsRef.current.values()))
+  }, [])
+
+  const loadLevelNeighborhood = useCallback(async (mazeId: string) => {
+    const desiredMazeIds = Array.from(new Set([
+      mazeId,
+      ...getAdjacentRuntimeLevelIds(mazeId)
+    ]))
+    const loadedLayouts = await Promise.all(
+      desiredMazeIds.map(async (desiredMazeId) => ({
+        id: desiredMazeId,
+        layout:
+          loadedMazeLayoutsRef.current.get(desiredMazeId) ??
+          await loadMazeLayoutById(desiredMazeId)
+      }))
+    )
+
+    for (const entry of loadedLayouts) {
+      if (!entry.layout) {
+        continue
+      }
+
+      loadedMazeLayoutsRef.current.set(entry.id, entry.layout)
+      getOrCreateLevelTurnState(entry.layout)
+    }
+
+    updateRenderedMazeLayouts()
+  }, [getOrCreateLevelTurnState, updateRenderedMazeLayouts])
+
   const instantiateLoadedMaze = (mazeId: string) => {
     const nextLayout = loadedMazeLayoutsRef.current.get(mazeId)
 
@@ -15405,6 +15661,8 @@ export default function App() {
     setMazeSceneKey((current) => current + 1)
     setMazeLayout(nextLayout)
     document.body.dataset.loadedMazeId = mazeId
+    getOrCreateLevelTurnState(nextLayout)
+    updateRenderedMazeLayouts()
   }
 
   const uninstantiateMaze = () => {
@@ -15423,6 +15681,38 @@ export default function App() {
     setSceneLoaded(false)
     setMazeSceneKey((current) => current + 1)
   }
+
+  const handleLevelTransition = useCallback(async (targetLevelId: string) => {
+    setReplayActive(false)
+    setMazeLoadError(null)
+
+    try {
+      await loadLevelNeighborhood(targetLevelId)
+      const targetLayout =
+        loadedMazeLayoutsRef.current.get(targetLevelId) ??
+        await loadMazeLayoutById(targetLevelId)
+
+      if (!targetLayout) {
+        throw new Error(`Target level "${targetLevelId}" could not be loaded`)
+      }
+
+      loadedMazeLayoutsRef.current.set(targetLevelId, targetLayout)
+      getOrCreateLevelTurnState(targetLayout)
+      setInstantiatedMazeId(targetLevelId)
+      setMazeSceneKey((current) => current + 1)
+      setMazeLayout(targetLayout)
+      document.body.dataset.loadedMazeId = targetLevelId
+      updateRenderedMazeLayouts()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+
+      setMazeLoadError(message)
+    }
+  }, [getOrCreateLevelTurnState, loadLevelNeighborhood, updateRenderedMazeLayouts])
+
+  const handleTurnStateChange = useCallback((mazeId: string, nextTurnState: TurnState) => {
+    levelTurnStatesRef.current.set(mazeId, nextTurnState)
+  }, [])
 
   const loadAndActivateLevel = async (level: AuthoredLevel, index: number) => {
     const mazeIds = availableMazeIdsRef.current.length > 0
@@ -15450,39 +15740,7 @@ export default function App() {
     document.body.dataset.selectedLevelName = level.name
 
     try {
-      const adjacentMazeIds = [index - 1, index + 1]
-        .filter((candidateIndex) => candidateIndex >= 0 && candidateIndex < authoredLevels.length)
-        .map((candidateIndex) =>
-          resolveRuntimeMazeIdForLevel(
-            authoredLevels[candidateIndex].name,
-            candidateIndex,
-            mazeIds,
-            mazeId
-          )
-        )
-        .filter((candidateMazeId): candidateMazeId is string => Boolean(candidateMazeId))
-      const desiredMazeIds = Array.from(new Set([mazeId, ...adjacentMazeIds]))
-      const loadedLayouts = await Promise.all(
-        desiredMazeIds.map(async (desiredMazeId) => ({
-          id: desiredMazeId,
-          layout:
-            loadedMazeLayoutsRef.current.get(desiredMazeId) ??
-            await loadMazeLayoutById(desiredMazeId)
-        }))
-      )
-
-      for (const entry of loadedLayouts) {
-        if (entry.layout) {
-          loadedMazeLayoutsRef.current.set(entry.id, entry.layout)
-        }
-      }
-      for (const loadedMazeId of Array.from(loadedMazeLayoutsRef.current.keys())) {
-        if (desiredMazeIds.includes(loadedMazeId)) {
-          continue
-        }
-        loadedMazeLayoutsRef.current.delete(loadedMazeId)
-        unloadMazeLayoutById(loadedMazeId)
-      }
+      await loadLevelNeighborhood(mazeId)
 
       const nextLayout = loadedMazeLayoutsRef.current.get(mazeId)
 
@@ -15490,6 +15748,7 @@ export default function App() {
         throw new Error(`Level "${level.name}" could not load runtime maze "${mazeId}"`)
       }
 
+      levelTurnStatesRef.current.set(mazeId, createInitialTurnState(nextLayout.maze))
       loadedMazeLayoutsRef.current.set(mazeId, nextLayout)
       instantiateLoadedMaze(mazeId)
     } catch (error) {
@@ -15527,6 +15786,8 @@ export default function App() {
           document.body.dataset.mazeLayoutLoadedAt = performance.now().toFixed(1)
           document.body.dataset.loadedMazeId = nextLayout.maze.id
           loadedMazeLayoutsRef.current.set(nextLayout.maze.id, nextLayout)
+          getOrCreateLevelTurnState(nextLayout)
+          await loadLevelNeighborhood(nextLayout.maze.id)
           setInstantiatedMazeId(nextLayout.maze.id)
           setReplayActive(false)
           setMazeLayout(nextLayout)
@@ -15548,7 +15809,7 @@ export default function App() {
       cancelled = true
       document.body.dataset.mazeLayoutCancelledAt = performance.now().toFixed(1)
     }
-  }, [requestedMazeId])
+  }, [getOrCreateLevelTurnState, loadLevelNeighborhood, requestedMazeId])
 
   useEffect(() => {
     const globalWindow = window as Window & {
@@ -16257,6 +16518,9 @@ export default function App() {
     )
   }
 
+  const activeLevelTransform = getRuntimeLevelWorldTransform(mazeLayout.maze.id)
+  const activeTurnState = getOrCreateLevelTurnState(mazeLayout)
+
   return (
     <div className="app-shell">
       {overlayVisible ? (
@@ -16353,8 +16617,13 @@ export default function App() {
               controlsOpen={controlsOpen}
               key={`${mazeLayout.maze.id}:${mazeSceneKey}`}
               layout={mazeLayout}
+              levelTransform={activeLevelTransform}
+              renderedLayouts={renderedMazeLayouts}
+              initialTurnState={activeTurnState}
               onAssetsReady={onAssetsReady}
+              onLevelTransition={handleLevelTransition}
               onReplayActiveChange={setReplayActive}
+              onTurnStateChange={handleTurnStateChange}
               replayRequestId={replayRequestId}
               visualSettings={visualSettings}
             />

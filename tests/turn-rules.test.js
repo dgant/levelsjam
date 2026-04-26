@@ -260,6 +260,38 @@ test('player can escape only while holding the trophy', () => {
   assert.equal(escaped.state.escaped, true)
 })
 
+test('authored level exits transition without entering escaped state', () => {
+  const maze = testMaze({
+    exitRequiresTrophy: false,
+    gates: [],
+    levelExits: [
+      {
+        cell: { x: 0, y: 0 },
+        side: 'west',
+        targetLevelId: 'neighbor-level'
+      }
+    ],
+    monsters: [],
+    openEdges: [],
+    opening: { cell: { x: 0, y: 0 }, side: 'west' },
+    playerStart: {
+      cell: { x: 0, y: 0 },
+      direction: 'west'
+    },
+    sword: null,
+    trophy: null,
+    width: 1,
+    height: 1
+  })
+  const initial = createInitialTurnState(maze)
+  const result = applyTurnAction(maze, initial, 'move-forward')
+
+  assert.equal(result.escaped, false)
+  assert.equal(result.state.escaped, false)
+  assert.equal(result.levelTransition.targetLevelId, 'neighbor-level')
+  assert.deepEqual(result.state.player.cell, { x: -1, y: 0 })
+})
+
 test('reset restores monsters and items to the initial maze state', () => {
   const maze = testMaze({
     gates: [],
