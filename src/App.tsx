@@ -237,21 +237,24 @@ const DEFAULT_PROBE_IBL_INTENSITY = 1
 const DEFAULT_REFLECTION_INTENSITY = 1
 const MAX_LIGHTING_CONTRIBUTION_INTENSITY = 4
 const BLOCKED_MOVE_FRACTION = 0.25
-const RUNTIME_RADIANCE_RESOLUTION = 192
+const RUNTIME_RADIANCE_RESOLUTION = 256
 const RUNTIME_RADIANCE_CASCADE_COUNT = 4
-const RUNTIME_RADIANCE_BASE_RAY_COUNT = 8
+const RUNTIME_RADIANCE_BASE_RAY_COUNT = 16
 const RUNTIME_RADIANCE_DIRECT_GAIN = 3
 const RUNTIME_RADIANCE_FOG_SCATTER_GAIN = 24
 const RUNTIME_RADIANCE_INDIRECT_GAIN = 0.8
 const RUNTIME_RADIANCE_MAX_DISTANCE = 18
+const RUNTIME_RADIANCE_OCCLUDER_PADDING = WALL_WIDTH * 0.35
 const RUNTIME_RADIANCE_SOURCE_RADIUS = 0.45
 const RUNTIME_RADIANCE_SURFACE_NORMAL_OFFSET = WALL_WIDTH * 0.75
+const RUNTIME_TORCH_FLICKER_INTENSITY = 0.15
 const RUNTIME_SHADOW_SLOT_COUNT = 2
 const RUNTIME_SHADOW_INNER_RADIUS = 3.5
 const RUNTIME_SHADOW_OUTER_RADIUS = 8
 const RUNTIME_SHADOW_SWITCH_MARGIN = 0.15
 const RUNTIME_SHADOW_FADE_IN_SECONDS = 0.25
 const RUNTIME_SHADOW_FADE_OUT_SECONDS = 0.75
+const RUNTIME_SHADOW_REFRESH_SECONDS = 0.5
 const RUNTIME_SHADOW_TORCH_INTENSITY = 0.35
 const RUNTIME_SHADOW_TORCH_DISTANCE = 7
 
@@ -362,7 +365,7 @@ const DEFAULT_VOLUMETRIC_AMBIENT_HEX = '#8f949e'
 const DEFAULT_VOLUMETRIC_FOG_DISTANCE = 12
 const EFFECT_EPSILON = 0.0001
 const MAX_PHYSICS_SUBSTEPS = 10
-const MIN_LOADING_OVERLAY_MS = 200
+const MIN_LOADING_OVERLAY_MS = 0
 const DEFAULT_PROBE_BOX_MAX = new Vector3(0.5, WALL_HEIGHT, 0.5)
 const DEFAULT_PROBE_BOX_MIN = new Vector3(-0.5, GROUND_Y, -0.5)
 const DEFAULT_PROBE_POSITION = new Vector3(0, 1, 0)
@@ -1369,6 +1372,11 @@ type RuntimeRadianceDebugState = {
   cascadeCount: number
   cascadeHeight: number
   cascadeWidth: number
+  emitterPixelCount: number
+  emitterFlicker: Array<{
+    lightId: string
+    value: number
+  }>
   generationMs: number
   gpuUpdateCount: number
   latestGpuUpdateMs: number
@@ -1380,6 +1388,7 @@ type RuntimeRadianceDebugState = {
 }
 
 type RuntimeShadowSlotDebugState = {
+  flicker: number
   lightId: string | null
   targetWeight: number
   weight: number
@@ -5386,6 +5395,23 @@ type RuntimeRadianceOccluder = {
   minZ: number
 }
 
+type RuntimeRadianceEmitter = {
+  blue: number
+  green: number
+  id: string
+  index: number
+  offsets: number[]
+  red: number
+}
+
+type RuntimeRadianceSceneTextureState = {
+  data: Uint16Array
+  emitterOffsets: number[]
+  emitters: RuntimeRadianceEmitter[]
+  occluderCount: number
+  texture: DataTexture
+}
+
 function getRuntimeRadianceBounds(layout: MazeLayout): RuntimeRadianceBounds {
   const groundBounds = layout.maze.lightmap.groundBounds
 
@@ -5439,11 +5465,62 @@ function pointInRuntimeRadianceOccluder2D(
   )
 }
 
+function padRuntimeRadianceOccluder(
+  occluder: RuntimeRadianceOccluder
+): RuntimeRadianceOccluder {
+  return {
+    maxX: occluder.maxX + RUNTIME_RADIANCE_OCCLUDER_PADDING,
+    maxZ: occluder.maxZ + RUNTIME_RADIANCE_OCCLUDER_PADDING,
+    minX: occluder.minX - RUNTIME_RADIANCE_OCCLUDER_PADDING,
+    minZ: occluder.minZ - RUNTIME_RADIANCE_OCCLUDER_PADDING
+  }
+}
+
+function getRuntimeTorchFlicker(lightIndex: number, elapsed: number) {
+  const seed = (lightIndex + 1) * 12.9898
+  const fast = Math.sin((elapsed * 11.7) + seed)
+  const medium = Math.sin((elapsed * 6.1) + (seed * 1.7))
+  const slow = Math.sin((elapsed * 2.4) + (seed * 2.9))
+  const mixed = (fast * 0.55) + (medium * 0.3) + (slow * 0.15)
+
+  return MathUtils.clamp(
+    1 + (mixed * RUNTIME_TORCH_FLICKER_INTENSITY),
+    1 - (RUNTIME_TORCH_FLICKER_INTENSITY * 1.35),
+    1 + (RUNTIME_TORCH_FLICKER_INTENSITY * 1.35)
+  )
+}
+
+function updateRuntimeRadianceEmitterTexture(
+  sceneTextureState: RuntimeRadianceSceneTextureState,
+  elapsed: number
+) {
+  for (const offset of sceneTextureState.emitterOffsets) {
+    sceneTextureState.data[offset] = 0
+    sceneTextureState.data[offset + 1] = 0
+    sceneTextureState.data[offset + 2] = 0
+  }
+
+  for (const emitter of sceneTextureState.emitters) {
+    const flicker = getRuntimeTorchFlicker(emitter.index, elapsed)
+    const red = DataUtils.toHalfFloat(emitter.red * flicker)
+    const green = DataUtils.toHalfFloat(emitter.green * flicker)
+    const blue = DataUtils.toHalfFloat(emitter.blue * flicker)
+
+    for (const offset of emitter.offsets) {
+      sceneTextureState.data[offset] = red
+      sceneTextureState.data[offset + 1] = green
+      sceneTextureState.data[offset + 2] = blue
+    }
+  }
+
+  sceneTextureState.texture.needsUpdate = true
+}
+
 function buildRuntimeRadianceOccluders(
   layout: MazeLayout,
   openGateIds: Set<string>
 ) {
-  const wallOccluders = layout.walls.map((wall) => ({
+  const wallOccluders = layout.walls.map((wall) => padRuntimeRadianceOccluder({
     maxX: wall.bounds.maxX,
     maxZ: wall.bounds.maxZ,
     minX: wall.bounds.minX,
@@ -5456,20 +5533,20 @@ function buildRuntimeRadianceOccluders(
       const halfWidth = WALL_WIDTH / 2
 
       if (gate.axis === 'x') {
-        return {
+        return padRuntimeRadianceOccluder({
           maxX: gate.center.x + halfLength,
           maxZ: gate.center.z + halfWidth,
           minX: gate.center.x - halfLength,
           minZ: gate.center.z - halfWidth
-        }
+        })
       }
 
-      return {
+      return padRuntimeRadianceOccluder({
         maxX: gate.center.x + halfWidth,
         maxZ: gate.center.z + halfLength,
         minX: gate.center.x - halfWidth,
         minZ: gate.center.z - halfLength
-      }
+      })
     })
 
   return [...wallOccluders, ...gateOccluders]
@@ -5555,17 +5632,23 @@ vec3 sampleHigherCascade(vec2 worldPosition, float angle) {
       float probeWeight =
         (xOffset == 0 ? 1.0 - cellFract.x : cellFract.x) *
         (yOffset == 0 ? 1.0 - cellFract.y : cellFract.y);
+      vec2 probeWorld =
+        radianceBounds.xy +
+        ((probeCell + vec2(0.5)) / nextProbeGridSize) * radianceBounds.zw;
+      probeWeight *= sampleSceneMap(probeWorld).a > 0.5 ? 0.0 : 1.0;
 
-      for (int rayOffset = 0; rayOffset <= 1; rayOffset += 1) {
-        float rayIndex = mod(baseRay + float(rayOffset) + nextRayCount, nextRayCount);
-        float rayWeight = rayOffset == 0 ? 1.0 - rayFract : rayFract;
-        float weight = probeWeight * rayWeight;
+      if (probeWeight > 0.0) {
+        for (int rayOffset = 0; rayOffset <= 1; rayOffset += 1) {
+          float rayIndex = mod(baseRay + float(rayOffset) + nextRayCount, nextRayCount);
+          float rayWeight = rayOffset == 0 ? 1.0 - rayFract : rayFract;
+          float weight = probeWeight * rayWeight;
 
-        sumColor += texture2D(
-          higherCascade,
-          cascadeTexelUv(nextProbeGridSize, nextRayCount, probeCell, rayIndex)
-        ).rgb * weight;
-        sumWeight += weight;
+          sumColor += texture2D(
+            higherCascade,
+            cascadeTexelUv(nextProbeGridSize, nextRayCount, probeCell, rayIndex)
+          ).rgb * weight;
+          sumWeight += weight;
+        }
       }
     }
   }
@@ -5602,11 +5685,11 @@ void main() {
       ? 0.0
       : baseInterval * (pow(4.0, cascadeIndex) - 1.0) / 3.0;
   float intervalEnd = intervalStart + intervalLength;
-  float stepLength = max(baseInterval * 0.75, intervalLength / 48.0);
+  float stepLength = max(baseInterval * 0.35, intervalLength / 96.0);
   vec3 radiance = vec3(0.0);
   float transmittance = 1.0;
 
-  for (int stepIndex = 0; stepIndex < 96; stepIndex += 1) {
+  for (int stepIndex = 0; stepIndex < 160; stepIndex += 1) {
     float distance = intervalStart + (float(stepIndex) + 0.5) * stepLength;
 
     if (distance >= intervalEnd) {
@@ -5730,10 +5813,12 @@ function createRuntimeRadianceSceneTexture(
   layout: MazeLayout,
   openGateIds: Set<string>,
   bounds: RuntimeRadianceBounds
-) {
+): RuntimeRadianceSceneTextureState {
   const resolution = RUNTIME_RADIANCE_RESOLUTION
   const data = new Uint16Array(resolution * resolution * 4)
   const occluders = buildRuntimeRadianceOccluders(layout, openGateIds)
+  const emitterOffsetSet = new Set<number>()
+  const emitters: RuntimeRadianceEmitter[] = []
   const xByColumn = new Float32Array(resolution)
   const zByRow = new Float32Array(resolution)
   const opaqueHalf = DataUtils.toHalfFloat(1)
@@ -5781,20 +5866,28 @@ function createRuntimeRadianceSceneTexture(
   }
 
   for (const light of layout.lights) {
+    const lightDirection = getRuntimeRadianceLightDirection(light.side)
+    const sourceX =
+      light.torchPosition.x +
+      (lightDirection.x * RUNTIME_RADIANCE_OCCLUDER_PADDING)
+    const sourceZ =
+      light.torchPosition.z +
+      (lightDirection.z * RUNTIME_RADIANCE_OCCLUDER_PADDING)
     const centerColumn = MathUtils.clamp(
-      Math.floor(((light.torchPosition.x - bounds.minX) / bounds.width) * resolution),
+      Math.floor(((sourceX - bounds.minX) / bounds.width) * resolution),
       0,
       resolution - 1
     )
     const centerRow = MathUtils.clamp(
-      Math.floor(((light.torchPosition.z - bounds.minZ) / bounds.depth) * resolution),
+      Math.floor(((sourceZ - bounds.minZ) / bounds.depth) * resolution),
       0,
       resolution - 1
     )
     const radiusPixels = Math.max(
       1,
-      Math.ceil((RUNTIME_RADIANCE_SOURCE_RADIUS / bounds.width) * resolution)
+      Math.ceil((RUNTIME_RADIANCE_SOURCE_RADIUS / Math.min(bounds.width, bounds.depth)) * resolution)
     )
+    const emitterOffsets: number[] = []
 
     for (let row = centerRow - radiusPixels; row <= centerRow + radiusPixels; row += 1) {
       if (row < 0 || row >= resolution) {
@@ -5817,17 +5910,35 @@ function createRuntimeRadianceSceneTexture(
           continue
         }
 
+        const x = xByColumn[column]
+        const z = zByRow[row]
+        const sourceSideDistance =
+          ((x - sourceX) * lightDirection.x) +
+          ((z - sourceZ) * lightDirection.z)
+
+        if (sourceSideDistance < -RUNTIME_RADIANCE_SOURCE_RADIUS * 0.2) {
+          continue
+        }
+
         const offset = ((row * resolution) + column) * 4
 
         if (data[offset + 3] !== 0) {
           continue
         }
 
-        data[offset] = DataUtils.toHalfFloat(TORCH_LIGHTMAP_TINT.r)
-        data[offset + 1] = DataUtils.toHalfFloat(TORCH_LIGHTMAP_TINT.g)
-        data[offset + 2] = DataUtils.toHalfFloat(TORCH_LIGHTMAP_TINT.b)
+        emitterOffsetSet.add(offset)
+        emitterOffsets.push(offset)
       }
     }
+
+    emitters.push({
+      blue: TORCH_LIGHTMAP_TINT.b,
+      green: TORCH_LIGHTMAP_TINT.g,
+      id: light.id,
+      index: light.index,
+      offsets: emitterOffsets,
+      red: TORCH_LIGHTMAP_TINT.r
+    })
   }
 
   const texture = new DataTexture(
@@ -5845,8 +5956,23 @@ function createRuntimeRadianceSceneTexture(
   texture.wrapS = ClampToEdgeWrapping
   texture.wrapT = ClampToEdgeWrapping
   texture.needsUpdate = true
+  const emitterOffsets = Array.from(emitterOffsetSet)
+
+  updateRuntimeRadianceEmitterTexture(
+    {
+      data,
+      emitterOffsets,
+      emitters,
+      occluderCount: occluders.length,
+      texture
+    },
+    0
+  )
 
   return {
+    data,
+    emitterOffsets,
+    emitters,
     occluderCount: occluders.length,
     texture
   }
@@ -5936,6 +6062,11 @@ function useRuntimeRadianceCascadeSurface(
         cascadeCount: RUNTIME_RADIANCE_CASCADE_COUNT,
         cascadeHeight,
         cascadeWidth,
+        emitterFlicker: sceneTextureState.emitters.map((emitter) => ({
+          lightId: emitter.id,
+          value: getRuntimeTorchFlicker(emitter.index, 0)
+        })),
+        emitterPixelCount: sceneTextureState.emitterOffsets.length,
         generationMs: 0,
         gpuUpdateCount: 0,
         latestGpuUpdateMs: 0,
@@ -5963,21 +6094,35 @@ function useRuntimeRadianceCascadeSurface(
   useEffect(() => {
     resources.cascadeMaterial.uniforms.sceneMap.value = sceneTextureState.texture
     resources.debug.bounds = bounds
+    resources.debug.emitterFlicker = sceneTextureState.emitters.map((emitter) => ({
+      lightId: emitter.id,
+      value: getRuntimeTorchFlicker(emitter.index, 0)
+    }))
+    resources.debug.emitterPixelCount = sceneTextureState.emitterOffsets.length
     resources.debug.lightCount = layout.lights.length
     resources.debug.occluderCount = sceneTextureState.occluderCount
   }, [
     bounds,
     layout.lights.length,
     resources,
+    sceneTextureState.emitterOffsets.length,
+    sceneTextureState.emitters,
     sceneTextureState.occluderCount,
     sceneTextureState.texture
   ])
 
   useFrame((state) => {
+    if (!Number.isFinite(Number(document.body.dataset.loadingOverlayCompleteAt))) {
+      state.invalidate()
+      return
+    }
+
     const startedAt = performance.now()
+    const elapsed = state.clock.getElapsedTime()
     const previousRenderTarget = gl.getRenderTarget()
     const previousAutoClear = gl.autoClear
 
+    updateRuntimeRadianceEmitterTexture(sceneTextureState, elapsed)
     gl.autoClear = false
     resources.cascadeMaterial.uniforms.radianceBounds.value.set(
       bounds.minX,
@@ -6007,6 +6152,10 @@ function useRuntimeRadianceCascadeSurface(
     const updateMs = performance.now() - startedAt
     resources.debug.generationMs = updateMs
     resources.debug.latestGpuUpdateMs = updateMs
+    resources.debug.emitterFlicker = sceneTextureState.emitters.map((emitter) => ({
+      lightId: emitter.id,
+      value: getRuntimeTorchFlicker(emitter.index, elapsed)
+    }))
     resources.debug.gpuUpdateCount += 1
     state.invalidate()
   })
@@ -7789,6 +7938,7 @@ function RuntimeShadowedTorchLights({
   const lightRefs = useRef<Array<ThreePointLight | null>>([])
   const slotStates = useRef<RuntimeShadowSlotDebugState[]>(
     Array.from({ length: RUNTIME_SHADOW_SLOT_COUNT }, () => ({
+      flicker: 1,
       lightId: null,
       targetWeight: 0,
       weight: 0
@@ -7811,7 +7961,8 @@ function RuntimeShadowedTorchLights({
     })
   }, [openGateKey])
 
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
+    const elapsed = state.clock.getElapsedTime()
     const candidates = layout.lights
       .map((light) => ({
         light,
@@ -7850,12 +8001,16 @@ function RuntimeShadowedTorchLights({
       const targetWeight = selectedLight
         ? getRuntimeShadowScore(selectedLight, playerWorldPosition)
         : 0
+      const flicker = selectedLight
+        ? getRuntimeTorchFlicker(selectedLight.index, elapsed)
+        : 1
       const tau = targetWeight > slot.weight
         ? RUNTIME_SHADOW_FADE_IN_SECONDS
         : RUNTIME_SHADOW_FADE_OUT_SECONDS
       const smoothing = 1 - Math.exp(-delta / Math.max(tau, 0.0001))
 
       slot.targetWeight = targetWeight
+      slot.flicker = flicker
       slot.weight += (targetWeight - slot.weight) * smoothing
 
       if (slot.weight < 0.001 && targetWeight <= 0.001) {
@@ -7880,9 +8035,14 @@ function RuntimeShadowedTorchLights({
       pointLight.distance = RUNTIME_SHADOW_TORCH_DISTANCE
       pointLight.decay = 2
       pointLight.intensity =
-        slot.weight * visualIntensity * RUNTIME_SHADOW_TORCH_INTENSITY
-      if (slotLightChanged) {
+        slot.weight * flicker * visualIntensity * RUNTIME_SHADOW_TORCH_INTENSITY
+      if (
+        slotLightChanged ||
+        elapsed - ((pointLight.userData.lastRuntimeShadowRefreshAt as number | undefined) ?? -Infinity) >=
+          RUNTIME_SHADOW_REFRESH_SECONDS
+      ) {
         pointLight.shadow.needsUpdate = true
+        pointLight.userData.lastRuntimeShadowRefreshAt = elapsed
       }
     }
   })
@@ -8099,9 +8259,10 @@ function TorchBillboard({
       const billboardMaterial = material.current.material as {
         color: Color
       }
+      const flicker = getRuntimeTorchFlicker(seed - 1, elapsed)
 
       billboardMaterial.color.copy(FIRE_COLOR).multiplyScalar(
-        TORCH_BASE_CANDELA * FIRE_BILLBOARD_INTENSITY_SCALE
+        TORCH_BASE_CANDELA * FIRE_BILLBOARD_INTENSITY_SCALE * flicker
       )
     }
   })
@@ -15951,6 +16112,7 @@ export default function App() {
   const [replayRequestId, setReplayRequestId] = useState(0)
   const [mazeSceneKey, setMazeSceneKey] = useState(0)
   const [sceneLoaded, setSceneLoaded] = useState(false)
+  const [renderLoopActive, setRenderLoopActive] = useState(false)
   const [visualSettings, setVisualSettings] = useState(createDefaultVisualSettings)
   const composerEnabled = true
 
@@ -16729,6 +16891,21 @@ export default function App() {
     setSceneLoaded(true)
   }, [])
 
+  useEffect(() => {
+    if (!sceneLoaded) {
+      setRenderLoopActive(false)
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setRenderLoopActive(true)
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [sceneLoaded])
+
   if (!mazeLayout) {
     return (
       <div className="app-shell">
@@ -16810,7 +16987,7 @@ export default function App() {
             ]
           }}
           dpr={[1, 2]}
-          frameloop={sceneLoaded ? 'always' : 'never'}
+          frameloop={renderLoopActive ? 'always' : 'never'}
           gl={{ antialias: true }}
           onCreated={({ gl }) => {
             recordStartupMarker('canvasCreatedAt')

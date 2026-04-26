@@ -20,8 +20,9 @@
 - The scene does not use a directional sunlight source.
 - The radiance-cascade experiment replaces baked surface-lightmap diffuse lighting at runtime with a generated two-dimensional maze radiance field evaluated over world XZ.
 - The generated radiance field applies to maze floor, maze walls, sconces, monsters, pickups, gates, volumetric fog, and other maze-local lit surfaces at every authored height unless a more specific height rule is documented.
-- The generated radiance field treats maze walls and closed gates as horizontal-plane occluders for torch visibility.
-- The generated radiance field treats torch billboards and sconces as emissive source markers rather than geometry occluders.
+- The generated radiance field treats maze walls and closed gates as horizontal-plane occluders for torch visibility without leaking light through wall interiors.
+- The generated radiance field treats torch billboards and sconces as emissive source markers.
+- Wall-mounted sconce bodies produce visible local contact occlusion under the fixture on the attached wall face.
 - The generated radiance field is produced by a real-time GPU radiance-cascade pipeline during ordinary browser runtime and does not require offline surface-lightmap baking.
 - The radiance-cascade pipeline updates on the GPU every rendered frame rather than precomputing diffuse lighting on the CPU.
 - The radiance-cascade pipeline stores directional ray-interval radiance in cascade render targets and merges higher-angular, lower-spatial cascades down to the material-sampled output field.
@@ -31,6 +32,7 @@
 - The active experiment does not use runtime volumetric-lightmap diffuse data; maze-local diffuse lighting for fog, monsters, pickups, gates, sconces, walls, and floor comes from the generated radiance field.
 - The generated radiance field propagates indirect light only through horizontally visible samples so walls and closed gates block cascade spread instead of permitting blur leakage.
 - Vertical maze-local surfaces sample the generated radiance field from the visible side of the surface rather than from inside wall or gate volume.
+- The generated radiance field is spatially smooth enough that ordinary wall and floor views do not show obvious block-sized probe cells.
 - Near-player realtime shadowed torch lights are blended as a smooth correction over the generated radiance field instead of abruptly replacing it.
 - Realtime torch shadow eligibility changes use continuous weights, temporal smoothing, and slot hysteresis so torch shadows do not flip on and off at selection boundaries.
 - Realtime shadowed torch lights are bounded to a small active set selected by player distance and visibility importance.
@@ -104,8 +106,8 @@
 - The baked sconce-body contact shadow remains visible beneath the fixture down to the floor on the attached wall face instead of terminating partway down the wall in an arch.
 - The runtime wall lightmap upload preserves the bake's vertical orientation so wall-mounted torch shadows appear below the sconce rather than flipped above it.
 - The baked wall and maze-floor lightmaps include properly occluded skylight or HDRI contribution, so those baked surfaces do not rely on direct runtime scene diffuse IBL.
-- The current scene does not include realtime torch flicker.
-- The current scene does not include realtime torch point lights.
+- Runtime torch emitters use stable per-torch flicker that modulates the GPU radiance-cascade scene input and the matching realtime shadowed torch lights.
+- The current scene includes a bounded set of realtime shadowed torch point lights as a 3D shadow correction over generated radiance-field diffuse lighting.
 - Reflection probe captures include temporary shadow-casting torch point lights that match the authored torch-light characteristics except for flicker.
 - Reflection probe captures wait until every expected opaque maze wall, baked floor patch, and sconce is present with its capture-ready material state before baking.
 - Reflection probe captures include the visible static maze geometry and its baked lighting instead of collapsing to only the HDRI and temporary torch emitters.
