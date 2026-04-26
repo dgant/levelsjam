@@ -240,9 +240,11 @@ const BLOCKED_MOVE_FRACTION = 0.25
 const RUNTIME_RADIANCE_RESOLUTION = 192
 const RUNTIME_RADIANCE_CASCADE_COUNT = 4
 const RUNTIME_RADIANCE_DIRECT_GAIN = 0.045
+const RUNTIME_RADIANCE_FOG_SCATTER_GAIN = 12
 const RUNTIME_RADIANCE_INDIRECT_GAIN = 0.5
 const RUNTIME_RADIANCE_MAX_DISTANCE = 18
 const RUNTIME_RADIANCE_SOURCE_RADIUS = 0.45
+const RUNTIME_RADIANCE_SURFACE_NORMAL_OFFSET = WALL_WIDTH * 0.75
 const RUNTIME_SHADOW_SLOT_COUNT = 2
 const RUNTIME_SHADOW_INNER_RADIUS = 3.5
 const RUNTIME_SHADOW_OUTER_RADIUS = 8
@@ -498,6 +500,9 @@ uniform float probeDepthAtlasFaceSize;
 uniform float probeHeight;
 uniform sampler2D probeAmbientTexture;
 uniform float rayStepCount;
+uniform vec4 runtimeRadianceBounds;
+uniform float runtimeRadianceIntensity;
+uniform sampler2D runtimeRadianceTexture;
 uniform float time;
 uniform float useProbeCoefficientTexture;
 uniform float useProbeDepthAtlases;
@@ -696,37 +701,27 @@ float fogProbeKernelWeight(vec2 gridPosition, vec2 cell) {
 }
 
 vec3 sampleFogAmbientColor(vec3 worldPosition) {
-  if (useProbeCoefficientTexture < 0.5) {
+  if (runtimeRadianceIntensity <= 0.0) {
     return vec3(0.0);
   }
 
-  vec2 worldGridPosition = vec2(
-    (worldPosition.x - probeAmbientBounds.x) / max(fogProbeCellSize(probeAmbientBounds.z, probeAmbientGrid.x), 0.0001),
-    (worldPosition.z - probeAmbientBounds.y) / max(fogProbeCellSize(probeAmbientBounds.w, probeAmbientGrid.y), 0.0001)
-  );
-  vec2 nearestCell = floor(worldGridPosition + vec2(0.5));
-  vec4 accumulated = vec4(0.0);
+  vec2 runtimeRadianceUv = (
+    worldPosition.xz - runtimeRadianceBounds.xy
+  ) / max( runtimeRadianceBounds.zw, vec2( 0.0001 ) );
 
-  for (int x = -1; x <= 1; x += 1) {
-    for (int y = -1; y <= 1; y += 1) {
-      vec2 cell = nearestCell + vec2(float(x), float(y));
-      float spatialWeight = fogProbeKernelWeight(worldGridPosition, cell);
-
-      if (spatialWeight <= 0.0001) {
-        continue;
-      }
-
-      accumulated += sampleFogAmbientCandidate(worldPosition, cell) * spatialWeight;
-    }
-  }
-  vec3 color = accumulated.rgb;
-  float weight = accumulated.a;
-
-  if (weight <= 0.0001) {
+  if (
+    runtimeRadianceUv.x < 0.0 ||
+    runtimeRadianceUv.x > 1.0 ||
+    runtimeRadianceUv.y < 0.0 ||
+    runtimeRadianceUv.y > 1.0
+  ) {
     return vec3(0.0);
   }
 
-  return color / weight;
+  return
+    texture2D(runtimeRadianceTexture, runtimeRadianceUv).rgb *
+    runtimeRadianceIntensity *
+    ${RUNTIME_RADIANCE_FOG_SCATTER_GAIN.toFixed(1)};
 }
 
 vec3 reconstructWorldPosition(vec2 uv, float sceneDepth) {
@@ -854,8 +849,6 @@ type LightingContributionSettings = {
 type ProbeDebugMode =
   | 'none'
   | 'reflection'
-  | 'volumetric-lightmap'
-  | 'shadow-map'
 
 type AnamorphicSettings = EffectSettings & {
   colorGain: number
@@ -989,9 +982,7 @@ const GIT_REVISION = __GIT_REVISION__
 const GIT_REVISION_TIMESTAMP = __GIT_REVISION_TIMESTAMP__
 const PROBE_DEBUG_MODE_OPTIONS: Array<{ key: ProbeDebugMode, label: string }> = [
   { key: 'none', label: 'None' },
-  { key: 'reflection', label: 'Reflection' },
-  { key: 'volumetric-lightmap', label: 'Volumetric Lightmap' },
-  { key: 'shadow-map', label: 'Shadow Map' }
+  { key: 'reflection', label: 'Reflection' }
 ]
 const SSR_OUTPUT_OPTIONS: Array<{ key: SSRPassOutputMode, label: string, value: number }> = [
   { key: 'default', label: 'Default', value: 0 },
@@ -1203,6 +1194,22 @@ type ProbeDepthAtlasTextures = [
   Texture | null
 ]
 
+const EMPTY_PROBE_DEPTH_ATLAS_TEXTURES: ProbeDepthAtlasTextures = [
+  null,
+  null,
+  null,
+  null,
+  null,
+  null
+]
+const EMPTY_PROBE_COEFFICIENT_TEXTURES = [
+  null,
+  null,
+  null,
+  null
+] as unknown as [Texture, Texture, Texture, Texture]
+const EMPTY_PROBE_COEFFICIENTS: Array<ProbeIrradianceCoefficients | null> = []
+
 type ProbeBlendConfig = {
   diffuseIntensity?: number
   mode: ProbeBlendMode
@@ -1321,9 +1328,10 @@ type ProbeBlendShader = Shader & {
     probeBlendRadianceIntensity?: Uniform<number>
     probeBlendRegion?: Uniform<Vector4>
     probeBlendWeights?: Uniform<Vector4>
-    runtimeRadianceBounds?: Uniform<Vector4>
-    runtimeRadianceIntensity?: Uniform<number>
-    runtimeRadianceTexture?: Uniform<Texture | null>
+  runtimeRadianceBounds?: Uniform<Vector4>
+  runtimeRadianceIntensity?: Uniform<number>
+  runtimeRadianceNormalOffset?: Uniform<number>
+  runtimeRadianceTexture?: Uniform<Texture | null>
     useProbeDepthAtlases?: Uniform<number>
     probeVlmMode?: Uniform<number>
   }
@@ -1335,6 +1343,7 @@ type MaterialShaderPatchConfig = {
   lightMapTorchTint?: Color
   runtimeRadianceBounds?: RuntimeRadianceBounds
   runtimeRadianceIntensity?: number
+  runtimeRadianceNormalOffset?: number
   runtimeRadianceTexture?: Texture | null
 }
 
@@ -1501,6 +1510,9 @@ class FogVolumeEffectImpl extends Effect {
         ['probeHeight', new Uniform(1.25)],
         ['probeAmbientTexture', new Uniform<Texture | null>(null)],
         ['rayStepCount', new Uniform(DEFAULT_VOLUMETRIC_STEP_COUNT)],
+        ['runtimeRadianceBounds', new Uniform(new Vector4(0, 0, 1, 1))],
+        ['runtimeRadianceIntensity', new Uniform(0)],
+        ['runtimeRadianceTexture', new Uniform<Texture | null>(null)],
         ['time', new Uniform(0)],
         ['useProbeCoefficientTexture', new Uniform(0)],
         ['useProbeDepthAtlases', new Uniform(0)],
@@ -1593,6 +1605,23 @@ class FogVolumeEffectImpl extends Effect {
 
   set rayStepCount(value: number) {
     this.uniforms.get('rayStepCount').value = value
+  }
+
+  set runtimeRadianceBounds(value: RuntimeRadianceBounds) {
+    this.uniforms.get('runtimeRadianceBounds').value.set(
+      value.minX,
+      value.minZ,
+      value.width,
+      value.depth
+    )
+  }
+
+  set runtimeRadianceIntensity(value: number) {
+    this.uniforms.get('runtimeRadianceIntensity').value = value
+  }
+
+  set runtimeRadianceTexture(value: Texture | null) {
+    this.uniforms.get('runtimeRadianceTexture').value = value
   }
 
   set time(value: number) {
@@ -2721,8 +2750,20 @@ const LEVELSJAM_LIGHTS_FRAGMENT_MAPS = `
 
 \t#ifdef LEVELSJAM_RUNTIME_RADIANCE
 
+\t\tvec3 runtimeRadianceWorldNormal = inverseTransformDirection( geometryNormal, viewMatrix );
+\t\tvec2 runtimeRadianceNormalOffsetDirection = runtimeRadianceWorldNormal.xz;
+\t\tfloat runtimeRadianceNormalOffsetLength = length( runtimeRadianceNormalOffsetDirection );
+\t\tvec2 runtimeRadianceSamplePosition = vProbeBlendWorldPosition.xz;
+
+\t\tif ( runtimeRadianceNormalOffsetLength > 0.0001 ) {
+\t\t\truntimeRadianceSamplePosition += (
+\t\t\t\truntimeRadianceNormalOffsetDirection /
+\t\t\t\truntimeRadianceNormalOffsetLength
+\t\t\t) * runtimeRadianceNormalOffset;
+\t\t}
+
 \t\tvec2 runtimeRadianceUv = (
-\t\t\tvProbeBlendWorldPosition.xz - runtimeRadianceBounds.xy
+\t\t\truntimeRadianceSamplePosition - runtimeRadianceBounds.xy
 \t\t) / max( runtimeRadianceBounds.zw, vec2( 0.0001 ) );
 
 \t\tif (
@@ -2814,6 +2855,9 @@ function updateProbeBlendShaderUniforms(
   }
   if (shader.uniforms.runtimeRadianceIntensity) {
     shader.uniforms.runtimeRadianceIntensity.value = patchConfig.runtimeRadianceIntensity ?? 0
+  }
+  if (shader.uniforms.runtimeRadianceNormalOffset) {
+    shader.uniforms.runtimeRadianceNormalOffset.value = patchConfig.runtimeRadianceNormalOffset ?? 0
   }
 
   const probePositions = probeBlend.probePositions ?? []
@@ -3125,6 +3169,7 @@ function getProbeBlendUpdateKey(
         ]
       : null,
     runtimeRadianceIntensity: patchConfig.runtimeRadianceIntensity ?? 0,
+    runtimeRadianceNormalOffset: patchConfig.runtimeRadianceNormalOffset ?? 0,
     runtimeRadianceTextureUUID: patchConfig.runtimeRadianceTexture?.uuid ?? null,
     diffuseIntensity: probeBlend.diffuseIntensity ?? 1,
     mode: probeBlend.mode,
@@ -3235,6 +3280,7 @@ function updateProbeBlendMaterialDebugState(
         ]
       : null,
     runtimeRadianceIntensity: patchConfig.runtimeRadianceIntensity ?? 0,
+    runtimeRadianceNormalOffset: patchConfig.runtimeRadianceNormalOffset ?? 0,
     runtimeRadianceTextureUUID: patchConfig.runtimeRadianceTexture?.uuid ?? null,
     probeTextureCount: probeBlend.probeTextures.filter(Boolean).length,
     region: probeBlend.region
@@ -3298,6 +3344,7 @@ function updateProbeBlendUniformDebugState(
         ]
       : null,
     runtimeRadianceIntensity: shader.uniforms.runtimeRadianceIntensity?.value ?? null,
+    runtimeRadianceNormalOffset: shader.uniforms.runtimeRadianceNormalOffset?.value ?? null,
     runtimeRadianceTextureUUID: shader.uniforms.runtimeRadianceTexture?.value?.uuid ?? null
   }
 }
@@ -3333,6 +3380,7 @@ function patchProbeBlendMaterialShader(
   probeBlendShader.uniforms.lightMapTorchTint = new Uniform(WHITE_COLOR.clone())
   probeBlendShader.uniforms.runtimeRadianceBounds = new Uniform(new Vector4(0, 0, 1, 1))
   probeBlendShader.uniforms.runtimeRadianceIntensity = new Uniform(0)
+  probeBlendShader.uniforms.runtimeRadianceNormalOffset = new Uniform(0)
   probeBlendShader.uniforms.runtimeRadianceTexture = new Uniform<Texture | null>(null)
   probeBlendShader.uniforms.localProbePosition0 = new Uniform(DEFAULT_PROBE_POSITION.clone())
   probeBlendShader.uniforms.localProbePosition1 = new Uniform(DEFAULT_PROBE_POSITION.clone())
@@ -3423,7 +3471,7 @@ function patchProbeBlendMaterialShader(
 \t#include <project_vertex>`
       )
   probeBlendShader.fragmentShader =
-    `${shaderFeatureDefines}${vlmFeatureDefines}${lightMapFeatureDefines}${currentPatchConfig.runtimeRadianceTexture ? '#define LEVELSJAM_RUNTIME_RADIANCE 1\n' : ''}uniform vec3 lightMapAmbientTint;\nuniform vec3 lightMapTorchTint;\nuniform sampler2D runtimeRadianceTexture;\nuniform vec4 runtimeRadianceBounds;\nuniform float runtimeRadianceIntensity;\nuniform float probeBlendDiffuseIntensity;\nuniform float probeBlendRadianceIntensity;\nvarying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
+    `${shaderFeatureDefines}${vlmFeatureDefines}${lightMapFeatureDefines}${currentPatchConfig.runtimeRadianceTexture ? '#define LEVELSJAM_RUNTIME_RADIANCE 1\n' : ''}uniform vec3 lightMapAmbientTint;\nuniform vec3 lightMapTorchTint;\nuniform sampler2D runtimeRadianceTexture;\nuniform vec4 runtimeRadianceBounds;\nuniform float runtimeRadianceIntensity;\nuniform float runtimeRadianceNormalOffset;\nuniform float probeBlendDiffuseIntensity;\nuniform float probeBlendRadianceIntensity;\nvarying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
       .replace(
         '#include <envmap_physical_pars_fragment>',
         PROBE_BLEND_SHADER_CHUNK
@@ -4221,18 +4269,18 @@ function buildProbeBlendConfig(
     diffuseIntensity: options.diffuseIntensity ?? 1,
     mode,
     probeCellSize: MAZE_CELL_SIZE,
-    probeCoeffTextureL0: options.probeCoefficientTextures?.[0] ?? null,
-    probeCoeffTextureL1: options.probeCoefficientTextures?.[1] ?? null,
-    probeCoeffTextureL2: options.probeCoefficientTextures?.[2] ?? null,
-    probeCoeffTextureL3: options.probeCoefficientTextures?.[3] ?? null,
-    probeDepthAtlasTextures,
+    probeCoeffTextureL0: null,
+    probeCoeffTextureL1: null,
+    probeCoeffTextureL2: null,
+    probeCoeffTextureL3: null,
+    probeDepthAtlasTextures: EMPTY_PROBE_DEPTH_ATLAS_TEXTURES,
     radianceIntensity: options.radianceIntensity ?? 1,
     radianceMode: options.radianceMode ?? mode,
     probeHeight: layout.reflectionProbes[0]?.position.y ?? 1.25,
     probeBoxes: probeIndices.map((probeIndex) =>
       getProbeVolumeBounds(layout.reflectionProbes[probeIndex]?.position)
     ),
-    probeCoefficients,
+    probeCoefficients: [],
     probeDepthTextures,
     probeGridMin: {
       x: layout.reflectionProbes[0]?.position.x ?? 0,
@@ -4248,9 +4296,9 @@ function buildProbeBlendConfig(
     probeTextureInfos: probeTextures.map((texture) => getCubeUvTextureInfo(texture)),
     probeTextures,
     region: options.region,
-    useProbeDepthAtlases: options.useProbeDepthAtlases ?? true,
-    vlmBoundaryNormal: options.vlmBoundaryNormal,
-    vlmMode: options.vlmMode ?? 'disabled',
+    useProbeDepthAtlases: false,
+    vlmBoundaryNormal: undefined,
+    vlmMode: 'disabled',
     weights: options.weights
   } satisfies ProbeBlendConfig
 }
@@ -5372,61 +5420,16 @@ function getRuntimeRadianceLightDirection(side: MazeLayout['lights'][number]['si
   }
 }
 
-function distancePointToAabb2D(
+function pointInRuntimeRadianceOccluder2D(
   x: number,
   z: number,
   occluder: RuntimeRadianceOccluder
 ) {
-  const dx = Math.max(occluder.minX - x, 0, x - occluder.maxX)
-  const dz = Math.max(occluder.minZ - z, 0, z - occluder.maxZ)
-  return Math.hypot(dx, dz)
-}
-
-function segmentIntersectsAabb2D(
-  ax: number,
-  az: number,
-  bx: number,
-  bz: number,
-  occluder: RuntimeRadianceOccluder
-) {
-  const dx = bx - ax
-  const dz = bz - az
-  let tMin = 0
-  let tMax = 1
-
-  const clip = (p: number, q: number) => {
-    if (Math.abs(p) < 0.000001) {
-      return q >= 0
-    }
-
-    const t = q / p
-
-    if (p < 0) {
-      if (t > tMax) {
-        return false
-      }
-      if (t > tMin) {
-        tMin = t
-      }
-    } else {
-      if (t < tMin) {
-        return false
-      }
-      if (t < tMax) {
-        tMax = t
-      }
-    }
-
-    return true
-  }
-
   return (
-    clip(-dx, ax - occluder.minX) &&
-    clip(dx, occluder.maxX - ax) &&
-    clip(-dz, az - occluder.minZ) &&
-    clip(dz, occluder.maxZ - az) &&
-    tMax >= Math.max(tMin, 0.0005) &&
-    tMin <= 0.9995
+    x >= occluder.minX &&
+    x <= occluder.maxX &&
+    z >= occluder.minZ &&
+    z <= occluder.maxZ
   )
 }
 
@@ -5466,22 +5469,43 @@ function buildRuntimeRadianceOccluders(
   return [...wallOccluders, ...gateOccluders]
 }
 
-function isRuntimeRadianceOccluded(
-  x: number,
-  z: number,
-  lightX: number,
-  lightZ: number,
-  occluders: RuntimeRadianceOccluder[]
+function isRuntimeRadiancePixelPathBlocked(
+  startColumn: number,
+  startRow: number,
+  endColumn: number,
+  endRow: number,
+  blocked: Uint8Array,
+  resolution: number
 ) {
-  for (const occluder of occluders) {
-    if (
-      distancePointToAabb2D(x, z, occluder) < 0.02 ||
-      distancePointToAabb2D(lightX, lightZ, occluder) < SCONCE_RADIUS + 0.08
-    ) {
-      continue
+  if (startColumn === endColumn && startRow === endRow) {
+    return false
+  }
+
+  let column = startColumn
+  let row = startRow
+  const deltaColumn = Math.abs(endColumn - startColumn)
+  const deltaRow = -Math.abs(endRow - startRow)
+  const stepColumn = startColumn < endColumn ? 1 : -1
+  const stepRow = startRow < endRow ? 1 : -1
+  let error = deltaColumn + deltaRow
+
+  while (column !== endColumn || row !== endRow) {
+    const doubledError = error * 2
+
+    if (doubledError >= deltaRow) {
+      error += deltaRow
+      column += stepColumn
+    }
+    if (doubledError <= deltaColumn) {
+      error += deltaColumn
+      row += stepRow
     }
 
-    if (segmentIntersectsAabb2D(x, z, lightX, lightZ, occluder)) {
+    if (column === endColumn && row === endRow) {
+      return false
+    }
+
+    if (blocked[(row * resolution) + column]) {
       return true
     }
   }
@@ -5500,21 +5524,84 @@ function buildRuntimeRadianceCascadeSurface(
   const direct = new Float32Array(pixelCount * 3)
   const cascadeA = new Float32Array(pixelCount * 3)
   const cascadeB = new Float32Array(pixelCount * 3)
+  const blocked = new Uint8Array(pixelCount)
   const occluders = buildRuntimeRadianceOccluders(layout, openGateIds)
   const torchColor = TORCH_LIGHTMAP_TINT
   const maxDistanceSquared = RUNTIME_RADIANCE_MAX_DISTANCE * RUNTIME_RADIANCE_MAX_DISTANCE
+  const xByColumn = new Float32Array(resolution)
+  const zByRow = new Float32Array(resolution)
+  const lightGridPositions = layout.lights.map((light) => ({
+    column: MathUtils.clamp(
+      Math.floor(((light.torchPosition.x - bounds.minX) / bounds.width) * resolution),
+      0,
+      resolution - 1
+    ),
+    row: MathUtils.clamp(
+      Math.floor(((light.torchPosition.z - bounds.minZ) / bounds.depth) * resolution),
+      0,
+      resolution - 1
+    )
+  }))
+
+  for (let column = 0; column < resolution; column += 1) {
+    xByColumn[column] = bounds.minX + ((column + 0.5) / resolution) * bounds.width
+  }
+  for (let row = 0; row < resolution; row += 1) {
+    zByRow[row] = bounds.minZ + ((row + 0.5) / resolution) * bounds.depth
+  }
+
+  for (const occluder of occluders) {
+    const minColumn = MathUtils.clamp(
+      Math.floor(((occluder.minX - bounds.minX) / bounds.width) * resolution),
+      0,
+      resolution - 1
+    )
+    const maxColumn = MathUtils.clamp(
+      Math.ceil(((occluder.maxX - bounds.minX) / bounds.width) * resolution),
+      0,
+      resolution - 1
+    )
+    const minRow = MathUtils.clamp(
+      Math.floor(((occluder.minZ - bounds.minZ) / bounds.depth) * resolution),
+      0,
+      resolution - 1
+    )
+    const maxRow = MathUtils.clamp(
+      Math.ceil(((occluder.maxZ - bounds.minZ) / bounds.depth) * resolution),
+      0,
+      resolution - 1
+    )
+
+    for (let row = minRow; row <= maxRow; row += 1) {
+      const z = zByRow[row]
+
+      for (let column = minColumn; column <= maxColumn; column += 1) {
+        const x = xByColumn[column]
+
+        if (pointInRuntimeRadianceOccluder2D(x, z, occluder)) {
+          blocked[(row * resolution) + column] = 1
+        }
+      }
+    }
+  }
 
   for (let row = 0; row < resolution; row += 1) {
-    const z = bounds.minZ + ((row + 0.5) / resolution) * bounds.depth
+    const z = zByRow[row]
 
     for (let column = 0; column < resolution; column += 1) {
-      const x = bounds.minX + ((column + 0.5) / resolution) * bounds.width
+      const x = xByColumn[column]
+      const pixelIndex = (row * resolution) + column
       const outputOffset = ((row * resolution) + column) * 3
       let red = 0
       let green = 0
       let blue = 0
 
-      for (const light of layout.lights) {
+      if (blocked[pixelIndex]) {
+        continue
+      }
+
+      for (let lightIndex = 0; lightIndex < layout.lights.length; lightIndex += 1) {
+        const light = layout.lights[lightIndex]
         const lightX = light.torchPosition.x
         const lightZ = light.torchPosition.z
         const dx = lightX - x
@@ -5536,7 +5623,18 @@ function buildRuntimeRadianceCascadeSurface(
           continue
         }
 
-        if (isRuntimeRadianceOccluded(x, z, lightX, lightZ, occluders)) {
+        const lightGridPosition = lightGridPositions[lightIndex]
+
+        if (
+          isRuntimeRadiancePixelPathBlocked(
+            column,
+            row,
+            lightGridPosition.column,
+            lightGridPosition.row,
+            blocked,
+            resolution
+          )
+        ) {
           continue
         }
 
@@ -5578,18 +5676,41 @@ function buildRuntimeRadianceCascadeSurface(
 
     for (let row = 0; row < resolution; row += 1) {
       for (let column = 0; column < resolution; column += 1) {
-        const outputOffset = ((row * resolution) + column) * 3
+        const pixelIndex = (row * resolution) + column
+        const outputOffset = pixelIndex * 3
         let red = 0
         let green = 0
         let blue = 0
         let sampleCount = 0
+
+        if (blocked[pixelIndex]) {
+          continue
+        }
 
         for (let yOffset = -radius; yOffset <= radius; yOffset += radius) {
           const sampleRow = MathUtils.clamp(row + yOffset, 0, resolution - 1)
 
           for (let xOffset = -radius; xOffset <= radius; xOffset += radius) {
             const sampleColumn = MathUtils.clamp(column + xOffset, 0, resolution - 1)
-            const sampleOffset = ((sampleRow * resolution) + sampleColumn) * 3
+            const sampleIndex = (sampleRow * resolution) + sampleColumn
+            const sampleOffset = sampleIndex * 3
+
+            if (blocked[sampleIndex]) {
+              continue
+            }
+
+            if (
+              isRuntimeRadiancePixelPathBlocked(
+                column,
+                row,
+                sampleColumn,
+                sampleRow,
+                blocked,
+                resolution
+              )
+            ) {
+              continue
+            }
 
             red += cascadeA[sampleOffset]
             green += cascadeA[sampleOffset + 1]
@@ -5598,9 +5719,11 @@ function buildRuntimeRadianceCascadeSurface(
           }
         }
 
-        cascadeB[outputOffset] = red / sampleCount
-        cascadeB[outputOffset + 1] = green / sampleCount
-        cascadeB[outputOffset + 2] = blue / sampleCount
+        if (sampleCount > 0) {
+          cascadeB[outputOffset] = red / sampleCount
+          cascadeB[outputOffset + 1] = green / sampleCount
+          cascadeB[outputOffset + 2] = blue / sampleCount
+        }
       }
     }
 
@@ -6481,23 +6604,7 @@ function EnvironmentLighting({
         })()
       )
     )
-    const startupVolumetricProbeIndices = Array.from(
-      new Set([
-        ...startupProbeIndices,
-        ...layout.reflectionProbes
-          .map((_, probeIndex) => probeIndex)
-          .filter(
-            (probeIndex) =>
-              getDistanceToPriorityPosition(probeIndex) <=
-              (STARTUP_VOLUMETRIC_PROBE_READY_RADIUS ** 2)
-          )
-          .sort(
-            (leftProbeIndex, rightProbeIndex) =>
-              getDistanceToPriorityPosition(leftProbeIndex) -
-              getDistanceToPriorityPosition(rightProbeIndex)
-          )
-      ])
-    )
+    const startupVolumetricProbeIndices: number[] = []
 
     if (!layout.maze.id.startsWith('debug-')) {
       const previousDepthTargets = reflectionProbeDepthTargets.current
@@ -6509,13 +6616,12 @@ function EnvironmentLighting({
       const nextDepthTargets = new Array<{ dispose: () => void; texture: CubeTexture }>(probeCount)
       const nextTargets = new Array<{ dispose: () => void; texture: Texture }>(probeCount)
       const nextProbeAmbientColors = new Array<Color>(probeCount)
-      const nextProbeCoefficients = new Array<ProbeIrradianceCoefficients | null>(probeCount).fill(null)
       let cancelled = false
       let loadHandle = 0
       let publishHandle = 0
       let latestCaptureSceneState = getReflectionCaptureSceneState(scene, layout)
       const startupProbeIndexSet = new Set(startupProbeIndices)
-      const startupVolumetricProbeIndexSet = new Set(startupVolumetricProbeIndices)
+      const startupVolumetricProbeIndexSet = new Set<number>()
 
       const disposeProbeTargets = (
         targets: Array<{ dispose: () => void; texture: Texture }>
@@ -6534,11 +6640,6 @@ function EnvironmentLighting({
           (count, target) => count + Number(Boolean(target)),
           0
         )
-        const loadedVolumetricProbeCount = startupVolumetricProbeIndices.reduce(
-          (count, probeIndex) =>
-            count + Number(Boolean(nextDepthTargets[probeIndex] && nextProbeCoefficients[probeIndex])),
-          0
-        )
 
         return {
           activeProbeId: null,
@@ -6548,7 +6649,7 @@ function EnvironmentLighting({
             Math.max(startupProbeIndices.length, REFLECTION_PROBE_RUNTIME_RESIDENT_LIMIT)
           ),
           loadedProbeCount,
-          loadedVolumetricProbeCount,
+          loadedVolumetricProbeCount: 0,
           priorityProbeIndices: [...startupProbeIndices],
           probeCaptureCounts: [],
           probeMetrics: [],
@@ -6573,40 +6674,28 @@ function EnvironmentLighting({
             probeCount,
             Math.max(startupProbeIndices.length, REFLECTION_PROBE_RUNTIME_RESIDENT_LIMIT)
           ),
-          startupVolumetricProbeCount: startupVolumetricProbeIndices.length,
-          startupVolumetricProbeIndices: [...startupVolumetricProbeIndices],
+          startupVolumetricProbeCount: 0,
+          startupVolumetricProbeIndices: [],
           textureMemoryBudgetBytes: REFLECTION_PROBE_RUNTIME_TEXTURE_MEMORY_BUDGET_BYTES,
           ready:
             startupProbeIndices.length > 0 &&
-            startupProbeIndices.every((probeIndex) => Boolean(nextTargets[probeIndex])) &&
-            startupVolumetricProbeIndices.every(
-              (probeIndex) =>
-                Boolean(nextDepthTargets[probeIndex]) &&
-                Boolean(nextProbeCoefficients[probeIndex])
-            )
+            startupProbeIndices.every((probeIndex) => Boolean(nextTargets[probeIndex]))
         }
       }
 
       const publishReflectionProbeState = () => {
         const publishedAmbientColors = new Array<Color>(probeCount)
-        const publishedCoefficients = new Array<ProbeIrradianceCoefficients | null>(probeCount)
         const publishedDepthTextures = new Array<CubeTexture>(probeCount)
         const publishedTextures = new Array<Texture>(probeCount)
 
         for (let probeIndex = 0; probeIndex < probeCount; probeIndex += 1) {
           const ambientColor = nextProbeAmbientColors[probeIndex]
-          const coefficients = nextProbeCoefficients[probeIndex]
           const depthTarget = nextDepthTargets[probeIndex]
           const target = nextTargets[probeIndex]
 
           publishedAmbientColors[probeIndex] = (
             ambientColor ?? BLACK_COLOR
           ).clone()
-          if (coefficients) {
-            publishedCoefficients[probeIndex] = coefficients.map((coefficient) => (
-              [...coefficient]
-            )) as ProbeIrradianceCoefficients
-          }
           if (depthTarget) {
             publishedDepthTextures[probeIndex] = depthTarget.texture
           }
@@ -6623,7 +6712,7 @@ function EnvironmentLighting({
         reflectionProbeRawTargets.current = []
         startTransition(() => {
           onReflectionProbeAmbientColorsChange(publishedAmbientColors)
-          onReflectionProbeCoefficientsChange(publishedCoefficients)
+          onReflectionProbeCoefficientsChange([])
           onReflectionProbeDepthTexturesChange(publishedDepthTextures)
           onReflectionProbeRawTexturesChange([])
           onReflectionProbeTexturesChange(publishedTextures)
@@ -6702,13 +6791,13 @@ function EnvironmentLighting({
             ])
           )
           const requestedResidentProbeIndexSet = new Set(requestedResidentProbeIndices)
-          const pendingStartupProbeIndices = [...startupVolumetricProbeIndices]
+          const pendingStartupProbeIndices = [...startupProbeIndices]
           const pendingBackgroundProbeIndices = manifest.probes
             .map((probe) => probe.index)
             .filter(
               (probeIndex) =>
                 requestedResidentProbeIndexSet.has(probeIndex) &&
-                !startupVolumetricProbeIndexSet.has(probeIndex)
+                !startupProbeIndexSet.has(probeIndex)
             )
           let activeProbeLoads = 0
           let finished = false
@@ -6761,12 +6850,6 @@ function EnvironmentLighting({
                 texture: processedTexture
               }
             }
-            nextProbeCoefficients[probeIndex] = (
-              Array.isArray(manifestProbe.coefficients) &&
-              manifestProbe.coefficients.length === 4
-            )
-              ? manifestProbe.coefficients as ProbeIrradianceCoefficients
-              : null
             const l0 = manifestProbe.coefficients?.[0]
             nextProbeAmbientColors[probeIndex] = l0
               ? new Color(
@@ -6778,13 +6861,7 @@ function EnvironmentLighting({
 
             scene.userData.reflectionProbeState = buildReflectionProbeState(latestCaptureSceneState)
 
-            const startupVolumetricReady = startupVolumetricProbeIndices.every(
-              (candidateProbeIndex) =>
-                Boolean(nextDepthTargets[candidateProbeIndex]) &&
-                Boolean(nextProbeCoefficients[candidateProbeIndex])
-            )
-
-            if (startupProbeIndexSet.has(probeIndex) || startupVolumetricReady) {
+            if (startupProbeIndexSet.has(probeIndex)) {
               schedulePublishedProbeState(true)
             } else {
               schedulePublishedProbeState(false)
@@ -7859,6 +7936,7 @@ function WallSconce({
       lightMapTorchTint: TORCH_LIGHTMAP_TINT,
       runtimeRadianceBounds: runtimeRadiance.bounds,
       runtimeRadianceIntensity: lightmapContributionIntensity,
+      runtimeRadianceNormalOffset: RUNTIME_RADIANCE_SURFACE_NORMAL_OFFSET * 0.5,
       runtimeRadianceTexture: runtimeRadiance.texture
     }),
     [
@@ -8226,9 +8304,9 @@ function FogVolume({
   noiseFrequency,
   noisePeriod,
   noiseStrength,
-  probeCoefficientTextures,
-  probeDepthAtlasTextures,
   rayStepCount,
+  runtimeRadiance,
+  runtimeRadianceIntensity,
   visible,
   volumeIntensity
 }: {
@@ -8240,15 +8318,14 @@ function FogVolume({
   noiseFrequency: number
   noisePeriod: number
   noiseStrength: number
-  probeCoefficientTextures: [Texture, Texture, Texture, Texture]
-  probeDepthAtlasTextures: ProbeDepthAtlasTextures
   rayStepCount: number
+  runtimeRadiance: RuntimeRadianceSurface
+  runtimeRadianceIntensity: number
   visible: boolean
   volumeIntensity: number
 }) {
   const camera = useThree((state) => state.camera)
   const scene = useThree((state) => state.scene)
-  const volumetricShadowsEnabled = useContext(VolumetricShadowContext)
   const effect = useMemo(() => new FogVolumeEffectImpl(), [])
   const probeBounds = useMemo(() => {
     const firstProbe = layout.reflectionProbes[0]?.position
@@ -8267,10 +8344,6 @@ function FogVolume({
     () => new Vector2(layout.maze.width, layout.maze.height),
     [layout.maze.height, layout.maze.width]
   )
-  const probeDepthAtlasFaceSize = useMemo(() => {
-    const atlasImage = probeDepthAtlasTextures[0]?.image as { width?: number } | undefined
-    return (atlasImage?.width ?? 0) / Math.max(layout.maze.width, 1)
-  }, [layout.maze.width, probeDepthAtlasTextures])
 
   useEffect(() => {
     effect.density = visible ? volumeIntensity * FOG_EXTINCTION_SCALE : 0
@@ -8284,15 +8357,17 @@ function FogVolume({
     effect.noiseStrength = noiseStrength
     effect.probeAmbientBounds = probeBounds
     effect.probeAmbientGrid = probeGrid
-    effect.probeCoeffTextureL0 = probeCoefficientTextures[0]
-    effect.probeDepthAtlasTextures = probeDepthAtlasTextures
-    effect.probeDepthAtlasFaceSize = probeDepthAtlasFaceSize
+    effect.probeCoeffTextureL0 = null
+    effect.probeDepthAtlasTextures = EMPTY_PROBE_DEPTH_ATLAS_TEXTURES
+    effect.probeDepthAtlasFaceSize = 0
     effect.probeHeight = layout.reflectionProbes[0]?.position.y ?? 1.25
     effect.probeAmbientTexture = null
     effect.rayStepCount = rayStepCount
-    effect.useProbeCoefficientTexture = probeCoefficientTextures[0] ? 1 : 0
-    effect.useProbeDepthAtlases =
-      volumetricShadowsEnabled && probeDepthAtlasTextures.every(Boolean) ? 1 : 0
+    effect.runtimeRadianceBounds = runtimeRadiance.bounds
+    effect.runtimeRadianceIntensity = runtimeRadianceIntensity
+    effect.runtimeRadianceTexture = runtimeRadiance.texture
+    effect.useProbeCoefficientTexture = 0
+    effect.useProbeDepthAtlases = 0
     effect.useProbeAmbientTexture = 0
     effect.volumeHeight = FOG_VOLUME_HEIGHT
     scene.userData.fogEffectState = {
@@ -8322,9 +8397,10 @@ function FogVolume({
       ],
       rayStepCount,
       useProbeAmbientTexture: 0,
-      useProbeCoefficientTexture: probeCoefficientTextures[0] ? 1 : 0,
-      useProbeDepthAtlases:
-        volumetricShadowsEnabled && probeDepthAtlasTextures.every(Boolean) ? 1 : 0
+      runtimeRadianceIntensity,
+      runtimeRadianceTextureUUID: runtimeRadiance.texture.uuid,
+      useProbeCoefficientTexture: 0,
+      useProbeDepthAtlases: 0
     }
   }, [
     ambientColor,
@@ -8335,15 +8411,14 @@ function FogVolume({
     noiseFrequency,
     noisePeriod,
     noiseStrength,
-    probeCoefficientTextures,
-    probeDepthAtlasFaceSize,
-    probeDepthAtlasTextures,
     probeBounds,
     probeGrid,
     rayStepCount,
+    runtimeRadiance.bounds,
+    runtimeRadiance.texture,
+    runtimeRadianceIntensity,
     scene,
     visible,
-    volumetricShadowsEnabled,
     volumeIntensity
   ])
 
@@ -8410,75 +8485,6 @@ function ReflectionProbeVisualization({
               toneMapped
               uniforms={{
                 probeCubeUvMap: { value: texture }
-              }}
-              onUpdate={(material) => {
-                material.depthTest = true
-                material.depthWrite = true
-                material.toneMapped = true
-              }}
-              vertexShader={`
-                varying vec3 vProbeDirection;
-
-                void main() {
-                  vProbeDirection = position;
-                  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-                }
-              `}
-            />
-          )
-        } else if (mode === 'volumetric-lightmap') {
-          const coefficients = reflectionProbeCoefficients[index]
-
-          if (!coefficients) {
-            return null
-          }
-
-          material = (
-            <shaderMaterial
-              key={`${probe.id}:${mode}:volumetric-lightmap`}
-              depthTest
-              depthWrite
-              fragmentShader={createVolumetricLightmapProbeSphereFragmentShader()}
-              side={DoubleSide}
-              toneMapped
-              uniforms={{
-                coeffL0: { value: new Vector3(...coefficients[0]) },
-                coeffL1: { value: new Vector3(...coefficients[1]) },
-                coeffL2: { value: new Vector3(...coefficients[2]) },
-                coeffL3: { value: new Vector3(...coefficients[3]) }
-              }}
-              onUpdate={(material) => {
-                material.depthTest = true
-                material.depthWrite = true
-                material.toneMapped = true
-              }}
-              vertexShader={`
-                varying vec3 vProbeDirection;
-
-                void main() {
-                  vProbeDirection = position;
-                  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-                }
-              `}
-            />
-          )
-        } else if (mode === 'shadow-map') {
-          const depthTexture = reflectionProbeDepthTextures[index]
-
-          if (!depthTexture) {
-            return null
-          }
-
-          material = (
-            <shaderMaterial
-              key={`${probe.id}:${mode}:shadow-map`}
-              depthTest
-              depthWrite
-              fragmentShader={createShadowProbeSphereFragmentShader()}
-              side={DoubleSide}
-              toneMapped
-              uniforms={{
-                probeDepthMap: { value: depthTexture }
               }}
               onUpdate={(material) => {
                 material.depthTest = true
@@ -9624,6 +9630,7 @@ function MazeWallMesh({
       lightMapTorchTint: TORCH_LIGHTMAP_TINT,
       runtimeRadianceBounds: runtimeRadiance.bounds,
       runtimeRadianceIntensity: surfaceLightmapsEnabled ? lightmapContributionIntensity : 0,
+      runtimeRadianceNormalOffset: RUNTIME_RADIANCE_SURFACE_NORMAL_OFFSET,
       runtimeRadianceTexture: runtimeRadiance.texture
     }),
     [
@@ -9802,6 +9809,7 @@ function SceneGeometry({
         environmentTexture={environmentTexture}
         environmentIntensity={environmentIntensity}
         iblContributionIntensity={iblContributionIntensity}
+        lightmapContributionIntensity={lightmapContributionIntensity}
         layout={layout}
         openGateIds={openGateIds}
         probeDepthAtlasTextures={probeDepthAtlasTextures}
@@ -9816,6 +9824,7 @@ function SceneGeometry({
         environmentTexture={environmentTexture}
         environmentIntensity={environmentIntensity}
         iblContributionIntensity={iblContributionIntensity}
+        lightmapContributionIntensity={lightmapContributionIntensity}
         layout={layout}
         probeDepthAtlasTextures={probeDepthAtlasTextures}
         probeCoefficientTextures={probeCoefficientTextures}
@@ -9844,6 +9853,7 @@ function GateActor({
   environmentTexture,
   gate,
   iblContributionIntensity,
+  lightmapContributionIntensity,
   isOpen,
   layout,
   probeDepthAtlasTextures,
@@ -9859,6 +9869,7 @@ function GateActor({
   environmentTexture: Texture | null
   gate: MazeLayout['gates'][number]
   iblContributionIntensity: number
+  lightmapContributionIntensity: number
   isOpen: boolean
   layout: MazeLayout
   probeDepthAtlasTextures: ProbeDepthAtlasTextures
@@ -9991,10 +10002,11 @@ function GateActor({
   const patchConfig = useMemo(
     () => ({
       runtimeRadianceBounds: runtimeRadiance.bounds,
-      runtimeRadianceIntensity: iblContributionIntensity,
+      runtimeRadianceIntensity: lightmapContributionIntensity,
+      runtimeRadianceNormalOffset: RUNTIME_RADIANCE_SURFACE_NORMAL_OFFSET,
       runtimeRadianceTexture: runtimeRadiance.texture
     }),
-    [iblContributionIntensity, runtimeRadiance.bounds, runtimeRadiance.texture]
+    [lightmapContributionIntensity, runtimeRadiance.bounds, runtimeRadiance.texture]
   )
 
   useAttachProbeBlendToModel(model, probeBlend, patchConfig)
@@ -10062,6 +10074,7 @@ function MazeGates({
   environmentTexture,
   iblContributionIntensity,
   layout,
+  lightmapContributionIntensity,
   openGateIds,
   probeDepthAtlasTextures,
   probeCoefficientTextures,
@@ -10075,6 +10088,7 @@ function MazeGates({
   environmentTexture: Texture | null
   iblContributionIntensity: number
   layout: MazeLayout
+  lightmapContributionIntensity: number
   openGateIds: Set<string>
   probeDepthAtlasTextures: ProbeDepthAtlasTextures
   probeCoefficientTextures: [Texture, Texture, Texture, Texture]
@@ -10093,6 +10107,7 @@ function MazeGates({
           environmentTexture={environmentTexture}
           gate={gate}
           iblContributionIntensity={iblContributionIntensity}
+          lightmapContributionIntensity={lightmapContributionIntensity}
           isOpen={openGateIds.has(gate.id)}
           key={gate.id}
           layout={layout}
@@ -10116,6 +10131,7 @@ function MazeItemGroundActor({
   iblContributionIntensity,
   item,
   layout,
+  lightmapContributionIntensity,
   probeDepthAtlasTextures,
   probeCoefficientTextures,
   reflectionContributionIntensity,
@@ -10130,6 +10146,7 @@ function MazeItemGroundActor({
   iblContributionIntensity: number
   item: MazeLayout['items'][number]
   layout: MazeLayout
+  lightmapContributionIntensity: number
   probeDepthAtlasTextures: ProbeDepthAtlasTextures
   probeCoefficientTextures: [Texture, Texture, Texture, Texture]
   reflectionContributionIntensity: number
@@ -10266,10 +10283,11 @@ function MazeItemGroundActor({
   const patchConfig = useMemo(
     () => ({
       runtimeRadianceBounds: runtimeRadiance.bounds,
-      runtimeRadianceIntensity: iblContributionIntensity,
+      runtimeRadianceIntensity: lightmapContributionIntensity,
+      runtimeRadianceNormalOffset: RUNTIME_RADIANCE_SURFACE_NORMAL_OFFSET * 0.5,
       runtimeRadianceTexture: runtimeRadiance.texture
     }),
-    [iblContributionIntensity, runtimeRadiance.bounds, runtimeRadiance.texture]
+    [lightmapContributionIntensity, runtimeRadiance.bounds, runtimeRadiance.texture]
   )
 
   useAttachProbeBlendToModel(model, probeBlend, patchConfig)
@@ -10309,6 +10327,7 @@ function HeldItemView({
   iblContributionIntensity,
   itemType,
   layout,
+  lightmapContributionIntensity,
   playerCell,
   probeDepthAtlasTextures,
   probeCoefficientTextures,
@@ -10324,6 +10343,7 @@ function HeldItemView({
   iblContributionIntensity: number
   itemType: 'sword' | 'trophy'
   layout: MazeLayout
+  lightmapContributionIntensity: number
   playerCell: { x: number; y: number }
   probeDepthAtlasTextures: ProbeDepthAtlasTextures
   probeCoefficientTextures: [Texture, Texture, Texture, Texture]
@@ -10468,10 +10488,11 @@ function HeldItemView({
   const patchConfig = useMemo(
     () => ({
       runtimeRadianceBounds: runtimeRadiance.bounds,
-      runtimeRadianceIntensity: iblContributionIntensity,
+      runtimeRadianceIntensity: lightmapContributionIntensity,
+      runtimeRadianceNormalOffset: RUNTIME_RADIANCE_SURFACE_NORMAL_OFFSET * 0.5,
       runtimeRadianceTexture: runtimeRadiance.texture
     }),
-    [iblContributionIntensity, runtimeRadiance.bounds, runtimeRadiance.texture]
+    [lightmapContributionIntensity, runtimeRadiance.bounds, runtimeRadiance.texture]
   )
 
   useAttachProbeBlendToModel(model, probeBlend, patchConfig)
@@ -10533,6 +10554,7 @@ function MazeItems({
   environmentTexture,
   iblContributionIntensity,
   layout,
+  lightmapContributionIntensity,
   probeDepthAtlasTextures,
   probeCoefficientTextures,
   reflectionContributionIntensity,
@@ -10546,6 +10568,7 @@ function MazeItems({
   environmentTexture: Texture | null
   iblContributionIntensity: number
   layout: MazeLayout
+  lightmapContributionIntensity: number
   probeDepthAtlasTextures: ProbeDepthAtlasTextures
   probeCoefficientTextures: [Texture, Texture, Texture, Texture]
   reflectionContributionIntensity: number
@@ -10568,6 +10591,7 @@ function MazeItems({
             environmentIntensity={environmentIntensity}
             environmentTexture={environmentTexture}
             iblContributionIntensity={iblContributionIntensity}
+            lightmapContributionIntensity={lightmapContributionIntensity}
             item={item}
             key={item.id}
             layout={layout}
@@ -10586,6 +10610,7 @@ function MazeItems({
           environmentIntensity={environmentIntensity}
           environmentTexture={environmentTexture}
           iblContributionIntensity={iblContributionIntensity}
+          lightmapContributionIntensity={lightmapContributionIntensity}
           itemType="sword"
           layout={layout}
           playerCell={turnState.player.cell}
@@ -10604,6 +10629,7 @@ function MazeItems({
           environmentIntensity={environmentIntensity}
           environmentTexture={environmentTexture}
           iblContributionIntensity={iblContributionIntensity}
+          lightmapContributionIntensity={lightmapContributionIntensity}
           itemType="trophy"
           layout={layout}
           playerCell={turnState.player.cell}
@@ -10776,6 +10802,7 @@ function MonsterModel({
     () => ({
       runtimeRadianceBounds: runtimeRadiance.bounds,
       runtimeRadianceIntensity: lightmapContributionIntensity,
+      runtimeRadianceNormalOffset: RUNTIME_RADIANCE_SURFACE_NORMAL_OFFSET * 0.5,
       runtimeRadianceTexture: runtimeRadiance.texture
     }),
     [lightmapContributionIntensity, runtimeRadiance.bounds, runtimeRadiance.texture]
@@ -13820,14 +13847,9 @@ function Scene({
     () => colorFromHex(visualSettings.volumetricAmbientHex),
     [visualSettings.volumetricAmbientHex]
   )
-  const probeCoefficientTextures = useProbeCoefficientTextures(
-    layout,
-    reflectionProbeCoefficients
-  ) as [Texture, Texture, Texture, Texture]
-  const probeDepthAtlasTextures = useProbeDepthAtlasTextures(
-    layout,
-    reflectionProbeDepthTextures
-  )
+  const probeCoefficientTextures = EMPTY_PROBE_COEFFICIENT_TEXTURES
+  const probeCoefficients = EMPTY_PROBE_COEFFICIENTS
+  const probeDepthAtlasTextures = EMPTY_PROBE_DEPTH_ATLAS_TEXTURES
   const vignetteActive = isEffectActive(visualSettings.vignette)
 
   return (
@@ -13847,7 +13869,7 @@ function Scene({
         onReflectionProbeRawTexturesChange={setReflectionProbeRawTextures}
         onReflectionProbeTexturesChange={setReflectionProbeTextures}
       />
-      <VolumetricShadowContext.Provider value={visualSettings.volumetricShadowsEnabled}>
+      <VolumetricShadowContext.Provider value={false}>
         <RuntimeShadowedTorchLights
           layout={layout}
           openGateIds={openGateIds}
@@ -13857,32 +13879,32 @@ function Scene({
         <SceneGeometry
           environmentTexture={environmentTexture}
           environmentIntensity={environmentIntensity}
-          iblContributionIntensity={getEnabledContributionIntensity(visualSettings.iblContribution)}
+          iblContributionIntensity={0}
           layout={layout}
           lightmapContributionIntensity={getEnabledContributionIntensity(visualSettings.lightmapContribution)}
           openGateIds={openGateIds}
           probeDebugMode={visualSettings.probeDebugMode}
           probeDepthAtlasTextures={probeDepthAtlasTextures}
           probeCoefficientTextures={probeCoefficientTextures}
-          reflectionProbeCoefficients={reflectionProbeCoefficients}
+          reflectionProbeCoefficients={probeCoefficients}
           reflectionProbeDepthTextures={reflectionProbeDepthTextures}
           reflectionContributionIntensity={getEnabledContributionIntensity(visualSettings.reflectionContribution)}
           reflectionProbeTextures={reflectionProbeTextures}
           runtimeRadiance={runtimeRadiance}
-          staticVolumetricContributionIntensity={getEnabledContributionIntensity(visualSettings.staticVolumetricContribution)}
+          staticVolumetricContributionIntensity={0}
           surfaceLightmap={surfaceLightmap}
           turnState={turnState}
         />
         <MonsterActors
           environmentIntensity={environmentIntensity}
           environmentTexture={environmentTexture}
-          iblContributionIntensity={getEnabledContributionIntensity(visualSettings.iblContribution)}
+          iblContributionIntensity={0}
           layout={layout}
           lightmapContributionIntensity={getEnabledContributionIntensity(visualSettings.lightmapContribution)}
           probeDepthAtlasTextures={probeDepthAtlasTextures}
           probeCoefficientTextures={probeCoefficientTextures}
           reflectionContributionIntensity={getEnabledContributionIntensity(visualSettings.reflectionContribution)}
-          reflectionProbeCoefficients={reflectionProbeCoefficients}
+          reflectionProbeCoefficients={probeCoefficients}
           reflectionProbeDepthTextures={reflectionProbeDepthTextures}
           reflectionProbeTextures={reflectionProbeTextures}
           runtimeRadiance={runtimeRadiance}
@@ -13934,9 +13956,9 @@ function Scene({
             noiseFrequency={visualSettings.volumetricNoiseFrequency}
             noisePeriod={visualSettings.volumetricNoisePeriod}
             noiseStrength={visualSettings.volumetricNoiseStrength}
-            probeCoefficientTextures={probeCoefficientTextures}
-            probeDepthAtlasTextures={probeDepthAtlasTextures}
             rayStepCount={visualSettings.volumetricStepCount}
+            runtimeRadiance={runtimeRadiance}
+            runtimeRadianceIntensity={getEnabledContributionIntensity(visualSettings.lightmapContribution)}
             visible={visualSettings.volumetricLighting.enabled}
             volumeIntensity={visualSettings.volumetricLighting.intensity}
           />
@@ -14295,7 +14317,7 @@ function VisualControls({
         </output>
         <label className="visual-effect-label">
           <input
-            aria-label="Surface Lightmap Enabled"
+            aria-label="Runtime Radiance Enabled"
             checked={visualSettings.lightmapContribution.enabled}
             onChange={(event) => {
               onBooleanSettingChange('lightmapContributionEnabled', event.target.checked)
@@ -14303,11 +14325,11 @@ function VisualControls({
             type="checkbox"
           />
           <ResettableLabel onReset={() => onResetScalarSetting('lightmapContributionIntensity')}>
-            Surface Lightmap
+            Runtime Radiance
           </ResettableLabel>
         </label>
         <input
-          aria-label="Surface Lightmap"
+          aria-label="Runtime Radiance"
           disabled={!visualSettings.lightmapContribution.enabled}
           max={MAX_LIGHTING_CONTRIBUTION_INTENSITY}
           min={0}
@@ -14318,90 +14340,6 @@ function VisualControls({
           type="range"
           value={visualSettings.lightmapContribution.intensity}
         />
-          </div>
-
-          <div className="visual-control-row">
-        <output>
-          {visualSettings.iblContribution.enabled
-            ? `${visualSettings.iblContribution.intensity.toFixed(2)}x`
-            : 'off'}
-        </output>
-        <label className="visual-effect-label">
-          <input
-            aria-label="Dynamic Volumetric Enabled"
-            checked={visualSettings.iblContribution.enabled}
-            onChange={(event) => {
-              onBooleanSettingChange('iblContributionEnabled', event.target.checked)
-            }}
-            type="checkbox"
-          />
-          <ResettableLabel onReset={() => onResetScalarSetting('iblContributionIntensity')}>
-            Dynamic Volumetric
-          </ResettableLabel>
-        </label>
-        <input
-          aria-label="Dynamic Volumetric"
-          disabled={!visualSettings.iblContribution.enabled}
-          max={MAX_LIGHTING_CONTRIBUTION_INTENSITY}
-          min={0}
-          onChange={(event) => {
-            onScalarSettingChange('iblContributionIntensity', Number(event.target.value))
-          }}
-          step={0.05}
-          type="range"
-          value={visualSettings.iblContribution.intensity}
-        />
-          </div>
-
-          <div className="visual-control-row">
-        <output>
-          {visualSettings.staticVolumetricContribution.enabled
-            ? `${visualSettings.staticVolumetricContribution.intensity.toFixed(2)}x`
-            : 'off'}
-        </output>
-        <label className="visual-effect-label">
-          <input
-            aria-label="Static Volumetric Enabled"
-            checked={visualSettings.staticVolumetricContribution.enabled}
-            onChange={(event) => {
-              onBooleanSettingChange('staticVolumetricContributionEnabled', event.target.checked)
-            }}
-            type="checkbox"
-          />
-          <ResettableLabel onReset={() => onResetScalarSetting('staticVolumetricContributionIntensity')}>
-            Static Volumetric
-          </ResettableLabel>
-        </label>
-        <input
-          aria-label="Static Volumetric"
-          disabled={!visualSettings.staticVolumetricContribution.enabled}
-          max={MAX_LIGHTING_CONTRIBUTION_INTENSITY}
-          min={0}
-          onChange={(event) => {
-            onScalarSettingChange('staticVolumetricContributionIntensity', Number(event.target.value))
-          }}
-          step={0.05}
-          type="range"
-          value={visualSettings.staticVolumetricContribution.intensity}
-        />
-          </div>
-
-          <div className="visual-control-row">
-        <output>{visualSettings.volumetricShadowsEnabled ? 'on' : 'off'}</output>
-        <label className="visual-effect-label">
-          <input
-            aria-label="Volumetric Shadows Enabled"
-            checked={visualSettings.volumetricShadowsEnabled}
-            onChange={(event) => {
-              onBooleanSettingChange('volumetricShadowsEnabled', event.target.checked)
-            }}
-            type="checkbox"
-          />
-          <ResettableLabel onReset={() => onResetBooleanSetting('volumetricShadowsEnabled')}>
-            Volumetric Shadows
-          </ResettableLabel>
-        </label>
-        <span aria-hidden="true" />
           </div>
 
           <div className="visual-control-row">

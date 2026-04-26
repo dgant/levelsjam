@@ -11,7 +11,7 @@
     <script>
       {
         const isLocalHost = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
-        const isDevServer = isLocalHost && ['4273', '5173'].includes(window.location.port)
+        const isDevServer = isLocalHost && ['4273', '5173', '5174'].includes(window.location.port)
         const addHeadPreload = (href, as, rel = 'preload') => {
           const link = document.createElement('link')
           link.rel = rel
@@ -182,7 +182,7 @@
       const isLocalHost = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
       const isDevServer =
         isLocalHost &&
-        ['4273', '5173'].includes(window.location.port)
+        ['4273', '5173', '5174'].includes(window.location.port)
       const preload = (href, as, rel = 'preload') => {
         const link = document.createElement('link')
         link.rel = rel

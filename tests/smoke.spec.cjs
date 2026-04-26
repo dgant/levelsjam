@@ -348,17 +348,12 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       )
       .toBe('100.00')
     await setSlider(page, 'Camera FOV', 60)
-    await expect(page.getByLabel('Surface Lightmap Enabled')).toBeVisible()
-    await expect(page.getByLabel('Surface Lightmap Enabled')).toBeChecked()
-    await expect(page.getByRole('slider', { name: 'Surface Lightmap' })).toHaveValue('1')
-    await expect(page.getByLabel('Dynamic Volumetric Enabled')).toBeVisible()
-    await expect(page.getByLabel('Dynamic Volumetric Enabled')).toBeChecked()
-    await expect(page.getByRole('slider', { name: 'Dynamic Volumetric' })).toHaveValue('1')
-    await expect(page.getByLabel('Static Volumetric Enabled')).toBeVisible()
-    await expect(page.getByLabel('Static Volumetric Enabled')).not.toBeChecked()
-    await expect(page.getByRole('slider', { name: 'Static Volumetric' })).toHaveValue('1')
-    await expect(page.getByLabel('Volumetric Shadows Enabled')).toBeVisible()
-    await expect(page.getByLabel('Volumetric Shadows Enabled')).toBeChecked()
+    await expect(page.getByLabel('Runtime Radiance Enabled')).toBeVisible()
+    await expect(page.getByLabel('Runtime Radiance Enabled')).toBeChecked()
+    await expect(page.getByRole('slider', { name: 'Runtime Radiance' })).toHaveValue('1')
+    await expect(page.getByText('Dynamic Volumetric')).toHaveCount(0)
+    await expect(page.getByText('Static Volumetric')).toHaveCount(0)
+    await expect(page.getByText('Volumetric Shadows')).toHaveCount(0)
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeVisible()
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeChecked()
     await expect(page.getByRole('slider', { name: 'Reflection Intensity' })).toHaveValue('1')
@@ -513,9 +508,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
           probeBlend: {
             diffuseIntensity: 0,
             mode: 'disabled',
-            probeDepthAtlasCount: 6,
+            probeDepthAtlasCount: 0,
             radianceIntensity: 1,
-            radianceMode: 'world',
             runtimeRadianceIntensity: 1,
             runtimeRadianceTextureUUID: expect.any(String)
           },
@@ -523,7 +517,6 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
             probeBlendDiffuseIntensity: 0,
             probeBlendMode: 3,
             probeBlendRadianceIntensity: 1,
-            probeBlendRadianceMode: 1,
             runtimeRadianceIntensity: 1,
             runtimeRadianceTextureUUID: expect.any(String)
           }
@@ -540,9 +533,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
           }
         }
       })
-    await setCheckbox(page, 'Static Volumetric Enabled', true)
-    await setSlider(page, 'Static Volumetric', 1)
-    await setCheckbox(page, 'Surface Lightmap Enabled', false)
+    await setCheckbox(page, 'Runtime Radiance Enabled', false)
     await expect
       .poll(
         async () => page.evaluate(() => ({
@@ -560,18 +551,16 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         ground: {
           hasLightMap: false,
           probeBlend: {
-            diffuseIntensity: 1,
+            diffuseIntensity: 0,
             mode: 'disabled',
-            probeDepthAtlasCount: 6,
+            probeDepthAtlasCount: 0,
             radianceIntensity: 1,
-            radianceMode: 'disabled',
             runtimeRadianceIntensity: 0
           },
           probeBlendUniforms: {
-            probeBlendDiffuseIntensity: 1,
+            probeBlendDiffuseIntensity: 0,
             probeBlendMode: 3,
             probeBlendRadianceIntensity: 1,
-            probeBlendRadianceMode: 3,
             runtimeRadianceIntensity: 0
           }
         },
@@ -640,8 +629,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         }
       })
     await setCheckbox(page, 'Reflection Intensity Enabled', true)
-    await setCheckbox(page, 'Static Volumetric Enabled', false)
-    await setCheckbox(page, 'Surface Lightmap Enabled', true)
+    await setCheckbox(page, 'Runtime Radiance Enabled', true)
     await page.keyboard.press('7')
     await expect
       .poll(

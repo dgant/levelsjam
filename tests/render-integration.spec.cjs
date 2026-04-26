@@ -307,17 +307,12 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     })
 
     await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveValue('0')
-    await expect(page.getByLabel('Surface Lightmap Enabled')).toBeVisible()
-    await expect(page.getByLabel('Surface Lightmap Enabled')).toBeChecked()
-    await expect(page.getByRole('slider', { name: 'Surface Lightmap' })).toHaveValue('1')
-    await expect(page.getByLabel('Dynamic Volumetric Enabled')).toBeVisible()
-    await expect(page.getByLabel('Dynamic Volumetric Enabled')).toBeChecked()
-    await expect(page.getByRole('slider', { name: 'Dynamic Volumetric' })).toHaveValue('1')
-    await expect(page.getByLabel('Static Volumetric Enabled')).toBeVisible()
-    await expect(page.getByLabel('Static Volumetric Enabled')).not.toBeChecked()
-    await expect(page.getByRole('slider', { name: 'Static Volumetric' })).toHaveValue('1')
-    await expect(page.getByLabel('Volumetric Shadows Enabled')).toBeVisible()
-    await expect(page.getByLabel('Volumetric Shadows Enabled')).toBeChecked()
+    await expect(page.getByLabel('Runtime Radiance Enabled')).toBeVisible()
+    await expect(page.getByLabel('Runtime Radiance Enabled')).toBeChecked()
+    await expect(page.getByRole('slider', { name: 'Runtime Radiance' })).toHaveValue('1')
+    await expect(page.getByText('Dynamic Volumetric')).toHaveCount(0)
+    await expect(page.getByText('Static Volumetric')).toHaveCount(0)
+    await expect(page.getByText('Volumetric Shadows')).toHaveCount(0)
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeVisible()
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeChecked()
     await expect(page.getByRole('slider', { name: 'Reflection Intensity' })).toHaveValue('1')
@@ -399,10 +394,9 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         }
       )
       .toMatchObject({
-        hasLightMap: true,
+        hasLightMap: false,
         hasMap: true,
-        hasUv1: true,
-        lightMapChannel: 1
+        hasUv1: true
       })
     await expect
       .poll(
@@ -432,15 +426,13 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       )
       .toMatchObject({
         ground: {
-          hasLightMap: true
+          hasLightMap: false
         },
         wall: {
-          hasLightMap: true
+          hasLightMap: false
         }
       })
-    await setCheckbox(page, 'Static Volumetric Enabled', true)
-    await setSlider(page, 'Static Volumetric', 1)
-    await setCheckbox(page, 'Surface Lightmap Enabled', false)
+    await setCheckbox(page, 'Runtime Radiance Enabled', false)
     await expect
       .poll(
         async () => page.evaluate(
@@ -502,12 +494,10 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await page.waitForTimeout(250)
     await page.keyboard.press('Backquote')
     await page.keyboard.press('Backquote')
-    await setCheckbox(page, 'Static Volumetric Enabled', false)
-    await setCheckbox(page, 'Surface Lightmap Enabled', true)
+    await setCheckbox(page, 'Runtime Radiance Enabled', true)
     await setCheckbox(page, 'Reflection Intensity Enabled', false)
     await setCheckbox(page, 'Reflection Intensity Enabled', true)
-    await setCheckbox(page, 'Static Volumetric Enabled', false)
-    await setCheckbox(page, 'Surface Lightmap Enabled', true)
+    await setCheckbox(page, 'Runtime Radiance Enabled', true)
   })
 
   await timedStep(timingProfile, 'probe-debug-visualization', async () => {
@@ -596,78 +586,6 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
           },
           visible: true
         }
-      })
-
-    await page.getByLabel('Probe Debug', { exact: true }).selectOption('volumetric-lightmap')
-    await expect
-      .poll(
-        async () => page.evaluate(() => {
-          const probeState = window.__levelsjamDebug.getReflectionProbeState?.()
-          const probeCount = probeState?.probeCount ?? 0
-          let loadedProbeIndex = null
-
-          for (let index = 0; index < probeCount; index += 1) {
-            const textureState = window.__levelsjamDebug.getReflectionProbeTextureState?.(index)
-
-            if (textureState?.processedTextureUUID) {
-              loadedProbeIndex = index
-              break
-            }
-          }
-
-          return loadedProbeIndex !== null
-            ? window.__levelsjamDebug.getReflectionProbeVisualizationState?.(loadedProbeIndex) ?? null
-            : null
-        }),
-        {
-          timeout: 5_000,
-          intervals: [100, 250, 500]
-        }
-      )
-      .toMatchObject({
-        mode: 'volumetric-lightmap',
-        uniformTextureUUIDs: {
-          coeffL0: '__coefficients__',
-          probeCubeUvMap: null,
-          probeDepthMap: null
-        },
-        visible: true
-      })
-
-    await page.getByLabel('Probe Debug', { exact: true }).selectOption('shadow-map')
-    await expect
-      .poll(
-        async () => page.evaluate(() => {
-          const probeState = window.__levelsjamDebug.getReflectionProbeState?.()
-          const probeCount = probeState?.probeCount ?? 0
-          let loadedProbeIndex = null
-
-          for (let index = 0; index < probeCount; index += 1) {
-            const textureState = window.__levelsjamDebug.getReflectionProbeTextureState?.(index)
-
-            if (textureState?.processedTextureUUID) {
-              loadedProbeIndex = index
-              break
-            }
-          }
-
-          return loadedProbeIndex !== null
-            ? window.__levelsjamDebug.getReflectionProbeVisualizationState?.(loadedProbeIndex) ?? null
-            : null
-        }),
-        {
-          timeout: 5_000,
-          intervals: [100, 250, 500]
-        }
-      )
-      .toMatchObject({
-        mode: 'shadow-map',
-        uniformTextureUUIDs: {
-          coeffL0: null,
-          probeCubeUvMap: null,
-          probeDepthMap: expect.any(String)
-        },
-        visible: true
       })
 
     await page.getByLabel('Probe Debug', { exact: true }).selectOption('none')
@@ -778,8 +696,10 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         fogDistance: 12,
         noiseFrequency: 6,
         useProbeAmbientTexture: 0,
-        useProbeCoefficientTexture: 1,
-        useProbeDepthAtlases: 1
+        useProbeCoefficientTexture: 0,
+        useProbeDepthAtlases: 0,
+        runtimeRadianceIntensity: 1,
+        runtimeRadianceTextureUUID: expect.any(String)
       })
 
     await expect
@@ -790,7 +710,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
           intervals: [50, 100, 250]
         }
       )
-      .toBe(1)
+      .toBe(0)
 
     await setSlider(page, 'Volumetric Fog Intensity', 0)
     await page.keyboard.press('Backquote')
@@ -822,7 +742,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     timingProfile.measurements.fogDiff = fogDiff
 
     expect(fogDiff.averagePerChannel).toBeGreaterThan(0.05)
-    expect(fogDiff.maxCombinedDifference).toBeGreaterThan(10)
+    expect(fogDiff.maxCombinedDifference).toBeGreaterThan(3)
 
     await page.keyboard.press('Backquote')
     await page.getByRole('button', { name: '7. Fog' }).click()

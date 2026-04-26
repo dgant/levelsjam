@@ -1,7 +1,7 @@
 # How To Work On This Project
 
 ## Current State
-The repository contains a runnable browser game prototype for GitHub Pages. The intended build serves a three.js scene with turn-based grid movement, an `F1` free-camera inspection toggle, a `C` credits modal, a local Poly Haven `overcast_soil` HDRI used for the visible skybox, an infinite `puddle-ground` base plane plus a maze-local lit floor patch, one randomly selected persisted maze built from `stone-wall-29` wall meshes, maze-mounted metal sconces with asynchronously loaded animated torch billboards, baked per-maze torch lightmaps, static local reflection probes for in-maze specular response, volumetric-lightmap probe data, and a backquote visual-controls panel with exposure, `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, `Reflection Intensity`, ambient-occlusion mode, tone-mapper, post-effect controls, and build metadata in the FPS overlay.
+The repository contains a runnable browser game prototype for GitHub Pages. The intended build serves a three.js scene with turn-based grid movement, an `F1` free-camera inspection toggle, a `C` credits modal, a local Poly Haven `overcast_soil` HDRI used for the visible skybox, an infinite `puddle-ground` base plane plus a maze-local lit floor patch, one randomly selected persisted maze built from `stone-wall-29` wall meshes, maze-mounted metal sconces with asynchronously loaded animated torch billboards, generated runtime radiance-field diffuse lighting, static local reflection probes for in-maze specular response, and a backquote visual-controls panel with exposure, `Runtime Radiance`, `Reflection Intensity`, ambient-occlusion mode, tone-mapper, post-effect controls, and build metadata in the FPS overlay.
 The initial `MINOTAUR` loading shell now appears directly from inline HTML in [index.html](/E:/p/levelsjam/index.html) before the React bundle finishes booting.
 The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutRuntime.ts](/E:/p/levelsjam/src/lib/sceneLayoutRuntime.ts) so the main app bundle stays small, while Node tests and scripts continue to use the synchronous [sceneLayout.js](/E:/p/levelsjam/src/lib/sceneLayout.js) path.
 
@@ -15,6 +15,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Stop that background instance with `npm run dev:bg:stop`.
 - Open the local URL printed by the dev server.
 - For agent work, prefer one long-lived headless Vite instance instead of repeatedly opening new visible windows.
+- On the `rc` branch, run the private dev server on `http://127.0.0.1:5174/` by setting `LEVELSJAM_DEV_PORT=5174`; `index.html` treats 5174 as a dev port so it loads `/src/main.tsx` instead of root-published assets.
 
 ## Build
 - Create a production build with `npm run build`.
@@ -31,7 +32,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Run `npm run test:smoke` to exercise the built page through Playwright.
 - Run `npm run test:smoke:runner` when `npm run build:pages` has already prepared the root-published bundle.
 - Run `npx playwright test tests/surface-lightmap.spec.cjs --reporter=line` after touching runtime lightmap formats, lightmap extraction, or baked-lightmap application. It isolates a known lit wall and catches the black-wall regression caused by invalid half-float texture uploads.
-- Re-run `npx playwright test tests/smoke.spec.cjs --reporter=line` after touching volumetric fog, probe-occlusion wiring, or lens flares. The smoke test now checks the fog debug state and the probe-depth-atlas path used by runtime probe blending.
+- Re-run `npx playwright test tests/smoke.spec.cjs --reporter=line` after touching volumetric fog, radiance-field wiring, or lens flares. The smoke test checks the fog debug state and the generated radiance path used by runtime probe blending.
 - Treat the Playwright `*:runner` commands as tests of the already-published root bundle. Run `npm run build:pages` first whenever source changes need to be reflected in those static-root runners.
 - Run `npm run test:render:integration` when you need the slower full-scene Playwright coverage for reflection, fog, and extended debug-control behavior.
 - `npm run test:render:integration` writes phase and screenshot timing data to `logs/latest-render-integration-profile.json`.
@@ -41,7 +42,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - `node scripts/sync-maze-runtime-data.cjs`, `npm run build`, and `npm run dev` now refresh the baked surface-lightmap artifacts for every maze under `logs/lightmap-artifacts/<maze-id>/` as part of the normal runtime-data sync.
 - For `rgb16f` baked lightmaps, expect each `public/maze-data/<maze-id>/` directory to contain `surface-lightmap.bin` for runtime loading, `surface-lightmap.png` for human-readable inspection, and `surface-lightmap-rgbe.png` for inspecting the encoded HDR payload.
 - Expect every persisted maze to emit the same baked-lighting artifact set. Differences in emitted filenames between mazes indicate stale or inconsistent bake output and should be treated as a bug.
-- Expect gameplay runtime lighting to use baked surface lightmaps, local volumetric-lightmap probes, and local reflection probes only. Global environment lighting is for offline bake inputs, not an in-game fallback.
+- Expect gameplay runtime lighting on the `rc` branch to use generated runtime radiance-field diffuse lighting plus local reflection probes. Global environment lighting is for offline bake inputs and the visible skybox, not an in-game diffuse fallback.
 - For baked surface lightmaps, treat `lightmap-atlas.png` as the human-readable preview and `lightmap-rgbe.png` as the raw HDR export encoded into a PNG container. Do not assume those two files should look the same.
 - Treat a scene that shows only the HDRI skybox and flame billboards as a render failure; the smoke test now checks that a real maze wall writes visible beauty-pass color.
 - Run `npm run test:perf` after changes that affect runtime probe loading, postprocessing defaults, monster rendering, or material shader paths.
@@ -78,8 +79,8 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify the torch billboards animate and stay camera-facing even on walls whose parent groups are rotated.
 - Verify the visible flame fills the square billboard, that the billboard width matches its wall clearance, and that the billboard bottom edge is flush with the sconce top.
 - Verify each persisted maze includes baked torch lightmap data.
-- Verify the browser runtime requests `surface-lightmap-rgbe.png` for surface lightmaps and does not request `surface-lightmap.bin` during ordinary page load.
-- Verify the baked lightmap visibly affects the maze walls and the maze-local lit floor patch in the rendered scene.
+- Verify the browser runtime does not request `surface-lightmap-rgbe.png` or `surface-lightmap.bin` during ordinary `rc` branch page load.
+- Verify generated runtime radiance visibly affects the maze walls and the maze-local lit floor patch in the rendered scene.
 - Verify the infinite base ground remains present outside the lit floor patch.
 - Verify baked wall lighting in a wall-facing view, not only in a broad maze overview where the floor can dominate the image.
 - Verify the wall-facing view is on the torch-facing side of the wall, not the dark back face.
@@ -104,13 +105,13 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify moving the camera between maze cells does not change `window.__levelsjamDebug.getReflectionProbeState().activeProbeId` from `null` or make the scene lighting flicker.
 - Verify the fire flipbook runs at the updated faster rate.
 - Verify the tone mapper is `AgX` by default.
-- Verify the visual controls panel exposes `Exposure`, `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, `Reflection Intensity`, `Ambient Occlusion`, `AO Intensity`, the tone mapper, and the enabled/intensity controls for Bloom, Depth Of Field, Lens Flares, SSR, and Vignette.
+- Verify the visual controls panel exposes `Exposure`, `Runtime Radiance`, `Reflection Intensity`, `Ambient Occlusion`, `AO Intensity`, the tone mapper, and the enabled/intensity controls for Bloom, Depth Of Field, Lens Flares, SSR, and Vignette.
 - Verify the visual controls panel also exposes `Probe Debug`.
 - Verify the visual controls panel also exposes `Bloom Kernel`, `AO Radius`, `DOF Focus Distance`, `DOF Focal Length`, `Depth Of Field Bokeh Scale`, and the volumetric fog controls.
 - Verify the `DOF Focus Distance` slider reaches 8 meters.
 - Verify double-clicking a debug label resets only the associated control.
-- Verify the `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, and `Reflection Intensity` controls each produce a visible material change when enabled.
-- Verify the `Volumetric Shadows` checkbox changes surface and fog volumetric-lightmap shadowing while preserving smooth probe blending.
+- Verify the `Runtime Radiance` and `Reflection Intensity` controls each produce a visible material change when enabled.
+- Verify the visual controls panel does not expose `Dynamic Volumetric`, `Static Volumetric`, or `Volumetric Shadows` controls on the `rc` branch.
 - Verify the Vignette tab exposes Vignette Intensity, Vignette Noise Period, Vignette Noise Intensity, and Exposure Noise Intensity, with the two noise intensities defaulting to zero.
 - Verify Bloom, Depth Of Field, Lens Flares, and SSR start disabled.
 - Verify the default `Exposure` value is `0`.

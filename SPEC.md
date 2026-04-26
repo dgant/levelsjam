@@ -25,6 +25,9 @@
 - The generated radiance field is produced during ordinary browser runtime from the active maze layout and does not require offline surface-lightmap baking.
 - The generated radiance field may reuse the existing surface-lightmap UV channel and material hook when that is the shortest safe path to feed PBR materials.
 - Runtime baked surface-lightmap files may remain present as historical assets, but the active experiment does not depend on them for maze diffuse lighting.
+- The active experiment does not use runtime volumetric-lightmap diffuse data; maze-local diffuse lighting for fog, monsters, pickups, gates, sconces, walls, and floor comes from the generated radiance field.
+- The generated radiance field propagates indirect light only through horizontally visible samples so walls and closed gates block cascade spread instead of permitting blur leakage.
+- Vertical maze-local surfaces sample the generated radiance field from the visible side of the surface rather than from inside wall or gate volume.
 - Near-player realtime shadowed torch lights are blended as a smooth correction over the generated radiance field instead of abruptly replacing it.
 - Realtime torch shadow eligibility changes use continuous weights, temporal smoothing, and slot hysteresis so torch shadows do not flip on and off at selection boundaries.
 - Realtime shadowed torch lights are bounded to a small active set selected by player distance and visibility importance.
@@ -72,13 +75,13 @@
 - Each maze wall face receives baked torch lighting on the side that faces the lit cell rather than on the wall's opposite face.
 - Each maze lightmap is source-controlled together with its maze definition.
 - Each torch billboard brightness derives from a 1500 candela torch baseline scaled by the shared torch intensity multiplier.
-- The maze floor and maze walls receive their baked direct and skylight diffuse lighting from the baked maze lightmap instead of from realtime torch point lights or direct runtime diffuse HDRI.
+- In the radiance-cascade experiment, the maze floor and maze walls receive runtime diffuse lighting from the generated radiance field instead of from baked maze lightmaps, realtime torch point lights, or direct runtime diffuse HDRI.
 - The maze-floor ground bounds expand beyond the maze footprint by the baked-lighting radius so the lit area covers the maze and its nearby spill.
 - The scene does not include the previous infinite background ground plane.
 - The maze-floor ground preserves the authored world-space puddle-texture texel density rather than retileing the puddle textures at a different density.
-- The maze-floor ground and maze walls integrate the baked HDR lightmap directly into their PBR material path rather than drawing it as a separate transparent overlay mesh.
-- The maze walls apply their baked torch lightmap on the actual wall mesh through authored lightmap UVs instead of through duplicate front-face or back-face overlay planes.
-- Runtime maze walls sample a shared baked surface-lightmap atlas through wall-specific atlas UVs rather than allocating separate lightmap textures for each wall face.
+- The maze-floor ground and maze walls integrate generated radiance-field diffuse lighting directly into their PBR material path rather than drawing it as a separate transparent overlay mesh.
+- The maze walls sample generated radiance on their actual wall mesh rather than through duplicate front-face or back-face overlay planes.
+- Runtime maze walls do not sample a baked surface-lightmap atlas in the radiance-cascade experiment.
 - The baked wall-face lightmap aligns with both local wall-face UV orientations so off-center torch gradients do not appear mirrored on one face orientation.
 - The baked wall-face lightmap assigns each wall its own slice consistently for both `x`-axis and `z`-axis wall runs, so a torch shadow cannot appear on an adjacent parallel wall that does not host that torch.
 - The baked maze lightmap follows the same pre-tonemap HDR lighting path as the rest of the wall and floor shading.
@@ -105,37 +108,37 @@
 - Reflection probe captures include the visible static maze geometry and its baked lighting instead of collapsing to only the HDRI and temporary torch emitters.
 - Reflection probes are captured during the offline maze-lighting pipeline and are not recaptured during ordinary runtime page load or debug-slider interaction.
 - Each persisted maze ships runtime-loadable reflection-probe assets derived from the offline bake rather than generating those assets in the browser from the live scene.
-- Each persisted maze ships runtime-loadable volumetric-lightmap probe assets derived from the offline bake rather than generating those assets in the browser from the live scene.
+- Runtime gameplay does not use volumetric-lightmap probe assets for diffuse lighting in the radiance-cascade experiment.
 - Runtime reflection-probe asset loading keeps a bounded resident working set prioritized around the player's current position instead of exceeding the authored resident budget.
 - The current resident reflection-probe budget is large enough for every probe in a current `7x7` maze, so probe-debug visualization can show all active maze probes while still enforcing the texture-memory ceiling.
 - Runtime reflection-probe asset loading must not continue in the background beyond the resident budget if doing so would create avoidable GPU memory pressure or frame-time collapse.
 - Runtime probe residency must be exposed through debug state so automated tests can assert that the loaded probe count stays within the authored resident budget.
-- Volumetric-lightmap probe coefficients and probe-depth visibility data are packed into runtime atlases so materials and fog do not need one sampler per probe.
-- Each persisted maze attempts to use one volumetric-lightmap atlas, one surface-lightmap atlas, and one reflection atlas for runtime maze lighting data.
-- Runtime volumetric-lightmap coefficient and probe-depth data for every probe in the active maze is available to surface materials, volumetric fog, and probe-debug visualization.
-- Each persisted maze ships inspectable offline reflection-probe and volumetric-lightmap artifacts under `logs/lightmap-artifacts`.
+- Runtime diffuse lighting comes from the generated radiance field rather than from volumetric-lightmap coefficient or probe-depth atlases.
+- Each persisted maze attempts to use one reflection atlas for runtime specular maze lighting data; diffuse maze lighting is generated from current maze torch and occluder inputs.
+- Runtime volumetric-lightmap coefficient and probe-depth data are not exposed to surface materials, volumetric fog, or probe-debug visualization in the radiance-cascade experiment.
+- Each persisted maze ships inspectable offline reflection-probe artifacts under `logs/lightmap-artifacts`.
 - Each offline reflection probe stores a `32x32` raw cubemap capture.
 - Each offline reflection probe stores an HDR processed runtime reflection texture derived from that raw cubemap.
 - Each offline reflection probe stores an offline-captured depth or shadow cubemap suitable for probe-space visibility tests during local reflections.
-- Each offline volumetric-lightmap probe stores HDR directional lighting data that is separate from the reflection texture and is intended for diffuse probe lighting rather than specular reflections.
-- Reflection probes and volumetric-lightmap probes share the same probe positions, local areas of influence, and capture-time occluders.
-- Gates, monsters, ground pickup items, and held pickup items are omitted from offline lightmap, volumetric-lightmap, and reflection-probe baking.
-- Diffuse volumetric-lightmap shading is evaluated per pixel rather than from one constant probe blend per mesh.
-- Diffuse volumetric-lightmap shading visibly contributes to surface materials when its runtime intensity is nonzero.
+- Runtime reflection probes store specular lighting data; diffuse runtime lighting is supplied by the generated radiance field.
+- Reflection probes use authored probe positions, local areas of influence, and capture-time occluders for specular response.
+- Gates, monsters, ground pickup items, and held pickup items use generated radiance-field diffuse lighting and local reflection-probe specular lighting at runtime.
+- Generated radiance-field shading is evaluated per pixel rather than from one constant lighting value per mesh.
+- Generated radiance-field shading visibly contributes to surface materials when its runtime intensity is nonzero.
 - Local reflection probes visibly contribute to reflective surface materials when their runtime intensity is nonzero.
-- Geometry that lives primarily inside a maze cell, such as monsters and cell-ground surfaces, evaluates diffuse volumetric-lightmap shading from the current probe plus the four cardinally adjacent probes.
-- Geometry that spans a boundary between maze cells, such as maze walls and wall-mounted sconces, evaluates diffuse volumetric-lightmap shading from the eight closest probes around that boundary.
-- Volumetric-lightmap diffuse shading blends probe influence continuously across surface position so adjacent surfaces do not show hard probe-selection seams.
-- Volumetric-lightmap diffuse shading remains continuous across probe axes rather than switching abruptly to unrelated lighting on each side of a probe.
-- Surface and fog volumetric-lightmap sampling use the same probe-center grid basis so cell boundaries and probe axes do not introduce discontinuities.
-- Volumetric-lightmap diffuse shading uses the baked probe depth or shadow data at runtime to reject probe contributions that are occluded from the shaded point by maze geometry.
-- Volumetric fog lighting uses the baked probe depth or shadow data at runtime to reject probe contributions that are occluded from the fog sample point by maze geometry.
-- A debug toggle can disable volumetric-lightmap shadowing; when disabled, surface and fog volumetric-lightmap samples treat every probe contribution as unshadowed while preserving the same smooth probe interpolation.
-- Volumetric fog blends volumetric-lightmap probes continuously at maze edges instead of creating seams through probe positions or cell boundaries.
+- Geometry that lives primarily inside a maze cell, such as monsters and cell-ground surfaces, samples diffuse lighting from the generated radiance field at its world position.
+- Geometry that spans a boundary between maze cells, such as maze walls, closed gates, and wall-mounted sconces, samples the generated radiance field from the visible surface side rather than from inside the occluder volume.
+- Generated radiance-field diffuse shading blends continuously across surface position so adjacent surfaces do not show hard probe-selection seams.
+- Generated radiance-field diffuse shading remains continuous across cascade cells rather than switching abruptly to unrelated lighting on each side of a texel or probe axis.
+- Surface and fog radiance-field sampling use the same world-space bounds so cell boundaries and probe axes do not introduce discontinuities.
+- Generated radiance-field propagation rejects samples whose horizontal path is blocked by maze walls or closed gates.
+- Volumetric fog lighting samples the generated radiance field and therefore uses the same wall and closed-gate blocking as surface diffuse lighting.
+- The radiance-cascade experiment does not expose a volumetric-lightmap shadow toggle.
+- Volumetric fog blends generated radiance continuously at maze edges instead of creating seams through probe positions or cell boundaries.
 - Maze generation writes lightmap diagnostic artifact textures to a non-source-controlled inspection directory so a human can review the baked wall and floor outputs.
 - Maze artifact generation also writes per-maze reflection-probe capture dumps into the same non-source-controlled inspection directory so a human can inspect the exact runtime cubemap faces used by local reflections.
 - Each maze artifact directory includes raw, processed-runtime, and geometry-only reflection-probe face PNGs for every probe rather than storing those probe diagnostics in a separate unrelated artifact tree.
-- Each maze artifact directory also includes human-inspectable probe depth or shadow artifacts and volumetric-lightmap artifacts for every probe.
+- Each maze artifact directory also includes human-inspectable probe depth or shadow artifacts for every reflection probe.
 - Each maze artifact directory includes both a human-readable preview PNG and a raw HDR PNG export for the baked surface lightmap so inspection does not require reading binary payloads out of maze JSON.
 - Refreshing persisted maze lighting regenerates the inspectable PNG artifact set for the current mazes under `logs/lightmap-artifacts` so the human-readable lightmap and reflection-capture outputs stay in sync with the latest baked maze data.
 - The repository includes a source-controlled synthetic `3x3` reflection diagnostic maze for probe-occlusion tests.
@@ -144,7 +147,7 @@
 - Reflection probe debug visualization renders as ordinary non-colliding scene geometry rather than as a separately composited overlay so it can be compared directly against the lit scene.
 - Reflection probe debug visualization remains bound to the actual processed local reflection source used by the runtime shading path and otherwise follows the same exposure and post-tonemapping presentation path as the rest of the scene.
 - Reflection probe debug visualization remains plainly visible and mode-distinct from ordinary gameplay viewpoints instead of hiding inside maze geometry or requiring an exact camera placement to notice.
-- Probe debug visualization can show reflection-probe, volumetric-lightmap, or probe-depth/shadow-map data for every active maze probe as applicable to the selected mode.
+- Probe debug visualization can show reflection-probe data for every active maze probe.
 - Reflection probe debugging exposes an on-demand geometry-only cubemap capture against a black background so capture-stage maze visibility can be verified independently from later probe filtering or beauty-pass shading.
 - The top of each wall sconce aligns to the bottom of its torch billboard by default so the flame billboard does not appear to float above the fixture.
 - The authored torch light color is `10 * #FF7E00` in HDR linear lighting space.
@@ -229,7 +232,7 @@
 - The minotaur runtime model loads from an offline-simplified asset derived from `public/models/minotaur.zip`, reduces the source mesh to roughly ten thousand triangles, scales proportionally to fit a `2.7m` cube, and places its bottom `0.25m` below the tile bottom-center.
 - The werewolf runtime model loads from an offline-joined asset derived from `public/models/awil_werewolf.zip`, preserves the authored PBR texture set, and reduces the source asset's static over-split skinned meshes to a single regular mesh.
 - Monster GLTF materials preserve their authored PBR texture and material inputs where those inputs load successfully.
-- Monster GLTF materials participate in the local volumetric-lightmap diffuse path and the local reflection-probe specular path.
+- Monster GLTF materials participate in the generated radiance-field diffuse path and the local reflection-probe specular path.
 - Awake minotaurs and werewolves face the player during idle, rotation, and movement animations.
 - Pressing `1` toggles a free-camera inspection mode that detaches the camera from the player.
 - Free-camera inspection mode uses WASD plus mouse look, has no collisions, supports the arrow keys as movement aliases, and maps `E` to move down and `Q` to move up.
@@ -277,10 +280,8 @@
 - Vignette defaults to enabled with intensity `0.6`.
 - Bloom, Depth of Field, Lens Flares, and SSR store zero-strength defaults so enabling them at zero does not transiently flash a nonzero effect.
 - The debug panel exposure control defaults to `0.0`.
-- The debug panel exposes a `Surface Lightmap` enabled toggle and scalar slider that control the baked surface-lightmap contribution on participating materials.
-- The debug panel exposes separate `Dynamic Volumetric` and `Static Volumetric` enabled toggles and scalar sliders for local-probe diffuse contribution.
-- `Dynamic Volumetric` controls non-lightmapped lit objects and defaults to enabled with intensity `1.0`.
-- `Static Volumetric` controls lightmapped objects and defaults to disabled with intensity `1.0`.
+- The debug panel exposes a `Runtime Radiance` enabled toggle and scalar slider that control the generated radiance-field contribution on participating materials.
+- The debug panel does not expose runtime volumetric-lightmap diffuse controls in the radiance-cascade experiment.
 - The debug panel exposes a `Reflection Intensity` enabled toggle and scalar slider that control the local-probe reflection contribution on participating materials.
 - The debug panel lens flare control provides useful adjustment very close to zero rather than jumping immediately to an over-bright flare.
 - The debug panel SSR intensity control is clamped to a maximum of `1.0`.
@@ -293,14 +294,12 @@
 - The debug panel allows Depth of Field focus distance values up to 8 meters.
 - The debug panel exposes Bloom `kernelSize`.
 - The Bloom kernel-size control updates the configured bloom kernel preset.
-- Disabling `Surface Lightmap` visibly removes the baked surface-lightmap contribution from materials that use those lightmaps while leaving the underlying geometry visible.
-- Enabling `Dynamic Volumetric` visibly adds local-probe diffuse or irradiance contribution on non-lightmapped lit PBR geometry.
-- Enabling `Static Volumetric` visibly adds local-probe diffuse or irradiance contribution on lightmapped PBR geometry.
+- Disabling `Runtime Radiance` visibly removes the generated radiance-field contribution from participating materials while leaving the underlying geometry visible.
 - Disabling `Reflection Intensity` visibly removes local-probe reflection contribution from materials that otherwise use it.
-- The debug panel exposes a probe-debug dropdown, defaulting to `None`, with `Reflection`, `Volumetric Lightmap`, and `Shadow Map` visualization modes.
-- Each `Probe Debug` mode produces a visibly distinct in-scene result that represents the actual runtime reflection source, volumetric-lightmap source, or probe shadow data rather than an inert or black placeholder sphere.
+- The debug panel exposes a probe-debug dropdown, defaulting to `None`, with a `Reflection` visualization mode.
+- Each `Probe Debug` mode produces a visibly distinct in-scene result that represents the actual runtime reflection source rather than an inert or black placeholder sphere.
 - Probe-debug geometry renders without added wireframe overlays that obscure the captured content.
-- The debug panel `Static Volumetric` enabled toggle defaults to `off`.
+- The debug panel does not expose a `Static Volumetric` enabled toggle in the radiance-cascade experiment.
 - Double-clicking any debug-panel label resets that control to its authored default value.
 - The debug panel fog tab exposes an editable fog ambient color through both a hex input and a color picker.
 - The debug panel fog tab exposes fog distance in meters with a `0m` to `40m` range and a default of `12m`.
@@ -367,17 +366,14 @@
 - The visible skybox and the baked environment lighting use the same calibrated HDRI intensity path.
 - The torch and sky-source bake intensities are pre-scaled from the legacy `-4.5` stop baseline so runtime `Exposure 0.0` preserves the previously approved lighting balance without needing an extra exposure offset.
 - The ground and walls use extracted PBR texture packs with tiling based on a 1 meter world scale unless a source specifies otherwise.
-- Maze wall materials do not add direct runtime scene-environment diffuse lighting on top of their baked diffuse lightmaps.
-- Lightmapped maze walls and the baked maze floor patch do not receive direct runtime global-HDRI diffuse lighting; their diffuse ambient comes from the baked surface lightmap plus any explicitly enabled local volumetric-lightmap contribution.
+- Maze wall materials do not add direct runtime scene-environment diffuse lighting on top of their generated radiance-field diffuse lighting.
+- Maze walls and the maze floor patch do not receive direct runtime global-HDRI diffuse lighting; their diffuse ambient comes from the generated radiance field.
 - Reflection probe captures, processed reflection-probe textures, and baked lightmaps remain raw lighting captures and are not tone-mapped or manually re-scaled for runtime use, debug previews, or exported inspection artifacts.
 - Reflection probe debug spheres must not show black or unrelated faces when the underlying captured probe contains scene geometry and lit surfaces.
-- Debug shadow-map probe visualization displays grayscale `clamp(0, 1, shadowDepthMeters / 10m)`.
-- Volumetric-lightmap debug probes represent incoming light direction: a bright side indicates light arriving from that direction.
-- Volumetric-lightmap capture preserves the direction of incoming light and probe-space occlusion by maze geometry.
-- Volumetric-lightmap application uses the captured directional data in the same coordinate convention used by capture.
+- Probe debug visualization does not expose volumetric-lightmap or probe-depth shadow-map modes in the radiance-cascade experiment.
 - Reflective and semi-reflective materials read from the shared environment consistently, with the nearest local maze reflection probe taking precedence over the global HDRI for in-maze specular.
-- Enabling `Static Volumetric` allows lit PBR maze geometry, including walls, to receive additive probe-driven local diffuse lighting without implicitly changing the baked surface-lightmap contribution.
-- Disabling `Surface Lightmap` while enabling `Static Volumetric` allows baked maze geometry to be inspected in a pure probe-driven volumetric-lightmap mode without any baked surface-lightmap contribution.
+- Enabling `Runtime Radiance` allows lit PBR maze geometry, including walls, to receive generated radiance-field diffuse lighting without requiring baked surface-lightmap contribution.
+- Disabling `Runtime Radiance` allows the reflection path to be inspected without generated diffuse radiance contribution.
 - Disabling `Reflection Intensity` removes local probe reflections rather than silently replacing them with another local reflection source.
 - The reflective maze floor patch uses local reflection probes so puddled areas can reflect nearby torch sources rather than only the global HDRI.
 - The reflective maze floor patch blends nearby local reflection probes with weighted interpolation rather than switching between one nearest probe per region.
@@ -385,13 +381,13 @@
 - Local reflection probes apply parallax-corrected local projection so nearby walls, sconces, and torches do not behave like infinitely distant reflections.
 - Local reflection probes apply probe-captured depth or shadow visibility data so reflected rays can be attenuated when the local probe would be occluded by maze geometry.
 - Local reflection probes do not make baked lighting or image-based lighting appear to flicker as the camera moves between maze cells.
-- Local reflection probes capture the baked maze lighting state so reflected maze surfaces remain consistent with the torch-lightmap shadows.
+- Local reflection probes capture maze-local lighting state so reflected maze surfaces remain consistent with torch-lit maze geometry.
 - Local reflection probes also capture the authored HDRI sky where it is locally visible so disabling reflection captures does not reveal a completely different sky contribution.
 - Local reflection-probe captures preserve wall and sconce occlusion of torch emitters instead of showing torches through opaque maze walls.
 - Local reflection-probe captures preserve the authored brightness balance of the baked maze geometry and do not darken significantly relative to the approved capture baseline unless the authored bake itself changes.
-- Volumetric-lightmap probes are separate from reflection probes in purpose even when they share positions and capture inputs.
-- Volumetric-lightmap probes provide the runtime diffuse probe-lighting source for non-lightmapped lit geometry and for explicitly enabled probe-diffuse inspection on lightmapped geometry.
-- Non-lightmapped lit geometry is controlled by `Dynamic Volumetric` rather than by the surface-lightmap contribution intended for baked geometry.
+- Generated radiance-field diffuse lighting is separate from reflection probes in purpose: radiance drives diffuse response, and reflection probes drive specular response.
+- Generated radiance-field diffuse lighting provides the runtime diffuse source for non-lightmapped lit geometry and maze-local lit geometry.
+- Non-lightmapped lit geometry is controlled by `Runtime Radiance` for diffuse lighting and `Reflection Intensity` for specular lighting.
 - The torch billboards face the camera continuously.
 - The torch billboards animate smoothly through the flipbook loop without lighting artifacts from scene lights.
 - The torch billboards are excluded from screen-space reflections.
@@ -407,9 +403,9 @@
 - The maze walls define the primary navigable space instead of the previous open random-wall field.
 - The maze opening is visually readable as the one exterior break in the perimeter walls.
 - Exposure acts as a neutral stop-offset presentation control with `0.0` meaning no extra gain.
-- Lightmap intensity, probe diffuse IBL intensity, and probe reflection intensity are the primary runtime balancing controls for baked maze lighting.
+- Runtime radiance intensity and probe reflection intensity are the primary runtime balancing controls for maze lighting in the radiance-cascade experiment.
 - Runtime gameplay does not use global environment diffuse lighting or other direct environment-light fallbacks.
-- Runtime gameplay falls back to black rather than to environment lighting when baked surface lightmaps or volumetric-lightmap data are absent.
+- Runtime gameplay falls back to black rather than to environment lighting when generated radiance-field or local reflection data are absent.
 - Positive exposure values darken the rendered image by stops and negative values brighten it by stops.
 - The renderer uses the postprocessing composer path for the default scene as well as for optional post effects, so enabling an effect does not switch the scene onto a different tone-mapping pipeline.
 - The postprocessing order is screen-space reflections, ambient occlusion, volumetric fog, translucent torch-billboard composite, depth of field, bloom, anamorphic, lens flares, vignette, exposure, tone mapping, and dithering.
@@ -437,18 +433,18 @@
 - Increasing or decreasing volumetric fog or smoke parameters produces a visible corresponding change in the full-scene fog volume.
 - Enabling volumetric fog with an intensity of `0` behaves as a visual no-op.
 - Increasing volumetric fog intensity toward `1.0` with a dark fog color and fog distance shorter than the visible scene depth can strongly attenuate distant scene color rather than remaining barely perceptible.
-- Volumetric fog samples its lighting only from the nearest available local volumetric-lightmap probes and otherwise falls back to black.
+- Volumetric fog samples its lighting from the generated radiance field and otherwise falls back to black.
 - Volumetric fog samples its procedural noise field across space and time, with a configurable noise period from `0s` to `10s` and a default of `5s`.
 - The `Fog Noise Period` control changes visible fog motion over time when fog noise strength is nonzero.
 - Volumetric fog follows the structure of the official three.js volumetric-lighting example while remaining adapted to the current WebGL render stack and local probe-lighting inputs.
-- Disabling local probe-driven diffuse lighting on scene materials does not disable volumetric fog's probe-fed lighting path.
+- Disabling local material radiance does not disable volumetric fog's radiance-field lighting path.
 - Volumetric fog responds immediately to debug-panel parameter changes without requiring the effect to be toggled off and on again.
 - Volumetric fog does not converge over time into a white sky wash or otherwise diverge as probe data finishes loading.
 - Volumetric fog does not re-solve against partially loaded probe-ambient data in a way that visibly degrades over several seconds after the effect is enabled.
 - Enabling Depth of Field with a `0` bokeh scale behaves as a visual no-op.
 - The page does not show speculative branding captions, launcher buttons, or click-to-enter copy.
 - The loading overlay does not fade out until the basic required scene textures are loaded.
-- Runtime lightmap and probe loading prioritizes the assets nearest the player's current position before more distant maze data.
+- Runtime reflection-probe loading prioritizes the assets nearest the player's current position before more distant maze data.
 
 ## Credits
 - The credits modal header is `Credits`.
@@ -466,9 +462,9 @@
 - Free-camera inspection mode is toggled with `F1`, where `WASD` and arrow keys move freely with mouselook detached from the turn-based player.
 - The debug controls panel exposes numbered tabs selectable by keyboard shortcuts `1` through `9`, with `0` selecting the Solution tab.
 - Opening the debug controls panel does not globally swallow gameplay keyboard or mouse input; gameplay controls and the `F1` free-camera toggle remain usable while the panel is open.
-- The default debug tab exposes the core scene-lighting controls, including the active tone mapper, `Probe Debug`, `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, and `Reflection Intensity`.
+- The default debug tab exposes the core scene-lighting controls, including the active tone mapper, `Probe Debug`, `Runtime Radiance`, and `Reflection Intensity`.
 - The `Probe Debug` control appears above `Tone Mapper`.
-- The `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, and `Reflection Intensity` checkbox-plus-slider controls each occupy one line in the same style as other effect rows.
+- The `Runtime Radiance` and `Reflection Intensity` checkbox-plus-slider controls each occupy one line in the same style as other effect rows.
 - Separate debug tabs exist for Ambient Occlusion, Bloom, Depth of Field, Lens Flares, SSR, Volumetric Fog, Vignette, and Anamorphic.
 - The ambient-occlusion tab exposes mode, intensity, and radius.
 - The bloom tab exposes enabled state and all useful bloom parameters, including intensity, threshold, smoothing, resolution scale, and kernel size.
@@ -495,13 +491,13 @@
 - Startup avoids remote third-party lighting assets during play by serving required scene textures from the project.
 - Startup avoids doing model simplification, texture downsizing, maze generation, probe baking, or other offline-preparable asset transforms on the client.
 - The initial runtime bundle does not eagerly embed every persisted maze module and baked-lightmap payload.
-- The initial runtime bundle does not eagerly embed offline reflection-probe or volumetric-lightmap payloads for every maze.
+- The initial runtime bundle does not eagerly embed offline reflection-probe payloads for every maze.
 - The initial page shell keeps the loading ellipsis animation smooth while the app bundle and maze assets load, which requires keeping avoidable main-thread work out of the startup critical path.
 - The Vite development server starts without regenerating maze runtime data; maze runtime data is generated by the offline maze, build, or asset-preparation paths.
-- The loading overlay remains visible until general scene assets, surface lightmaps, and all volumetric-lightmap coefficient/depth probe data within 12 meters of the player's starting position are loaded.
-- Startup probe loading keeps specular reflection textures bounded to the authored resident-probe limit even when more nearby volumetric-lightmap probes are loaded for diffuse lighting and fog occlusion.
+- The loading overlay remains visible until general scene assets and required startup reflection-probe textures are loaded.
+- Startup probe loading keeps specular reflection textures bounded to the authored resident-probe limit.
 - The runtime warms scene textures and compiles visible mesh programs before the loading overlay becomes eligible to fade out, and startup warmup work must not delay the overlay completion state once assets are ready.
-- Runtime surface lightmaps are loaded from the inspectable RGBE PNG payload for browser startup, while the raw binary HDR lightmap remains an artifact for tooling and debugging.
+- Runtime surface lightmaps are not loaded for browser startup in the radiance-cascade experiment; historical raw binary and RGBE lightmap files remain artifacts for tooling and debugging.
 - The frame rate remains stable during ordinary movement and camera motion.
 - The automated browser performance test covers the default user-visible scene after runtime probe residency has stabilized, not only an early startup state with optional effects disabled.
 - The automated browser performance test fails when runtime probe loading exceeds the resident-probe budget or grows estimated runtime texture memory beyond the authored ceiling.
@@ -531,13 +527,13 @@
 - The loading overlay is checked in the browser and verified to animate and then fade away after asset load.
 - The loading-overlay ellipsis animation is checked in the browser and verified to remain smooth during startup rather than stalling under main-thread load.
 - The backquote shortcut is checked in the browser and verified to open the debug controls panel.
-- The debug controls panel is checked in the browser and verified to expose the new `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, and reflection controls while omitting removed atmosphere controls.
+- The debug controls panel is checked in the browser and verified to expose the `Runtime Radiance` and reflection controls while omitting removed atmosphere and volumetric-lightmap controls.
 - The automated browser performance test remains disabled until the temporary static baked-lightmap torch-lighting evaluation ends.
-- Automated browser smoke coverage verifies that the baked maze lightmap is present and contributes visible lighting.
-- Automated render-integration coverage verifies that the volumetric-lightmap toggle changes the diffuse probe-lighting path without breaking scene visibility.
-- Automated render-integration coverage verifies that the `Probe Debug` modes produce visibly different in-scene probe outputs instead of inert or identical frames.
+- Automated browser smoke coverage verifies that the generated radiance field is present and contributes visible lighting.
+- Automated render-integration coverage verifies that the runtime-radiance toggle changes the diffuse lighting path without breaking scene visibility.
+- Automated render-integration coverage verifies that the `Probe Debug` reflection mode produces a visible in-scene probe output instead of an inert or black sphere.
 - Automated render-integration coverage verifies that enabling SSR changes a reflective in-maze crop in the live rendered frame.
-- Automated render-integration coverage verifies that volumetric fog responds immediately to its live controls and uses probe-fed lighting without breaking fog visibility.
+- Automated render-integration coverage verifies that volumetric fog responds immediately to its live controls and uses generated radiance-field lighting without breaking fog visibility.
 - Automated render-integration coverage verifies that double-clicking a debug-panel label resets the associated control to its authored default.
 - Automated render-integration coverage verifies that reflection-probe debug visualization shows captured maze walls and respects wall occlusion of torch emitters.
 - Automated render-integration coverage verifies that a geometry-only reflection-probe capture contains maze geometry, so the cube-camera capture path itself is proven before beauty-pass probe behavior is judged.
@@ -553,4 +549,4 @@
 - Automated coverage verifies the solution-replay debug path can reset a maze and replay the recorded successful path while player controls are disabled.
 - Automated coverage verifies maze data and instantiated maze scene objects can be loaded, unloaded, reset, and reloaded repeatedly without stale assets or scene objects surviving the unload.
 - The scene-instantiation path is checked in the browser and verified to load one of the persisted mazes, build the correct wall meshes, and place sconces and torches only at the maze-defined light positions.
-- The maze-artifact generation path is checked end to end so the dumped per-maze artifact directory contains reflection-probe capture images, reflection depth or shadow artifacts, volumetric-lightmap artifacts, and baked lightmap images.
+- The maze-artifact generation path is checked end to end so the dumped per-maze artifact directory contains reflection-probe capture images, reflection depth or shadow artifacts, and historical baked-lightmap inspection images.
