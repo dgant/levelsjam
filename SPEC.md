@@ -24,8 +24,9 @@
 - Each runtime level occupies world cells that do not overlap any other runtime level's world cells.
 - Runtime levels do not share maze wall volumes with any other runtime level.
 - Each level transition is represented visually by a single destination-owned ingress cell; non-`Entrance` player starts are placed in that ingress cell and face into the destination level.
-- When precomputed visibility is enabled, adjacent streamed levels render only the destination ingress cell that is visible through the current level's transition rather than rendering the entire adjacent maze.
+- When precomputed visibility is enabled and the player's current visible cell set includes a level transition cell, the adjacent streamed level renders the cells that are precomputed-visible from that adjacent level's ingress cell rather than rendering the entire adjacent maze.
 - When precomputed visibility is disabled, adjacent streamed levels may render their full geometry for debugging.
+- Runtime level transitions do not synchronously fetch, decode, upload, instantiate, or shader-compile level assets at the moment the player crosses a boundary; that work is completed ahead of time for adjacent levels.
 - Level floor meshes are spawned only inside the level's own cell footprint and not in the lightmap margin or any neighboring level's footprint.
 - Once a level's gameplay-rule state has been loaded, the runtime keeps that state available for the rest of the session instead of unloading or resetting it during ordinary level traversal.
 - Player movement between connected levels is a level transition, not an escape state.
@@ -498,6 +499,7 @@
 - Runtime rendering can use precomputed cell visibility to hide maze geometry outside the current visible cell set while keeping occluding boundary walls visible.
 - The first startup render may use a narrower local visibility set before expanding to the full precomputed-visibility set after the current scene is ready, so initial mesh construction does not stall the loading ellipsis.
 - Minotaur actors within five grid cells of the player remain rendered even if their cell is outside the current precomputed visibility set.
+- Minotaur actors outside the player's precomputed visible cell set and farther than five grid cells from the player are not rendered.
 
 ## Credits
 - The credits modal header is `Credits`.

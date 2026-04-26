@@ -18,6 +18,15 @@ function getExitToLevel(maze, targetLevelId) {
   return exits.find((exit) => exit?.targetLevelId === targetLevelId) ?? null
 }
 
+function getVisibilityCellsFrom(maze, cell) {
+  const key = cellKey(cell)
+  const visibleCells = maze?.visibility?.cells?.[key]
+
+  return Array.isArray(visibleCells) && visibleCells.length > 0
+    ? visibleCells
+    : [key]
+}
+
 export function getAdjacentLevelVisibleCellKeys(
   currentMaze,
   targetMaze,
@@ -28,23 +37,22 @@ export function getAdjacentLevelVisibleCellKeys(
   }
 
   const directExit = getExitToLevel(currentMaze, targetMaze.id)
+  const targetExitToCurrent = getExitToLevel(targetMaze, currentMaze.id)
 
   if (directExit && currentVisibleCellKeys.has(cellKey(directExit.cell))) {
-    const ingressCell = getIngressCell(targetMaze)
-    return ingressCell ? [cellKey(ingressCell)] : []
+    const targetConnectionCell = targetExitToCurrent?.cell ?? getIngressCell(targetMaze)
+    return targetConnectionCell ? getVisibilityCellsFrom(targetMaze, targetConnectionCell) : []
   }
 
-  const reverseExit = getExitToLevel(targetMaze, currentMaze.id)
   const currentIngressCell = getIngressCell(currentMaze)
 
   if (
-    reverseExit &&
+    targetExitToCurrent &&
     currentIngressCell &&
     currentVisibleCellKeys.has(cellKey(currentIngressCell))
   ) {
-    return [cellKey(reverseExit.cell)]
+    return getVisibilityCellsFrom(targetMaze, targetExitToCurrent.cell)
   }
 
   return []
 }
-

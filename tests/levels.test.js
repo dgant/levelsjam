@@ -298,7 +298,7 @@ test('runtime level wall volumes are not shared between levels', () => {
   }
 })
 
-test('adjacent streamed levels expose only the destination ingress cell under PVS', () => {
+test('adjacent streamed levels expose cells visible from the destination ingress under PVS', () => {
   const chamber = {
     height: 18,
     id: 'chamber-1',
@@ -315,15 +315,53 @@ test('adjacent streamed levels expose only the destination ingress cell under PV
     id: 'maze-001',
     opening: { cell: { x: 0, y: 5 }, side: 'west' },
     playerStart: { cell: { x: 0, y: 5 }, direction: 'east' },
+    visibility: {
+      cells: {
+        '0,5': ['0,5', '1,5', '1,4']
+      }
+    },
     width: 7
   }
 
   assert.deepEqual(
     getAdjacentLevelVisibleCellKeys(chamber, maze, new Set(['0,3'])),
-    ['0,5']
+    ['0,5', '1,5', '1,4']
   )
   assert.deepEqual(
     getAdjacentLevelVisibleCellKeys(chamber, maze, new Set(['4,11'])),
     []
+  )
+})
+
+test('adjacent streamed parent levels expose cells visible from their reverse exit under PVS', () => {
+  const chamber = {
+    height: 18,
+    id: 'chamber-1',
+    levelExits: [
+      { cell: { x: 0, y: 3 }, side: 'west', targetLevelId: 'maze-001' }
+    ],
+    opening: { cell: { x: 2, y: 17 }, side: 'south' },
+    playerStart: { cell: { x: 2, y: 17 }, direction: 'north' },
+    visibility: {
+      cells: {
+        '0,3': ['0,3', '1,3', '0,4']
+      }
+    },
+    width: 5
+  }
+  const maze = {
+    height: 7,
+    id: 'maze-001',
+    levelExits: [
+      { cell: { x: 0, y: 5 }, side: 'west', targetLevelId: 'chamber-1' }
+    ],
+    opening: { cell: { x: 0, y: 5 }, side: 'west' },
+    playerStart: { cell: { x: 0, y: 5 }, direction: 'east' },
+    width: 7
+  }
+
+  assert.deepEqual(
+    getAdjacentLevelVisibleCellKeys(maze, chamber, new Set(['0,5'])),
+    ['0,3', '1,3', '0,4']
   )
 })

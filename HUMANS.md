@@ -46,6 +46,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Treat a scene that shows only the HDRI skybox and flame billboards as a render failure; the smoke test now checks that a real maze wall writes visible beauty-pass color.
 - Run `npm run test:perf` after changes that affect runtime probe loading, postprocessing defaults, monster rendering, or material shader paths.
 - The perf test exercises the default rendered scene after local probe residency has stabilized and asserts both FPS and resident probe memory limits.
+- The perf test also loads `Chamber 1`, waits for all adjacent levels to render, walks to an exit sightline, waits for shader warmup, and enforces the 144 FPS render budget there with default visuals.
 - Run the maze-generation validation script or its test entrypoint whenever maze files or maze rules change so persisted mazes keep their baked lightmaps in sync.
 - Run `npm run test:maze:runner` after changing maze generation, maze validation, baked lightmap construction, or persisted maze cleanup. It writes per-test timings to `logs/latest-maze-test-profile.json` and enforces the bounded maze-test budget.
 - Run `npm run ensure:mazes` when persisted maze runtime payloads or reflection-probe assets must be refreshed. Expect the fast existing-maze validation and artifact sync phase to be separate from the much slower full reflection-probe export phase.

@@ -983,7 +983,7 @@ const DEFAULT_VOLUMETRIC_NOISE_PERIOD = 0.75
 const DEFAULT_VOLUMETRIC_NOISE_STRENGTH = 1
 const DEFAULT_VOLUMETRIC_HEIGHT_FALLOFF = 0.4
 const DEFAULT_VOLUMETRIC_LIGHTING_STRENGTH = 1
-const DEFAULT_VOLUMETRIC_STEP_COUNT = 16
+const DEFAULT_VOLUMETRIC_STEP_COUNT = 12
 const MAX_SIMULTANEOUS_LENS_FLARES = 5
 const MAX_BUFFERED_TURN_COMMANDS = 10
 const GIT_REVISION = `${__GIT_BRANCH__}@${__GIT_REVISION__}`
@@ -12992,7 +12992,8 @@ function RenderedLevelGeometry({
   staticVolumetricContributionIntensity,
   transform,
   turnState,
-  visibilityState
+  visibilityState,
+  mountAllGeometry = false
 }: {
   environmentTexture: Texture | null
   environmentIntensity: number
@@ -13010,6 +13011,7 @@ function RenderedLevelGeometry({
   transform: LevelWorldTransform
   turnState: TurnState
   visibilityState: PrecomputedVisibilityState
+  mountAllGeometry?: boolean
 }) {
   const surfaceLightmap = useSurfaceLightmapAtlasTexture(layout.maze.lightmap)
   const openGateIds = useMemo(
@@ -13033,7 +13035,7 @@ function RenderedLevelGeometry({
         iblContributionIntensity={iblContributionIntensity}
         layout={layout}
         lightmapContributionIntensity={lightmapContributionIntensity}
-        mountAllGeometry
+        mountAllGeometry={mountAllGeometry}
         openGateIds={openGateIds}
         probeDebugMode={probeDebugMode}
         probeDepthAtlasTextures={probeDepthAtlasTextures}
@@ -13121,9 +13123,11 @@ function Scene({
     setDisplayedOpenGateIds(getOpenGateIds(layout.maze, initialTurnState))
   }, [initialTurnState, layout.maze, onTurnStateChange])
   useEffect(() => {
+    const wasAlreadyReady = hasReportedBasicAssetsReady.current
+
     hasReportedBasicAssetsReady.current = false
-    setRuntimeModelsEnabled(false)
-    setStartupGeometryExpanded(false)
+    setRuntimeModelsEnabled(wasAlreadyReady)
+    setStartupGeometryExpanded(wasAlreadyReady)
   }, [layout.maze.id])
   useEffect(() => {
     recordStartupMarker('sceneMountedAt')
@@ -14174,7 +14178,7 @@ function Scene({
             denoiseRadius={6}
             distanceFalloff={1}
             intensity={visualSettings.ambientOcclusionIntensity * 3}
-            quality="medium"
+            quality="low"
           />
         ) : null}
         {ambientOcclusionActive && visualSettings.ambientOcclusionMode === 'ssao' ? (
@@ -16170,15 +16174,26 @@ export default function App() {
     return nextState
   }, [])
 
-  const updateRenderedMazeLayouts = useCallback(() => {
-    setRenderedMazeLayouts(Array.from(loadedMazeLayoutsRef.current.values()))
+  const updateRenderedMazeLayouts = useCallback((centerMazeId: string | null) => {
+    if (!centerMazeId) {
+      setRenderedMazeLayouts([])
+      return
+    }
+
+    const renderedIds = new Set([
+      centerMazeId,
+      ...getAdjacentRuntimeLevelIds(centerMazeId)
+    ])
+
+    setRenderedMazeLayouts(
+      Array.from(renderedIds)
+        .map((id) => loadedMazeLayoutsRef.current.get(id) ?? null)
+        .filter((layout): layout is MazeLayout => Boolean(layout))
+    )
   }, [])
 
-  const loadLevelNeighborhood = useCallback(async (mazeId: string) => {
-    const desiredMazeIds = Array.from(new Set([
-      mazeId,
-      ...getAdjacentRuntimeLevelIds(mazeId)
-    ]))
+  const loadRuntimeLevelLayouts = useCallback(async (mazeIds: string[]) => {
+    const desiredMazeIds = Array.from(new Set(mazeIds))
     const loadedLayouts = await Promise.all(
       desiredMazeIds.map(async (desiredMazeId) => ({
         id: desiredMazeId,
@@ -16196,9 +16211,35 @@ export default function App() {
       loadedMazeLayoutsRef.current.set(entry.id, entry.layout)
       getOrCreateLevelTurnState(entry.layout)
     }
+  }, [getOrCreateLevelTurnState])
 
-    updateRenderedMazeLayouts()
-  }, [getOrCreateLevelTurnState, updateRenderedMazeLayouts])
+  const loadLevelNeighborhood = useCallback(async (
+    mazeId: string,
+    options: { updateRendered?: boolean } = {}
+  ) => {
+    await loadRuntimeLevelLayouts([
+      mazeId,
+      ...getAdjacentRuntimeLevelIds(mazeId)
+    ])
+
+    if (options.updateRendered !== false) {
+      updateRenderedMazeLayouts(mazeId)
+    }
+  }, [loadRuntimeLevelLayouts, updateRenderedMazeLayouts])
+
+  const preloadAdjacentTransitionNeighborhoods = useCallback(async (mazeId: string) => {
+    const preloadIds = new Set<string>()
+
+    for (const adjacentId of getAdjacentRuntimeLevelIds(mazeId)) {
+      preloadIds.add(adjacentId)
+      for (const nextAdjacentId of getAdjacentRuntimeLevelIds(adjacentId)) {
+        preloadIds.add(nextAdjacentId)
+      }
+    }
+
+    await loadRuntimeLevelLayouts([...preloadIds])
+    updateRenderedMazeLayouts(mazeId)
+  }, [loadRuntimeLevelLayouts, updateRenderedMazeLayouts])
 
   const instantiateLoadedMaze = (mazeId: string) => {
     const nextLayout = loadedMazeLayoutsRef.current.get(mazeId)
@@ -16215,7 +16256,7 @@ export default function App() {
     setMazeLayout(nextLayout)
     document.body.dataset.loadedMazeId = mazeId
     getOrCreateLevelTurnState(nextLayout)
-    updateRenderedMazeLayouts()
+    updateRenderedMazeLayouts(mazeId)
   }
 
   const uninstantiateMaze = () => {
@@ -16223,6 +16264,7 @@ export default function App() {
     setSceneLoaded(false)
     setInstantiatedMazeId(null)
     setMazeLayout(null)
+    updateRenderedMazeLayouts(null)
   }
 
   const resetInstantiatedMaze = () => {
@@ -16240,7 +16282,7 @@ export default function App() {
     setMazeLoadError(null)
 
     try {
-      await loadLevelNeighborhood(targetLevelId)
+      await loadLevelNeighborhood(targetLevelId, { updateRendered: false })
       const targetLayout =
         loadedMazeLayoutsRef.current.get(targetLevelId) ??
         await loadMazeLayoutById(targetLevelId)
@@ -16252,16 +16294,42 @@ export default function App() {
       loadedMazeLayoutsRef.current.set(targetLevelId, targetLayout)
       getOrCreateLevelTurnState(targetLayout)
       setInstantiatedMazeId(targetLevelId)
-      setMazeSceneKey((current) => current + 1)
       setMazeLayout(targetLayout)
       document.body.dataset.loadedMazeId = targetLevelId
-      updateRenderedMazeLayouts()
+      updateRenderedMazeLayouts(targetLevelId)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
 
       setMazeLoadError(message)
     }
   }, [getOrCreateLevelTurnState, loadLevelNeighborhood, updateRenderedMazeLayouts])
+
+  useEffect(() => {
+    if (!instantiatedMazeId) {
+      return undefined
+    }
+
+    let cancelled = false
+    const handle = window.setTimeout(() => {
+      document.body.dataset.levelPreloadStartedAt = performance.now().toFixed(1)
+      void preloadAdjacentTransitionNeighborhoods(instantiatedMazeId)
+        .then(() => {
+          if (!cancelled) {
+            document.body.dataset.levelPreloadCompleteAt = performance.now().toFixed(1)
+          }
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            console.error(error)
+          }
+        })
+    }, 0)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(handle)
+    }
+  }, [instantiatedMazeId, preloadAdjacentTransitionNeighborhoods])
 
   const handleTurnStateChange = useCallback((mazeId: string, nextTurnState: TurnState) => {
     levelTurnStatesRef.current.set(mazeId, nextTurnState)
@@ -16374,6 +16442,7 @@ export default function App() {
           instantiatedMazeId: string | null
           loadedMazeIds: string[]
           persistedLayoutCacheIds: string[]
+          renderedMazeIds: string[]
           replayActive: boolean
           sceneLoaded: boolean
         }
@@ -16454,6 +16523,7 @@ export default function App() {
         instantiatedMazeId,
         loadedMazeIds: Array.from(loadedMazeLayoutsRef.current.keys()).sort(),
         persistedLayoutCacheIds: getLoadedMazeLayoutIds(),
+        renderedMazeIds: renderedMazeLayouts.map((renderedLayout) => renderedLayout.maze.id).sort(),
         replayActive,
         sceneLoaded
       }),
@@ -16521,7 +16591,7 @@ export default function App() {
         delete globalWindow.__levelsjamDebug
       }
     }
-  }, [instantiatedMazeId, mazeLoadError, replayActive, sceneLoaded, mazeLayout])
+  }, [instantiatedMazeId, mazeLoadError, replayActive, renderedMazeLayouts, sceneLoaded, mazeLayout])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

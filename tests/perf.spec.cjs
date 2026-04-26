@@ -5,11 +5,11 @@ test.setTimeout(120_000)
 const TARGET_FPS = 144
 const MIN_ACCEPTABLE_REPLAY_FPS = TARGET_FPS * 0.85
 
-async function waitForSceneReady(page) {
+async function waitForSceneReady(page, mazeId = 'maze-001') {
   const loadingOverlay = page.locator('#root .loading-overlay')
 
   await page.setViewportSize({ width: 2560, height: 1440 })
-  await page.goto('/?maze=maze-001', { waitUntil: 'domcontentloaded' })
+  await page.goto(`/?maze=${mazeId}`, { waitUntil: 'domcontentloaded' })
   await expect
     .poll(async () => loadingOverlay.getAttribute('data-loading-complete'), {
       timeout: 12_000,
@@ -216,6 +216,22 @@ async function benchmarkInitialGameplayView(page, patch) {
   }, { patch })
 }
 
+async function moveChamberPlayerToExitSightline(page) {
+  for (let index = 0; index < 5; index += 1) {
+    await page.keyboard.press('KeyW')
+    await page.waitForTimeout(320)
+  }
+
+  await expect
+    .poll(async () => page.evaluate(() =>
+      window.__levelsjamDebug?.getTurnStateSummary?.()?.player?.cell ?? null
+    ), {
+      timeout: 5_000,
+      intervals: [100, 250]
+    })
+    .toEqual({ x: 2, y: 13 })
+}
+
 async function benchmarkMonsterView(page, monsterType, patch) {
   await expect
     .poll(async () => page.evaluate(() =>
@@ -354,6 +370,83 @@ test('GPU-backed scene benchmark stays at or above 144 FPS for baseline and lens
   expect(minotaurView).not.toBeNull()
   expect(minotaurView.averageFrameMs).toBeGreaterThan(0)
   expect(minotaurView.fps).toBeGreaterThanOrEqual(144)
+})
+
+test('Chamber 1 with adjacent levels loaded stays within the 144 FPS render budget', async ({ page }) => {
+  const consoleErrors = []
+  const pageErrors = []
+
+  page.on('console', (message) => {
+    if (message.type() === 'error') {
+      consoleErrors.push(message.text())
+    }
+  })
+
+  page.on('pageerror', (error) => {
+    pageErrors.push(String(error))
+  })
+
+  await waitForSceneReady(page, 'chamber-1')
+  await expect
+    .poll(async () => page.evaluate(() =>
+      window.__levelsjamDebug?.getMazeLifecycleState?.()?.renderedMazeIds ?? []
+    ), {
+      timeout: 10_000,
+      intervals: [100, 250, 500]
+    })
+    .toEqual(expect.arrayContaining([
+      'chamber-1',
+      'entrance',
+      'maze-001',
+      'maze-002',
+      'maze-003',
+      'maze-005'
+    ]))
+
+  await moveChamberPlayerToExitSightline(page)
+  await expect
+    .poll(async () => page.evaluate(() => document.body.dataset.sceneProgramsReady), {
+      timeout: 15_000,
+      intervals: [100, 250, 500]
+    })
+    .toBe('true')
+
+  const noPost = await page.evaluate(async () => {
+    window.__levelsjamSetVisualSettings?.({
+      ambientOcclusionMode: 'off',
+      anamorphic: { enabled: false, intensity: 0 },
+      bloom: { enabled: false, intensity: 0 },
+      depthOfField: { bokehScale: 0, enabled: false },
+      lensFlare: { enabled: false, intensity: 0 },
+      precomputedVisibilityEnabled: true,
+      ssr: { enabled: false, intensity: 0 },
+      vignette: { enabled: false, intensity: 0 },
+      volumetricLighting: { enabled: false, intensity: 0 }
+    })
+    for (let index = 0; index < 8; index += 1) {
+      await new Promise((resolve) => requestAnimationFrame(() => resolve()))
+    }
+    return window.__levelsjamBenchmark(120)
+  })
+  const defaultVisuals = await page.evaluate(async () => {
+    window.__levelsjamSetVisualSettings?.({
+      ambientOcclusionMode: 'n8ao',
+      precomputedVisibilityEnabled: true,
+      vignette: { enabled: true, intensity: 0.6 },
+      volumetricLighting: { enabled: true, intensity: 0.75 }
+    })
+    for (let index = 0; index < 8; index += 1) {
+      await new Promise((resolve) => requestAnimationFrame(() => resolve()))
+    }
+    return window.__levelsjamBenchmark(120)
+  })
+
+  expect(consoleErrors).toEqual([])
+  expect(pageErrors).toEqual([])
+  expect(noPost.averageFrameMs).toBeGreaterThan(0)
+  expect(noPost.fps).toBeGreaterThanOrEqual(144)
+  expect(defaultVisuals.averageFrameMs).toBeGreaterThan(0)
+  expect(defaultVisuals.fps).toBeGreaterThanOrEqual(144)
 })
 
 test('solution replay maintains the GPU render budget through the maze', async ({ page }) => {
