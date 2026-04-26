@@ -18,6 +18,9 @@
 - Selecting a level through the runtime menu resets that level's character and maze state before placing the player at that level's entrance.
 - The game begins in the authored `Entrance` level.
 - Player movement through an authored level exit transitions seamlessly into the connected level without fading, showing a loading transition, or exposing the boundary between levels.
+- Walking across a connected level boundary preserves the player's world-space position, camera yaw, camera pitch, inventory flags, held-item visibility, and current input flow.
+- Walking across a connected level boundary updates only the active rules context and streamed-neighborhood bookkeeping; it does not teleport the player, rotate the player, remount the scene, reset the target level, or show pickup items that were not actually picked up.
+- Walking across a connected level boundary maps the player into the destination-owned ingress cell in the destination level while leaving all scene geometry in its authored world-space position.
 - The runtime renders the current level and the levels directly adjacent to it so ordinary walking between connected levels does not reveal level streaming.
 - The initial startup path may defer non-current adjacent level geometry until after the current level is visible, while still loading and retaining adjacent level data early enough that ordinary walking does not expose the deferral.
 - The runtime level graph is a directed acyclic graph rooted at `Entrance`; renderer streaming may use the corresponding undirected neighborhood only as a loading and rendering optimization.

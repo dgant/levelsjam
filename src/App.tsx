@@ -3417,6 +3417,12 @@ type LevelWorldTransform = {
   z: number
 }
 
+type SeamlessLevelTransitionRequest = {
+  sourceLevelId: string
+  sourceState: TurnState
+  targetLevelId: string
+}
+
 const IDENTITY_LEVEL_WORLD_TRANSFORM: LevelWorldTransform = {
   rotationY: 0,
   x: 0,
@@ -3467,6 +3473,107 @@ function directionToYaw(direction: CardinalDirection) {
     default:
       return 0
   }
+}
+
+function normalizeAngleRadians(value: number) {
+  return Math.atan2(Math.sin(value), Math.cos(value))
+}
+
+function yawToDirection(yaw: number): CardinalDirection {
+  const normalized = normalizeAngleRadians(yaw)
+  const candidates: Array<{ direction: CardinalDirection; yaw: number }> = [
+    { direction: 'north', yaw: 0 },
+    { direction: 'east', yaw: -Math.PI / 2 },
+    { direction: 'south', yaw: Math.PI },
+    { direction: 'west', yaw: Math.PI / 2 }
+  ]
+
+  return candidates.reduce((best, candidate) => {
+    const bestDistance = Math.abs(normalizeAngleRadians(normalized - best.yaw))
+    const candidateDistance = Math.abs(normalizeAngleRadians(normalized - candidate.yaw))
+
+    return candidateDistance < bestDistance ? candidate : best
+  }).direction
+}
+
+function cloneTurnStateForRuntime(state: TurnState): TurnState {
+  return {
+    ...state,
+    checkpoint: {
+      cell: { ...state.checkpoint.cell },
+      direction: state.checkpoint.direction
+    },
+    monsters: state.monsters.map((monster) => ({
+      ...monster,
+      cell: { ...monster.cell },
+      lastPath: [...monster.lastPath]
+    })),
+    player: {
+      ...state.player,
+      cell: { ...state.player.cell }
+    }
+  }
+}
+
+function findIngressCellForTransition(
+  targetMaze: MazeLayout['maze'],
+  sourceLevelId: string
+) {
+  const reverseExit = Array.isArray(targetMaze.levelExits)
+    ? targetMaze.levelExits.find((exit) => exit.targetLevelId === sourceLevelId)
+    : null
+
+  return {
+    ...(reverseExit?.cell ?? targetMaze.playerStart?.cell ?? targetMaze.opening.cell)
+  }
+}
+
+function createSeamlessTargetTurnState({
+  previousTargetState,
+  sourceLevelId,
+  sourceState,
+  sourceTransform,
+  targetLayout,
+  targetTransform
+}: {
+  previousTargetState: TurnState
+  sourceLevelId: string
+  sourceState: TurnState
+  sourceTransform: LevelWorldTransform
+  targetLayout: MazeLayout
+  targetTransform: LevelWorldTransform
+}) {
+  const nextState = cloneTurnStateForRuntime(previousTargetState)
+  const sourceWorldYaw =
+    directionToYaw(sourceState.player.direction) + sourceTransform.rotationY
+  const targetLocalYaw = sourceWorldYaw - targetTransform.rotationY
+
+  nextState.dead = false
+  nextState.escaped = false
+  nextState.player = {
+    ...nextState.player,
+    cell: findIngressCellForTransition(targetLayout.maze, sourceLevelId),
+    direction: yawToDirection(targetLocalYaw),
+    hasSword: sourceState.player.hasSword,
+    hasTrophy: sourceState.player.hasTrophy
+  }
+  nextState.turn = Math.max(nextState.turn, sourceState.turn)
+
+  if (sourceState.player.hasSword) {
+    nextState.swordState = 'held'
+  } else if (nextState.swordState === 'held') {
+    nextState.swordState = 'consumed'
+  }
+
+  if (sourceState.player.hasTrophy) {
+    nextState.trophyState = 'held'
+  } else if (targetLayout.maze.trophy?.cell) {
+    nextState.trophyState = nextState.trophyState === 'held'
+      ? 'ground'
+      : nextState.trophyState
+  }
+
+  return nextState
 }
 
 function directionToWorldOffset(direction: CardinalDirection) {
@@ -11709,7 +11816,7 @@ function FlightRig({
   layout: MazeLayout
   levelTransform: LevelWorldTransform
   movementSettings: MovementSettings
-  onLevelTransition: (targetLevelId: string) => void
+  onLevelTransition: (request: SeamlessLevelTransitionRequest) => void
   onReplayActiveChange: (active: boolean) => void
   replayRequestId: number
   setDisplayedOpenGateIds: (gateIds: string[]) => void
@@ -11745,6 +11852,7 @@ function FlightRig({
   const replayQueue = useRef<TurnAction[]>([])
   const replayActive = useRef(false)
   const turnStateRef = useRef(turnState)
+  const hasInitializedPose = useRef(false)
   const cameraShake = useRef({ amplitude: 0, endsAt: 0 })
   const playerAnimation = useRef<{
     action: TurnAction
@@ -11830,6 +11938,11 @@ function FlightRig({
   }, [camera, layout.maze, levelTransform, onReplayActiveChange, replayRequestId, setDisplayedOpenGateIds, setTurnState])
 
   useEffect(() => {
+    if (hasInitializedPose.current) {
+      return
+    }
+
+    hasInitializedPose.current = true
     const spawnPosition = getTransformedMazeCellWorldPosition(
       layout.maze,
       levelTransform,
@@ -11848,7 +11961,7 @@ function FlightRig({
     camera.quaternion.setFromEuler(cameraEuler.set(DEFAULT_CAMERA_PITCH, yaw.current, 0, 'YXZ'))
     pitch.current = DEFAULT_CAMERA_PITCH
     playerPosition.current.copy(spawnPosition)
-  }, [camera, layout.maze, levelTransform])
+  }, [camera, layout.maze, levelTransform, turnState.player.cell, turnState.player.direction])
 
   useEffect(() => {
     const updateRotation = () => {
@@ -12106,6 +12219,11 @@ function FlightRig({
           playerAnimationAction: TurnAction | null
           replayActive: boolean
           replayQueueLength: number
+        }
+        getCameraState?: () => {
+          pitch: number
+          position: [number, number, number]
+          yaw: number
         }
         setAnimationSpeedMultiplier?: (value: number) => number
         getReflectionProbeState?: () => {
@@ -12625,6 +12743,15 @@ function FlightRig({
         replayActive: replayActive.current,
         replayQueueLength: replayQueue.current.length
       }),
+      getCameraState: () => ({
+        pitch: pitch.current,
+        position: [
+          camera.position.x,
+          camera.position.y,
+          camera.position.z
+        ],
+        yaw: yaw.current
+      }),
       setAnimationSpeedMultiplier: (value) => {
         globalAnimationSpeedMultiplier = MathUtils.clamp(
           Number.isFinite(value) ? value : 1,
@@ -12668,6 +12795,7 @@ function FlightRig({
       delete globalWindow.__levelsjamDebug.getMonsterRenderState
       delete globalWindow.__levelsjamDebug.getTurnStateSummary
       delete globalWindow.__levelsjamDebug.getReplayControllerState
+      delete globalWindow.__levelsjamDebug.getCameraState
       delete globalWindow.__levelsjamDebug.setAnimationSpeedMultiplier
       delete globalWindow.__levelsjamDebug.getDebugProgramUniformState
       delete globalWindow.__levelsjamDebug.getReflectionProbeState
@@ -12778,7 +12906,11 @@ function FlightRig({
             playerAnimation.current = null
             inputQueue.current = []
             replayQueue.current = []
-            onLevelTransition(activeAnimation.levelTransition.targetLevelId)
+            onLevelTransition({
+              sourceLevelId: layout.maze.id,
+              sourceState: activeAnimation.to,
+              targetLevelId: activeAnimation.levelTransition.targetLevelId
+            })
             return
           }
 
@@ -13090,7 +13222,7 @@ function Scene({
   levelTransform: LevelWorldTransform
   renderedLayouts: MazeLayout[]
   onAssetsReady: () => void
-  onLevelTransition: (targetLevelId: string) => void
+  onLevelTransition: (request: SeamlessLevelTransitionRequest) => void
   onReplayActiveChange: (active: boolean) => void
   onTurnStateChange: (mazeId: string, turnState: TurnState) => void
   initialTurnState: TurnState
@@ -13131,6 +13263,9 @@ function Scene({
   }, [layout.maze.id])
   useEffect(() => {
     recordStartupMarker('sceneMountedAt')
+    document.body.dataset.sceneMountCount = String(
+      Number(document.body.dataset.sceneMountCount ?? '0') + 1
+    )
   }, [])
 
   const gl = useThree((state) => state.gl)
@@ -16277,26 +16412,38 @@ export default function App() {
     setMazeSceneKey((current) => current + 1)
   }
 
-  const handleLevelTransition = useCallback(async (targetLevelId: string) => {
+  const handleLevelTransition = useCallback(async (request: SeamlessLevelTransitionRequest) => {
     setReplayActive(false)
     setMazeLoadError(null)
 
     try {
-      await loadLevelNeighborhood(targetLevelId, { updateRendered: false })
+      await loadLevelNeighborhood(request.targetLevelId, { updateRendered: false })
       const targetLayout =
-        loadedMazeLayoutsRef.current.get(targetLevelId) ??
-        await loadMazeLayoutById(targetLevelId)
+        loadedMazeLayoutsRef.current.get(request.targetLevelId) ??
+        await loadMazeLayoutById(request.targetLevelId)
 
       if (!targetLayout) {
-        throw new Error(`Target level "${targetLevelId}" could not be loaded`)
+        throw new Error(`Target level "${request.targetLevelId}" could not be loaded`)
       }
 
-      loadedMazeLayoutsRef.current.set(targetLevelId, targetLayout)
-      getOrCreateLevelTurnState(targetLayout)
-      setInstantiatedMazeId(targetLevelId)
+      const previousTargetState = getOrCreateLevelTurnState(targetLayout)
+      const targetTransform = getRuntimeLevelWorldTransform(targetLayout.maze.id)
+      const sourceTransform = getRuntimeLevelWorldTransform(request.sourceLevelId)
+      const nextTargetState = createSeamlessTargetTurnState({
+        previousTargetState,
+        sourceLevelId: request.sourceLevelId,
+        sourceState: request.sourceState,
+        sourceTransform,
+        targetLayout,
+        targetTransform
+      })
+
+      loadedMazeLayoutsRef.current.set(request.targetLevelId, targetLayout)
+      levelTurnStatesRef.current.set(request.targetLevelId, nextTargetState)
+      setInstantiatedMazeId(request.targetLevelId)
       setMazeLayout(targetLayout)
-      document.body.dataset.loadedMazeId = targetLevelId
-      updateRenderedMazeLayouts(targetLevelId)
+      document.body.dataset.loadedMazeId = request.targetLevelId
+      updateRenderedMazeLayouts(request.targetLevelId)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
 
@@ -17261,7 +17408,7 @@ export default function App() {
               <Scene
                 composerEnabled={composerEnabled}
                 controlsOpen={controlsOpen}
-                key={`${mazeLayout.maze.id}:${mazeSceneKey}`}
+                key={`scene:${mazeSceneKey}`}
                 layout={mazeLayout}
                 levelTransform={activeLevelTransform}
                 renderedLayouts={sceneRenderedLayouts}

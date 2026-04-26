@@ -269,10 +269,42 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
   })
   expect(state.lifecycle.loadedMazeIds).toEqual(expect.arrayContaining(['entrance', 'chamber-1']))
 
-  for (const key of ['KeyW', 'KeyW', 'KeyW']) {
+  const pressAndWaitForTurn = async (key, expectedPlayer) => {
     await page.keyboard.press(key)
-    await page.waitForTimeout(350)
+    await expect
+      .poll(
+        async () => page.evaluate(() => window.__levelsjamDebug?.getTurnStateSummary?.()?.player ?? null),
+        {
+          timeout: 5_000,
+          intervals: [50, 100, 250]
+        }
+      )
+      .toMatchObject(expectedPlayer)
   }
+
+  await pressAndWaitForTurn('KeyW', {
+    cell: { x: 1, y: 1 },
+    direction: 'north'
+  })
+  await pressAndWaitForTurn('KeyW', {
+    cell: { x: 1, y: 0 },
+    direction: 'north'
+  })
+
+  const beforeBoundaryMove = await page.evaluate(() => ({
+    camera: window.__levelsjamDebug?.getCameraState?.() ?? null,
+    sceneMountCount: document.body.dataset.sceneMountCount ?? null,
+    turn: window.__levelsjamDebug?.getTurnStateSummary?.() ?? null
+  }))
+
+  expect(beforeBoundaryMove.turn.player).toMatchObject({
+    cell: { x: 1, y: 0 },
+    direction: 'north',
+    hasSword: false,
+    hasTrophy: false
+  })
+
+  await page.keyboard.press('KeyW')
 
   await page.waitForFunction(
     () => window.__levelsjamDebug?.getMazeLifecycleState?.()?.instantiatedMazeId === 'chamber-1',
@@ -282,6 +314,8 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
 
   const transitionedState = await page.evaluate(() => ({
     lifecycle: window.__levelsjamDebug?.getMazeLifecycleState?.() ?? null,
+    camera: window.__levelsjamDebug?.getCameraState?.() ?? null,
+    sceneMountCount: document.body.dataset.sceneMountCount ?? null,
     turn: window.__levelsjamDebug?.getTurnStateSummary?.() ?? null
   }))
 
@@ -290,6 +324,59 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
   )
   expect(transitionedState.turn.escaped).toBe(false)
   expect(transitionedState.turn.player.cell).toEqual({ x: 2, y: 17 })
+  expect(transitionedState.turn.player).toMatchObject({
+    direction: 'north',
+    hasSword: false,
+    hasTrophy: false
+  })
+  expect(transitionedState.sceneMountCount).toBe(beforeBoundaryMove.sceneMountCount)
+  expect(Math.abs(transitionedState.camera.yaw - beforeBoundaryMove.camera.yaw)).toBeLessThan(0.001)
+  expect(Math.abs(transitionedState.camera.pitch - beforeBoundaryMove.camera.pitch)).toBeLessThan(0.001)
+
+  await pressAndWaitForTurn('ArrowRight', {
+    cell: { x: 2, y: 17 },
+    direction: 'east'
+  })
+  await pressAndWaitForTurn('ArrowRight', {
+    cell: { x: 2, y: 17 },
+    direction: 'south'
+  })
+  const beforeReturnMove = await page.evaluate(() => ({
+    camera: window.__levelsjamDebug?.getCameraState?.() ?? null,
+    sceneMountCount: document.body.dataset.sceneMountCount ?? null,
+    turn: window.__levelsjamDebug?.getTurnStateSummary?.() ?? null
+  }))
+
+  expect(beforeReturnMove.turn.player).toMatchObject({
+    cell: { x: 2, y: 17 },
+    direction: 'south',
+    hasSword: false,
+    hasTrophy: false
+  })
+
+  await page.keyboard.press('KeyW')
+  await page.waitForFunction(
+    () => window.__levelsjamDebug?.getMazeLifecycleState?.()?.instantiatedMazeId === 'entrance',
+    undefined,
+    { timeout: 10_000 }
+  )
+
+  const returnedState = await page.evaluate(() => ({
+    camera: window.__levelsjamDebug?.getCameraState?.() ?? null,
+    sceneMountCount: document.body.dataset.sceneMountCount ?? null,
+    turn: window.__levelsjamDebug?.getTurnStateSummary?.() ?? null
+  }))
+
+  expect(returnedState.turn.escaped).toBe(false)
+  expect(returnedState.turn.player).toMatchObject({
+    cell: { x: 1, y: 0 },
+    direction: 'south',
+    hasSword: false,
+    hasTrophy: false
+  })
+  expect(returnedState.sceneMountCount).toBe(beforeBoundaryMove.sceneMountCount)
+  expect(Math.abs(returnedState.camera.yaw - beforeReturnMove.camera.yaw)).toBeLessThan(0.001)
+  expect(Math.abs(returnedState.camera.pitch - beforeReturnMove.camera.pitch)).toBeLessThan(0.001)
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
 })
