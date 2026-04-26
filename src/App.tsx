@@ -239,9 +239,10 @@ const MAX_LIGHTING_CONTRIBUTION_INTENSITY = 4
 const BLOCKED_MOVE_FRACTION = 0.25
 const RUNTIME_RADIANCE_RESOLUTION = 192
 const RUNTIME_RADIANCE_CASCADE_COUNT = 4
-const RUNTIME_RADIANCE_DIRECT_GAIN = 0.045
-const RUNTIME_RADIANCE_FOG_SCATTER_GAIN = 12
-const RUNTIME_RADIANCE_INDIRECT_GAIN = 0.5
+const RUNTIME_RADIANCE_BASE_RAY_COUNT = 8
+const RUNTIME_RADIANCE_DIRECT_GAIN = 3
+const RUNTIME_RADIANCE_FOG_SCATTER_GAIN = 24
+const RUNTIME_RADIANCE_INDIRECT_GAIN = 0.8
 const RUNTIME_RADIANCE_MAX_DISTANCE = 18
 const RUNTIME_RADIANCE_SOURCE_RADIUS = 0.45
 const RUNTIME_RADIANCE_SURFACE_NORMAL_OFFSET = WALL_WIDTH * 0.75
@@ -1366,10 +1367,15 @@ type RuntimeRadianceSurface = {
 type RuntimeRadianceDebugState = {
   bounds: RuntimeRadianceBounds
   cascadeCount: number
+  cascadeHeight: number
+  cascadeWidth: number
   generationMs: number
+  gpuUpdateCount: number
+  latestGpuUpdateMs: number
   lightCount: number
   occluderCount: number
   resolution: number
+  sceneResolution: number
   shadowSlots?: RuntimeShadowSlotDebugState[]
 }
 
@@ -5469,79 +5475,268 @@ function buildRuntimeRadianceOccluders(
   return [...wallOccluders, ...gateOccluders]
 }
 
-function isRuntimeRadiancePixelPathBlocked(
-  startColumn: number,
-  startRow: number,
-  endColumn: number,
-  endRow: number,
-  blocked: Uint8Array,
-  resolution: number
-) {
-  if (startColumn === endColumn && startRow === endRow) {
-    return false
-  }
+const runtimeRadianceFullscreenVertexShader = `
+varying vec2 vUv;
 
-  let column = startColumn
-  let row = startRow
-  const deltaColumn = Math.abs(endColumn - startColumn)
-  const deltaRow = -Math.abs(endRow - startRow)
-  const stepColumn = startColumn < endColumn ? 1 : -1
-  const stepRow = startRow < endRow ? 1 : -1
-  let error = deltaColumn + deltaRow
+void main() {
+  vUv = uv;
+  gl_Position = vec4(position.xy, 0.0, 1.0);
+}
+`
 
-  while (column !== endColumn || row !== endRow) {
-    const doubledError = error * 2
+const runtimeRadianceCascadeFragmentShader = `
+precision highp float;
 
-    if (doubledError >= deltaRow) {
-      error += deltaRow
-      column += stepColumn
-    }
-    if (doubledError <= deltaColumn) {
-      error += deltaColumn
-      row += stepRow
-    }
+uniform sampler2D sceneMap;
+uniform sampler2D higherCascade;
+uniform vec4 radianceBounds;
+uniform vec2 sceneMapSize;
+uniform vec2 cascadeTextureSize;
+uniform float baseRayCount;
+uniform float baseProbeCount;
+uniform float cascadeIndex;
+uniform float cascadeCount;
+uniform float directGain;
+uniform float indirectGain;
 
-    if (column === endColumn && row === endRow) {
-      return false
-    }
+const float PI = 3.141592653589793;
+const float TWO_PI = 6.283185307179586;
 
-    if (blocked[(row * resolution) + column]) {
-      return true
-    }
-  }
-
-  return false
+vec2 worldToSceneUv(vec2 worldPosition) {
+  return (worldPosition - radianceBounds.xy) / max(radianceBounds.zw, vec2(0.0001));
 }
 
-function buildRuntimeRadianceCascadeSurface(
+vec4 sampleSceneMap(vec2 worldPosition) {
+  vec2 uv = worldToSceneUv(worldPosition);
+
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+    return vec4(0.0);
+  }
+
+  return texture2D(sceneMap, uv);
+}
+
+vec2 cascadeTexelUv(float probeGridSize, float rayCount, vec2 probeCell, float rayIndex) {
+  float probeIndex =
+    floor(probeCell.y) * probeGridSize +
+    floor(probeCell.x);
+  float texelIndex = probeIndex * rayCount + rayIndex;
+  float texelX = mod(texelIndex, cascadeTextureSize.x);
+  float texelY = floor(texelIndex / cascadeTextureSize.x);
+
+  return (vec2(texelX, texelY) + vec2(0.5)) / cascadeTextureSize;
+}
+
+vec3 sampleHigherCascade(vec2 worldPosition, float angle) {
+  if (cascadeIndex >= cascadeCount - 1.0) {
+    return vec3(0.0);
+  }
+
+  float nextCascade = cascadeIndex + 1.0;
+  float nextProbeGridSize = max(1.0, floor(baseProbeCount / exp2(nextCascade) + 0.5));
+  float nextRayCount = baseRayCount * pow(4.0, nextCascade);
+  vec2 nextGridPosition =
+    worldToSceneUv(worldPosition) * nextProbeGridSize - vec2(0.5);
+  vec2 baseCell = floor(nextGridPosition);
+  vec2 cellFract = fract(nextGridPosition);
+  float rayPosition = fract(angle / TWO_PI) * nextRayCount - 0.5;
+  float baseRay = floor(rayPosition);
+  float rayFract = fract(rayPosition);
+  vec3 sumColor = vec3(0.0);
+  float sumWeight = 0.0;
+
+  for (int yOffset = 0; yOffset <= 1; yOffset += 1) {
+    for (int xOffset = 0; xOffset <= 1; xOffset += 1) {
+      vec2 probeCell = clamp(
+        baseCell + vec2(float(xOffset), float(yOffset)),
+        vec2(0.0),
+        vec2(nextProbeGridSize - 1.0)
+      );
+      float probeWeight =
+        (xOffset == 0 ? 1.0 - cellFract.x : cellFract.x) *
+        (yOffset == 0 ? 1.0 - cellFract.y : cellFract.y);
+
+      for (int rayOffset = 0; rayOffset <= 1; rayOffset += 1) {
+        float rayIndex = mod(baseRay + float(rayOffset) + nextRayCount, nextRayCount);
+        float rayWeight = rayOffset == 0 ? 1.0 - rayFract : rayFract;
+        float weight = probeWeight * rayWeight;
+
+        sumColor += texture2D(
+          higherCascade,
+          cascadeTexelUv(nextProbeGridSize, nextRayCount, probeCell, rayIndex)
+        ).rgb * weight;
+        sumWeight += weight;
+      }
+    }
+  }
+
+  return sumWeight > 0.0 ? sumColor / sumWeight : vec3(0.0);
+}
+
+void main() {
+  float texelIndex =
+    floor(gl_FragCoord.y) * cascadeTextureSize.x +
+    floor(gl_FragCoord.x);
+  float probeGridSize = max(1.0, floor(baseProbeCount / exp2(cascadeIndex) + 0.5));
+  float rayCount = baseRayCount * pow(4.0, cascadeIndex);
+  float rayIndex = mod(texelIndex, rayCount);
+  float probeIndex = floor(texelIndex / rayCount);
+
+  if (probeIndex >= probeGridSize * probeGridSize) {
+    gl_FragColor = vec4(0.0);
+    return;
+  }
+
+  vec2 probeCell = vec2(
+    mod(probeIndex, probeGridSize),
+    floor(probeIndex / probeGridSize)
+  );
+  vec2 probeUv = (probeCell + vec2(0.5)) / probeGridSize;
+  vec2 probeWorld = radianceBounds.xy + probeUv * radianceBounds.zw;
+  float angle = (rayIndex + 0.5) / rayCount * TWO_PI;
+  vec2 rayDirection = vec2(cos(angle), sin(angle));
+  float baseInterval = max(max(radianceBounds.z, radianceBounds.w) / baseProbeCount, 0.0001);
+  float intervalLength = baseInterval * pow(4.0, cascadeIndex);
+  float intervalStart =
+    cascadeIndex <= 0.5
+      ? 0.0
+      : baseInterval * (pow(4.0, cascadeIndex) - 1.0) / 3.0;
+  float intervalEnd = intervalStart + intervalLength;
+  float stepLength = max(baseInterval * 0.75, intervalLength / 48.0);
+  vec3 radiance = vec3(0.0);
+  float transmittance = 1.0;
+
+  for (int stepIndex = 0; stepIndex < 96; stepIndex += 1) {
+    float distance = intervalStart + (float(stepIndex) + 0.5) * stepLength;
+
+    if (distance >= intervalEnd) {
+      break;
+    }
+
+    vec2 sampleWorld = probeWorld + rayDirection * distance;
+    vec4 sceneSample = sampleSceneMap(sampleWorld);
+
+    if (sceneSample.a > 0.5) {
+      transmittance = 0.0;
+      break;
+    }
+
+    if (max(max(sceneSample.r, sceneSample.g), sceneSample.b) > 0.0001) {
+      float falloff = 1.0 / max(
+        distance * distance + ${RUNTIME_RADIANCE_SOURCE_RADIUS.toFixed(6)} * ${RUNTIME_RADIANCE_SOURCE_RADIUS.toFixed(6)},
+        0.0001
+      );
+      radiance += sceneSample.rgb * falloff * directGain * transmittance;
+      transmittance = 0.0;
+      break;
+    }
+  }
+
+  if (transmittance > 0.0) {
+    vec2 mergeWorld = probeWorld + rayDirection * intervalEnd;
+    radiance += sampleHigherCascade(mergeWorld, angle) * indirectGain * transmittance;
+  }
+
+  gl_FragColor = vec4(max(radiance, vec3(0.0)), 1.0);
+}
+`
+
+const runtimeRadianceResolveFragmentShader = `
+precision highp float;
+
+uniform sampler2D cascadeTexture;
+uniform vec2 cascadeTextureSize;
+uniform float baseRayCount;
+uniform float baseProbeCount;
+varying vec2 vUv;
+
+vec2 cascadeTexelUv(float probeGridSize, float rayCount, vec2 probeCell, float rayIndex) {
+  float probeIndex =
+    floor(probeCell.y) * probeGridSize +
+    floor(probeCell.x);
+  float texelIndex = probeIndex * rayCount + rayIndex;
+  float texelX = mod(texelIndex, cascadeTextureSize.x);
+  float texelY = floor(texelIndex / cascadeTextureSize.x);
+
+  return (vec2(texelX, texelY) + vec2(0.5)) / cascadeTextureSize;
+}
+
+vec3 sampleCascade0(vec2 uv, float rayIndex) {
+  float probeGridSize = baseProbeCount;
+  float rayCount = baseRayCount;
+  vec2 gridPosition = uv * probeGridSize - vec2(0.5);
+  vec2 baseCell = floor(gridPosition);
+  vec2 cellFract = fract(gridPosition);
+  vec3 sumColor = vec3(0.0);
+  float sumWeight = 0.0;
+
+  for (int yOffset = 0; yOffset <= 1; yOffset += 1) {
+    for (int xOffset = 0; xOffset <= 1; xOffset += 1) {
+      vec2 probeCell = clamp(
+        baseCell + vec2(float(xOffset), float(yOffset)),
+        vec2(0.0),
+        vec2(probeGridSize - 1.0)
+      );
+      float weight =
+        (xOffset == 0 ? 1.0 - cellFract.x : cellFract.x) *
+        (yOffset == 0 ? 1.0 - cellFract.y : cellFract.y);
+
+      sumColor += texture2D(
+        cascadeTexture,
+        cascadeTexelUv(probeGridSize, rayCount, probeCell, rayIndex)
+      ).rgb * weight;
+      sumWeight += weight;
+    }
+  }
+
+  return sumWeight > 0.0 ? sumColor / sumWeight : vec3(0.0);
+}
+
+void main() {
+  vec3 irradiance = vec3(0.0);
+
+  for (int rayIndex = 0; rayIndex < ${RUNTIME_RADIANCE_BASE_RAY_COUNT}; rayIndex += 1) {
+    irradiance += sampleCascade0(vUv, float(rayIndex));
+  }
+
+  gl_FragColor = vec4(irradiance / ${RUNTIME_RADIANCE_BASE_RAY_COUNT.toFixed(1)}, 1.0);
+}
+`
+
+function createRuntimeRadianceRenderTarget(
+  width: number,
+  height: number,
+  filter: typeof LinearFilter | typeof NearestFilter
+) {
+  const target = new WebGLRenderTarget(width, height, {
+    depthBuffer: false,
+    generateMipmaps: false,
+    magFilter: filter,
+    minFilter: filter,
+    stencilBuffer: false,
+    type: HalfFloatType,
+    format: RGBAFormat
+  })
+
+  target.texture.colorSpace = NoColorSpace
+  target.texture.wrapS = ClampToEdgeWrapping
+  target.texture.wrapT = ClampToEdgeWrapping
+  target.texture.generateMipmaps = false
+
+  return target
+}
+
+function createRuntimeRadianceSceneTexture(
   layout: MazeLayout,
-  openGateIds: Set<string>
-): RuntimeRadianceSurface {
-  const startedAt = performance.now()
-  const bounds = getRuntimeRadianceBounds(layout)
+  openGateIds: Set<string>,
+  bounds: RuntimeRadianceBounds
+) {
   const resolution = RUNTIME_RADIANCE_RESOLUTION
-  const pixelCount = resolution * resolution
-  const direct = new Float32Array(pixelCount * 3)
-  const cascadeA = new Float32Array(pixelCount * 3)
-  const cascadeB = new Float32Array(pixelCount * 3)
-  const blocked = new Uint8Array(pixelCount)
+  const data = new Uint16Array(resolution * resolution * 4)
   const occluders = buildRuntimeRadianceOccluders(layout, openGateIds)
-  const torchColor = TORCH_LIGHTMAP_TINT
-  const maxDistanceSquared = RUNTIME_RADIANCE_MAX_DISTANCE * RUNTIME_RADIANCE_MAX_DISTANCE
   const xByColumn = new Float32Array(resolution)
   const zByRow = new Float32Array(resolution)
-  const lightGridPositions = layout.lights.map((light) => ({
-    column: MathUtils.clamp(
-      Math.floor(((light.torchPosition.x - bounds.minX) / bounds.width) * resolution),
-      0,
-      resolution - 1
-    ),
-    row: MathUtils.clamp(
-      Math.floor(((light.torchPosition.z - bounds.minZ) / bounds.depth) * resolution),
-      0,
-      resolution - 1
-    )
-  }))
+  const opaqueHalf = DataUtils.toHalfFloat(1)
 
   for (let column = 0; column < resolution; column += 1) {
     xByColumn[column] = bounds.minX + ((column + 0.5) / resolution) * bounds.width
@@ -5579,175 +5774,64 @@ function buildRuntimeRadianceCascadeSurface(
         const x = xByColumn[column]
 
         if (pointInRuntimeRadianceOccluder2D(x, z, occluder)) {
-          blocked[(row * resolution) + column] = 1
+          data[(((row * resolution) + column) * 4) + 3] = opaqueHalf
         }
       }
     }
   }
 
-  for (let row = 0; row < resolution; row += 1) {
-    const z = zByRow[row]
+  for (const light of layout.lights) {
+    const centerColumn = MathUtils.clamp(
+      Math.floor(((light.torchPosition.x - bounds.minX) / bounds.width) * resolution),
+      0,
+      resolution - 1
+    )
+    const centerRow = MathUtils.clamp(
+      Math.floor(((light.torchPosition.z - bounds.minZ) / bounds.depth) * resolution),
+      0,
+      resolution - 1
+    )
+    const radiusPixels = Math.max(
+      1,
+      Math.ceil((RUNTIME_RADIANCE_SOURCE_RADIUS / bounds.width) * resolution)
+    )
 
-    for (let column = 0; column < resolution; column += 1) {
-      const x = xByColumn[column]
-      const pixelIndex = (row * resolution) + column
-      const outputOffset = ((row * resolution) + column) * 3
-      let red = 0
-      let green = 0
-      let blue = 0
-
-      if (blocked[pixelIndex]) {
+    for (let row = centerRow - radiusPixels; row <= centerRow + radiusPixels; row += 1) {
+      if (row < 0 || row >= resolution) {
         continue
       }
 
-      for (let lightIndex = 0; lightIndex < layout.lights.length; lightIndex += 1) {
-        const light = layout.lights[lightIndex]
-        const lightX = light.torchPosition.x
-        const lightZ = light.torchPosition.z
-        const dx = lightX - x
-        const dz = lightZ - z
-        const distanceSquared = dx * dx + dz * dz
-
-        if (distanceSquared > maxDistanceSquared) {
+      for (
+        let column = centerColumn - radiusPixels;
+        column <= centerColumn + radiusPixels;
+        column += 1
+      ) {
+        if (column < 0 || column >= resolution) {
           continue
         }
 
-        const distance = Math.sqrt(distanceSquared)
-        const directionLength = Math.max(distance, 0.0001)
-        const lightDirection = getRuntimeRadianceLightDirection(light.side)
-        const emissionFacing =
-          ((-dx / directionLength) * lightDirection.x) +
-          ((-dz / directionLength) * lightDirection.z)
+        const dx = column - centerColumn
+        const dz = row - centerRow
 
-        if (emissionFacing < -0.2) {
+        if ((dx * dx) + (dz * dz) > radiusPixels * radiusPixels) {
           continue
         }
 
-        const lightGridPosition = lightGridPositions[lightIndex]
+        const offset = ((row * resolution) + column) * 4
 
-        if (
-          isRuntimeRadiancePixelPathBlocked(
-            column,
-            row,
-            lightGridPosition.column,
-            lightGridPosition.row,
-            blocked,
-            resolution
-          )
-        ) {
+        if (data[offset + 3] !== 0) {
           continue
         }
 
-        const falloff =
-          1 / Math.max(
-            distanceSquared + RUNTIME_RADIANCE_SOURCE_RADIUS * RUNTIME_RADIANCE_SOURCE_RADIUS,
-            0.0001
-          )
-        const rangeFade = 1 - MathUtils.smoothstep(
-          distance,
-          RUNTIME_RADIANCE_MAX_DISTANCE * 0.72,
-          RUNTIME_RADIANCE_MAX_DISTANCE
-        )
-        const facing = MathUtils.clamp(0.25 + 0.75 * emissionFacing, 0, 1)
-        const intensity = falloff * rangeFade * facing * RUNTIME_RADIANCE_DIRECT_GAIN
-
-        red += torchColor.r * intensity
-        green += torchColor.g * intensity
-        blue += torchColor.b * intensity
-      }
-
-      direct[outputOffset] = red
-      direct[outputOffset + 1] = green
-      direct[outputOffset + 2] = blue
-      cascadeA[outputOffset] = red
-      cascadeA[outputOffset + 1] = green
-      cascadeA[outputOffset + 2] = blue
-    }
-  }
-
-  const blurRadii = [2, 5, 11, 23]
-  const blurWeights = [0.14, 0.09, 0.055, 0.03]
-
-  for (let cascadeIndex = 0; cascadeIndex < blurRadii.length; cascadeIndex += 1) {
-    const radius = blurRadii[cascadeIndex]
-    const weight = blurWeights[cascadeIndex]
-
-    cascadeB.fill(0)
-
-    for (let row = 0; row < resolution; row += 1) {
-      for (let column = 0; column < resolution; column += 1) {
-        const pixelIndex = (row * resolution) + column
-        const outputOffset = pixelIndex * 3
-        let red = 0
-        let green = 0
-        let blue = 0
-        let sampleCount = 0
-
-        if (blocked[pixelIndex]) {
-          continue
-        }
-
-        for (let yOffset = -radius; yOffset <= radius; yOffset += radius) {
-          const sampleRow = MathUtils.clamp(row + yOffset, 0, resolution - 1)
-
-          for (let xOffset = -radius; xOffset <= radius; xOffset += radius) {
-            const sampleColumn = MathUtils.clamp(column + xOffset, 0, resolution - 1)
-            const sampleIndex = (sampleRow * resolution) + sampleColumn
-            const sampleOffset = sampleIndex * 3
-
-            if (blocked[sampleIndex]) {
-              continue
-            }
-
-            if (
-              isRuntimeRadiancePixelPathBlocked(
-                column,
-                row,
-                sampleColumn,
-                sampleRow,
-                blocked,
-                resolution
-              )
-            ) {
-              continue
-            }
-
-            red += cascadeA[sampleOffset]
-            green += cascadeA[sampleOffset + 1]
-            blue += cascadeA[sampleOffset + 2]
-            sampleCount += 1
-          }
-        }
-
-        if (sampleCount > 0) {
-          cascadeB[outputOffset] = red / sampleCount
-          cascadeB[outputOffset + 1] = green / sampleCount
-          cascadeB[outputOffset + 2] = blue / sampleCount
-        }
+        data[offset] = DataUtils.toHalfFloat(TORCH_LIGHTMAP_TINT.r)
+        data[offset + 1] = DataUtils.toHalfFloat(TORCH_LIGHTMAP_TINT.g)
+        data[offset + 2] = DataUtils.toHalfFloat(TORCH_LIGHTMAP_TINT.b)
       }
     }
-
-    for (let index = 0; index < direct.length; index += 1) {
-      direct[index] += cascadeB[index] * weight * RUNTIME_RADIANCE_INDIRECT_GAIN
-      cascadeA[index] = cascadeB[index]
-    }
-  }
-
-  const output = new Uint16Array(pixelCount * 4)
-  const alpha = DataUtils.toHalfFloat(1)
-
-  for (let pixelIndex = 0; pixelIndex < pixelCount; pixelIndex += 1) {
-    const sourceOffset = pixelIndex * 3
-    const destinationOffset = pixelIndex * 4
-
-    output[destinationOffset] = DataUtils.toHalfFloat(Math.max(0, direct[sourceOffset]))
-    output[destinationOffset + 1] = DataUtils.toHalfFloat(Math.max(0, direct[sourceOffset + 1]))
-    output[destinationOffset + 2] = DataUtils.toHalfFloat(Math.max(0, direct[sourceOffset + 2]))
-    output[destinationOffset + 3] = alpha
   }
 
   const texture = new DataTexture(
-    output,
+    data,
     resolution,
     resolution,
     RGBAFormat,
@@ -5756,23 +5840,14 @@ function buildRuntimeRadianceCascadeSurface(
   texture.colorSpace = NoColorSpace
   texture.flipY = false
   texture.generateMipmaps = false
-  texture.magFilter = LinearFilter
-  texture.minFilter = LinearFilter
+  texture.magFilter = NearestFilter
+  texture.minFilter = NearestFilter
   texture.wrapS = ClampToEdgeWrapping
   texture.wrapT = ClampToEdgeWrapping
   texture.needsUpdate = true
 
   return {
-    bounds,
-    debug: {
-      bounds,
-      cascadeCount: RUNTIME_RADIANCE_CASCADE_COUNT,
-      generationMs: performance.now() - startedAt,
-      lightCount: layout.lights.length,
-      occluderCount: occluders.length,
-      resolution
-    },
-    ready: true,
+    occluderCount: occluders.length,
     texture
   }
 }
@@ -5781,23 +5856,196 @@ function useRuntimeRadianceCascadeSurface(
   layout: MazeLayout,
   openGateIds: Set<string>
 ) {
+  const gl = useThree((state) => state.gl)
+  const invalidate = useThree((state) => state.invalidate)
   const openGateKey = useMemo(
     () => Array.from(openGateIds).sort().join('|'),
     [openGateIds]
   )
-  const surface = useMemo(
-    () => buildRuntimeRadianceCascadeSurface(layout, openGateIds),
-    [layout, openGateKey]
+  const bounds = useMemo(() => getRuntimeRadianceBounds(layout), [layout])
+  const cascadeWidth = RUNTIME_RADIANCE_RESOLUTION * RUNTIME_RADIANCE_BASE_RAY_COUNT
+  const cascadeHeight = RUNTIME_RADIANCE_RESOLUTION
+  const sceneTextureState = useMemo(
+    () => createRuntimeRadianceSceneTexture(layout, openGateIds, bounds),
+    [bounds, layout, openGateKey]
+  )
+  const resources = useMemo(() => {
+    const passScene = new ThreeScene()
+    const passCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1)
+    const passGeometry = new PlaneGeometry(2, 2)
+    const emptyTexture = new DataTexture(
+      new Uint16Array([0, 0, 0, DataUtils.toHalfFloat(1)]),
+      1,
+      1,
+      RGBAFormat,
+      HalfFloatType
+    )
+    emptyTexture.colorSpace = NoColorSpace
+    emptyTexture.needsUpdate = true
+    const cascadeTargets = Array.from(
+      { length: RUNTIME_RADIANCE_CASCADE_COUNT },
+      () => createRuntimeRadianceRenderTarget(cascadeWidth, cascadeHeight, NearestFilter)
+    )
+    const outputTarget = createRuntimeRadianceRenderTarget(
+      RUNTIME_RADIANCE_RESOLUTION,
+      RUNTIME_RADIANCE_RESOLUTION,
+      LinearFilter
+    )
+    const cascadeMaterial = new ShaderMaterial({
+      depthTest: false,
+      depthWrite: false,
+      fragmentShader: runtimeRadianceCascadeFragmentShader,
+      toneMapped: false,
+      uniforms: {
+        baseProbeCount: new Uniform(RUNTIME_RADIANCE_RESOLUTION),
+        baseRayCount: new Uniform(RUNTIME_RADIANCE_BASE_RAY_COUNT),
+        cascadeCount: new Uniform(RUNTIME_RADIANCE_CASCADE_COUNT),
+        cascadeIndex: new Uniform(0),
+        cascadeTextureSize: new Uniform(new Vector2(cascadeWidth, cascadeHeight)),
+        directGain: new Uniform(RUNTIME_RADIANCE_DIRECT_GAIN),
+        higherCascade: new Uniform<Texture>(emptyTexture),
+        indirectGain: new Uniform(RUNTIME_RADIANCE_INDIRECT_GAIN),
+        radianceBounds: new Uniform(new Vector4()),
+        sceneMap: new Uniform<Texture>(sceneTextureState.texture),
+        sceneMapSize: new Uniform(new Vector2(RUNTIME_RADIANCE_RESOLUTION, RUNTIME_RADIANCE_RESOLUTION))
+      },
+      vertexShader: runtimeRadianceFullscreenVertexShader
+    })
+    const resolveMaterial = new ShaderMaterial({
+      depthTest: false,
+      depthWrite: false,
+      fragmentShader: runtimeRadianceResolveFragmentShader,
+      toneMapped: false,
+      uniforms: {
+        baseProbeCount: new Uniform(RUNTIME_RADIANCE_RESOLUTION),
+        baseRayCount: new Uniform(RUNTIME_RADIANCE_BASE_RAY_COUNT),
+        cascadeTexture: new Uniform<Texture>(cascadeTargets[0].texture),
+        cascadeTextureSize: new Uniform(new Vector2(cascadeWidth, cascadeHeight))
+      },
+      vertexShader: runtimeRadianceFullscreenVertexShader
+    })
+    const passMesh = new Mesh(passGeometry, cascadeMaterial)
+
+    passScene.add(passMesh)
+
+    return {
+      cascadeMaterial,
+      cascadeTargets,
+      debug: {
+        bounds,
+        cascadeCount: RUNTIME_RADIANCE_CASCADE_COUNT,
+        cascadeHeight,
+        cascadeWidth,
+        generationMs: 0,
+        gpuUpdateCount: 0,
+        latestGpuUpdateMs: 0,
+        lightCount: layout.lights.length,
+        occluderCount: sceneTextureState.occluderCount,
+        resolution: RUNTIME_RADIANCE_RESOLUTION,
+        sceneResolution: RUNTIME_RADIANCE_RESOLUTION
+      } satisfies RuntimeRadianceDebugState,
+      emptyTexture,
+      outputTarget,
+      passCamera,
+      passMesh,
+      passScene,
+      resolveMaterial
+    }
+  }, [
+    bounds,
+    cascadeHeight,
+    cascadeWidth,
+    layout.lights.length,
+    sceneTextureState.occluderCount,
+    sceneTextureState.texture
+  ])
+
+  useEffect(() => {
+    resources.cascadeMaterial.uniforms.sceneMap.value = sceneTextureState.texture
+    resources.debug.bounds = bounds
+    resources.debug.lightCount = layout.lights.length
+    resources.debug.occluderCount = sceneTextureState.occluderCount
+  }, [
+    bounds,
+    layout.lights.length,
+    resources,
+    sceneTextureState.occluderCount,
+    sceneTextureState.texture
+  ])
+
+  useFrame((state) => {
+    const startedAt = performance.now()
+    const previousRenderTarget = gl.getRenderTarget()
+    const previousAutoClear = gl.autoClear
+
+    gl.autoClear = false
+    resources.cascadeMaterial.uniforms.radianceBounds.value.set(
+      bounds.minX,
+      bounds.minZ,
+      bounds.width,
+      bounds.depth
+    )
+
+    resources.passMesh.material = resources.cascadeMaterial
+    for (let cascadeIndex = RUNTIME_RADIANCE_CASCADE_COUNT - 1; cascadeIndex >= 0; cascadeIndex -= 1) {
+      resources.cascadeMaterial.uniforms.cascadeIndex.value = cascadeIndex
+      resources.cascadeMaterial.uniforms.higherCascade.value =
+        cascadeIndex === RUNTIME_RADIANCE_CASCADE_COUNT - 1
+          ? resources.emptyTexture
+          : resources.cascadeTargets[cascadeIndex + 1].texture
+      gl.setRenderTarget(resources.cascadeTargets[cascadeIndex])
+      gl.render(resources.passScene, resources.passCamera)
+    }
+
+    resources.passMesh.material = resources.resolveMaterial
+    resources.resolveMaterial.uniforms.cascadeTexture.value = resources.cascadeTargets[0].texture
+    gl.setRenderTarget(resources.outputTarget)
+    gl.render(resources.passScene, resources.passCamera)
+    gl.setRenderTarget(previousRenderTarget)
+    gl.autoClear = previousAutoClear
+
+    const updateMs = performance.now() - startedAt
+    resources.debug.generationMs = updateMs
+    resources.debug.latestGpuUpdateMs = updateMs
+    resources.debug.gpuUpdateCount += 1
+    state.invalidate()
+  })
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      invalidate()
+    }, 16)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [invalidate])
+
+  useEffect(
+    () => () => {
+      sceneTextureState.texture.dispose()
+    },
+    [sceneTextureState.texture]
   )
 
   useEffect(
     () => () => {
-      surface.texture.dispose()
+      resources.cascadeMaterial.dispose()
+      resources.resolveMaterial.dispose()
+      resources.passMesh.geometry.dispose()
+      resources.cascadeTargets.forEach((target) => target.dispose())
+      resources.outputTarget.dispose()
+      resources.emptyTexture.dispose()
     },
-    [surface]
+    [resources]
   )
 
-  return surface
+  return {
+    bounds,
+    debug: resources.debug,
+    ready: true,
+    texture: resources.outputTarget.texture
+  } satisfies RuntimeRadianceSurface
 }
 
 async function loadRgbEImageDataTexture(url: string) {

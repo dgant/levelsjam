@@ -22,7 +22,10 @@
 - The generated radiance field applies to maze floor, maze walls, sconces, monsters, pickups, gates, volumetric fog, and other maze-local lit surfaces at every authored height unless a more specific height rule is documented.
 - The generated radiance field treats maze walls and closed gates as horizontal-plane occluders for torch visibility.
 - The generated radiance field treats torch billboards and sconces as emissive source markers rather than geometry occluders.
-- The generated radiance field is produced during ordinary browser runtime from the active maze layout and does not require offline surface-lightmap baking.
+- The generated radiance field is produced by a real-time GPU radiance-cascade pipeline during ordinary browser runtime and does not require offline surface-lightmap baking.
+- The radiance-cascade pipeline updates on the GPU every rendered frame rather than precomputing diffuse lighting on the CPU.
+- The radiance-cascade pipeline stores directional ray-interval radiance in cascade render targets and merges higher-angular, lower-spatial cascades down to the material-sampled output field.
+- The radiance-cascade scene input is a runtime GPU texture containing XZ-plane wall, closed-gate, and emissive torch data for ray marching.
 - The generated radiance field may reuse the existing surface-lightmap UV channel and material hook when that is the shortest safe path to feed PBR materials.
 - Runtime baked surface-lightmap files may remain present as historical assets, but the active experiment does not depend on them for maze diffuse lighting.
 - The active experiment does not use runtime volumetric-lightmap diffuse data; maze-local diffuse lighting for fog, monsters, pickups, gates, sconces, walls, and floor comes from the generated radiance field.
@@ -33,7 +36,7 @@
 - Realtime shadowed torch lights are bounded to a small active set selected by player distance and visibility importance.
 - Realtime shadowed torch slots keep their selected torch while it fades out, and newly eligible torches fade into another available slot instead of stealing an already visible slot.
 - Realtime shadow maps for selected torch slots refresh when a slot selects a different torch or when gate occluder state changes, not every animation frame.
-- The generated radiance-field debug state exposes atlas dimensions, source light count, occluder count, generation time, and active shadow-light weights.
+- The generated radiance-field debug state exposes scene-map dimensions, cascade dimensions, cascade count, source light count, occluder count, GPU update count, latest GPU update time, and active shadow-light weights.
 - The scene contains maze-floor ground geometry covering the playable maze footprint and its required baked-lighting bounds.
 - The maze-floor ground uses the extracted ShareTextures `puddle-ground` PBR pack rather than preview imagery.
 - The maze-floor ground uses the full authored `puddle-ground` PBR material stack rather than a reduced compatibility material.
