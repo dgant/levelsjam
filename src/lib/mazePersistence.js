@@ -10,6 +10,7 @@ import {
   MAZE_TARGET_COUNT,
   MAZE_WIDTH,
   generateMaze,
+  computeMazeCellVisibility,
   getMazeWallSegments,
   getMazeSignature,
   serializeMazeModule,
@@ -88,6 +89,10 @@ function needsMazeRewrite(maze) {
     return true
   }
 
+  if (!maze.visibility?.cells || maze.visibility.version !== 1) {
+    return true
+  }
+
   const walls = getMazeWallSegments(maze)
   return walls.some((wall) => !maze.lightmap?.wallRects?.[wall.id])
 }
@@ -130,6 +135,9 @@ function generateReplacementMaze({
     const maze = createMazeCandidate(mazeFactory, seed)
     normalizeCandidateTiming(maze)
     maze.id = path.basename(fileName, '.js')
+    if (!maze.visibility) {
+      maze.visibility = computeMazeCellVisibility(maze)
+    }
     if (!maze.lightmap) {
       maze.lightmap = bakeMazeLightmap(maze)
     }
@@ -412,6 +420,7 @@ export async function ensureMazeFiles({
 
     const shouldRewrite = needsMazeRewrite(maze)
     if (shouldRewrite) {
+      maze.visibility = computeMazeCellVisibility(maze)
       maze.lightmap = bakeMazeLightmap(maze)
       fs.writeFileSync(filePath, serializeMazeModule(maze))
       reportProgress({
@@ -509,6 +518,9 @@ export async function ensureMazeFiles({
     const fileName = `maze-${String(nextIndex).padStart(3, '0')}.js`
     nextIndex += 1
     maze.id = path.basename(fileName, '.js')
+    if (!maze.visibility) {
+      maze.visibility = computeMazeCellVisibility(maze)
+    }
     if (!maze.lightmap) {
       maze.lightmap = bakeMazeLightmap(maze)
     }

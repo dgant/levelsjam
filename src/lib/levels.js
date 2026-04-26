@@ -1,4 +1,4 @@
-import { bakeMazeLightmap } from './maze.js'
+import { bakeMazeLightmap, computeMazeCellVisibility } from './maze.js'
 
 const AUTHORED_LEVEL_IDS = Object.freeze({
   Entrance: 'entrance',
@@ -223,6 +223,7 @@ export function createAuthoredRuntimeMaze(id) {
     return null
   }
 
+  maze.visibility = computeMazeCellVisibility(maze)
   maze.lightmap = bakeMazeLightmap(maze)
   authoredLevelMazeCache.set(id, maze)
 

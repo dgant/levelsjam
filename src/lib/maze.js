@@ -1144,6 +1144,7 @@ export function generateMaze(seed = Date.now(), options = {}) {
       getSolutionRouteCells(maze, adjacency)
     )
   )
+  maze.visibility = computeMazeCellVisibility(maze)
   maze.generationMs = performance.now() - startTime
   recordMazeSolution(maze)
   if (bakeLightmap) {
@@ -1294,6 +1295,131 @@ export function getMazeWallSegments(maze) {
 
   assignWallSurfaceGroups(walls)
   return walls
+}
+
+function getVisibilitySamplePoints(maze, cell) {
+  const center = getCellCenter(maze, cell)
+  const inset = (MAZE_CELL_SIZE / 2) - 0.08
+
+  return [
+    center,
+    { x: center.x - inset, z: center.z - inset },
+    { x: center.x + inset, z: center.z - inset },
+    { x: center.x - inset, z: center.z + inset },
+    { x: center.x + inset, z: center.z + inset }
+  ]
+}
+
+function wallToVisibilitySegment(wall) {
+  if (wall.axis === 'x') {
+    return {
+      a: { x: wall.bounds.minX, z: wall.center.z },
+      b: { x: wall.bounds.maxX, z: wall.center.z }
+    }
+  }
+
+  return {
+    a: { x: wall.center.x, z: wall.bounds.minZ },
+    b: { x: wall.center.x, z: wall.bounds.maxZ }
+  }
+}
+
+function orientation2d(a, b, c) {
+  return ((b.z - a.z) * (c.x - b.x)) - ((b.x - a.x) * (c.z - b.z))
+}
+
+function pointOnSegment2d(a, b, c) {
+  const epsilon = 1e-8
+
+  return (
+    Math.min(a.x, c.x) - epsilon <= b.x &&
+    b.x <= Math.max(a.x, c.x) + epsilon &&
+    Math.min(a.z, c.z) - epsilon <= b.z &&
+    b.z <= Math.max(a.z, c.z) + epsilon
+  )
+}
+
+function segmentsIntersect2d(a, b, c, d) {
+  const epsilon = 1e-8
+  const o1 = orientation2d(a, b, c)
+  const o2 = orientation2d(a, b, d)
+  const o3 = orientation2d(c, d, a)
+  const o4 = orientation2d(c, d, b)
+
+  if (
+    ((o1 > epsilon && o2 < -epsilon) || (o1 < -epsilon && o2 > epsilon)) &&
+    ((o3 > epsilon && o4 < -epsilon) || (o3 < -epsilon && o4 > epsilon))
+  ) {
+    return true
+  }
+
+  return (
+    (Math.abs(o1) <= epsilon && pointOnSegment2d(a, c, b)) ||
+    (Math.abs(o2) <= epsilon && pointOnSegment2d(a, d, b)) ||
+    (Math.abs(o3) <= epsilon && pointOnSegment2d(c, a, d)) ||
+    (Math.abs(o4) <= epsilon && pointOnSegment2d(c, b, d))
+  )
+}
+
+function hasClearVisibilitySegment(source, target, wallSegments) {
+  for (const wall of wallSegments) {
+    if (segmentsIntersect2d(source, target, wall.a, wall.b)) {
+      return false
+    }
+  }
+
+  return true
+}
+
+export function computeMazeCellVisibility(maze) {
+  const cells = allCells(maze)
+  const samplePoints = new Map(
+    cells.map((cell) => [cellKey(cell), getVisibilitySamplePoints(maze, cell)])
+  )
+  const wallSegments = getMazeWallSegments(maze).map(wallToVisibilitySegment)
+  const visibilityCells = {}
+
+  for (const sourceCell of cells) {
+    const sourceKey = cellKey(sourceCell)
+    const sourceSamples = samplePoints.get(sourceKey) ?? []
+    const visible = []
+
+    for (const targetCell of cells) {
+      const targetKey = cellKey(targetCell)
+
+      if (sourceKey === targetKey) {
+        visible.push(targetKey)
+        continue
+      }
+
+      const targetSamples = samplePoints.get(targetKey) ?? []
+      let canSee = false
+
+      for (const sourceSample of sourceSamples) {
+        for (const targetSample of targetSamples) {
+          if (hasClearVisibilitySegment(sourceSample, targetSample, wallSegments)) {
+            canSee = true
+            break
+          }
+        }
+
+        if (canSee) {
+          break
+        }
+      }
+
+      if (canSee) {
+        visible.push(targetKey)
+      }
+    }
+
+    visibilityCells[sourceKey] = visible.sort()
+  }
+
+  return {
+    cells: visibilityCells,
+    version: 1
+  }
 }
 
 function getWallEndpointCoordinates(wall) {
@@ -2748,16 +2874,23 @@ function getMazeReflectionProbePlacements(maze) {
 }
 
 export function getMazeSceneLayout(maze, sconceRadius) {
+  const mazeWithVisibility = maze.visibility
+    ? maze
+    : {
+        ...maze,
+        visibility: computeMazeCellVisibility(maze)
+      }
+
   return {
-    cornerFillers: getMazeCornerFillers(maze),
-    decals: getMazeDecalPlacements(maze),
-    gates: getMazeGatePlacements(maze),
-    gatePosts: getMazeGatePostPlacements(maze),
-    items: getMazeItemPlacements(maze),
-    lights: getMazeTorchPlacements(maze, sconceRadius),
-    maze,
-    reflectionProbes: getMazeReflectionProbePlacements(maze),
-    walls: getMazeWallSegments(maze)
+    cornerFillers: getMazeCornerFillers(mazeWithVisibility),
+    decals: getMazeDecalPlacements(mazeWithVisibility),
+    gates: getMazeGatePlacements(mazeWithVisibility),
+    gatePosts: getMazeGatePostPlacements(mazeWithVisibility),
+    items: getMazeItemPlacements(mazeWithVisibility),
+    lights: getMazeTorchPlacements(mazeWithVisibility, sconceRadius),
+    maze: mazeWithVisibility,
+    reflectionProbes: getMazeReflectionProbePlacements(mazeWithVisibility),
+    walls: getMazeWallSegments(mazeWithVisibility)
   }
 }
 

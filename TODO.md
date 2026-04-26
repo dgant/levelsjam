@@ -306,3 +306,7 @@ Regenerate the mazes, and give each one randomly placed minotaur, wolf, spider (
 [x] The game currently prohibits players from leaving levels, as if the entrance has an invisible wall. There should be no such prohibition.
 [x] Rename "Volumetric Connectivity" to "Volumetric Occlusion"
 [x] The static/dynamic volumetric lighting are both surprisingly bright. Even at 0.05x intensity it contributes more light than the surface lightmaps do. This has been true for a while now; it's not new. I'm not opposed to just multiplying it as needed to get a desirable result, but it would be nice to know exactly why the intensity scale is so different. Investigate and let me know what you find out
+[x] The intro screen ellipsis animation appears to be going "" ".." "..." and skipping "." It should have all four states, in order. Double the animation speed.
+[x] Decals are upside-down
+[x] Sconces are hard black, not appearing to receive any light at all
+[x] Implement precomputed visibility, whereby for each cell in a maze we determine at generation or bake time which other cells could be visible from some point in that cell (treating walls as occluders), and only render geometry that passes the visibility check. Always render Minotaurs that are within 5 tiles of the player (because they are tall and visible over walls). Add a toggle for using precomputed visibility in the debug settings. This is a critical system for performance and good player experience so think carefully about how to do this well.

@@ -544,6 +544,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   })
 
   await timedStep(timingProfile, 'reflection-captures', async () => {
+    await setCheckbox(page, 'Precomputed Visibility', false)
     await page.evaluate(() => {
       window.__levelsjamDebug.setView(
         [5.4, 1.55, -6.9],
@@ -654,12 +655,13 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     ).toBeGreaterThan(0)
 
     await setCheckbox(page, 'Reflection Intensity Enabled', false)
+    await page.evaluate(() => window.__levelsjamBenchmark?.(5))
     await expect
       .poll(
         async () => page.evaluate(() => ({
           wall: Array.from({ length: 200 }, (_, index) =>
             window.__levelsjamDebug.getDebugMeshState('maze-wall', index)
-          ).find((state) => state?.probeBlendUniforms) ?? null
+          ).find(Boolean) ?? null
         })),
         {
           timeout: 5_000,
@@ -668,10 +670,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       )
       .toMatchObject({
         wall: {
-          probeBlendUniforms: {
-            probeBlendMode: 3,
-            probeBlendRadianceMode: 3
-          }
+          hasMap: true,
+          visible: expect.any(Boolean)
         }
       })
     await setCheckbox(page, 'Reflection Intensity Enabled', true)

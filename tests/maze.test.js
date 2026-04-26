@@ -12,6 +12,7 @@ import {
   MAZE_CELL_SIZE,
   MAZE_WIDTH,
   bakeMazeLightmap,
+  computeMazeCellVisibility,
   computeMazeVolumetricLightmapCoefficients,
   generateMaze,
   getMazeSceneLayout,
@@ -156,6 +157,28 @@ test('generated wall decals avoid torch-bearing wall faces', () => {
 
     assert.equal(lightFaceKeys.has(key), false, `${decal.id} was placed on a lit wall face`)
   }
+})
+
+test('precomputed cell visibility treats closed walls as occluders', () => {
+  const sealedMaze = {
+    height: 1,
+    id: 'visibility-sealed',
+    lights: [],
+    openEdges: [],
+    opening: { cell: { x: 0, y: 0 }, side: 'west' },
+    width: 2
+  }
+  const openMaze = {
+    ...sealedMaze,
+    id: 'visibility-open',
+    openEdges: [{ from: { x: 0, y: 0 }, to: { x: 1, y: 0 } }]
+  }
+
+  const sealed = computeMazeCellVisibility(sealedMaze)
+  const open = computeMazeCellVisibility(openMaze)
+
+  assert.deepEqual(sealed.cells['0,0'], ['0,0'])
+  assert.equal(open.cells['0,0'].includes('1,0'), true)
 })
 
 test('persists at least five valid mazes', async () => {

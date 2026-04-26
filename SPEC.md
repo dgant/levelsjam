@@ -19,6 +19,7 @@
 - The game begins in the authored `Entrance` level.
 - Player movement through an authored level exit transitions seamlessly into the connected level without fading, showing a loading transition, or exposing the boundary between levels.
 - The runtime renders the current level and the levels directly adjacent to it so ordinary walking between connected levels does not reveal level streaming.
+- The initial startup path may defer non-current adjacent level geometry until after the current level is visible, while still loading and retaining adjacent level data early enough that ordinary walking does not expose the deferral.
 - Once a level's gameplay-rule state has been loaded, the runtime keeps that state available for the rest of the session instead of unloading or resetting it during ordinary level traversal.
 - Player movement between connected levels is a level transition, not an escape state.
 
@@ -52,6 +53,7 @@
 - Each wall sconce uses the requested `metal-13` PBR texture pack rather than a debug material.
 - Each wall sconce uses the full authored `metal-13` PBR material stack, excluding only the known-problematic ambient-occlusion map path.
 - Each wall sconce is positioned with its center one sconce radius outside the wall face.
+- Each wall sconce receives visible local volumetric-lightmap illumination and must not render as hard black under the default lighting stack.
 - Each wall sconce supports a camera-facing torch billboard above it.
 - Each torch billboard is positioned against the same wall face as the sconce, on the side of the cell the light is intended to illuminate.
 - Each torch billboard's bottom edge is flush with the top of the sconce rather than floating above it.
@@ -72,6 +74,7 @@
 - Wall decals use OpenAI-generated Minoan fresco-style painting assets instead of procedural placeholder drawings.
 - Wall decals are lit through the same wall-surface lighting path as the wall face they are attached to.
 - Wall decals are never placed on wall faces that contain a torch/sconce light.
+- Wall decals render upright on their wall faces.
 - Each maze includes a baked torch lightmap generated as a late step in maze generation.
 - Each maze lightmap stores the baked static direct and skylight contribution for the maze floor and wall faces.
 - Each maze wall face receives baked torch lighting on the side that faces the lit cell rather than on the wall's opposite face.
@@ -143,6 +146,7 @@
 - Volumetric-lightmap diffuse and fog sampling reject probes separated from the evaluated position by a maze wall through maze-cell connectivity.
 - Volumetric-lightmap interpolation is continuous inside connected cells and gives zero weight to probes in cells separated by a wall.
 - Volumetric fog blends volumetric-lightmap probes continuously at maze edges instead of creating seams through probe positions or cell boundaries.
+- Probe-driven diffuse lighting and local reflections evaluate baked probe positions in the local coordinate space of the level that owns the baked probes, even when the level is rendered with a world-space offset or rotation.
 - Maze generation writes lightmap diagnostic artifact textures to a non-source-controlled inspection directory so a human can review the baked wall and floor outputs.
 - Maze artifact generation also writes per-maze reflection-probe capture dumps into the same non-source-controlled inspection directory so a human can inspect the exact runtime cubemap faces used by local reflections.
 - Each maze artifact directory includes raw, processed-runtime, and geometry-only reflection-probe face PNGs for every probe rather than storing those probe diagnostics in a separate unrelated artifact tree.
@@ -357,10 +361,11 @@
 - The initial HTML response includes the loading overlay shell so `MINOTAUR` and `Entering the labyrinth...` appear immediately before the React app and maze payload finish loading.
 - The initial loading shell is rendered outside the React root so its first paint does not wait for React startup.
 - The initial loading shell yields one browser paint before the main app module is requested so the shell is visible immediately instead of being delayed by app bootstrap work.
+- The React app yields animation frames before creating the WebGL canvas so app bootstrap work and WebGL scene construction do not form a single uninterrupted startup stall.
 - The initial loading shell becomes visible in under 1 second from navigation start on the project’s enforced startup benchmark.
 - The loading overlay shows an `h1` with the text `MINOTAUR`.
 - The loading overlay shows an `h2` with the text `Entering the labyrinth...`.
-- The loading overlay animates the trailing dots on the subtitle through `.`, `..`, `...`, and a blank ellipsis slot at 0.25 second intervals.
+- The loading overlay animates the trailing dots on the subtitle through `.`, `..`, `...`, and a blank ellipsis slot at 0.125 second intervals.
 - The loading-overlay dot animation does not rely on JavaScript timers and remains visually smooth while the app bundle and maze payload load.
 - The animated ellipsis aligns on the same baseline as the rest of the loading subtitle text instead of floating higher than the letters.
 - The loading subtitle keeps a consistent total width while the trailing dots animate.
@@ -478,6 +483,13 @@
 - The page does not show speculative branding captions, launcher buttons, or click-to-enter copy.
 - The loading overlay does not fade out until the basic required scene textures are loaded.
 - Runtime lightmap and probe loading prioritizes the assets nearest the player's current position before more distant maze data.
+- Runtime specular reflection probe textures outside the startup-critical probe set load after the current scene is ready so they do not stall the loading ellipsis or solution replay startup.
+- Dynamic runtime models for gates, monsters, and held props are not part of the startup-critical render path; their gameplay state remains loaded, and their visuals may be prepared immediately after the current level's walls, floors, sconces, lightmaps, and startup probes are ready.
+- Baked runtime mazes use the HDRI as the visible background but do not synchronously generate a live PMREM environment map during startup, because surface lighting and reflections come from baked lightmaps and probes.
+- Each maze includes precomputed cell visibility data identifying the maze cells that can be seen from each origin cell when maze walls are treated as occluders.
+- Runtime rendering can use precomputed cell visibility to hide maze geometry outside the current visible cell set while keeping occluding boundary walls visible.
+- The first startup render may use a narrower local visibility set before expanding to the full precomputed-visibility set after the current scene is ready, so initial mesh construction does not stall the loading ellipsis.
+- Minotaur actors within five grid cells of the player remain rendered even if their cell is outside the current precomputed visibility set.
 
 ## Credits
 - The credits modal header is `Credits`.
@@ -497,6 +509,7 @@
 - The debug controls panel exposes numbered tabs selectable by keyboard shortcuts `1` through `9`, with `0` selecting the Solution tab.
 - Opening the debug controls panel does not globally swallow gameplay keyboard or mouse input; gameplay controls and the `F1` free-camera toggle remain usable while the panel is open.
 - The default debug tab exposes the core scene-lighting controls, including the active tone mapper, `Probe Debug`, `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, and `Reflection Intensity`.
+- The default debug tab exposes a `Precomputed Visibility` checkbox that toggles runtime use of baked per-cell visibility culling.
 - The default debug tab exposes an `Unlit Mode` checkbox that disables baked/runtime lighting contributions and applies a uniform white ambient light for material and geometry inspection.
 - The `Probe Debug` control appears above `Tone Mapper`.
 - The `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, and `Reflection Intensity` checkbox-plus-slider controls each occupy one line in the same style as other effect rows.
@@ -537,6 +550,9 @@
 - The automated browser performance test covers the default user-visible scene after runtime probe residency has stabilized, not only an early startup state with optional effects disabled.
 - The automated browser performance test fails when runtime probe loading exceeds the resident-probe budget or grows estimated runtime texture memory beyond the authored ceiling.
 - Automated performance coverage replays a recorded solution through a maze and checks render cost throughout the replay rather than only benchmarking a static camera.
+- Automated end-to-end tests may raise a debug-only global animation speed multiplier so long-running solution replays complete quickly while exercising the same gameplay state transitions and rendering path.
+- Automated solution-replay performance tests wait for intentionally deferred non-startup assets, including the 4K fire flipbook, before sampling gameplay frame time.
+- Automated solution-replay performance tests wait for delayed scene program warmup before sampling gameplay frame time so one-time shader compilation is not mistaken for steady-state replay cost.
 - The project documents startup-time and test-duration benchmarks and treats regressions in those measurements as actionable.
 - The prepared browser smoke runner keeps its startup phase under 60 seconds after a prepared `build:pages`.
 - The prepared browser smoke runner stays under 180 seconds total after a prepared `build:pages` while the deeper render assertions remain in separate integration specs.
