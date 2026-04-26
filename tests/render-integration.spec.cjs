@@ -316,8 +316,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByLabel('Static Volumetric Enabled')).toBeVisible()
     await expect(page.getByLabel('Static Volumetric Enabled')).not.toBeChecked()
     await expect(page.getByRole('slider', { name: 'Static Volumetric' })).toHaveValue('1')
-    await expect(page.getByLabel('Volumetric Shadows Enabled')).toBeVisible()
-    await expect(page.getByLabel('Volumetric Shadows Enabled')).toBeChecked()
+    await expect(page.getByLabel('Volumetric Connectivity Enabled')).toBeVisible()
+    await expect(page.getByLabel('Volumetric Connectivity Enabled')).toBeChecked()
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeVisible()
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeChecked()
     await expect(page.getByRole('slider', { name: 'Reflection Intensity' })).toHaveValue('1')
@@ -476,7 +476,6 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       )
       .toMatchObject({
         loadedProbeCount: expect.any(Number),
-        probeDepthTextureUUIDs: expect.any(Array),
         probeTextureUUIDs: expect.any(Array)
       })
     const probeState = await page.evaluate(
@@ -485,9 +484,6 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     expect(probeState.loadedProbeCount).toBeGreaterThan(0)
     expect(
       probeState.probeTextureUUIDs.filter(Boolean).length
-    ).toBeGreaterThan(0)
-    expect(
-      probeState.probeDepthTextureUUIDs.filter(Boolean).length
     ).toBeGreaterThan(0)
 
     await page.evaluate(() => {
@@ -591,8 +587,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         visualizationState: {
           mode: 'reflection',
           uniformTextureUUIDs: {
-            probeCubeUvMap: expect.any(String),
-            probeDepthMap: null
+            probeCubeUvMap: expect.any(String)
           },
           visible: true
         }
@@ -628,44 +623,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         mode: 'volumetric-lightmap',
         uniformTextureUUIDs: {
           coeffL0: '__coefficients__',
-          probeCubeUvMap: null,
-          probeDepthMap: null
-        },
-        visible: true
-      })
-
-    await page.getByLabel('Probe Debug', { exact: true }).selectOption('shadow-map')
-    await expect
-      .poll(
-        async () => page.evaluate(() => {
-          const probeState = window.__levelsjamDebug.getReflectionProbeState?.()
-          const probeCount = probeState?.probeCount ?? 0
-          let loadedProbeIndex = null
-
-          for (let index = 0; index < probeCount; index += 1) {
-            const textureState = window.__levelsjamDebug.getReflectionProbeTextureState?.(index)
-
-            if (textureState?.processedTextureUUID) {
-              loadedProbeIndex = index
-              break
-            }
-          }
-
-          return loadedProbeIndex !== null
-            ? window.__levelsjamDebug.getReflectionProbeVisualizationState?.(loadedProbeIndex) ?? null
-            : null
-        }),
-        {
-          timeout: 5_000,
-          intervals: [100, 250, 500]
-        }
-      )
-      .toMatchObject({
-        mode: 'shadow-map',
-        uniformTextureUUIDs: {
-          coeffL0: null,
-          probeCubeUvMap: null,
-          probeDepthMap: expect.any(String)
+          probeCubeUvMap: null
         },
         visible: true
       })
@@ -779,7 +737,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         noiseFrequency: 6,
         useProbeAmbientTexture: 0,
         useProbeCoefficientTexture: 1,
-        useProbeDepthAtlases: 1
+        useProbeConnectivity: 1
       })
 
     await expect

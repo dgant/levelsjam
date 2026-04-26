@@ -12,6 +12,10 @@
 - When the page is loaded with a `?maze=<maze-id>` query parameter, the runtime loads that exact persisted maze.
 - The runtime does not silently replace a requested maze with a different random maze.
 - If a requested maze cannot be loaded, the runtime fails that request explicitly instead of swapping to another maze.
+- `LEVELS.md` is the plain-English source for the authored level order.
+- The runtime parses `LEVELS.md` into an ordered level list using each `+ Level Name` heading as one selectable level entry and the following prose as that level's description.
+- The initial runtime level menu can route authored level selections to the current persisted-maze runtime while preserving a clean data path for future non-maze level payloads.
+- Selecting a level through the runtime menu resets that level's character and maze state before placing the player at that level's entrance.
 
 ## Current Scope
 - The scene uses image-based lighting from the Poly Haven `overcast_soil` environment.
@@ -25,6 +29,8 @@
 - Runtime PBR materials use multichannel ORM textures for occlusion, roughness, and metalness instead of separate channel textures wherever those material channels are present.
 - Offline model and material preparation combines imported material occlusion, roughness, and metalness channels into ORM textures no larger than `1024x1024`.
 - Runtime model import rejects or rewrites separate occlusion, roughness, and metalness texture slots into the ORM convention before those materials are used in the game scene.
+- Runtime imported-model materials bind the ORM texture through the occlusion, roughness, and metalness slots only when those channels share one texture source.
+- Imported gates render visibly with default reflection intensity and Dynamic Volumetric enabled, staying within the WebGL fragment texture-sampler budget.
 - The scene instantiates one source-controlled legal maze at random on each load.
 - The default maze dimensions are 7 cells by 7 cells.
 - Each maze uses a grid of cells with walls on cell edges rather than filling the cells themselves.
@@ -32,6 +38,8 @@
 - Each maze wall has its base at `Y = 0`.
 - Each maze wall uses the extracted ShareTextures `stone-wall-29` PBR pack rather than preview imagery.
 - Each maze wall uses the full authored `stone-wall-29` PBR material stack rather than a reduced compatibility material.
+- Each maze wall short end face uses wall-material UV scale that preserves the same texel density as the larger wall faces.
+- Each maze wall short end face receives baked surface-lightmap data instead of sampling the neutral lightmap.
 - The scene does not include the previous deterministic pseudo-random wall field.
 - The scene does not include the previous standalone reference sconce line.
 - The scene uses wall sconces only where a generated maze light is assigned.
@@ -77,6 +85,7 @@
 - Baked torch lighting uses physical inverse-square falloff across all represented lightmapped surfaces without an authored hard maximum distance cutoff.
 - Baked torch lighting clamps only the mathematical point-light singularity at the finite torch source radius needed for numerical stability.
 - Baked torch point-light brightness uses one fifth of the previous authored baseline while preserving the same torch color and inverse-square falloff model.
+- Baked torch point-light brightness is reduced by another factor of ten from the previous baked baseline while preserving the same torch color and inverse-square falloff model.
 - Each baked maze wall-face lightmap uses a higher texel density than the current base wall-material textures require for albedo detail.
 - Each baked maze wall-face lightmap uses `128x128` texels per wall face.
 - Each baked maze floor-patch lightmap uses a higher texel density than the previous full-ground bake.
@@ -98,13 +107,13 @@
 - The current resident reflection-probe budget is large enough for every probe in a current `7x7` maze, so probe-debug visualization can show all active maze probes while still enforcing the texture-memory ceiling.
 - Runtime reflection-probe asset loading must not continue in the background beyond the resident budget if doing so would create avoidable GPU memory pressure or frame-time collapse.
 - Runtime probe residency must be exposed through debug state so automated tests can assert that the loaded probe count stays within the authored resident budget.
-- Volumetric-lightmap probe coefficients and probe-depth visibility data are packed into runtime atlases so materials and fog do not need one sampler per probe.
+- Volumetric-lightmap probe coefficients and per-cell maze connectivity are packed into runtime textures so materials and fog do not need one sampler per probe.
 - Each persisted maze attempts to use one volumetric-lightmap atlas, one surface-lightmap atlas, and one reflection atlas for runtime maze lighting data.
-- Runtime volumetric-lightmap coefficient and probe-depth data for every probe in the active maze is available to surface materials, volumetric fog, and probe-debug visualization.
+- Runtime volumetric-lightmap coefficient data for every probe in the active maze is available to surface materials, volumetric fog, and probe-debug visualization.
 - Each persisted maze ships inspectable offline reflection-probe and volumetric-lightmap artifacts under `logs/lightmap-artifacts`.
 - Each offline reflection probe stores a `32x32` raw cubemap capture.
 - Each offline reflection probe stores an HDR processed runtime reflection texture derived from that raw cubemap.
-- Each offline reflection probe stores an offline-captured depth or shadow cubemap suitable for probe-space visibility tests during local reflections.
+- Each offline reflection probe stores raw and processed HDR reflection captures for runtime local reflections and debug inspection.
 - Each offline volumetric-lightmap probe stores HDR directional lighting data that is separate from the reflection texture and is intended for diffuse probe lighting rather than specular reflections.
 - Offline volumetric-lightmap coefficients are generated from the baked maze lighting model directly, including occluded torch point-light contribution and occluded skylight, rather than inferred only from reflection beauty captures.
 - A volumetric-lightmap probe in a cell with a same-cell visible torch receives directional warm torch energy unless maze geometry occludes the torch from the probe.
@@ -118,14 +127,16 @@
 - Volumetric-lightmap diffuse shading blends probe influence continuously across surface position so adjacent surfaces do not show hard probe-selection seams.
 - Volumetric-lightmap diffuse shading remains continuous across probe axes rather than switching abruptly to unrelated lighting on each side of a probe.
 - Surface and fog volumetric-lightmap sampling use the same probe-center grid basis so cell boundaries and probe axes do not introduce discontinuities.
-- Volumetric-lightmap diffuse shading uses the baked probe depth or shadow data at runtime to reject probe contributions that are occluded from the shaded point by maze geometry.
-- Volumetric fog lighting uses the baked probe depth or shadow data at runtime to reject probe contributions that are occluded from the fog sample point by maze geometry.
-- A debug toggle can disable volumetric-lightmap shadowing; when disabled, surface and fog volumetric-lightmap samples treat every probe contribution as unshadowed while preserving the same smooth probe interpolation.
+- Volumetric-lightmap diffuse shading uses maze-cell connectivity at runtime to reject probe contributions that are separated from the shaded point by maze geometry.
+- Volumetric fog lighting uses maze-cell connectivity at runtime to reject probe contributions that are separated from the fog sample point by maze geometry.
+- A debug toggle can disable volumetric-lightmap connectivity gating; when disabled, surface and fog volumetric-lightmap samples treat every probe contribution as connected while preserving the same smooth probe interpolation.
+- Volumetric-lightmap diffuse and fog sampling reject probes separated from the evaluated position by a maze wall through maze-cell connectivity.
+- Volumetric-lightmap interpolation is continuous inside connected cells and gives zero weight to probes in cells separated by a wall.
 - Volumetric fog blends volumetric-lightmap probes continuously at maze edges instead of creating seams through probe positions or cell boundaries.
 - Maze generation writes lightmap diagnostic artifact textures to a non-source-controlled inspection directory so a human can review the baked wall and floor outputs.
 - Maze artifact generation also writes per-maze reflection-probe capture dumps into the same non-source-controlled inspection directory so a human can inspect the exact runtime cubemap faces used by local reflections.
 - Each maze artifact directory includes raw, processed-runtime, and geometry-only reflection-probe face PNGs for every probe rather than storing those probe diagnostics in a separate unrelated artifact tree.
-- Each maze artifact directory also includes human-inspectable probe depth or shadow artifacts and volumetric-lightmap artifacts for every probe.
+- Each maze artifact directory also includes human-inspectable volumetric-lightmap artifacts for every probe.
 - Each maze artifact directory includes both a human-readable preview PNG and a raw HDR PNG export for the baked surface lightmap so inspection does not require reading binary payloads out of maze JSON.
 - Refreshing persisted maze lighting regenerates the inspectable PNG artifact set for the current mazes under `logs/lightmap-artifacts` so the human-readable lightmap and reflection-capture outputs stay in sync with the latest baked maze data.
 - The repository includes a source-controlled synthetic `3x3` reflection diagnostic maze for probe-occlusion tests.
@@ -134,7 +145,7 @@
 - Reflection probe debug visualization renders as ordinary non-colliding scene geometry rather than as a separately composited overlay so it can be compared directly against the lit scene.
 - Reflection probe debug visualization remains bound to the actual processed local reflection source used by the runtime shading path and otherwise follows the same exposure and post-tonemapping presentation path as the rest of the scene.
 - Reflection probe debug visualization remains plainly visible and mode-distinct from ordinary gameplay viewpoints instead of hiding inside maze geometry or requiring an exact camera placement to notice.
-- Probe debug visualization can show reflection-probe, volumetric-lightmap, or probe-depth/shadow-map data for every active maze probe as applicable to the selected mode.
+- Probe debug visualization can show reflection-probe or volumetric-lightmap data for every active maze probe as applicable to the selected mode.
 - Reflection probe debugging exposes an on-demand geometry-only cubemap capture against a black background so capture-stage maze visibility can be verified independently from later probe filtering or beauty-pass shading.
 - The top of each wall sconce aligns to the bottom of its torch billboard by default so the flame billboard does not appear to float above the fixture.
 - The authored torch light color is `10 * #FF7E00` in HDR linear lighting space.
@@ -173,6 +184,8 @@
 - When the player enters the sword cell without already holding a sword, the sword is picked up and attached to the first-person camera rig in the right hand.
 - When the player enters the trophy cell without already holding the trophy, the trophy is picked up and attached to the first-person camera rig in the left hand.
 - Held sword and trophy meshes remain visible in first person at their authored hand positions after pickup until they are consumed, dropped, or the maze resets.
+- The held sword is positioned in the player's right hand within the camera frustum and points forward from the player perspective.
+- The held trophy is positioned in the player's left hand within the camera frustum and points upward from the player perspective.
 - If the player would die by intersecting a monster while holding the sword, the monster dies instead, the sword is consumed, and the strike fade plays to dark red before restoring gameplay.
 - The sword-strike fade animates to linear RGB `(0.5, 0, 0)` over `125ms`, then fades back to the camera view over `375ms`, without flashing or transitioning through black.
 - A maze is beaten only when the player acquires the trophy and exits the maze while still holding it.
@@ -189,6 +202,7 @@
 - The player input queue stores at most ten pending commands.
 - If turn commands are queued after a move command and before any subsequent move command, the camera begins animating those turns immediately for responsiveness while preserving the final rules-facing direction.
 - If a right turn is commanded while a left turn animation is still in progress, or a left turn is commanded while a right turn animation is still in progress, the camera turn animation immediately reverses toward the newly commanded final direction.
+- Camera rotation during and after movement is derived from one continuous displayed yaw target and never jumps back to the pre-move direction or applies the same queued turn twice.
 - Pressing `W` or `ArrowUp` queues a one-cell forward move in the current camera direction.
 - Pressing `S` or `ArrowDown` queues a one-cell backward move in the current camera direction.
 - Pressing `A` or `ArrowLeft` queues a `90` degree left rotation.
@@ -209,6 +223,8 @@
 - A minotaur that cannot move because of a wall or gate goes to sleep.
 - Each spider is either a left-wall-following spider or a right-wall-following spider.
 - An awake spider moves one cell according to its configured wall-following rule.
+- An awake left-wall-following spider chooses its move by testing left, straight, right, then backwards relative to its current facing direction.
+- An awake right-wall-following spider chooses its move by testing right, straight, left, then backwards relative to its current facing direction.
 - An awake werewolf that did not move on the previous monster turn moves one step along a shortest legal path toward the player.
 - If multiple shortest werewolf path steps are tied, the werewolf prefers the next step from its previous path, then a step continuing its previous movement direction, then any remaining tied step.
 - Monster models rotate to face their upcoming move before moving when a rotation is required.
@@ -226,10 +242,15 @@
 - Pressing `C` opens a centered credits modal.
 - The credits modal closes on any key press while it is open.
 - The credits modal lists the required model credits and license links.
+- Pressing `Escape` opens a centered level menu modal when the level menu is closed.
+- Pressing `Escape` closes the level menu modal when it is open.
+- The level menu lists the levels parsed from `LEVELS.md` in their authored order.
+- Clicking a level name closes the level menu, loads the corresponding runtime maze or placeholder-backed current maze integration, resets its state, and teleports the player to that level's entrance.
 - The character collision volume is a capsule that is 1.75 meters tall and 0.25 meters in radius.
 - The player spawns 1 meter above the ground plane.
 - The camera eye height remains derived from the character capsule.
 - The initial camera angle starts five degrees downward from horizontal.
+- The default camera field of view is `80` degrees.
 - The player reaches a horizontal top speed of 20 mph by default.
 - The player reaches a vertical top speed of 5 mph.
 - The player reaches a maximum fall speed of 40 mph.
@@ -287,20 +308,23 @@
 - Enabling `Dynamic Volumetric` visibly adds local-probe diffuse or irradiance contribution on non-lightmapped lit PBR geometry.
 - Enabling `Static Volumetric` visibly adds local-probe diffuse or irradiance contribution on lightmapped PBR geometry.
 - Disabling `Reflection Intensity` visibly removes local-probe reflection contribution from materials that otherwise use it.
-- The debug panel exposes a probe-debug dropdown, defaulting to `None`, with `Reflection`, `Volumetric Lightmap`, and `Shadow Map` visualization modes.
-- Each `Probe Debug` mode produces a visibly distinct in-scene result that represents the actual runtime reflection source, volumetric-lightmap source, or probe shadow data rather than an inert or black placeholder sphere.
+- The debug panel exposes a probe-debug dropdown, defaulting to `None`, with `Reflection` and `Volumetric Lightmap` visualization modes.
+- Each `Probe Debug` mode produces a visibly distinct in-scene result that represents the actual runtime reflection source or volumetric-lightmap source rather than an inert or black placeholder sphere.
 - Probe-debug geometry renders without added wireframe overlays that obscure the captured content.
 - The debug panel `Static Volumetric` enabled toggle defaults to `off`.
 - Double-clicking any debug-panel label resets that control to its authored default value.
 - The debug panel fog tab exposes an editable fog ambient color through both a hex input and a color picker.
+- The debug panel fog ambient color defaults to `#2c2c68`.
 - The debug panel fog tab exposes fog distance in meters with a `0m` to `40m` range and a default of `12m`.
 - The debug panel fog noise-frequency control operates in meters over a `0m` to `10m` range.
-- The debug panel fog noise-frequency control defaults to `10m`.
+- The debug panel fog noise-frequency control defaults to `0.25m`.
+- The debug panel fog noise-period control defaults to `0.75s`.
 - The debug panel fog noise-strength control defaults to `1.0`.
 - The debug panel fog lighting-strength control ranges from `0` to `2.0` and defaults to `1.0`.
 - The debug panel fog enabled toggle defaults to `on`.
-- The debug panel fog intensity defaults to `1.0`.
+- The debug panel fog intensity defaults to `0.75`.
 - The debug panel fog height-falloff control is denominated in meters per 50% fog-density drop, ranges from `0.01m` to `8m`, and is implemented using that same half-distance interpretation.
+- The debug panel fog height-falloff control defaults to `0.4m`.
 - The debug panel does not expose obsolete atmosphere or sun-direction controls.
 - The page shows an FPS counter in the top-right corner together with the active maze ID, current Git branch, current Git revision, and revision timestamp.
 - The top-right overlay also shows the active maze ID.
@@ -361,7 +385,7 @@
 - Lightmapped maze walls and the baked maze floor patch do not receive direct runtime global-HDRI diffuse lighting; their diffuse ambient comes from the baked surface lightmap plus any explicitly enabled local volumetric-lightmap contribution.
 - Reflection probe captures, processed reflection-probe textures, and baked lightmaps remain raw lighting captures and are not tone-mapped or manually re-scaled for runtime use, debug previews, or exported inspection artifacts.
 - Reflection probe debug spheres must not show black or unrelated faces when the underlying captured probe contains scene geometry and lit surfaces.
-- Debug shadow-map probe visualization displays grayscale `clamp(0, 1, shadowDepthMeters / 10m)`.
+- Volumetric-lightmap debug controls include a connectivity toggle that can treat wall-separated probes as either blocked or unblocked for comparison.
 - Volumetric-lightmap debug probes represent incoming light direction: a bright side indicates light arriving from that direction.
 - Volumetric-lightmap capture preserves the direction of incoming light and probe-space occlusion by maze geometry.
 - Volumetric-lightmap application uses the captured directional data in the same coordinate convention used by capture.
@@ -373,7 +397,7 @@
 - The reflective maze floor patch blends nearby local reflection probes with weighted interpolation rather than switching between one nearest probe per region.
 - Reflective maze sconces blend nearby local reflection probes with weighted interpolation rather than switching between one nearest probe at the object position.
 - Local reflection probes apply parallax-corrected local projection so nearby walls, sconces, and torches do not behave like infinitely distant reflections.
-- Local reflection probes apply probe-captured depth or shadow visibility data so reflected rays can be attenuated when the local probe would be occluded by maze geometry.
+- Local reflection probes use the baked local reflection source directly; wall-separated diffuse and fog occlusion is handled by connectivity-gated volumetric lightmaps.
 - Local reflection probes do not make baked lighting or image-based lighting appear to flicker as the camera moves between maze cells.
 - Local reflection probes capture the baked maze lighting state so reflected maze surfaces remain consistent with the torch-lightmap shadows.
 - Local reflection probes also capture the authored HDRI sky where it is locally visible so disabling reflection captures does not reveal a completely different sky contribution.
@@ -428,7 +452,7 @@
 - Enabling volumetric fog with an intensity of `0` behaves as a visual no-op.
 - Increasing volumetric fog intensity toward `1.0` with a dark fog color and fog distance shorter than the visible scene depth can strongly attenuate distant scene color rather than remaining barely perceptible.
 - Volumetric fog samples its lighting only from the nearest available local volumetric-lightmap probes and otherwise falls back to black.
-- Volumetric fog samples its procedural noise field across space and time, with a configurable noise period from `0s` to `10s` and a default of `5s`.
+- Volumetric fog samples its procedural noise field across space and time, with a configurable noise period from `0s` to `10s` and a default of `0.75s`.
 - The `Fog Noise Period` control changes visible fog motion over time when fog noise strength is nonzero.
 - Volumetric fog follows the structure of the official three.js volumetric-lighting example while remaining adapted to the current WebGL render stack and local probe-lighting inputs.
 - Disabling local probe-driven diffuse lighting on scene materials does not disable volumetric fog's probe-fed lighting path.
@@ -453,10 +477,12 @@
 - The debug controls panel can be opened and closed with backquote.
 - The debug controls panel exposes exposure.
 - The debug controls panel exposes the camera field of view as a live slider with a maximum of `120` degrees.
+- The debug controls panel camera field-of-view slider defaults to `80` degrees.
 - Free-camera inspection mode is toggled with `F1`, where `WASD` and arrow keys move freely with mouselook detached from the turn-based player.
 - The debug controls panel exposes numbered tabs selectable by keyboard shortcuts `1` through `9`, with `0` selecting the Solution tab.
 - Opening the debug controls panel does not globally swallow gameplay keyboard or mouse input; gameplay controls and the `F1` free-camera toggle remain usable while the panel is open.
 - The default debug tab exposes the core scene-lighting controls, including the active tone mapper, `Probe Debug`, `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, and `Reflection Intensity`.
+- The default debug tab exposes an `Unlit Mode` checkbox that disables baked/runtime lighting contributions and applies a uniform white ambient light for material and geometry inspection.
 - The `Probe Debug` control appears above `Tone Mapper`.
 - The `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, and `Reflection Intensity` checkbox-plus-slider controls each occupy one line in the same style as other effect rows.
 - Separate debug tabs exist for Ambient Occlusion, Bloom, Depth of Field, Lens Flares, SSR, Volumetric Fog, Vignette, and Anamorphic.
@@ -541,6 +567,8 @@
 - Automated tests guarantee that the repository contains at least five valid persisted maze files by generating additional mazes when required and discarding invalid outputs until the target count is satisfied.
 - Automated tests verify that the dumped synthetic `3x3` reflection-diagnostic artifacts do not contain visible torch sources beyond the skybox-only baseline.
 - Automated coverage verifies the solution-replay debug path can reset a maze and replay the recorded successful path while player controls are disabled.
+- Automated coverage verifies solution replay resets character state, pickup state, monster state, gates, and player position before replaying recorded actions.
+- Automated coverage verifies the `LEVELS.md` parser preserves authored level order and descriptions.
 - Automated coverage verifies maze data and instantiated maze scene objects can be loaded, unloaded, reset, and reloaded repeatedly without stale assets or scene objects surviving the unload.
 - The scene-instantiation path is checked in the browser and verified to load one of the persisted mazes, build the correct wall meshes, and place sconces and torches only at the maze-defined light positions.
-- The maze-artifact generation path is checked end to end so the dumped per-maze artifact directory contains reflection-probe capture images, reflection depth or shadow artifacts, volumetric-lightmap artifacts, and baked lightmap images.
+- The maze-artifact generation path is checked end to end so the dumped per-maze artifact directory contains reflection-probe capture images, volumetric-lightmap artifacts, and baked lightmap images.

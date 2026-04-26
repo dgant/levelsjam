@@ -340,7 +340,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     })
 
     await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveValue('0')
-    await expect(page.getByRole('slider', { name: 'Camera FOV' })).toHaveValue('60')
+    await expect(page.getByRole('slider', { name: 'Camera FOV' })).toHaveValue('80')
     await expect(page.getByRole('slider', { name: 'Camera FOV' })).toHaveAttribute('max', '120')
     await setSlider(page, 'Camera FOV', 100)
     await expect(page.getByRole('slider', { name: 'Camera FOV' })).toHaveValue('100')
@@ -353,7 +353,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         }
       )
       .toBe('100.00')
-    await setSlider(page, 'Camera FOV', 60)
+    await setSlider(page, 'Camera FOV', 80)
     await expect(page.getByLabel('Surface Lightmap Enabled')).toBeVisible()
     await expect(page.getByLabel('Surface Lightmap Enabled')).toBeChecked()
     await expect(page.getByRole('slider', { name: 'Surface Lightmap' })).toHaveValue('1')
@@ -363,17 +363,21 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByLabel('Static Volumetric Enabled')).toBeVisible()
     await expect(page.getByLabel('Static Volumetric Enabled')).not.toBeChecked()
     await expect(page.getByRole('slider', { name: 'Static Volumetric' })).toHaveValue('1')
-    await expect(page.getByLabel('Volumetric Shadows Enabled')).toBeVisible()
-    await expect(page.getByLabel('Volumetric Shadows Enabled')).toBeChecked()
+    await expect(page.getByLabel('Volumetric Connectivity Enabled')).toBeVisible()
+    await expect(page.getByLabel('Volumetric Connectivity Enabled')).toBeChecked()
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeVisible()
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeChecked()
     await expect(page.getByRole('slider', { name: 'Reflection Intensity' })).toHaveValue('1')
     await expect(page.getByLabel('Probe Debug', { exact: true })).toBeVisible()
     await page.keyboard.press('Digit7')
     await expect(page.getByRole('slider', { name: 'Volumetric Fog Intensity' })).toBeVisible()
-    await expect(page.getByLabel('Fog Ambient Color Hex')).toHaveValue('#8f949e')
-    await expect(page.getByLabel('Fog Ambient Color Picker')).toHaveValue('#8f949e')
+    await expect(page.getByRole('slider', { name: 'Volumetric Fog Intensity' })).toHaveValue('0.75')
+    await expect(page.getByLabel('Fog Ambient Color Hex')).toHaveValue('#2c2c68')
+    await expect(page.getByLabel('Fog Ambient Color Picker')).toHaveValue('#2c2c68')
     await expect(page.getByRole('slider', { name: 'Fog Distance' })).toHaveValue('12')
+    await expect(page.getByRole('slider', { name: 'Fog Noise Frequency' })).toHaveValue('0.25')
+    await expect(page.getByRole('slider', { name: 'Fog Noise Period' })).toHaveValue('0.75')
+    await expect(page.getByRole('slider', { name: 'Fog Height 50%' })).toHaveValue('0.4')
     await page.keyboard.press('Digit1')
     await expect(page.getByRole('slider', { name: 'Exposure' })).toBeVisible()
 
@@ -519,7 +523,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
           probeBlend: {
             diffuseIntensity: 0,
             mode: 'disabled',
-            probeDepthAtlasCount: 6,
+            probeConnectivity: true,
             radianceIntensity: 1,
             radianceMode: 'world'
           },
@@ -556,7 +560,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
           probeBlend: {
             diffuseIntensity: 1,
             mode: 'disabled',
-            probeDepthAtlasCount: 6,
+            probeConnectivity: true,
             radianceIntensity: 1,
             radianceMode: 'disabled'
           },
@@ -583,7 +587,6 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       )
       .toMatchObject({
         loadedProbeCount: expect.any(Number),
-        probeDepthTextureUUIDs: expect.any(Array),
         probeTextureUUIDs: expect.any(Array)
       })
     const probeState = await page.evaluate(
@@ -592,9 +595,6 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     expect(probeState.loadedProbeCount).toBeGreaterThan(0)
     expect(
       probeState.probeTextureUUIDs.filter(Boolean).length
-    ).toBeGreaterThan(0)
-    expect(
-      probeState.probeDepthTextureUUIDs.filter(Boolean).length
     ).toBeGreaterThan(0)
 
     await setCheckbox(page, 'Reflection Intensity Enabled', false)
@@ -640,8 +640,10 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         }
       )
       .toMatchObject({
-        noiseFrequency: 10,
-        noisePeriod: 5,
+        density: 0.75,
+        heightFalloff: 0.4,
+        noiseFrequency: 0.25,
+        noisePeriod: 0.75,
         useProbeAmbientTexture: 0
       })
   })

@@ -31,7 +31,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Run `npm run test:smoke` to exercise the built page through Playwright.
 - Run `npm run test:smoke:runner` when `npm run build:pages` has already prepared the root-published bundle.
 - Run `npx playwright test tests/surface-lightmap.spec.cjs --reporter=line` after touching runtime lightmap formats, lightmap extraction, or baked-lightmap application. It isolates a known lit wall and catches the black-wall regression caused by invalid half-float texture uploads.
-- Re-run `npx playwright test tests/smoke.spec.cjs --reporter=line` after touching volumetric fog, probe-occlusion wiring, or lens flares. The smoke test now checks the fog debug state and the probe-depth-atlas path used by runtime probe blending.
+- Re-run `npx playwright test tests/smoke.spec.cjs --reporter=line` after touching volumetric fog, probe-occlusion wiring, or lens flares. The smoke test now checks the fog debug state and the maze-connectivity path used by runtime probe blending.
 - Treat the Playwright `*:runner` commands as tests of the already-published root bundle. Run `npm run build:pages` first whenever source changes need to be reflected in those static-root runners.
 - Run `npm run test:render:integration` when you need the slower full-scene Playwright coverage for reflection, fog, and extended debug-control behavior.
 - `npm run test:render:integration` writes phase and screenshot timing data to `logs/latest-render-integration-profile.json`.
@@ -110,7 +110,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify the `DOF Focus Distance` slider reaches 8 meters.
 - Verify double-clicking a debug label resets only the associated control.
 - Verify the `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, and `Reflection Intensity` controls each produce a visible material change when enabled.
-- Verify the `Volumetric Shadows` checkbox changes surface and fog volumetric-lightmap shadowing while preserving smooth probe blending.
+- Verify the `Volumetric Connectivity` checkbox changes surface and fog volumetric-lightmap wall blocking while preserving smooth probe blending.
 - Verify the Vignette tab exposes Vignette Intensity, Vignette Noise Period, Vignette Noise Intensity, and Exposure Noise Intensity, with the two noise intensities defaulting to zero.
 - Verify Bloom, Depth Of Field, Lens Flares, and SSR start disabled.
 - Verify the default `Exposure` value is `0`.

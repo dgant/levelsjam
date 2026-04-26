@@ -161,6 +161,17 @@ body {
   color: #f5edda;
 }
 
+.level-menu-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 72%);
+  color: #f5edda;
+}
+
 .credits-panel {
   width: min(720px, calc(100vw - 48px));
   max-height: calc(100vh - 48px);
@@ -172,7 +183,26 @@ body {
   box-shadow: 0 24px 80px rgb(0 0 0 / 55%);
 }
 
+.level-menu-panel {
+  width: min(680px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 28px;
+  background:
+    linear-gradient(145deg, rgb(20 16 13 / 96%), rgb(8 11 16 / 96%));
+  border: 1px solid rgb(229 198 139 / 24%);
+  border-radius: 18px;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 60%);
+}
+
 .credits-panel h2 {
+  margin: 0 0 18px;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+}
+
+.level-menu-panel h2 {
   margin: 0 0 18px;
   text-align: center;
   text-transform: uppercase;
@@ -188,7 +218,51 @@ body {
   color: #f1c878;
 }
 
+.level-menu-list {
+  display: grid;
+  gap: 10px;
+}
+
+.level-menu-button {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  padding: 12px 14px;
+  background: rgb(255 244 216 / 7%);
+  border: 1px solid rgb(229 198 139 / 18%);
+  border-radius: 12px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.level-menu-button:hover,
+.level-menu-button:focus-visible {
+  background: rgb(229 198 139 / 16%);
+  border-color: rgb(229 198 139 / 42%);
+  outline: none;
+}
+
+.level-menu-button span {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.level-menu-button small {
+  color: rgb(245 237 218 / 72%);
+  line-height: 1.35;
+  white-space: pre-line;
+}
+
 .credits-panel small {
+  display: block;
+  margin-top: 18px;
+  text-align: center;
+  color: rgb(245 237 218 / 70%);
+}
+
+.level-menu-panel > small {
   display: block;
   margin-top: 18px;
   text-align: center;

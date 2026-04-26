@@ -195,39 +195,19 @@
       "uri": "scene.bin"
     }
   ],
-  "extensionsUsed": [
-    "KHR_materials_specular"
-  ],
   "images": [
     {
       "uri": "textures/MI_WoodTrim_01a_SM_MetalGate_01a_baseColor.jpeg"
     },
     {
-      "uri": "textures/MI_WoodTrim_01a_SM_MetalGate_01a_metallicRoughness.png"
+      "uri": "textures/MI_WoodTrim_01a_SM_MetalGate_01a_orm.png"
     },
     {
       "uri": "textures/MI_WoodTrim_01a_SM_MetalGate_01a_normal.png"
-    },
-    {
-      "uri": "textures/MI_WoodTrim_01a_SM_MetalGate_01a_specularf0.png"
     }
   ],
   "materials": [
     {
-      "extensions": {
-        "KHR_materials_specular": {
-          "specularColorFactor": [
-            1,
-            1,
-            1
-          ],
-          "specularFactor": 1,
-          "specularTexture": {
-            "index": 3,
-            "texCoord": 1
-          }
-        }
-      },
       "name": "MI_WoodTrim_01a_SM_MetalGate_01a",
       "normalTexture": {
         "index": 2
@@ -363,10 +343,6 @@
     {
       "sampler": 0,
       "source": 2
-    },
-    {
-      "sampler": 0,
-      "source": 3
     }
   ]
 }

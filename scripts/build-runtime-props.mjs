@@ -28,15 +28,6 @@ async function copyFileIfChanged(sourcePath, targetPath) {
   }
 }
 
-async function copyDirectory(sourcePath, targetPath) {
-  try {
-    await fs.rm(targetPath, { force: true, recursive: true })
-  } catch {
-    // Ignore stale or missing output directories.
-  }
-  await fs.cp(sourcePath, targetPath, { recursive: true })
-}
-
 async function isTargetFresh(sourcePath, targetPath) {
   try {
     const [sourceStat, targetStat] = await Promise.all([
@@ -65,6 +56,192 @@ async function resizeImageIfStale(sourceImagePath, targetImagePath, targetSize) 
 
   await ensureDirectory(path.dirname(targetImagePath))
   await jimp.write(targetImagePath)
+}
+
+function getOrmTextureUri(sourceUri) {
+  const extension = path.posix.extname(sourceUri)
+  const directory = path.posix.dirname(sourceUri)
+  const baseName = path.posix.basename(sourceUri, extension)
+  const ormBaseName = baseName
+    .replace(/metallicRoughness/gi, 'orm')
+    .replace(/metallic_roughness/gi, 'orm')
+    .replace(/metalroughness/gi, 'orm')
+
+  return path.posix.join(
+    directory === '.' ? '' : directory,
+    `${ormBaseName === baseName ? `${baseName}_orm` : ormBaseName}${extension}`
+  )
+}
+
+function visitMaterialTextureInfos(material, visit) {
+  const visitObject = (value) => {
+    if (!value || typeof value !== 'object') {
+      return
+    }
+
+    if (typeof value.index === 'number') {
+      visit(value)
+    }
+
+    for (const child of Object.values(value)) {
+      visitObject(child)
+    }
+  }
+
+  visitObject(material)
+}
+
+function collectMaterialTextureIndices(gltf) {
+  const textureIndices = new Set()
+
+  for (const material of gltf.materials ?? []) {
+    visitMaterialTextureInfos(material, (textureInfo) => {
+      textureIndices.add(textureInfo.index)
+    })
+  }
+
+  return textureIndices
+}
+
+function pruneUnusedMaterialTextures(gltf, sourceUriByTargetUri) {
+  const usedTextureIndices = collectMaterialTextureIndices(gltf)
+  const textureIndexMap = new Map()
+  const textures = []
+
+  for (let index = 0; index < (gltf.textures ?? []).length; index += 1) {
+    if (!usedTextureIndices.has(index)) {
+      continue
+    }
+
+    textureIndexMap.set(index, textures.length)
+    textures.push(gltf.textures[index])
+  }
+
+  for (const material of gltf.materials ?? []) {
+    visitMaterialTextureInfos(material, (textureInfo) => {
+      textureInfo.index = textureIndexMap.get(textureInfo.index)
+    })
+  }
+
+  gltf.textures = textures
+
+  const usedImageIndices = new Set(
+    textures
+      .map((texture) => texture.source)
+      .filter((source) => typeof source === 'number')
+  )
+  const imageIndexMap = new Map()
+  const images = []
+
+  for (let index = 0; index < (gltf.images ?? []).length; index += 1) {
+    if (!usedImageIndices.has(index)) {
+      continue
+    }
+
+    imageIndexMap.set(index, images.length)
+    images.push(gltf.images[index])
+  }
+
+  for (const texture of textures) {
+    if (typeof texture.source === 'number') {
+      texture.source = imageIndexMap.get(texture.source)
+    }
+  }
+
+  gltf.images = images
+
+  return new Map(
+    images
+      .filter((image) => typeof image.uri === 'string')
+      .map((image) => [image.uri, sourceUriByTargetUri.get(image.uri) ?? image.uri])
+  )
+}
+
+function rewriteGltfMaterialsToOrm(gltf, { stripSpecular = false } = {}) {
+  const sourceImageUris = (gltf.images ?? []).map((image) => image.uri)
+  let sourceUriByTargetUri = new Map(
+    sourceImageUris
+      .filter((uri) => typeof uri === 'string')
+      .map((uri) => [uri, uri])
+  )
+
+  const rewriteTextureAsOrm = (textureIndex) => {
+    const texture = gltf.textures?.[textureIndex]
+    const image = typeof texture?.source === 'number'
+      ? gltf.images?.[texture.source]
+      : null
+    const sourceUri = typeof texture?.source === 'number'
+      ? sourceImageUris[texture.source]
+      : null
+
+    if (!image || typeof sourceUri !== 'string') {
+      return
+    }
+
+    const targetUri = getOrmTextureUri(sourceUri)
+    image.uri = targetUri
+    sourceUriByTargetUri.set(targetUri, sourceUri)
+  }
+
+  for (const material of gltf.materials ?? []) {
+    const metallicRoughnessTexture =
+      material.pbrMetallicRoughness?.metallicRoughnessTexture
+    const occlusionTexture = material.occlusionTexture
+
+    if (metallicRoughnessTexture) {
+      if (
+        occlusionTexture &&
+        occlusionTexture.index !== metallicRoughnessTexture.index
+      ) {
+        throw new Error(
+          `Material ${material.name ?? '<unnamed>'} uses separate occlusion and metallic-roughness textures; combine them into ORM before runtime export.`
+        )
+      }
+
+      material.occlusionTexture = {
+        ...(occlusionTexture ?? {}),
+        index: metallicRoughnessTexture.index
+      }
+      rewriteTextureAsOrm(metallicRoughnessTexture.index)
+    }
+
+    if (stripSpecular && material.extensions?.KHR_materials_specular) {
+      delete material.extensions.KHR_materials_specular
+      if (Object.keys(material.extensions).length === 0) {
+        delete material.extensions
+      }
+    }
+  }
+
+  if (stripSpecular && Array.isArray(gltf.extensionsUsed)) {
+    gltf.extensionsUsed = gltf.extensionsUsed.filter(
+      (extension) => extension !== 'KHR_materials_specular'
+    )
+    if (gltf.extensionsUsed.length === 0) {
+      delete gltf.extensionsUsed
+    }
+  }
+
+  sourceUriByTargetUri = pruneUnusedMaterialTextures(gltf, sourceUriByTargetUri)
+
+  return sourceUriByTargetUri
+}
+
+async function copyRuntimeGltfImages({
+  sourceDirectory,
+  sourceUriByTargetUri,
+  targetDirectory,
+  targetSize
+}) {
+  for (const [targetUri, sourceUri] of sourceUriByTargetUri) {
+    if (typeof sourceUri !== 'string' || sourceUri.length === 0) {
+      continue
+    }
+
+    const sourceImagePath = path.join(sourceDirectory, sourceUri)
+    const targetImagePath = path.join(targetDirectory, targetUri)
+    await resizeImageIfStale(sourceImagePath, targetImagePath, targetSize)
+  }
 }
 
 function getAccessorElementSize(type) {
@@ -469,10 +646,6 @@ async function buildJoinedStaticRuntimeModel({
 
   await fs.rm(targetDirectory, { force: true, recursive: true })
   await ensureDirectory(targetDirectory)
-  await copyDirectory(
-    path.join(sourceDirectory, 'textures'),
-    path.join(targetDirectory, 'textures')
-  )
   await copyFileIfChanged(
     path.join(sourceDirectory, 'license.txt'),
     path.join(targetDirectory, 'license.txt')
@@ -528,6 +701,14 @@ async function buildJoinedStaticRuntimeModel({
     delete outputGltf.meshes[0].primitives[0].attributes.TANGENT
   }
 
+  const sourceUriByTargetUri = rewriteGltfMaterialsToOrm(outputGltf)
+  await copyRuntimeGltfImages({
+    sourceDirectory,
+    sourceUriByTargetUri,
+    targetDirectory,
+    targetSize: 1024
+  })
+
   await fs.writeFile(
     path.join(targetDirectory, 'scene.gltf'),
     `${JSON.stringify(outputGltf, null, 2)}\n`
@@ -537,13 +718,16 @@ async function buildJoinedStaticRuntimeModel({
 async function buildGateRuntimeAssets() {
   const sourceDirectory = path.join(PROJECT_ROOT, 'public', 'models', 'metal_gate')
   const targetDirectory = path.join(PROJECT_ROOT, 'public', 'models', 'metal_gate_runtime')
-  const targetTextureDirectory = path.join(targetDirectory, 'textures')
   const targetSize = 512
   const gltf = JSON.parse(
     await fs.readFile(path.join(sourceDirectory, 'scene.gltf'), 'utf8')
   )
+  const sourceUriByTargetUri = rewriteGltfMaterialsToOrm(gltf, {
+    stripSpecular: true
+  })
 
-  await ensureDirectory(targetTextureDirectory)
+  await fs.rm(targetDirectory, { force: true, recursive: true })
+  await ensureDirectory(targetDirectory)
   await copyFileIfChanged(
     path.join(sourceDirectory, 'license.txt'),
     path.join(targetDirectory, 'license.txt')
@@ -553,15 +737,12 @@ async function buildGateRuntimeAssets() {
     path.join(targetDirectory, 'scene.bin')
   )
 
-  for (const image of gltf.images ?? []) {
-    if (typeof image.uri !== 'string' || image.uri.length === 0) {
-      continue
-    }
-
-    const sourceImagePath = path.join(sourceDirectory, image.uri)
-    const targetImagePath = path.join(targetDirectory, image.uri)
-    await resizeImageIfStale(sourceImagePath, targetImagePath, targetSize)
-  }
+  await copyRuntimeGltfImages({
+    sourceDirectory,
+    sourceUriByTargetUri,
+    targetDirectory,
+    targetSize
+  })
 
   await fs.writeFile(
     path.join(targetDirectory, 'scene.gltf'),
@@ -572,13 +753,14 @@ async function buildGateRuntimeAssets() {
 async function buildTrophyRuntimeAssets() {
   const sourceDirectory = path.join(PROJECT_ROOT, 'public', 'models', 'head_of_a_bull')
   const targetDirectory = path.join(PROJECT_ROOT, 'public', 'models', 'head_of_a_bull_runtime')
-  const targetTextureDirectory = path.join(targetDirectory, 'textures')
   const targetSize = 1024
   const gltf = JSON.parse(
     await fs.readFile(path.join(sourceDirectory, 'scene.gltf'), 'utf8')
   )
+  const sourceUriByTargetUri = rewriteGltfMaterialsToOrm(gltf)
 
-  await ensureDirectory(targetTextureDirectory)
+  await fs.rm(targetDirectory, { force: true, recursive: true })
+  await ensureDirectory(targetDirectory)
   await copyFileIfChanged(
     path.join(sourceDirectory, 'license.txt'),
     path.join(targetDirectory, 'license.txt')
@@ -588,15 +770,12 @@ async function buildTrophyRuntimeAssets() {
     path.join(targetDirectory, 'scene.bin')
   )
 
-  for (const image of gltf.images ?? []) {
-    if (typeof image.uri !== 'string' || image.uri.length === 0) {
-      continue
-    }
-
-    const sourceImagePath = path.join(sourceDirectory, image.uri)
-    const targetImagePath = path.join(targetDirectory, image.uri)
-    await resizeImageIfStale(sourceImagePath, targetImagePath, targetSize)
-  }
+  await copyRuntimeGltfImages({
+    sourceDirectory,
+    sourceUriByTargetUri,
+    targetDirectory,
+    targetSize
+  })
 
   await fs.writeFile(
     path.join(targetDirectory, 'scene.gltf'),

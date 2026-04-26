@@ -15,6 +15,21 @@ export type WallBounds = {
 }
 
 export type MazeLayout = {
+  cornerFillers: Array<{
+    bounds: WallBounds
+    center: { x: number; z: number }
+    id: string
+    type: 'corner-filler'
+  }>
+  decals: Array<{
+    faceKey: 'pz' | 'nz'
+    id: string
+    normal: { x: number; y: number; z: number }
+    position: Vector3Like
+    textureIndex: number
+    wallId: string
+    yaw: number
+  }>
   gates: Array<{
     axis: 'x' | 'z'
     cells: [{ x: number; y: number }, { x: number; y: number }]
@@ -24,6 +39,16 @@ export type MazeLayout = {
     index: number
     to: { x: number; y: number }
     yaw: number
+  }>
+  gatePosts: Array<{
+    axis: 'x' | 'z'
+    bounds: WallBounds
+    center: { x: number; z: number }
+    gateId: string
+    id: string
+    index: number
+    radius: number
+    type: 'gate-post'
   }>
   items: Array<{
     cell: { x: number; y: number }
@@ -65,7 +90,9 @@ export type MazeLayout = {
       wallRects: Record<
         string,
         {
+          nx?: { height: number; width: number; x: number; y: number }
           nz: { height: number; width: number; x: number; y: number }
+          px?: { height: number; width: number; x: number; y: number }
           pz: { height: number; width: number; x: number; y: number }
         }
       >
@@ -81,6 +108,10 @@ export type MazeLayout = {
       cell: { x: number; y: number }
       hand?: 'left' | 'right'
       type: 'minotaur' | 'spider' | 'werewolf'
+    }>
+    openEdges?: Array<{
+      from: { x: number; y: number }
+      to: { x: number; y: number }
     }>
     width: number
     solution?: {

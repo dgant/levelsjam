@@ -40,6 +40,52 @@ function testMaze(overrides = {}) {
   }
 }
 
+function edgeFromDirection(cell, direction) {
+  const deltas = {
+    east: { x: 1, y: 0 },
+    north: { x: 0, y: -1 },
+    south: { x: 0, y: 1 },
+    west: { x: -1, y: 0 }
+  }
+  const delta = deltas[direction]
+
+  return {
+    from: cell,
+    to: {
+      x: cell.x + delta.x,
+      y: cell.y + delta.y
+    }
+  }
+}
+
+function resolveAwakeSpiderMove(hand, openDirections) {
+  const spiderCell = { x: 2, y: 2 }
+  const maze = testMaze({
+    gates: [],
+    height: 5,
+    monsters: [
+      { cell: spiderCell, hand, type: 'spider' }
+    ],
+    openEdges: [
+      { from: { x: 0, y: 0 }, to: { x: 1, y: 0 } },
+      ...openDirections.map((direction) => edgeFromDirection(spiderCell, direction))
+    ],
+    opening: { cell: { x: 0, y: 0 }, side: 'west' },
+    sword: null,
+    trophy: null,
+    width: 5
+  })
+  const state = createInitialTurnState(maze)
+
+  state.monsters[0] = {
+    ...state.monsters[0],
+    awake: true,
+    direction: 'north'
+  }
+
+  return applyTurnAction(maze, state, 'move-forward').state.monsters[0]
+}
+
 test('initial turn state starts at the maze entrance facing inward', () => {
   const state = createInitialTurnState(testMaze())
 
@@ -50,6 +96,28 @@ test('initial turn state starts at the maze entrance facing inward', () => {
   assert.equal(state.swordState, 'ground')
   assert.equal(state.trophyState, 'ground')
   assert.equal(state.monsters.length, 3)
+})
+
+test('left-wall spiders prefer left, straight, right, then backwards', () => {
+  assert.deepEqual(resolveAwakeSpiderMove('left', ['west', 'north', 'east', 'south']).cell, { x: 1, y: 2 })
+  assert.equal(resolveAwakeSpiderMove('left', ['west', 'north', 'east', 'south']).direction, 'west')
+  assert.deepEqual(resolveAwakeSpiderMove('left', ['north', 'east', 'south']).cell, { x: 2, y: 1 })
+  assert.equal(resolveAwakeSpiderMove('left', ['north', 'east', 'south']).direction, 'north')
+  assert.deepEqual(resolveAwakeSpiderMove('left', ['east', 'south']).cell, { x: 3, y: 2 })
+  assert.equal(resolveAwakeSpiderMove('left', ['east', 'south']).direction, 'east')
+  assert.deepEqual(resolveAwakeSpiderMove('left', ['south']).cell, { x: 2, y: 3 })
+  assert.equal(resolveAwakeSpiderMove('left', ['south']).direction, 'south')
+})
+
+test('right-wall spiders prefer right, straight, left, then backwards', () => {
+  assert.deepEqual(resolveAwakeSpiderMove('right', ['west', 'north', 'east', 'south']).cell, { x: 3, y: 2 })
+  assert.equal(resolveAwakeSpiderMove('right', ['west', 'north', 'east', 'south']).direction, 'east')
+  assert.deepEqual(resolveAwakeSpiderMove('right', ['west', 'north', 'south']).cell, { x: 2, y: 1 })
+  assert.equal(resolveAwakeSpiderMove('right', ['west', 'north', 'south']).direction, 'north')
+  assert.deepEqual(resolveAwakeSpiderMove('right', ['west', 'south']).cell, { x: 1, y: 2 })
+  assert.equal(resolveAwakeSpiderMove('right', ['west', 'south']).direction, 'west')
+  assert.deepEqual(resolveAwakeSpiderMove('right', ['south']).cell, { x: 2, y: 3 })
+  assert.equal(resolveAwakeSpiderMove('right', ['south']).direction, 'south')
 })
 
 test('rotation changes player direction without advancing monster turns', () => {

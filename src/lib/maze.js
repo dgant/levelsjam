@@ -15,7 +15,7 @@ export const MAZE_CELL_SIZE = 2
 export const MAZE_WALL_THICKNESS = 0.25
 export const MAZE_WALL_HEIGHT = 2
 export const MAZE_TARGET_COUNT = 5
-export const MAZE_LIGHTMAP_VERSION = 22
+export const MAZE_LIGHTMAP_VERSION = 24
 export const MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS = 0.125
 
 const MAZE_LIGHTMAP_GROUND_TILE_SIZE = 256
@@ -24,8 +24,8 @@ const MAZE_LIGHTMAP_WALL_TILE_HEIGHT = 128
 const MAZE_LIGHTMAP_NEUTRAL_TILE_SIZE = 4
 const MAZE_LIGHTMAP_GROUND_MARGIN = 16
 const MAZE_LIGHTMAP_SAMPLE_EPSILON = 0.02
-const MAZE_LIGHTMAP_TORCH_STRENGTH = AUTHORED_LIGHTING_SOURCE_SCALE / 5
-const MAZE_LIGHTMAP_MIN_RAW_WALL_OCCLUSION_CONTRIBUTION = 1
+const MAZE_LIGHTMAP_TORCH_STRENGTH = AUTHORED_LIGHTING_SOURCE_SCALE / 50
+const MAZE_LIGHTMAP_MIN_RAW_WALL_OCCLUSION_CONTRIBUTION = 0
 const MAZE_LIGHTMAP_GROUND_SUPERSAMPLE_GRID = 1
 const MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID = 2
 const MAZE_LIGHTMAP_GROUND_AMBIENT_SAMPLE_GRID = 40
@@ -67,6 +67,8 @@ const CARDINAL_DIRECTIONS = [
   { dx: 0, dy: 1, side: 'south' },
   { dx: -1, dy: 0, side: 'west' }
 ]
+
+const MAZE_DECAL_TEXTURE_COUNT = 7
 
 const OPPOSITE_SIDE = {
   east: 'west',
@@ -1294,6 +1296,70 @@ export function getMazeWallSegments(maze) {
   return walls
 }
 
+function getWallEndpointCoordinates(wall) {
+  if (wall.axis === 'x') {
+    return [
+      { x: wall.bounds.minX, z: wall.center.z },
+      { x: wall.bounds.maxX, z: wall.center.z }
+    ]
+  }
+
+  return [
+    { x: wall.center.x, z: wall.bounds.minZ },
+    { x: wall.center.x, z: wall.bounds.maxZ }
+  ]
+}
+
+function wallIntersectionKey(point) {
+  return `${point.x.toFixed(6)},${point.z.toFixed(6)}`
+}
+
+export function getMazeCornerFillers(maze) {
+  const endpointMap = new Map()
+  const walls = getMazeWallSegments(maze)
+
+  for (const wall of walls) {
+    for (const point of getWallEndpointCoordinates(wall)) {
+      const key = wallIntersectionKey(point)
+      const entries = endpointMap.get(key) ?? []
+
+      entries.push({ point, wall })
+      endpointMap.set(key, entries)
+    }
+  }
+
+  const fillers = []
+
+  for (const [key, entries] of endpointMap) {
+    if (entries.length !== 2) {
+      continue
+    }
+
+    const [first, second] = entries
+
+    if (!first || !second || first.wall.axis === second.wall.axis) {
+      continue
+    }
+
+    fillers.push({
+      bounds: {
+        id: `corner-filler-${key}`,
+        maxX: first.point.x + (MAZE_WALL_THICKNESS / 2),
+        maxY: GROUND_Y + MAZE_WALL_HEIGHT,
+        maxZ: first.point.z + (MAZE_WALL_THICKNESS / 2),
+        minX: first.point.x - (MAZE_WALL_THICKNESS / 2),
+        minY: GROUND_Y,
+        minZ: first.point.z - (MAZE_WALL_THICKNESS / 2)
+      },
+      center: { x: first.point.x, z: first.point.z },
+      id: `corner-filler-${key}`,
+      type: 'corner-filler'
+    })
+  }
+
+  return fillers
+}
+
 function assignWallSurfaceGroups(walls) {
   const wallLines = new Map()
 
@@ -1415,7 +1481,13 @@ function getPreferredLightmapAtlasWidth(wallCount) {
   const totalTexelCount =
     (MAZE_LIGHTMAP_GROUND_TILE_SIZE * MAZE_LIGHTMAP_GROUND_TILE_SIZE) +
     (MAZE_LIGHTMAP_NEUTRAL_TILE_SIZE * MAZE_LIGHTMAP_NEUTRAL_TILE_SIZE) +
-    (wallCount * 2 * MAZE_LIGHTMAP_WALL_TILE_WIDTH * MAZE_LIGHTMAP_WALL_TILE_HEIGHT)
+    (
+      wallCount *
+      (
+        (2 * MAZE_LIGHTMAP_WALL_TILE_WIDTH * MAZE_LIGHTMAP_WALL_TILE_HEIGHT) +
+        (2 * MAZE_LIGHTMAP_WALL_TILE_HEIGHT * MAZE_LIGHTMAP_WALL_TILE_HEIGHT)
+      )
+    )
 
   return Math.max(
     MAZE_LIGHTMAP_GROUND_TILE_SIZE,
@@ -1517,6 +1589,42 @@ function getWallSurfaceFaceSample(surfaceGroup, faceKey, u, v) {
       x: surfaceGroup.center.x + rotatedPosition.x,
       y: GROUND_Y + (MAZE_WALL_HEIGHT / 2) + localY,
       z: surfaceGroup.center.z + rotatedPosition.z
+    }
+  }
+}
+
+function getWallShortFaceSample(wall, faceKey, u, v) {
+  const localY = (v - 0.5) * MAZE_WALL_HEIGHT
+  const localZ = (u - 0.5) * MAZE_WALL_THICKNESS
+  let localX = 0
+  let normalX = 0
+
+  switch (faceKey) {
+    case 'px':
+      localX = MAZE_CELL_SIZE / 2
+      normalX = 1
+      break
+    case 'nx':
+      localX = -(MAZE_CELL_SIZE / 2)
+      normalX = -1
+      break
+    default:
+      throw new Error(`Unsupported wall short-face bake key: ${faceKey}`)
+  }
+
+  const rotatedPosition = rotateWallLocalVector(localX, localZ, wall.yaw)
+  const rotatedNormal = rotateWallLocalVector(normalX, 0, wall.yaw)
+
+  return {
+    normal: {
+      x: rotatedNormal.x,
+      y: 0,
+      z: rotatedNormal.z
+    },
+    position: {
+      x: wall.center.x + rotatedPosition.x,
+      y: GROUND_Y + (MAZE_WALL_HEIGHT / 2) + localY,
+      z: wall.center.z + rotatedPosition.z
     }
   }
 }
@@ -2131,6 +2239,24 @@ export function bakeMazeLightmap(
     }
   }
 
+  for (const wall of walls) {
+    const existingRects = wallRects[wall.id] ?? {}
+
+    wallRects[wall.id] = {
+      ...existingRects,
+      nx: allocateLightmapRect(
+        packer,
+        MAZE_LIGHTMAP_WALL_TILE_HEIGHT,
+        MAZE_LIGHTMAP_WALL_TILE_HEIGHT
+      ),
+      px: allocateLightmapRect(
+        packer,
+        MAZE_LIGHTMAP_WALL_TILE_HEIGHT,
+        MAZE_LIGHTMAP_WALL_TILE_HEIGHT
+      )
+    }
+  }
+
   const atlasHeight = getLightmapAtlasHeight(packer)
   const atlasFloatData = new Float32Array(atlasWidth * atlasHeight * 3)
 
@@ -2288,7 +2414,7 @@ export function bakeMazeLightmap(
             torchPlacements,
             walls,
             null,
-            surfaceGroup.id,
+            null,
             sconceRadius
           )
         },
@@ -2305,10 +2431,47 @@ export function bakeMazeLightmap(
             sample.normal,
             walls,
             null,
-            surfaceGroup.id
+            null
           )
         },
         { alignUToRectEdges: true }
+      )
+    }
+  }
+
+  for (const wall of walls) {
+    for (const faceKey of ['nx', 'px']) {
+      writeColorRect(
+        atlasFloatData,
+        wallRects[wall.id][faceKey],
+        MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID,
+        (u, v) => {
+          const sample = getWallShortFaceSample(wall, faceKey, u, v)
+          return accumulateTorchLighting(
+            sample.position,
+            sample.normal,
+            torchPlacements,
+            walls,
+            null,
+            null,
+            sconceRadius
+          )
+        }
+      )
+      writeUpscaledAmbientRect(
+        atlasFloatData,
+        wallRects[wall.id][faceKey],
+        MAZE_LIGHTMAP_WALL_AMBIENT_SAMPLE_GRID,
+        (u, v) => {
+          const sample = getWallShortFaceSample(wall, faceKey, u, v)
+          return sampleSkylight(
+            sample.position,
+            sample.normal,
+            walls,
+            null,
+            null
+          )
+        }
       )
     }
   }
@@ -2401,6 +2564,85 @@ export function getMazeGatePlacements(maze) {
   })
 }
 
+export function getMazeGatePostPlacements(maze) {
+  return getMazeGatePlacements(maze).flatMap((gate) => {
+    const postOffsets = gate.axis === 'z'
+      ? [
+          { x: 0, z: -(MAZE_CELL_SIZE / 2) },
+          { x: 0, z: MAZE_CELL_SIZE / 2 }
+        ]
+      : [
+          { x: -(MAZE_CELL_SIZE / 2), z: 0 },
+          { x: MAZE_CELL_SIZE / 2, z: 0 }
+        ]
+
+    return postOffsets.map((offset, index) => ({
+      axis: gate.axis,
+      bounds: {
+        id: `${gate.id}:post-${index}`,
+        maxX: gate.center.x + offset.x + (MAZE_WALL_THICKNESS / 4),
+        maxY: GROUND_Y + MAZE_WALL_HEIGHT,
+        maxZ: gate.center.z + offset.z + (MAZE_WALL_THICKNESS / 4),
+        minX: gate.center.x + offset.x - (MAZE_WALL_THICKNESS / 4),
+        minY: GROUND_Y,
+        minZ: gate.center.z + offset.z - (MAZE_WALL_THICKNESS / 4)
+      },
+      center: {
+        x: gate.center.x + offset.x,
+        z: gate.center.z + offset.z
+      },
+      gateId: gate.id,
+      id: `${gate.id}:post-${index}`,
+      index,
+      radius: MAZE_WALL_THICKNESS / 4,
+      type: 'gate-post'
+    }))
+  })
+}
+
+function hashString(value) {
+  let hash = 2166136261
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+
+  return hash >>> 0
+}
+
+export function getMazeDecalPlacements(maze) {
+  const walls = getMazeWallSegments(maze)
+  const decals = []
+
+  for (const wall of walls) {
+    for (const faceKey of ['pz', 'nz']) {
+      const hash = hashString(`${maze.id}:${wall.id}:${faceKey}`)
+
+      if (hash % 5 !== 0) {
+        continue
+      }
+
+      const sample = getWallFaceSample(wall, faceKey, 0.5, 0.5)
+      decals.push({
+        faceKey,
+        id: `decal-${wall.id}-${faceKey}`,
+        normal: sample.normal,
+        position: {
+          x: sample.position.x + (sample.normal.x * 0.006),
+          y: sample.position.y,
+          z: sample.position.z + (sample.normal.z * 0.006)
+        },
+        textureIndex: hash % MAZE_DECAL_TEXTURE_COUNT,
+        wallId: wall.id,
+        yaw: Math.atan2(sample.normal.x, sample.normal.z)
+      })
+    }
+  }
+
+  return decals
+}
+
 export function getMazeItemPlacements(maze) {
   const items = []
 
@@ -2461,7 +2703,10 @@ function getMazeReflectionProbePlacements(maze) {
 
 export function getMazeSceneLayout(maze, sconceRadius) {
   return {
+    cornerFillers: getMazeCornerFillers(maze),
+    decals: getMazeDecalPlacements(maze),
     gates: getMazeGatePlacements(maze),
+    gatePosts: getMazeGatePostPlacements(maze),
     items: getMazeItemPlacements(maze),
     lights: getMazeTorchPlacements(maze, sconceRadius),
     maze,

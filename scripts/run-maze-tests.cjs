@@ -17,14 +17,20 @@ const testCases = [
   { name: 'maps runtime floor lightmap UVs to the same world-space orientation used by baking', thresholdMs: 5_000 },
   { name: 'keeps baked lighting continuous across an open coplanar wall run', thresholdMs: 5_000 },
   { name: 'bakes local sconce occlusion into the attached wall face', thresholdMs: 5_000 },
+  { name: 'bakes same-cell torch energy into volumetric lightmap coefficients', thresholdMs: 5_000 },
   { name: 'keeps mid-wall torch lighting visible below the sconce top', thresholdMs: 5_000 },
   { name: 'stores baked wall skylight in the HDR lightmap', thresholdMs: 5_000 },
+  { name: 'bakes lightmap rectangles for maze wall short end faces', thresholdMs: 5_000 },
   { name: 'three box geometry mirrors local -Z face UVs relative to +Z', thresholdMs: 5_000 },
   { name: 'assigns z-axis wall-run lightmap slices to the correct wall', thresholdMs: 5_000 }
 ]
 
 function formatMilliseconds(value) {
   return `${value.toFixed(1)}ms`
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function parseReportedDuration(stdout) {
@@ -42,9 +48,13 @@ function parseReportedDuration(stdout) {
 function runTestCase(testCase) {
   return new Promise((resolve) => {
     const startedAt = process.hrtime.bigint()
+    const timeoutMs = Math.max(testCase.thresholdMs * 4, 15_000)
+    console.log(
+      `starting: ${testCase.name} (timeout ${formatMilliseconds(timeoutMs)})`
+    )
     const child = spawn(
       nodeCommand,
-      ['--test', '--test-name-pattern', testCase.name, testFile],
+      ['--test', '--test-name-pattern', `^${escapeRegExp(testCase.name)}$`, testFile],
       {
         cwd: rootDir,
         env: { ...process.env }
@@ -52,6 +62,17 @@ function runTestCase(testCase) {
     )
     let stdout = ''
     let stderr = ''
+    let settled = false
+    let timedOut = false
+    const timeout = setTimeout(() => {
+      timedOut = true
+      child.kill()
+      setTimeout(() => {
+        if (!settled) {
+          child.kill('SIGKILL')
+        }
+      }, 1_000).unref()
+    }, timeoutMs)
 
     child.stdout.setEncoding('utf8')
     child.stderr.setEncoding('utf8')
@@ -62,16 +83,20 @@ function runTestCase(testCase) {
       stderr += chunk
     })
     child.on('close', (code) => {
+      settled = true
+      clearTimeout(timeout)
       const wallDurationMs = Number(process.hrtime.bigint() - startedAt) / 1e6
 
       resolve({
-        code: code ?? 1,
+        code: timedOut ? 1 : code ?? 1,
         durationMs: parseReportedDuration(stdout) ?? wallDurationMs,
         name: testCase.name,
         reportedDurationMs: parseReportedDuration(stdout),
         stderr,
         stdout,
         thresholdMs: testCase.thresholdMs,
+        timedOut,
+        timeoutMs,
         wallDurationMs
       })
     })
@@ -106,7 +131,11 @@ async function main() {
     if (result.code !== 0) {
       process.stdout.write(result.stdout)
       process.stderr.write(result.stderr)
-      failures.push(`${result.name} exited with code ${result.code}`)
+      failures.push(
+        result.timedOut
+          ? `${result.name} timed out after ${formatMilliseconds(result.timeoutMs)}`
+          : `${result.name} exited with code ${result.code}`
+      )
       continue
     }
 
@@ -130,6 +159,8 @@ async function main() {
       overThreshold: result.durationMs > result.thresholdMs,
       reportedDurationMs: result.reportedDurationMs,
       thresholdMs: result.thresholdMs,
+      timedOut: result.timedOut,
+      timeoutMs: result.timeoutMs,
       wallDurationMs: result.wallDurationMs
     })),
     generatedAt: new Date().toISOString(),

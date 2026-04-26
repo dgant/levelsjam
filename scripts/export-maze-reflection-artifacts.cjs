@@ -157,7 +157,6 @@ async function captureMazeReflectionArtifacts(
       !Array.isArray(capture.rawRgbEAtlas) ||
       !Array.isArray(capture.processedAtlas) ||
       !Array.isArray(capture.geometryAtlas) ||
-      !Array.isArray(capture.depthAtlas) ||
       !capture.processedCubeUvRgbE?.dataUrl
     ) {
       const probeState = await page.evaluate(
@@ -183,7 +182,6 @@ async function captureMazeReflectionArtifacts(
     writeAtlasArtifacts(probeDirectory, 'raw-rgbe', capture.rawRgbEAtlas)
     writeAtlasArtifacts(probeDirectory, 'processed', capture.processedAtlas)
     writeAtlasArtifacts(probeDirectory, 'geometry', capture.geometryAtlas)
-    writeAtlasArtifacts(probeDirectory, 'depth', capture.depthAtlas)
     writeDataUrlPng(
       path.join(probeDirectory, 'processed-cubeuv-rgbe.png'),
       capture.processedCubeUvRgbE.dataUrl
@@ -194,9 +192,6 @@ async function captureMazeReflectionArtifacts(
       'reflection-probes'
     )
     const runtimeProcessedFile = `probe-${String(probeIndex).padStart(3, '0')}-processed-cubeuv-rgbe.png`
-    const runtimeDepthFiles = Array.from({ length: capture.depthAtlas.length }, (_, faceIndex) =>
-      `probe-${String(probeIndex).padStart(3, '0')}-depth-face-${faceIndex}.png`
-    )
 
     for (const runtimeDirectory of runtimeMazeDataDirectories) {
       const runtimeProbeDirectory = path.join(runtimeDirectory, maze.id, 'reflection-probes')
@@ -206,12 +201,6 @@ async function captureMazeReflectionArtifacts(
         path.join(runtimeProbeDirectory, runtimeProcessedFile),
         capture.processedCubeUvRgbE.dataUrl
       )
-      for (let faceIndex = 0; faceIndex < capture.depthAtlas.length; faceIndex += 1) {
-        writeDataUrlPng(
-          path.join(runtimeProbeDirectory, runtimeDepthFiles[faceIndex]),
-          capture.depthAtlas[faceIndex]
-        )
-      }
     }
 
     runtimeManifest.probes.push({
@@ -219,9 +208,6 @@ async function captureMazeReflectionArtifacts(
         maze,
         mazeLayout.reflectionProbes[probeIndex].position,
         sconceRadius
-      ),
-      depthFaces: runtimeDepthFiles.map((fileName) =>
-        path.posix.join(runtimeProbeDirectoryRelative, fileName)
       ),
       index: probeIndex,
       processedCubeUvRgbE: path.posix.join(
@@ -232,7 +218,6 @@ async function captureMazeReflectionArtifacts(
       textureWidth: capture.processedCubeUvRgbE.width
     })
     summary.probes.push({
-      depthFaceCount: capture.depthAtlas.length,
       geometryFaceCount: capture.geometryAtlas.length,
       index: probeIndex,
       processedFaceCount: capture.processedAtlas.length,
