@@ -23,6 +23,7 @@
 - The generated radiance field treats maze walls and closed gates as horizontal-plane occluders for torch visibility without leaking light through wall interiors.
 - The generated radiance field treats torch billboards and sconces as emissive source markers.
 - Wall-mounted sconce bodies produce visible local contact occlusion under the fixture on the attached wall face.
+- The radiance-cascade runtime preserves visible wall-sconce contact shadows by darkening generated radiance on the attached vertical wall face below each fixture.
 - The generated radiance field is produced by a real-time GPU radiance-cascade pipeline during ordinary browser runtime and does not require offline surface-lightmap baking.
 - The radiance-cascade pipeline updates on the GPU every rendered frame rather than precomputing diffuse lighting on the CPU.
 - The radiance-cascade pipeline stores directional ray-interval radiance in cascade render targets and merges higher-angular, lower-spatial cascades down to the material-sampled output field.
@@ -34,6 +35,7 @@
 - The generated radiance field propagates indirect light only through horizontally visible samples so walls and closed gates block cascade spread instead of permitting blur leakage.
 - Vertical maze-local surfaces sample the generated radiance field from the visible side of the surface rather than from inside wall or gate volume.
 - Horizontal maze-local surfaces sample generated radiance from nearby non-occluder texels when their primary XZ sample lands in a wall or closed-gate mask, so floors remain lit up to wall bases instead of forming black moats.
+- Horizontal maze-local surfaces near wall or gate masks bias their generated-radiance lookup away from the occluder side, so valid but underlit edge texels do not form hard black lines at wall feet.
 - Runtime material and fog sampling attenuate generated radiance by inverse-square vertical distance from the authored torch height so the two-dimensional radiance field reads as torch-height lighting in the three-dimensional scene.
 - The generated radiance field is spatially smooth enough that ordinary wall and floor views do not show obvious block-sized probe cells.
 - Near-player realtime shadowed torch lights are blended as a smooth correction over the generated radiance field instead of abruptly replacing it.

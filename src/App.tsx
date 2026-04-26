@@ -219,6 +219,7 @@ const FIRE_FLIPBOOK_CROP_HEIGHT =
 const FIRE_COLOR = new Color('#ff7e00')
 const FIRE_LIGHT_COLOR = FIRE_COLOR.clone().multiplyScalar(10)
 const BLACK_COLOR = new Color(0, 0, 0)
+const ZERO_VECTOR4 = new Vector4(0, 0, 0, 0)
 const LIGHTMAP_AMBIENT_TINT = new Color(1, 1, 1)
 const TORCH_LIGHTMAP_TINT = FIRE_LIGHT_COLOR.clone()
 const FIRE_BILLBOARD_INTENSITY_SCALE =
@@ -251,7 +252,9 @@ const RUNTIME_RADIANCE_OCCLUDER_TANGENT_PADDING = WALL_WIDTH * 0.1
 const RUNTIME_RADIANCE_SOURCE_RADIUS = 0.32
 const RUNTIME_RADIANCE_SURFACE_NORMAL_OFFSET = WALL_WIDTH * 0.75
 const RUNTIME_RADIANCE_TORCH_HEIGHT = GROUND_Y + 1.1 + (TORCH_BILLBOARD_SIZE / 2)
-const RUNTIME_RADIANCE_VERTICAL_FALLOFF_RADIUS = 0.95
+const RUNTIME_RADIANCE_VERTICAL_FALLOFF_RADIUS = 0.72
+const RUNTIME_RADIANCE_SCONCE_SHADOW_RADIUS = 0.55
+const RUNTIME_RADIANCE_SCONCE_SHADOW_STRENGTH = 0.92
 const RUNTIME_TORCH_FLICKER_INTENSITY = 0.15
 const RUNTIME_SHADOW_SLOT_COUNT = 2
 const RUNTIME_SHADOW_INNER_RADIUS = 3.5
@@ -735,8 +738,13 @@ vec3 sampleFogAmbientColor(vec3 worldPosition) {
     (verticalRadius * verticalRadius) /
     ((verticalDistance * verticalDistance) + (verticalRadius * verticalRadius));
 
+  vec4 runtimeRadianceTexel = texture2D(runtimeRadianceTexture, runtimeRadianceUv);
+  vec3 runtimeRadianceColor = runtimeRadianceTexel.a > 0.05
+    ? runtimeRadianceTexel.rgb / max(runtimeRadianceTexel.a, 0.05)
+    : vec3(0.0);
+
   return
-    texture2D(runtimeRadianceTexture, runtimeRadianceUv).rgb *
+    runtimeRadianceColor *
     runtimeRadianceIntensity *
     verticalWeight *
     ${RUNTIME_RADIANCE_FOG_SCATTER_GAIN.toFixed(1)};
@@ -1349,6 +1357,8 @@ type ProbeBlendShader = Shader & {
   runtimeRadianceBounds?: Uniform<Vector4>
   runtimeRadianceIntensity?: Uniform<number>
   runtimeRadianceNormalOffset?: Uniform<number>
+  runtimeRadianceSconceShadowCount?: Uniform<number>
+  runtimeRadianceSconceShadows?: Uniform<Vector4[]>
   runtimeRadianceTorchHeight?: Uniform<number>
   runtimeRadianceTexture?: Uniform<Texture | null>
   runtimeRadianceVerticalFalloffRadius?: Uniform<number>
@@ -1364,6 +1374,7 @@ type MaterialShaderPatchConfig = {
   runtimeRadianceBounds?: RuntimeRadianceBounds
   runtimeRadianceIntensity?: number
   runtimeRadianceNormalOffset?: number
+  runtimeRadianceSconceShadows?: Vector4[]
   runtimeRadianceTorchHeight?: number
   runtimeRadianceTexture?: Texture | null
   runtimeRadianceVerticalFalloffRadius?: number
@@ -2818,6 +2829,8 @@ const LEVELSJAM_LIGHTS_FRAGMENT_MAPS = `
 \t\t) / max( runtimeRadianceBounds.zw, vec2( 0.0001 ) );
 \t\tvec3 runtimeRadianceColor = vec3( 0.0 );
 \t\tfloat runtimeRadianceWeight = 0.0;
+\t\tfloat runtimeRadianceHorizontalFallbackOffset =
+\t\t\tmax( runtimeRadianceNormalOffset, ${RUNTIME_RADIANCE_SURFACE_NORMAL_OFFSET.toFixed(6)} );
 
 \t\tif (
 \t\t\truntimeRadianceUv.x >= 0.0 &&
@@ -2826,51 +2839,172 @@ const LEVELSJAM_LIGHTS_FRAGMENT_MAPS = `
 \t\t\truntimeRadianceUv.y <= 1.0
 \t\t) {
 \t\t\tvec4 runtimeRadianceTexel = texture2D( runtimeRadianceTexture, runtimeRadianceUv );
-\t\t\truntimeRadianceColor += runtimeRadianceTexel.rgb * step( 0.5, runtimeRadianceTexel.a );
-\t\t\truntimeRadianceWeight += step( 0.5, runtimeRadianceTexel.a );
+\t\t\tfloat runtimeRadianceTexelWeight = smoothstep( 0.05, 0.5, runtimeRadianceTexel.a );
+\t\t\truntimeRadianceColor +=
+\t\t\t\t( runtimeRadianceTexel.rgb / max( runtimeRadianceTexel.a, 0.05 ) ) *
+\t\t\t\truntimeRadianceTexelWeight;
+\t\t\truntimeRadianceWeight += runtimeRadianceTexelWeight;
 \t\t}
 
-\t\tif ( runtimeRadianceWeight <= 0.0 && runtimeRadianceNormalOffsetLength <= 0.0001 ) {
-\t\t\tfloat runtimeRadianceHorizontalFallbackOffset =
-\t\t\t\tmax( runtimeRadianceNormalOffset, ${RUNTIME_RADIANCE_SURFACE_NORMAL_OFFSET.toFixed(6)} );
+\t\tif ( runtimeRadianceNormalOffsetLength <= 0.0001 ) {
+\t\t\tvec2 runtimeRadianceFallbackUvOffsetX =
+\t\t\t\tvec2( runtimeRadianceHorizontalFallbackOffset / max( runtimeRadianceBounds.z, 0.0001 ), 0.0 );
+\t\t\tvec2 runtimeRadianceFallbackUvOffsetZ =
+\t\t\t\tvec2( 0.0, runtimeRadianceHorizontalFallbackOffset / max( runtimeRadianceBounds.w, 0.0001 ) );
+\t\t\tvec4 runtimeRadianceTexelPx =
+\t\t\t\ttexture2D( runtimeRadianceTexture, clamp( runtimeRadianceUv + runtimeRadianceFallbackUvOffsetX, 0.0, 1.0 ) );
+\t\t\tvec4 runtimeRadianceTexelNx =
+\t\t\t\ttexture2D( runtimeRadianceTexture, clamp( runtimeRadianceUv - runtimeRadianceFallbackUvOffsetX, 0.0, 1.0 ) );
+\t\t\tvec4 runtimeRadianceTexelPz =
+\t\t\t\ttexture2D( runtimeRadianceTexture, clamp( runtimeRadianceUv + runtimeRadianceFallbackUvOffsetZ, 0.0, 1.0 ) );
+\t\t\tvec4 runtimeRadianceTexelNz =
+\t\t\t\ttexture2D( runtimeRadianceTexture, clamp( runtimeRadianceUv - runtimeRadianceFallbackUvOffsetZ, 0.0, 1.0 ) );
+\t\t\tfloat runtimeRadianceValidPx = smoothstep( 0.05, 0.5, runtimeRadianceTexelPx.a );
+\t\t\tfloat runtimeRadianceValidNx = smoothstep( 0.05, 0.5, runtimeRadianceTexelNx.a );
+\t\t\tfloat runtimeRadianceValidPz = smoothstep( 0.05, 0.5, runtimeRadianceTexelPz.a );
+\t\t\tfloat runtimeRadianceValidNz = smoothstep( 0.05, 0.5, runtimeRadianceTexelNz.a );
+\t\t\tvec2 runtimeRadianceWallGradient = vec2(
+\t\t\t\t( 1.0 - runtimeRadianceTexelPx.a ) - ( 1.0 - runtimeRadianceTexelNx.a ),
+\t\t\t\t( 1.0 - runtimeRadianceTexelPz.a ) - ( 1.0 - runtimeRadianceTexelNz.a )
+\t\t\t);
+\t\t\tfloat runtimeRadianceWallProximity = max(
+\t\t\t\tmax( 1.0 - runtimeRadianceTexelPx.a, 1.0 - runtimeRadianceTexelNx.a ),
+\t\t\t\tmax( 1.0 - runtimeRadianceTexelPz.a, 1.0 - runtimeRadianceTexelNz.a )
+\t\t\t);
+\t\t\tvec3 runtimeRadianceFallbackColor = vec3( 0.0 );
+\t\t\tfloat runtimeRadianceFallbackWeight = 0.0;
 
-\t\t\tfor ( int runtimeRadianceAxis = 0; runtimeRadianceAxis < 4; runtimeRadianceAxis += 1 ) {
-\t\t\t\tvec2 runtimeRadianceFallbackOffset =
-\t\t\t\t\truntimeRadianceAxis == 0
-\t\t\t\t\t\t? vec2( runtimeRadianceHorizontalFallbackOffset, 0.0 )
-\t\t\t\t\t\t: runtimeRadianceAxis == 1
-\t\t\t\t\t\t\t? vec2( -runtimeRadianceHorizontalFallbackOffset, 0.0 )
-\t\t\t\t\t\t\t: runtimeRadianceAxis == 2
-\t\t\t\t\t\t\t\t? vec2( 0.0, runtimeRadianceHorizontalFallbackOffset )
-\t\t\t\t\t\t\t\t: vec2( 0.0, -runtimeRadianceHorizontalFallbackOffset );
-\t\t\t\tvec2 runtimeRadianceFallbackUv = (
-\t\t\t\t\truntimeRadianceSamplePosition +
-\t\t\t\t\truntimeRadianceFallbackOffset -
-\t\t\t\t\truntimeRadianceBounds.xy
-\t\t\t\t) / max( runtimeRadianceBounds.zw, vec2( 0.0001 ) );
+\t\t\tif ( length( runtimeRadianceWallGradient ) > 0.001 ) {
+\t\t\t\tvec2 runtimeRadianceAwayFromWall = -normalize( runtimeRadianceWallGradient );
+\t\t\t\tfloat runtimeRadianceAwayPx =
+\t\t\t\t\tmax( dot( runtimeRadianceAwayFromWall, vec2( 1.0, 0.0 ) ), 0.0 ) * runtimeRadianceValidPx;
+\t\t\t\tfloat runtimeRadianceAwayNx =
+\t\t\t\t\tmax( dot( runtimeRadianceAwayFromWall, vec2( -1.0, 0.0 ) ), 0.0 ) * runtimeRadianceValidNx;
+\t\t\t\tfloat runtimeRadianceAwayPz =
+\t\t\t\t\tmax( dot( runtimeRadianceAwayFromWall, vec2( 0.0, 1.0 ) ), 0.0 ) * runtimeRadianceValidPz;
+\t\t\t\tfloat runtimeRadianceAwayNz =
+\t\t\t\t\tmax( dot( runtimeRadianceAwayFromWall, vec2( 0.0, -1.0 ) ), 0.0 ) * runtimeRadianceValidNz;
 
-\t\t\t\tif (
-\t\t\t\t\truntimeRadianceFallbackUv.x >= 0.0 &&
-\t\t\t\t\truntimeRadianceFallbackUv.x <= 1.0 &&
-\t\t\t\t\truntimeRadianceFallbackUv.y >= 0.0 &&
-\t\t\t\t\truntimeRadianceFallbackUv.y <= 1.0
-\t\t\t\t) {
-\t\t\t\t\tvec4 runtimeRadianceFallbackTexel =
-\t\t\t\t\t\ttexture2D( runtimeRadianceTexture, runtimeRadianceFallbackUv );
-\t\t\t\t\tfloat runtimeRadianceFallbackWeight =
-\t\t\t\t\t\tstep( 0.5, runtimeRadianceFallbackTexel.a );
-\t\t\t\t\truntimeRadianceColor +=
-\t\t\t\t\t\truntimeRadianceFallbackTexel.rgb * runtimeRadianceFallbackWeight;
-\t\t\t\t\truntimeRadianceWeight += runtimeRadianceFallbackWeight;
+\t\t\t\truntimeRadianceFallbackColor +=
+\t\t\t\t\t( runtimeRadianceTexelPx.rgb / max( runtimeRadianceTexelPx.a, 0.05 ) ) *
+\t\t\t\t\truntimeRadianceAwayPx;
+\t\t\t\truntimeRadianceFallbackColor +=
+\t\t\t\t\t( runtimeRadianceTexelNx.rgb / max( runtimeRadianceTexelNx.a, 0.05 ) ) *
+\t\t\t\t\truntimeRadianceAwayNx;
+\t\t\t\truntimeRadianceFallbackColor +=
+\t\t\t\t\t( runtimeRadianceTexelPz.rgb / max( runtimeRadianceTexelPz.a, 0.05 ) ) *
+\t\t\t\t\truntimeRadianceAwayPz;
+\t\t\t\truntimeRadianceFallbackColor +=
+\t\t\t\t\t( runtimeRadianceTexelNz.rgb / max( runtimeRadianceTexelNz.a, 0.05 ) ) *
+\t\t\t\t\truntimeRadianceAwayNz;
+\t\t\t\truntimeRadianceFallbackWeight +=
+\t\t\t\t\truntimeRadianceAwayPx +
+\t\t\t\t\truntimeRadianceAwayNx +
+\t\t\t\t\truntimeRadianceAwayPz +
+\t\t\t\t\truntimeRadianceAwayNz;
+\t\t\t}
+
+\t\t\tif ( runtimeRadianceFallbackWeight <= 0.0 && runtimeRadianceWeight <= 0.0 ) {
+\t\t\t\truntimeRadianceFallbackColor +=
+\t\t\t\t\t( runtimeRadianceTexelPx.rgb / max( runtimeRadianceTexelPx.a, 0.05 ) ) *
+\t\t\t\t\truntimeRadianceValidPx;
+\t\t\t\truntimeRadianceFallbackColor +=
+\t\t\t\t\t( runtimeRadianceTexelNx.rgb / max( runtimeRadianceTexelNx.a, 0.05 ) ) *
+\t\t\t\t\truntimeRadianceValidNx;
+\t\t\t\truntimeRadianceFallbackColor +=
+\t\t\t\t\t( runtimeRadianceTexelPz.rgb / max( runtimeRadianceTexelPz.a, 0.05 ) ) *
+\t\t\t\t\truntimeRadianceValidPz;
+\t\t\t\truntimeRadianceFallbackColor +=
+\t\t\t\t\t( runtimeRadianceTexelNz.rgb / max( runtimeRadianceTexelNz.a, 0.05 ) ) *
+\t\t\t\t\truntimeRadianceValidNz;
+\t\t\t\truntimeRadianceFallbackWeight +=
+\t\t\t\t\truntimeRadianceValidPx +
+\t\t\t\t\truntimeRadianceValidNx +
+\t\t\t\t\truntimeRadianceValidPz +
+\t\t\t\t\truntimeRadianceValidNz;
+\t\t\t}
+
+\t\t\tif ( runtimeRadianceFallbackWeight > 0.0 ) {
+\t\t\t\tvec3 runtimeRadianceFallbackAverage =
+\t\t\t\t\truntimeRadianceFallbackColor / runtimeRadianceFallbackWeight;
+
+\t\t\t\tif ( runtimeRadianceWeight > 0.0 ) {
+\t\t\t\t\truntimeRadianceColor = mix(
+\t\t\t\t\t\truntimeRadianceColor / runtimeRadianceWeight,
+\t\t\t\t\t\truntimeRadianceFallbackAverage,
+\t\t\t\t\t\tclamp( runtimeRadianceWallProximity, 0.0, 1.0 )
+\t\t\t\t\t);
+\t\t\t\t\truntimeRadianceWeight = 1.0;
+\t\t\t\t} else {
+\t\t\t\t\truntimeRadianceColor = runtimeRadianceFallbackAverage;
+\t\t\t\t\truntimeRadianceWeight = 1.0;
 \t\t\t\t}
 \t\t\t}
 \t\t}
 
 \t\tif ( runtimeRadianceWeight > 0.0 ) {
+\t\t\tfloat runtimeRadianceSconceShadow = 0.0;
+\t\t\tvec2 runtimeRadianceSurfaceNormal2D = runtimeRadianceWorldNormal.xz;
+\t\t\tfloat runtimeRadianceSurfaceNormalLength = length( runtimeRadianceSurfaceNormal2D );
+
+\t\t\tif ( runtimeRadianceSurfaceNormalLength > 0.25 ) {
+\t\t\t\truntimeRadianceSurfaceNormal2D /= runtimeRadianceSurfaceNormalLength;
+
+\t\t\t\tfor ( int runtimeRadianceShadowIndex = 0; runtimeRadianceShadowIndex < ${RUNTIME_RADIANCE_MAX_LIGHTS}; runtimeRadianceShadowIndex += 1 ) {
+\t\t\t\t\tif ( runtimeRadianceShadowIndex >= runtimeRadianceSconceShadowCount ) {
+\t\t\t\t\t\tbreak;
+\t\t\t\t\t}
+
+\t\t\t\t\tvec4 runtimeRadianceSconce = runtimeRadianceSconceShadows[runtimeRadianceShadowIndex];
+\t\t\t\t\tvec2 runtimeRadianceSconceNormal = normalize( runtimeRadianceSconce.zw );
+\t\t\t\t\tvec2 runtimeRadianceSconceTangent = vec2( -runtimeRadianceSconceNormal.y, runtimeRadianceSconceNormal.x );
+\t\t\t\t\tvec2 runtimeRadianceToSurface = vProbeBlendWorldPosition.xz - runtimeRadianceSconce.xy;
+\t\t\t\t\tfloat runtimeRadianceFaceWeight =
+\t\t\t\t\t\tsmoothstep( 0.45, 0.75, abs( dot( runtimeRadianceSurfaceNormal2D, runtimeRadianceSconceNormal ) ) );
+\t\t\t\t\tfloat runtimeRadiancePlaneDistance =
+\t\t\t\t\t\tabs( abs( dot( runtimeRadianceToSurface, runtimeRadianceSconceNormal ) ) - ${ (WALL_WIDTH * 0.5).toFixed(6) } );
+\t\t\t\t\tfloat runtimeRadiancePlaneWeight =
+\t\t\t\t\t\t1.0 - smoothstep( 0.04, 0.18, runtimeRadiancePlaneDistance );
+\t\t\t\t\tfloat runtimeRadianceTangentDistance =
+\t\t\t\t\t\tabs( dot( runtimeRadianceToSurface, runtimeRadianceSconceTangent ) );
+\t\t\t\t\tfloat runtimeRadianceTangentWeight =
+\t\t\t\t\t\texp(
+\t\t\t\t\t\t\t-(
+\t\t\t\t\t\t\t\truntimeRadianceTangentDistance *
+\t\t\t\t\t\t\t\truntimeRadianceTangentDistance
+\t\t\t\t\t\t\t) /
+\t\t\t\t\t\t\t${ (RUNTIME_RADIANCE_SCONCE_SHADOW_RADIUS * RUNTIME_RADIANCE_SCONCE_SHADOW_RADIUS).toFixed(6) }
+\t\t\t\t\t\t);
+\t\t\t\t\tfloat runtimeRadianceBelowSconce = ( ${ (GROUND_Y + 1.1).toFixed(6) } ) - vProbeBlendWorldPosition.y;
+\t\t\t\t\tfloat runtimeRadianceVerticalShadow =
+\t\t\t\t\t\tsmoothstep( -0.04, 0.16, runtimeRadianceBelowSconce ) *
+\t\t\t\t\t\t( 1.0 - smoothstep( 1.35, 1.75, runtimeRadianceBelowSconce ) );
+
+\t\t\t\t\truntimeRadianceSconceShadow = max(
+\t\t\t\t\t\truntimeRadianceSconceShadow,
+\t\t\t\t\t\truntimeRadianceFaceWeight *
+\t\t\t\t\t\truntimeRadiancePlaneWeight *
+\t\t\t\t\t\truntimeRadianceTangentWeight *
+\t\t\t\t\t\truntimeRadianceVerticalShadow *
+\t\t\t\t\t\t${RUNTIME_RADIANCE_SCONCE_SHADOW_STRENGTH.toFixed(2)}
+\t\t\t\t\t);
+\t\t\t\t}
+\t\t\t}
+\t\t\tfloat runtimeRadianceSconceShadowMultiplier =
+\t\t\t\t1.0 - clamp( runtimeRadianceSconceShadow, 0.0, 0.92 );
+
+\t\t\treflectedLight.directDiffuse *= runtimeRadianceSconceShadowMultiplier;
+\t\t\treflectedLight.directSpecular *= mix(
+\t\t\t\t1.0,
+\t\t\t\truntimeRadianceSconceShadowMultiplier,
+\t\t\t\t0.7
+\t\t\t);
+
 \t\t\tirradiance +=
 \t\t\t\t( runtimeRadianceColor / runtimeRadianceWeight ) *
 \t\t\t\truntimeRadianceIntensity *
-\t\t\t\truntimeRadianceVerticalWeight;
+\t\t\t\truntimeRadianceVerticalWeight *
+\t\t\t\truntimeRadianceSconceShadowMultiplier;
 \t\t}
 
 \t#endif
@@ -2956,6 +3090,19 @@ function updateProbeBlendShaderUniforms(
   }
   if (shader.uniforms.runtimeRadianceNormalOffset) {
     shader.uniforms.runtimeRadianceNormalOffset.value = patchConfig.runtimeRadianceNormalOffset ?? 0
+  }
+  if (shader.uniforms.runtimeRadianceSconceShadows) {
+    const sconceShadows = patchConfig.runtimeRadianceSconceShadows ?? []
+    const uniformShadows = shader.uniforms.runtimeRadianceSconceShadows.value
+
+    shader.uniforms.runtimeRadianceSconceShadowCount.value = Math.min(
+      sconceShadows.length,
+      RUNTIME_RADIANCE_MAX_LIGHTS
+    )
+
+    for (let index = 0; index < RUNTIME_RADIANCE_MAX_LIGHTS; index += 1) {
+      uniformShadows[index].copy(sconceShadows[index] ?? ZERO_VECTOR4)
+    }
   }
   if (shader.uniforms.runtimeRadianceTorchHeight) {
     shader.uniforms.runtimeRadianceTorchHeight.value =
@@ -3276,6 +3423,13 @@ function getProbeBlendUpdateKey(
       : null,
     runtimeRadianceIntensity: patchConfig.runtimeRadianceIntensity ?? 0,
     runtimeRadianceNormalOffset: patchConfig.runtimeRadianceNormalOffset ?? 0,
+    runtimeRadianceSconceShadows:
+      (patchConfig.runtimeRadianceSconceShadows ?? []).map((shadow) => [
+        shadow.x,
+        shadow.y,
+        shadow.z,
+        shadow.w
+      ]),
     runtimeRadianceTorchHeight:
       patchConfig.runtimeRadianceTorchHeight ?? RUNTIME_RADIANCE_TORCH_HEIGHT,
     runtimeRadianceTextureUUID: patchConfig.runtimeRadianceTexture?.uuid ?? null,
@@ -3456,6 +3610,8 @@ function updateProbeBlendUniformDebugState(
       : null,
     runtimeRadianceIntensity: shader.uniforms.runtimeRadianceIntensity?.value ?? null,
     runtimeRadianceNormalOffset: shader.uniforms.runtimeRadianceNormalOffset?.value ?? null,
+    runtimeRadianceSconceShadowCount:
+      shader.uniforms.runtimeRadianceSconceShadowCount?.value ?? null,
     runtimeRadianceTorchHeight: shader.uniforms.runtimeRadianceTorchHeight?.value ?? null,
     runtimeRadianceTextureUUID: shader.uniforms.runtimeRadianceTexture?.value?.uuid ?? null,
     runtimeRadianceVerticalFalloffRadius:
@@ -3495,6 +3651,10 @@ function patchProbeBlendMaterialShader(
   probeBlendShader.uniforms.runtimeRadianceBounds = new Uniform(new Vector4(0, 0, 1, 1))
   probeBlendShader.uniforms.runtimeRadianceIntensity = new Uniform(0)
   probeBlendShader.uniforms.runtimeRadianceNormalOffset = new Uniform(0)
+  probeBlendShader.uniforms.runtimeRadianceSconceShadowCount = new Uniform(0)
+  probeBlendShader.uniforms.runtimeRadianceSconceShadows = new Uniform(
+    Array.from({ length: RUNTIME_RADIANCE_MAX_LIGHTS }, () => new Vector4())
+  )
   probeBlendShader.uniforms.runtimeRadianceTorchHeight = new Uniform(RUNTIME_RADIANCE_TORCH_HEIGHT)
   probeBlendShader.uniforms.runtimeRadianceTexture = new Uniform<Texture | null>(null)
   probeBlendShader.uniforms.runtimeRadianceVerticalFalloffRadius =
@@ -3588,7 +3748,7 @@ function patchProbeBlendMaterialShader(
 \t#include <project_vertex>`
       )
   probeBlendShader.fragmentShader =
-    `${shaderFeatureDefines}${vlmFeatureDefines}${lightMapFeatureDefines}${currentPatchConfig.runtimeRadianceTexture ? '#define LEVELSJAM_RUNTIME_RADIANCE 1\n' : ''}uniform vec3 lightMapAmbientTint;\nuniform vec3 lightMapTorchTint;\nuniform sampler2D runtimeRadianceTexture;\nuniform vec4 runtimeRadianceBounds;\nuniform float runtimeRadianceIntensity;\nuniform float runtimeRadianceNormalOffset;\nuniform float runtimeRadianceTorchHeight;\nuniform float runtimeRadianceVerticalFalloffRadius;\nuniform float probeBlendDiffuseIntensity;\nuniform float probeBlendRadianceIntensity;\nvarying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
+    `${shaderFeatureDefines}${vlmFeatureDefines}${lightMapFeatureDefines}${currentPatchConfig.runtimeRadianceTexture ? '#define LEVELSJAM_RUNTIME_RADIANCE 1\n' : ''}uniform vec3 lightMapAmbientTint;\nuniform vec3 lightMapTorchTint;\nuniform sampler2D runtimeRadianceTexture;\nuniform vec4 runtimeRadianceBounds;\nuniform float runtimeRadianceIntensity;\nuniform float runtimeRadianceNormalOffset;\nuniform int runtimeRadianceSconceShadowCount;\nuniform vec4 runtimeRadianceSconceShadows[${RUNTIME_RADIANCE_MAX_LIGHTS}];\nuniform float runtimeRadianceTorchHeight;\nuniform float runtimeRadianceVerticalFalloffRadius;\nuniform float probeBlendDiffuseIntensity;\nuniform float probeBlendRadianceIntensity;\nvarying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
       .replace(
         '#include <envmap_physical_pars_fragment>',
         PROBE_BLEND_SHADER_CHUNK
@@ -5608,6 +5768,17 @@ function getRuntimeRadianceLightSource2D(light: MazeLayout['lights'][number]) {
     x: light.torchPosition.x + (lightDirection.x * sourceOffset),
     z: light.torchPosition.z + (lightDirection.z * sourceOffset)
   }
+}
+
+function getRuntimeRadianceSconceShadowUniforms(layout: MazeLayout) {
+  return layout.lights.slice(0, RUNTIME_RADIANCE_MAX_LIGHTS).map((light) =>
+    new Vector4(
+      light.wallCenter.x,
+      light.wallCenter.z,
+      light.normal.x,
+      light.normal.z
+    )
+  )
 }
 
 function updateRuntimeRadianceEmitterTexture(
@@ -10375,6 +10546,10 @@ function MazeWallMesh({
     surfaceLightmapsEnabled
       ? lightmapContributionIntensity * WALL_LIGHTMAP_INTENSITY_SCALE
       : 0
+  const runtimeRadianceSconceShadows = useMemo(
+    () => getRuntimeRadianceSconceShadowUniforms(layout),
+    [layout]
+  )
   const faceMaterialPatchConfig = useMemo(
     () => ({
       lightMapAmbientTint:
@@ -10384,11 +10559,13 @@ function MazeWallMesh({
       runtimeRadianceBounds: runtimeRadiance.bounds,
       runtimeRadianceIntensity: surfaceLightmapsEnabled ? lightmapContributionIntensity : 0,
       runtimeRadianceNormalOffset: RUNTIME_RADIANCE_SURFACE_NORMAL_OFFSET,
+      runtimeRadianceSconceShadows,
       runtimeRadianceTexture: runtimeRadiance.texture
     }),
     [
       lightmapContributionIntensity,
       lightmapTextureEncoding,
+      runtimeRadianceSconceShadows,
       runtimeRadiance.bounds,
       runtimeRadiance.texture,
       surfaceLightmapsEnabled
