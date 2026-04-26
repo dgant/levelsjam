@@ -140,6 +140,28 @@ test('places each sconce one radius outside the wall face on the lit-cell side',
   }
 })
 
+test('stores each light normal pointing from the wall into the lit cell', async () => {
+  const layout = await getDefaultMazeLayout()
+
+  for (const light of layout.lights) {
+    const expectedNormal = light.side === 'north'
+      ? { x: 0, z: 1 }
+      : light.side === 'east'
+        ? { x: -1, z: 0 }
+        : light.side === 'south'
+          ? { x: 0, z: -1 }
+          : { x: 1, z: 0 }
+    const torchOffsetX = light.torchPosition.x - light.wallCenter.x
+    const torchOffsetZ = light.torchPosition.z - light.wallCenter.z
+
+    assert.deepEqual(light.normal, expectedNormal)
+    assert.ok(
+      (torchOffsetX * light.normal.x) + (torchOffsetZ * light.normal.z) > 0,
+      `light ${light.id} normal should point toward its torch`
+    )
+  }
+})
+
 test('sizes the torch billboard to match its wall clearance', () => {
   assert.equal(TORCH_BILLBOARD_SIZE, WALL_FACE_OFFSET)
 })

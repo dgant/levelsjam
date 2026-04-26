@@ -5442,17 +5442,21 @@ function getRuntimeRadianceBounds(layout: MazeLayout): RuntimeRadianceBounds {
   }
 }
 
-function getRuntimeRadianceLightDirection(side: MazeLayout['lights'][number]['side']) {
+function getRuntimeRadianceFallbackLightDirection(side: MazeLayout['lights'][number]['side']) {
   switch (side) {
     case 'east':
-      return { x: 1, z: 0 }
-    case 'south':
-      return { x: 0, z: 1 }
-    case 'west':
       return { x: -1, z: 0 }
-    default:
+    case 'south':
       return { x: 0, z: -1 }
+    case 'west':
+      return { x: 1, z: 0 }
+    default:
+      return { x: 0, z: 1 }
   }
+}
+
+function getRuntimeRadianceLightDirection(light: MazeLayout['lights'][number]) {
+  return light.normal ?? getRuntimeRadianceFallbackLightDirection(light.side)
 }
 
 function pointInRuntimeRadianceOccluder2D(
@@ -5496,7 +5500,7 @@ function getRuntimeTorchFlicker(lightIndex: number, elapsed: number) {
 }
 
 function getRuntimeRadianceLightSource2D(light: MazeLayout['lights'][number]) {
-  const lightDirection = getRuntimeRadianceLightDirection(light.side)
+  const lightDirection = getRuntimeRadianceLightDirection(light)
   const sourceOffset =
     RUNTIME_RADIANCE_OCCLUDER_NORMAL_PADDING +
     (RUNTIME_RADIANCE_SOURCE_RADIUS * 0.9)
@@ -6090,7 +6094,7 @@ function createRuntimeRadianceSceneTexture(
   }
 
   for (const light of layout.lights) {
-    const lightDirection = getRuntimeRadianceLightDirection(light.side)
+    const lightDirection = getRuntimeRadianceLightDirection(light)
     const lightSource = getRuntimeRadianceLightSource2D(light)
     const centerColumn = MathUtils.clamp(
       Math.floor(((lightSource.x - bounds.minX) / bounds.width) * resolution),
