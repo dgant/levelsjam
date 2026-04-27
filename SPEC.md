@@ -409,6 +409,8 @@
 - The frame-cost profile answers where frame time is going with a markdown tree of frame steps; any measured step averaging at least `0.1ms/frame` is broken down further when the runtime can reasonably instrument its children.
 - The frame-cost profile includes a Chrome tracing tree captured during the same end-to-end traversal so browser main-thread, compositor, and GPU-thread work are broken down from real trace events instead of being hidden in an unmeasured browser bucket.
 - The Chrome tracing tree reports inclusive child costs and explicit self/untraced residual costs for every displayed node, and no displayed leaf may exceed `0.1ms/frame` unless the trace does not expose lower-level child events for that work.
+- The frame-cost profile includes a human-legible frame-time accounting table that names at least 90% of the measured average frame interval, including app-owned render work, browser main-thread trace work, GPU-process trace work, compositor/present work, and wait-for-next-frame time.
+- The frame-cost profile distinguishes additive app-owned scope totals from overlapping browser thread busy times so the report can guide optimization without double-counting parallel work.
 - The frame-cost profile records application-owned named render pipeline scopes, including the main composer frame, each composer pass, custom pass sub-steps, WebGL render submissions, and hot per-frame gameplay/update systems.
 - The frame-cost profile reports GPU timer-query measurements for render/composer scopes when the browser exposes WebGL GPU timer queries.
 - The frame-cost profile annotates long frames with resource-residency deltas so runtime probe, volumetric-lightmap, level, or scene-object churn is visible in the report.
