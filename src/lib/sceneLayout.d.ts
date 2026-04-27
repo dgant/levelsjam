@@ -40,16 +40,6 @@ export type MazeLayout = {
     to: { x: number; y: number }
     yaw: number
   }>
-  gatePosts: Array<{
-    axis: 'x' | 'z'
-    bounds: WallBounds
-    center: { x: number; z: number }
-    gateId: string
-    id: string
-    index: number
-    radius: number
-    type: 'gate-post'
-  }>
   items: Array<{
     cell: { x: number; y: number }
     id: string

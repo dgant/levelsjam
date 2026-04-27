@@ -92,6 +92,32 @@ test('builds a scene layout from a persisted maze with walls, lights, probes, an
   assert.ok(layout.maze.lightmap)
 })
 
+test('runtime reflection-probe manifests match their maze dimensions', () => {
+  const runtimeMazeDirectory = path.join(process.cwd(), 'public', 'maze-data')
+  const mazeFiles = fs.readdirSync(runtimeMazeDirectory).filter((fileName) => /^.+\.json$/.test(fileName) && fileName !== 'index.json')
+
+  for (const fileName of mazeFiles) {
+    const maze = JSON.parse(
+      fs.readFileSync(path.join(runtimeMazeDirectory, fileName), 'utf8')
+    )
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(runtimeMazeDirectory, maze.id, 'probe-assets.json'), 'utf8')
+    )
+    const expectedProbeCount = maze.width * maze.height
+
+    assert.equal(
+      manifest.probes.length,
+      expectedProbeCount,
+      `${maze.id} probe asset count must match width * height`
+    )
+    assert.equal(
+      manifest.probeCount,
+      expectedProbeCount,
+      `${maze.id} manifest probeCount must match width * height`
+    )
+  }
+})
+
 test('expands the baked ground patch beyond the maze footprint', async () => {
   const layout = await getDefaultMazeLayout()
   const bounds = layout.maze.lightmap.groundBounds
@@ -108,6 +134,11 @@ test('uses the requested wall mesh dimensions for maze wall segments', async () 
   assert.equal(WALL_WIDTH, 0.25)
   assert.equal(WALL_HEIGHT, 2)
   assert.equal(WALL_LENGTH, 2)
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(layout, 'gatePosts'),
+    false,
+    'gate doorway post meshes should not be generated'
+  )
 
   for (const wall of layout.walls) {
     const width = wall.bounds.maxX - wall.bounds.minX

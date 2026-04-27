@@ -8,13 +8,6 @@ function getProbeCenterCoordinate(index, count, cellSize) {
   return -((count * cellSize) / 2) + (cellSize / 2) + (index * cellSize)
 }
 
-function getProbeCenterCoordinates(count, cellSize) {
-  return Array.from(
-    { length: count },
-    (_, index) => getProbeCenterCoordinate(index, count, cellSize)
-  )
-}
-
 function getAxisBlend(position, count, cellSize) {
   if (count <= 1) {
     return {
@@ -115,39 +108,31 @@ export function getReflectionProbeBlendForPosition(layout, position) {
 }
 
 export function buildGroundReflectionProbeRects(layout) {
-  const xCenters = getProbeCenterCoordinates(layout.maze.width, MAZE_CELL_SIZE)
-  const zCenters = getProbeCenterCoordinates(layout.maze.height, MAZE_CELL_SIZE)
   const mazeMinX = -((layout.maze.width * MAZE_CELL_SIZE) / 2)
-  const mazeMaxX = (layout.maze.width * MAZE_CELL_SIZE) / 2
   const mazeMinZ = -((layout.maze.height * MAZE_CELL_SIZE) / 2)
-  const mazeMaxZ = (layout.maze.height * MAZE_CELL_SIZE) / 2
-  const xBoundaries = [mazeMinX, ...xCenters, mazeMaxX]
-  const zBoundaries = [mazeMinZ, ...zCenters, mazeMaxZ]
   const rects = []
 
-  for (let zSegment = 0; zSegment < zBoundaries.length - 1; zSegment += 1) {
-    const z0 = zBoundaries[zSegment]
-    const z1 = zBoundaries[zSegment + 1]
-    const zStartIndex = clampIndex(zSegment - 1, layout.maze.height)
-    const zEndIndex = clampIndex(zSegment, layout.maze.height)
+  for (let y = 0; y < layout.maze.height; y += 1) {
+    const z0 = mazeMinZ + (y * MAZE_CELL_SIZE)
+    const z1 = z0 + MAZE_CELL_SIZE
+    const centerZ = (z0 + z1) / 2
 
-    for (let xSegment = 0; xSegment < xBoundaries.length - 1; xSegment += 1) {
-      const x0 = xBoundaries[xSegment]
-      const x1 = xBoundaries[xSegment + 1]
-      const xStartIndex = clampIndex(xSegment - 1, layout.maze.width)
-      const xEndIndex = clampIndex(xSegment, layout.maze.width)
+    for (let x = 0; x < layout.maze.width; x += 1) {
+      const x0 = mazeMinX + (x * MAZE_CELL_SIZE)
+      const x1 = x0 + MAZE_CELL_SIZE
+      const centerX = (x0 + x1) / 2
+      const centerBlend = getReflectionProbeBlendForPosition(layout, {
+        x: centerX,
+        z: centerZ
+      })
 
       rects.push({
-        centerX: (x0 + x1) / 2,
-        centerZ: (z0 + z1) / 2,
+        cell: { x, y },
+        centerX,
+        centerZ,
         depth: z1 - z0,
-        id: `probe-tile-${xSegment}-${zSegment}`,
-        probeIndices: [
-          getProbeIndex(layout.maze.width, xStartIndex, zStartIndex),
-          getProbeIndex(layout.maze.width, xEndIndex, zStartIndex),
-          getProbeIndex(layout.maze.width, xStartIndex, zEndIndex),
-          getProbeIndex(layout.maze.width, xEndIndex, zEndIndex)
-        ],
+        id: `cell-floor-${x}-${y}`,
+        probeIndices: centerBlend.probeIndices,
         region: {
           minX: x0,
           minZ: z0,

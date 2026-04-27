@@ -257,6 +257,7 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
 
   const state = await page.evaluate(() => ({
     error: document.body.dataset.mazeLayoutLoadError ?? null,
+    lighting: window.__levelsjamDebug?.getLevelLightingState?.() ?? [],
     lifecycle: window.__levelsjamDebug?.getMazeLifecycleState?.() ?? null,
     loadedMazeId: document.body.dataset.loadedMazeId ?? null,
     requestedMazeId: document.body.dataset.requestedMazeId ?? null
@@ -268,6 +269,22 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
     requestedMazeId: 'entrance'
   })
   expect(state.lifecycle.loadedMazeIds).toEqual(expect.arrayContaining(['entrance', 'chamber-1']))
+  expect(state.lighting).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        mazeId: 'entrance',
+        ready: true,
+        reflectionReady: true,
+        surfaceLightmapReady: true
+      }),
+      expect.objectContaining({
+        mazeId: 'chamber-1',
+        ready: true,
+        reflectionReady: true,
+        surfaceLightmapReady: true
+      })
+    ])
+  )
 
   const pressAndWaitForTurn = async (key, expectedPlayer) => {
     await page.keyboard.press(key)
@@ -304,6 +321,29 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
     hasTrophy: false
   })
 
+  const transitionSamplesPromise = page.evaluate(() => new Promise((resolve) => {
+    const samples = []
+    const startedAt = performance.now()
+    const sample = () => {
+      const camera = window.__levelsjamDebug?.getCameraState?.() ?? null
+
+      samples.push({
+        mazeId: window.__levelsjamDebug?.getMazeLifecycleState?.()?.instantiatedMazeId ?? null,
+        position: camera?.position ?? null,
+        t: performance.now() - startedAt
+      })
+
+      if (performance.now() - startedAt >= 1500) {
+        resolve(samples)
+        return
+      }
+
+      requestAnimationFrame(sample)
+    }
+
+    requestAnimationFrame(sample)
+  }))
+
   await page.keyboard.press('KeyW')
 
   await page.waitForFunction(
@@ -315,6 +355,7 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
   const transitionedState = await page.evaluate(() => ({
     lifecycle: window.__levelsjamDebug?.getMazeLifecycleState?.() ?? null,
     camera: window.__levelsjamDebug?.getCameraState?.() ?? null,
+    lighting: window.__levelsjamDebug?.getLevelLightingState?.() ?? [],
     sceneMountCount: document.body.dataset.sceneMountCount ?? null,
     turn: window.__levelsjamDebug?.getTurnStateSummary?.() ?? null
   }))
@@ -322,6 +363,21 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
   expect(transitionedState.lifecycle.loadedMazeIds).toEqual(
     expect.arrayContaining(['entrance', 'chamber-1', 'maze-001', 'maze-002', 'maze-003', 'maze-005'])
   )
+  await expect
+    .poll(
+      async () => page.evaluate(() => window.__levelsjamDebug?.getLevelLightingState?.() ?? []),
+      {
+        timeout: 30_000,
+        intervals: [250, 500, 1_000]
+      }
+    )
+    .toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ mazeId: 'chamber-1', ready: true }),
+        expect.objectContaining({ mazeId: 'maze-001', ready: true }),
+        expect.objectContaining({ mazeId: 'maze-003', ready: true })
+      ])
+    )
   expect(transitionedState.turn.escaped).toBe(false)
   expect(transitionedState.turn.player.cell).toEqual({ x: 2, y: 17 })
   expect(transitionedState.turn.player).toMatchObject({
@@ -332,6 +388,16 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
   expect(transitionedState.sceneMountCount).toBe(beforeBoundaryMove.sceneMountCount)
   expect(Math.abs(transitionedState.camera.yaw - beforeBoundaryMove.camera.yaw)).toBeLessThan(0.001)
   expect(Math.abs(transitionedState.camera.pitch - beforeBoundaryMove.camera.pitch)).toBeLessThan(0.001)
+  const transitionSamples = await transitionSamplesPromise
+  const firstDestinationFrame = transitionSamples.findIndex(
+    (sample) => Array.isArray(sample.position) && sample.position[2] <= -3.8
+  )
+  expect(firstDestinationFrame).toBeGreaterThanOrEqual(0)
+  expect(
+    transitionSamples
+      .slice(firstDestinationFrame)
+      .some((sample) => Array.isArray(sample.position) && sample.position[2] > -3.2)
+  ).toBe(false)
 
   await pressAndWaitForTurn('ArrowRight', {
     cell: { x: 2, y: 17 },

@@ -47,6 +47,19 @@ async function findDebugPosition(page, role, maxIndex = 8) {
   )
 }
 
+async function pressAndWaitForPlayer(page, key, expectedPlayer) {
+  await page.keyboard.press(key)
+  await expect
+    .poll(
+      async () => page.evaluate(() => window.__levelsjamDebug.getTurnStateSummary?.()?.player ?? null),
+      {
+        timeout: 10_000,
+        intervals: [50, 100, 250]
+      }
+    )
+    .toMatchObject(expectedPlayer)
+}
+
 test('maze runtime exposes gate/item/lifecycle and memory state', async ({ page }) => {
   const consoleErrors = []
   const pageErrors = []
@@ -203,6 +216,61 @@ test('maze runtime exposes gate/item/lifecycle and memory state', async ({ page 
   expect(pageErrors).toEqual([])
 })
 
+test('maze 005 sword pickup swaps the floor sword for the held sword', async ({ page }) => {
+  const consoleErrors = []
+  const pageErrors = []
+
+  page.on('console', (message) => {
+    if (message.type() === 'error') {
+      consoleErrors.push(message.text())
+    }
+  })
+
+  page.on('pageerror', (error) => {
+    pageErrors.push(String(error))
+  })
+
+  await waitForSceneReady(page, 'maze-005')
+  await page.evaluate(() => window.__levelsjamDebug.setAnimationSpeedMultiplier?.(20))
+
+  await pressAndWaitForPlayer(page, 'ArrowRight', {
+    cell: { x: 0, y: 2 },
+    direction: 'south',
+    hasSword: false
+  })
+  await pressAndWaitForPlayer(page, 'KeyW', {
+    cell: { x: 0, y: 3 },
+    direction: 'south',
+    hasSword: false
+  })
+  await pressAndWaitForPlayer(page, 'KeyW', {
+    cell: { x: 0, y: 4 },
+    direction: 'south',
+    hasSword: true
+  })
+
+  const pickupState = await page.evaluate(() => window.__levelsjamDebug.getTurnStateSummary?.())
+  expect(pickupState.swordState).toBe('held')
+  await expect
+    .poll(async () => ({
+      floorSword: await findDebugPosition(page, 'maze-sword'),
+      heldSword: await findDebugPosition(page, 'held-sword')
+    }), {
+      timeout: 10_000,
+      intervals: [100, 250, 500]
+    })
+    .toMatchObject({
+      floorSword: null,
+      heldSword: {
+        index: expect.any(Number),
+        position: expect.any(Array)
+      }
+    })
+
+  expect(consoleErrors).toEqual([])
+  expect(pageErrors).toEqual([])
+})
+
 test('replay solution drives the maze to a winning escaped state', async ({ page }) => {
   const consoleErrors = []
   const pageErrors = []
@@ -218,6 +286,7 @@ test('replay solution drives the maze to a winning escaped state', async ({ page
   })
 
   await waitForSceneReady(page, 'maze-001')
+  await page.evaluate(() => window.__levelsjamDebug.setAnimationSpeedMultiplier?.(20))
 
   const started = await page.evaluate(() => window.__levelsjamDebug.startSolutionReplay?.() ?? false)
   expect(started).toBe(true)
@@ -232,17 +301,25 @@ test('replay solution drives the maze to a winning escaped state', async ({ page
     })
 
   await expect
-    .poll(async () => page.evaluate(() => window.__levelsjamDebug.getTurnStateSummary?.()), {
+    .poll(async () => page.evaluate(() => ({
+      lifecycle: window.__levelsjamDebug.getMazeLifecycleState?.(),
+      turn: window.__levelsjamDebug.getTurnStateSummary?.()
+    })), {
       timeout: 60_000,
       intervals: [250, 500, 1_000]
     })
     .toMatchObject({
-      dead: false,
-      escaped: true,
-      player: {
-        hasTrophy: true
+      lifecycle: {
+        instantiatedMazeId: 'chamber-1'
       },
-      replayActive: false
+      turn: {
+        dead: false,
+        escaped: false,
+        player: {
+          hasTrophy: true
+        },
+        replayActive: false
+      }
     })
 
   expect(consoleErrors).toEqual([])

@@ -38,19 +38,21 @@ test('blends across four probes at the midpoint between both axes', () => {
   assert.deepEqual(blend.weights, [0.25, 0.25, 0.25, 0.25])
 })
 
-test('builds ground probe blend tiles that cover only the maze cell footprint continuously', () => {
+test('builds one ground probe blend tile per maze cell', () => {
   const rects = buildGroundReflectionProbeRects(layout)
 
-  assert.equal(rects.length, 16)
+  assert.equal(rects.length, 9)
   assert.equal(Math.min(...rects.map((rect) => rect.region.minX)), -3)
   assert.equal(Math.min(...rects.map((rect) => rect.region.minZ)), -3)
   assert.equal(Math.max(...rects.map((rect) => rect.region.minX + rect.region.sizeX)), 3)
   assert.equal(Math.max(...rects.map((rect) => rect.region.minZ + rect.region.sizeZ)), 3)
   assert.deepEqual(rects[0].probeIndices, [0, 0, 0, 0])
-  assert.deepEqual(rects[5].probeIndices, [0, 1, 3, 4])
-  assert.deepEqual(rects[5].region, {
-    minX: -2,
-    minZ: -2,
+  assert.deepEqual(rects[0].cell, { x: 0, y: 0 })
+  assert.deepEqual(rects[4].probeIndices, [4, 5, 7, 8])
+  assert.deepEqual(rects[4].cell, { x: 1, y: 1 })
+  assert.deepEqual(rects[4].region, {
+    minX: -1,
+    minZ: -1,
     sizeX: 2,
     sizeZ: 2
   })

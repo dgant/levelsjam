@@ -110,3 +110,23 @@ test('gate dynamic volumetric material variant stays under the WebGL sampler bud
     'the test should cover the previous six-sampler depth-atlas pressure that made gates disappear'
   )
 })
+
+test('minotaur runtime materials use the authored dark base tint', () => {
+  const gltf = readGltf('public/models/minotaur-runtime/scene.gltf')
+  const expectedTint = [
+    0x2b / 255,
+    0x21 / 255,
+    0x30 / 255,
+    1
+  ]
+
+  assert.ok(gltf.materials?.length > 0)
+
+  for (const material of gltf.materials) {
+    assert.deepEqual(
+      material.pbrMetallicRoughness?.baseColorFactor,
+      expectedTint,
+      `${material.name ?? '<unnamed>'} should use #2b2130 as its base color factor`
+    )
+  }
+})

@@ -19,6 +19,8 @@
 - The game begins in the authored `Entrance` level.
 - Player movement through an authored level exit transitions seamlessly into the connected level without fading, showing a loading transition, or exposing the boundary between levels.
 - Walking across a connected level boundary preserves the player's world-space position, camera yaw, camera pitch, inventory flags, held-item visibility, and current input flow.
+- Walking across a connected level boundary keeps the player camera continuous through the final frame of the move animation and the first frame of the destination level; the camera must not snap back to the source exit cell before settling in the destination ingress cell.
+- Only the active gameplay level may render camera-attached held pickup models; adjacent rendered levels may render their ground pickups but must not attach their saved inventory state to the active camera.
 - Walking across a connected level boundary updates only the active rules context and streamed-neighborhood bookkeeping; it does not teleport the player, rotate the player, remount the scene, reset the target level, or show pickup items that were not actually picked up.
 - Walking across a connected level boundary maps the player into the destination-owned ingress cell in the destination level while leaving all scene geometry in its authored world-space position.
 - The runtime renders the current level and the levels directly adjacent to it so ordinary walking between connected levels does not reveal level streaming.
@@ -27,10 +29,16 @@
 - Each runtime level occupies world cells that do not overlap any other runtime level's world cells.
 - Runtime levels do not share maze wall volumes with any other runtime level.
 - Each level transition is represented visually by a single destination-owned ingress cell; non-`Entrance` player starts are placed in that ingress cell and face into the destination level.
+- Runtime scene objects for a rendered level are keyed by stable level identity so changing the active gameplay context does not unmount and recreate an already-rendered adjacent level.
+- Each rendered level owns its own resident baked surface lightmap, volumetric-lightmap coefficients, and local reflection-probe textures.
+- The active level affects gameplay input, rules updates, debug focus, and loading-readiness bookkeeping; it does not determine which lighting/probe resources are bound to other rendered levels.
+- Adjacent rendered levels use their own lightmaps and probe data while they are visible from the current level, so walking across a boundary does not cause lighting bindings to churn or appear unlit until the destination becomes active.
 - When precomputed visibility is enabled and the player's current visible cell set includes a level transition cell, the adjacent streamed level renders the cells that are precomputed-visible from that adjacent level's ingress cell rather than rendering the entire adjacent maze.
 - When precomputed visibility is disabled, adjacent streamed levels may render their full geometry for debugging.
 - Runtime level transitions do not synchronously fetch, decode, upload, instantiate, or shader-compile level assets at the moment the player crosses a boundary; that work is completed ahead of time for adjacent levels.
 - Level floor meshes are spawned only inside the level's own cell footprint and not in the lightmap margin or any neighboring level's footprint.
+- Level floor visibility is evaluated per whole cell; precomputed visibility may hide an entire floor cell, but it must not clip a visible floor cell into partial missing-cell fragments.
+- Level floor meshes are emitted as one 2m by 2m patch per maze cell, centered on that cell, so floor mesh boundaries align with the gameplay grid.
 - Once a level's gameplay-rule state has been loaded, the runtime keeps that state available for the rest of the session instead of unloading or resetting it during ordinary level traversal.
 - Player movement between connected levels is a level transition, not an escape state.
 
@@ -145,6 +153,7 @@
 - Reflection probes and volumetric-lightmap probes share the same probe positions, local areas of influence, and capture-time occluders.
 - Gates, monsters, ground pickup items, and held pickup items are omitted from offline lightmap, volumetric-lightmap, and reflection-probe baking.
 - Diffuse volumetric-lightmap shading is evaluated per pixel rather than from one constant probe blend per mesh.
+- Diffuse volumetric-lightmap shading and volumetric-fog probe lighting blend continuously across connected cells, including across the midlines between adjacent probe centers, while still rejecting contribution across maze walls when volumetric occlusion is enabled.
 - Diffuse volumetric-lightmap shading visibly contributes to surface materials when its runtime intensity is nonzero.
 - Local reflection probes visibly contribute to reflective surface materials when their runtime intensity is nonzero.
 - Geometry that lives primarily inside a maze cell, such as monsters and cell-ground surfaces, evaluates diffuse volumetric-lightmap shading from the current probe plus the four cardinally adjacent probes.
@@ -196,7 +205,9 @@
 - Gates not adjacent to the player are closed in both the headless rules state and the rendered animation state.
 - Raised gates block player and monster movement exactly like walls.
 - Raised gates do not block monster line of sight to the player.
-- Each gate uses the `metal_gate` model, flipped upside down, scaled to fill the `2m x 2m` cell edge opening, and animated from underground to above ground over `250ms` when opening or closing.
+- Gates render only the imported `metal_gate` model and do not include extra cylindrical doorway-post meshes.
+- Each gate uses the `metal_gate` model, flipped upside down, scaled proportionally so its rendered width equals the open passage between two parallel maze walls, and animated over `250ms` when opening or closing.
+- An opened gate lowers by `1.5m`, leaving part of the gate visibly protruding from the floor rather than disappearing completely below the floor.
 - Every gate state change published by the rules engine is animated by sliding between the underground open position and the above-ground closed position, including state changes that occur before and after player moves.
 - Gate animations run in parallel with player and monster movement animations rather than teleporting or disappearing between turns.
 - The runtime uses offline-resized `512x512` gate textures instead of the oversized source textures.
@@ -208,6 +219,7 @@
 - The trophy uses the `head_of_a_bull` model, scaled proportionally to `0.5m` tall, and starts resting on the ground in its cell.
 - The trophy runtime model uses an offline-resized texture set instead of the source asset's oversized `8k` texture so loading the page does not allocate hundreds of megabytes for a small prop.
 - When the player enters the sword cell without already holding a sword, the sword is picked up and attached to the first-person camera rig in the right hand.
+- When the player picks up the sword, the floor sword disappears and the held sword appears attached to the player camera for the active level.
 - When the player enters the trophy cell without already holding the trophy, the trophy is picked up and attached to the first-person camera rig in the left hand.
 - Held sword and trophy meshes remain visible in first person at their authored hand positions after pickup until they are consumed, dropped, or the maze resets.
 - The held sword is positioned in the player's right hand within the camera frustum and points forward from the player perspective.
@@ -226,8 +238,7 @@
 - Player inputs are buffered and consumed in order when the rules engine is ready for the next player action.
 - Held movement keys enqueue at most one action until that key is released and pressed again.
 - The player input queue stores at most ten pending commands.
-- If turn commands are queued after a move command and before any subsequent move command, the camera begins animating those turns immediately for responsiveness while preserving the final rules-facing direction.
-- If a right turn is commanded while a left turn animation is still in progress, or a left turn is commanded while a right turn animation is still in progress, the camera turn animation immediately reverses toward the newly commanded final direction.
+- Player move commands and player turn commands execute as separate queued commands; a queued turn does not execute during the animation of a preceding move command.
 - Camera rotation during and after movement is derived from one continuous displayed yaw target and never jumps back to the pre-move direction or applies the same queued turn twice.
 - Pressing `W` or `ArrowUp` queues a one-cell forward move in the current camera direction.
 - Pressing `S` or `ArrowDown` queues a one-cell backward move in the current camera direction.
@@ -259,6 +270,7 @@
 - The werewolf model loads from `public/models/awil_werewolf.zip`, scales proportionally to fit a `1.6m` cube, and places its bottom center at the tile bottom-center.
 - The spider model loads from `public/models/pbr_jumping_spider_monster.zip`, scales proportionally to fit a `1.4m` cube, and is placed as a wall-walking spider with its base oriented along the configured wall and floor.
 - The minotaur runtime model loads from an offline-simplified asset derived from `public/models/minotaur.zip`, reduces the source mesh to roughly ten thousand triangles, scales proportionally to fit a `2.7m` cube, and places its bottom `0.25m` below the tile bottom-center.
+- The minotaur model's base tint is `#2b2130`.
 - The werewolf runtime model loads from an offline-joined asset derived from `public/models/awil_werewolf.zip`, preserves the authored PBR texture set, and reduces the source asset's static over-split skinned meshes to a single regular mesh.
 - Monster GLTF materials preserve their authored PBR texture and material inputs where those inputs load successfully.
 - Monster GLTF materials participate in the local volumetric-lightmap diffuse path and the local reflection-probe specular path.
@@ -495,6 +507,7 @@
 - The page does not show speculative branding captions, launcher buttons, or click-to-enter copy.
 - The loading overlay does not fade out until the basic required scene textures are loaded.
 - Runtime lightmap and probe loading prioritizes the assets nearest the player's current position before more distant maze data.
+- Runtime lightmap and probe readiness is tracked per rendered level, and the loading overlay remains until the current level and the adjacent levels needed for ordinary seamless walking are resident enough to render without visible pop-in.
 - Runtime specular reflection probe textures outside the startup-critical probe set load after the current scene is ready so they do not stall the loading ellipsis or solution replay startup.
 - Dynamic runtime models for gates, monsters, and held props are not part of the startup-critical render path; their gameplay state remains loaded, and their visuals may be prepared immediately after the current level's walls, floors, sconces, lightmaps, and startup probes are ready.
 - Baked runtime mazes use the HDRI as the visible background but do not synchronously generate a live PMREM environment map during startup, because surface lighting and reflections come from baked lightmaps and probes.
@@ -545,6 +558,7 @@
 - Every debug control that affects rendering updates the live rendered result immediately when the control changes; no control requires disabling and re-enabling an effect before the new value takes effect.
 - Double-clicking a debug control label resets only that specific setting to its authored default and does not reset the whole tab.
 - The debug controls panel does not expose controls for removed effects or removed atmosphere systems.
+- The `Replay solution` action is edge-triggered by a new user request. Re-entering a level after a replay completes does not restart the previous replay request.
 
 ## Performance Requirements
 - The page becomes interactive quickly on load.

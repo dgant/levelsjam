@@ -2757,42 +2757,6 @@ export function getMazeGatePlacements(maze) {
   })
 }
 
-export function getMazeGatePostPlacements(maze) {
-  return getMazeGatePlacements(maze).flatMap((gate) => {
-    const postOffsets = gate.axis === 'z'
-      ? [
-          { x: 0, z: -(MAZE_CELL_SIZE / 2) },
-          { x: 0, z: MAZE_CELL_SIZE / 2 }
-        ]
-      : [
-          { x: -(MAZE_CELL_SIZE / 2), z: 0 },
-          { x: MAZE_CELL_SIZE / 2, z: 0 }
-        ]
-
-    return postOffsets.map((offset, index) => ({
-      axis: gate.axis,
-      bounds: {
-        id: `${gate.id}:post-${index}`,
-        maxX: gate.center.x + offset.x + (MAZE_WALL_THICKNESS / 4),
-        maxY: GROUND_Y + MAZE_WALL_HEIGHT,
-        maxZ: gate.center.z + offset.z + (MAZE_WALL_THICKNESS / 4),
-        minX: gate.center.x + offset.x - (MAZE_WALL_THICKNESS / 4),
-        minY: GROUND_Y,
-        minZ: gate.center.z + offset.z - (MAZE_WALL_THICKNESS / 4)
-      },
-      center: {
-        x: gate.center.x + offset.x,
-        z: gate.center.z + offset.z
-      },
-      gateId: gate.id,
-      id: `${gate.id}:post-${index}`,
-      index,
-      radius: MAZE_WALL_THICKNESS / 4,
-      type: 'gate-post'
-    }))
-  })
-}
-
 function hashString(value) {
   let hash = 2166136261
 
@@ -2926,7 +2890,6 @@ export function getMazeSceneLayout(maze, sconceRadius) {
     cornerFillers: getMazeCornerFillers(mazeWithVisibility),
     decals: getMazeDecalPlacements(mazeWithVisibility),
     gates: getMazeGatePlacements(mazeWithVisibility),
-    gatePosts: getMazeGatePostPlacements(mazeWithVisibility),
     items: getMazeItemPlacements(mazeWithVisibility),
     lights: getMazeTorchPlacements(mazeWithVisibility, sconceRadius),
     maze: mazeWithVisibility,
