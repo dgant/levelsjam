@@ -5606,7 +5606,7 @@ function getRuntimeSurfaceLightmapEncoding(
   const source = getSelectedSurfaceLightmapSource(lightmap, sourceKey)
   const encoding = source.encoding ?? lightmap.encoding
 
-  return imageUrl?.endsWith('surface-lightmap-rgbe.png') || encoding === 'rgbe8'
+  return imageUrl?.endsWith('-rgbe.png') || encoding === 'rgbe8'
     ? 'rgbe8'
     : 'linear'
 }
@@ -5697,7 +5697,7 @@ function useSurfaceLightmapAtlasTexture(
 
         if (
           imageUrl &&
-          (imageUrl.endsWith('surface-lightmap-rgbe.png') || sourceEncoding === 'rgbe8')
+          (imageUrl.endsWith('-rgbe.png') || sourceEncoding === 'rgbe8')
         ) {
           return {
             encoding: 'rgbe8' as const,

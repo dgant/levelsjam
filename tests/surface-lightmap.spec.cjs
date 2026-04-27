@@ -97,8 +97,8 @@ test('surface lightmapped wall remains visibly lit with runtime effects disabled
   expect(pageErrors).toEqual([])
 })
 
-test('surface lightmap debug selector loads alternate atlas sources', async ({ page }) => {
-  await page.goto('/?maze=entrance', { waitUntil: 'domcontentloaded' })
+test('surface lightmap debug selector loads and renders alternate atlas sources', async ({ page }) => {
+  await page.goto('/?maze=maze-003', { waitUntil: 'domcontentloaded' })
   await expect
     .poll(async () => page.locator('#root .loading-overlay').getAttribute('data-loading-complete'), {
       timeout: 20_000,
@@ -112,11 +112,40 @@ test('surface lightmap debug selector loads alternate atlas sources', async ({ p
   const responsePromise = page.waitForResponse(
     (response) =>
       response.status() === 200 &&
-      response.url().includes('/maze-data/entrance/surface-lightmap-bounce-only-rgbe.png'),
+      response.url().includes('/maze-data/maze-003/surface-lightmap-soft-shadows-rgbe.png'),
     { timeout: 15_000 }
   )
 
-  await page.getByLabel('Surface Lightmap Source').selectOption('bounce-only')
+  await page.evaluate(() => {
+    window.__levelsjamDebug.setVisualSettings({
+      ambientOcclusionMode: 'off',
+      bloom: { enabled: false },
+      depthOfField: { enabled: false },
+      exposureStops: -6,
+      iblContribution: { enabled: false, intensity: 0 },
+      lensFlare: { enabled: false },
+      reflectionContribution: { enabled: false, intensity: 0 },
+      ssr: { enabled: false, intensity: 0 },
+      vignette: { enabled: false },
+      volumetricLighting: { enabled: false, intensity: 0 }
+    })
+
+    const position = window.__levelsjamDebug.getDebugPosition('maze-wall', 10)
+    window.__levelsjamDebug.isolateDebugRole('maze-wall', 10)
+    window.__levelsjamDebug.setView(
+      [position[0] + 1.6, position[1] + 0.8, position[2] + 2.4],
+      [position[0], position[1] + 0.8, position[2]]
+    )
+  })
+
+  await page.getByLabel('Surface Lightmap Source').selectOption('soft-shadows')
   await responsePromise
-  await expect(page.getByLabel('Surface Lightmap Source')).toHaveValue('bounce-only')
+  await expect(page.getByLabel('Surface Lightmap Source')).toHaveValue('soft-shadows')
+  await page.waitForTimeout(500)
+
+  const screenshot = await page.locator('canvas').screenshot()
+  const summary = summarizePng(screenshot)
+
+  expect(summary.nonBlackPixelCount).toBeGreaterThan(100_000)
+  expect(summary.averageLuminance).toBeGreaterThan(20)
 })

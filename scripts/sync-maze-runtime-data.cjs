@@ -50,7 +50,7 @@ function getExistingLightmapDebugSources(mazeId, mazeOutputDirectory) {
 
     debugSources[source.key] = {
       atlasUrl: `${mazeId}/${source.fileName}`,
-      encoding: 'rgb16f',
+      encoding: 'rgbe8',
       label: source.label
     }
   }
