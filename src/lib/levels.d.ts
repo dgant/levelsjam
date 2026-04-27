@@ -21,7 +21,7 @@ export function getRuntimeLevelWorldTransform(id: string): {
   z: number
 }
 
-export function createAuthoredRuntimeMaze(id: string): unknown | null
+export function createAuthoredRuntimeMaze(id: string): Promise<unknown | null>
 
 export function resolveRuntimeMazeIdForLevel(
   levelName: string,

@@ -244,7 +244,7 @@ export function getRuntimeLevelWorldTransform(id) {
     : { x: 0, z: 0, rotationY: 0 }
 }
 
-export function createAuthoredRuntimeMaze(id) {
+export async function createAuthoredRuntimeMaze(id) {
   if (!isAuthoredRuntimeLevelId(id)) {
     return null
   }
@@ -268,7 +268,7 @@ export function createAuthoredRuntimeMaze(id) {
   }
 
   maze.visibility = computeMazeCellVisibility(maze)
-  maze.lightmap = bakeMazeLightmap(maze)
+  maze.lightmap = await bakeMazeLightmap(maze)
   authoredLevelMazeCache.set(id, maze)
 
   return {

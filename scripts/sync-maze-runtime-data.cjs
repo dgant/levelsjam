@@ -111,7 +111,7 @@ async function main() {
 
   for (let index = 0; index < authoredLevelIds.length; index += 1) {
     const authoredLevelId = authoredLevelIds[index]
-    const maze = createAuthoredRuntimeMaze(authoredLevelId)
+    const maze = await createAuthoredRuntimeMaze(authoredLevelId)
 
     if (!maze) {
       throw new Error(`Failed to create authored runtime level ${authoredLevelId}`)

@@ -277,9 +277,10 @@ async function main() {
     const page = await browser.newPage({
       viewport: { width: 800, height: 450 }
     })
-    const authoredMazes = getAuthoredRuntimeLevelIds()
-      .map((id) => createAuthoredRuntimeMaze(id))
-      .filter(Boolean)
+    const authoredMazes = (await Promise.all(
+      getAuthoredRuntimeLevelIds()
+        .map((id) => createAuthoredRuntimeMaze(id))
+    )).filter(Boolean)
     const allMazes = [...authoredMazes, ...MAZES]
     const mazesToCapture = requestedMazeIds.length > 0
       ? allMazes.filter((maze) => requestedMazeIds.includes(maze.id))

@@ -50,6 +50,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Run the maze-generation validation script or its test entrypoint whenever maze files or maze rules change so persisted mazes keep their baked lightmaps in sync.
 - Run `npm run test:maze:runner` after changing maze generation, maze validation, baked lightmap construction, or persisted maze cleanup. It writes per-test timings to `logs/latest-maze-test-profile.json` and enforces the bounded maze-test budget.
 - Run `npm run ensure:mazes` when persisted maze runtime payloads or reflection-probe assets must be refreshed. Expect the fast existing-maze validation and artifact sync phase to be separate from the much slower full reflection-probe export phase.
+- The surface-lightmap bake uses a WebGL2 GPU worker launched through installed Chrome; keep Chrome available on development machines so persisted maze and authored-level lightmaps can be regenerated.
 - Verify the main page renders the 3D scene without console errors.
 - Verify the loading overlay appears with `MINOTAUR` and `Entering the labyrinth...` before the scene fades in.
 - Verify the loading overlay does not fade out before the basic required scene textures are available in the mounted scene.

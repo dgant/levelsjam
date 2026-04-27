@@ -19,7 +19,6 @@ import {
   getMazeSceneLayout
 } from './maze.js'
 import {
-  createAuthoredRuntimeMaze,
   getAuthoredRuntimeLevelIds,
   isAuthoredRuntimeLevelId
 } from './levels.js'
@@ -131,10 +130,6 @@ async function loadPersistedMaze(id: string) {
 
   if (!response.ok) {
     if (response.status === 404) {
-      if (isAuthoredRuntimeLevelId(id)) {
-        return createAuthoredRuntimeMaze(id) as PersistedMaze | null
-      }
-
       return null
     }
 

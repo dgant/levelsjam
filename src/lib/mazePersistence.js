@@ -120,7 +120,7 @@ function isAcceptableCandidate(maze, validation) {
   )
 }
 
-function generateReplacementMaze({
+async function generateReplacementMaze({
   fileName,
   mazeFactory,
   maxGenerationAttempts,
@@ -139,7 +139,7 @@ function generateReplacementMaze({
       maze.visibility = computeMazeCellVisibility(maze)
     }
     if (!maze.lightmap) {
-      maze.lightmap = bakeMazeLightmap(maze)
+      maze.lightmap = await bakeMazeLightmap(maze)
     }
     const validation = validateMaze(maze)
 
@@ -422,7 +422,7 @@ export async function ensureMazeFiles({
     const shouldRewrite = bakeLightmaps && needsMazeRewrite(maze)
     if (shouldRewrite) {
       maze.visibility = computeMazeCellVisibility(maze)
-      maze.lightmap = bakeMazeLightmap(maze)
+      maze.lightmap = await bakeMazeLightmap(maze)
       fs.writeFileSync(filePath, serializeMazeModule(maze))
       reportProgress({
         action: 'rewrite-lightmap',
@@ -436,7 +436,7 @@ export async function ensureMazeFiles({
     })
 
     if (!validation.valid) {
-      const replacement = generateReplacementMaze({
+      const replacement = await generateReplacementMaze({
         fileName,
         mazeFactory,
         maxGenerationAttempts,
@@ -525,7 +525,7 @@ export async function ensureMazeFiles({
       maze.visibility = computeMazeCellVisibility(maze)
     }
     if (bakeLightmaps && !maze.lightmap) {
-      maze.lightmap = bakeMazeLightmap(maze)
+      maze.lightmap = await bakeMazeLightmap(maze)
     }
     fs.writeFileSync(
       path.join(directory, fileName),

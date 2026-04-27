@@ -2,7 +2,6 @@ import {
   AUTHORED_LIGHTING_SOURCE_SCALE,
   getHdrLightingIntensity
 } from './lightingCalibration.js'
-import { DataUtils } from 'three'
 import {
   getMazeSolutionMoveBound,
   solveMaze,
@@ -15,7 +14,7 @@ export const MAZE_CELL_SIZE = 2
 export const MAZE_WALL_THICKNESS = 0.25
 export const MAZE_WALL_HEIGHT = 2
 export const MAZE_TARGET_COUNT = 5
-export const MAZE_LIGHTMAP_VERSION = 25
+export const MAZE_LIGHTMAP_VERSION = 26
 export const MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS = 0.125
 
 const MAZE_LIGHTMAP_GROUND_TILE_SIZE = 256
@@ -28,8 +27,6 @@ const MAZE_LIGHTMAP_TORCH_STRENGTH = AUTHORED_LIGHTING_SOURCE_SCALE / 50
 const MAZE_LIGHTMAP_MIN_RAW_WALL_OCCLUSION_CONTRIBUTION = 0
 const MAZE_LIGHTMAP_GROUND_SUPERSAMPLE_GRID = 1
 const MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID = 2
-const MAZE_LIGHTMAP_GROUND_AMBIENT_SAMPLE_GRID = 40
-const MAZE_LIGHTMAP_WALL_AMBIENT_SAMPLE_GRID = 16
 const MAZE_LIGHTMAP_SKY_RAY_DISTANCE = 24
 const MAZE_REFLECTION_PROBE_Y = 1.25
 const MAZE_TORCH_LIGHT_COLOR = [10, 2.0863687013464577, 0]
@@ -756,7 +753,7 @@ function hasValidMazeLightmap(maze) {
 
   return walls.every((wall) => {
     const rects = lightmap.wallRects[wall.id]
-    return Boolean(rects?.nz && rects?.pz)
+    return Boolean(rects?.nx && rects?.px && (rects.nz || rects.pz))
   })
 }
 
@@ -1153,7 +1150,9 @@ export function generateMaze(seed = Date.now(), options = {}) {
   maze.generationMs = performance.now() - startTime
   recordMazeSolution(maze)
   if (bakeLightmap) {
-    maze.lightmap = bakeMazeLightmap(maze)
+    throw new Error(
+      'generateMaze no longer performs synchronous lightmap baking; call bakeMazeLightmap(maze) from async tooling after generation'
+    )
   }
   maze.totalGenerationMs = performance.now() - startTime
 
@@ -2349,7 +2348,7 @@ export function computeMazeVolumetricLightmapCoefficients(
   return coefficients
 }
 
-export function bakeMazeLightmap(
+export async function bakeMazeLightmap(
   maze,
   sconceRadius = MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS
 ) {
@@ -2377,6 +2376,19 @@ export function bakeMazeLightmap(
   )
   const wallRects = {}
   const surfaceGroupRects = {}
+  const surfaces = [{
+    alignUToRectEdges: false,
+    rect: groundRect,
+    surfaceA: [
+      groundBounds.minX,
+      groundBounds.minZ,
+      groundBounds.width,
+      groundBounds.depth
+    ],
+    surfaceB: [0, 0, 0, 0],
+    supersampleGrid: MAZE_LIGHTMAP_GROUND_SUPERSAMPLE_GRID,
+    type: 0
+  }]
 
   for (const surfaceGroup of surfaceGroups) {
     const groupWidth = surfaceGroup.walls.length === 1
@@ -2426,6 +2438,30 @@ export function bakeMazeLightmap(
     }
   }
 
+  for (const surfaceGroup of surfaceGroups) {
+    for (const faceKey of ['nz', 'pz']) {
+      const rect = surfaceGroupRects[surfaceGroup.id][faceKey]
+
+      if (!rect) {
+        continue
+      }
+
+      surfaces.push({
+        alignUToRectEdges: true,
+        rect,
+        surfaceA: [
+          surfaceGroup.center.x,
+          surfaceGroup.center.z,
+          surfaceGroup.length,
+          surfaceGroup.yaw
+        ],
+        surfaceB: [faceKey === 'pz' ? 1 : -1, 0, 0, 0],
+        supersampleGrid: MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID,
+        type: 1
+      })
+    }
+  }
+
   for (const wall of walls) {
     const existingRects = wallRects[wall.id] ?? {}
 
@@ -2442,251 +2478,62 @@ export function bakeMazeLightmap(
         MAZE_LIGHTMAP_WALL_TILE_HEIGHT
       )
     }
+
+    for (const faceKey of ['nx', 'px']) {
+      surfaces.push({
+        alignUToRectEdges: false,
+        rect: wallRects[wall.id][faceKey],
+        surfaceA: [
+          wall.center.x,
+          wall.center.z,
+          wall.yaw,
+          0
+        ],
+        surfaceB: [faceKey === 'px' ? 1 : -1, 0, 0, 0],
+        supersampleGrid: MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID,
+        type: 2
+      })
+    }
   }
 
   const atlasHeight = getLightmapAtlasHeight(packer)
-  const atlasFloatData = new Float32Array(atlasWidth * atlasHeight * 3)
-
-  const writeColorRect = (
-    target,
-    rect,
-    supersampleGrid,
-    sampleColor,
-    options = {}
-  ) => {
-    const alignUToRectEdges = options.alignUToRectEdges ?? false
-
-    for (let row = 0; row < rect.height; row += 1) {
-      for (let column = 0; column < rect.width; column += 1) {
-        const accumulatedColor = [0, 0, 0]
-
-        for (let sampleRow = 0; sampleRow < supersampleGrid; sampleRow += 1) {
-          for (let sampleColumn = 0; sampleColumn < supersampleGrid; sampleColumn += 1) {
-            const u = alignUToRectEdges && rect.width > 1
-              ? column / (rect.width - 1)
-              : (
-                  column +
-                  ((sampleColumn + 0.5) / supersampleGrid)
-                ) / rect.width
-            const v = (
-              row +
-              ((sampleRow + 0.5) / supersampleGrid)
-            ) / rect.height
-
-            const color = sampleColor(u, v)
-
-            accumulatedColor[0] += Math.max(0, color[0] ?? 0)
-            accumulatedColor[1] += Math.max(0, color[1] ?? 0)
-            accumulatedColor[2] += Math.max(0, color[2] ?? 0)
-          }
-        }
-
-        const scale = 1 / (supersampleGrid * supersampleGrid)
-        const pixelOffset =
-          (((rect.y + row) * atlasWidth) + rect.x + column) * 3
-
-        target[pixelOffset] = accumulatedColor[0] * scale
-        target[pixelOffset + 1] = accumulatedColor[1] * scale
-        target[pixelOffset + 2] = accumulatedColor[2] * scale
-      }
-    }
-  }
-
-  const writeUpscaledAmbientRect = (
-    target,
-    rect,
-    sampleGrid,
-    sampleColor,
-    options = {}
-  ) => {
-    const alignUToRectEdges = options.alignUToRectEdges ?? false
-    const sampleWidth = Math.max(1, Math.min(rect.width, sampleGrid))
-    const sampleHeight = Math.max(1, Math.min(rect.height, sampleGrid))
-    const gridData = new Float32Array(sampleWidth * sampleHeight * 3)
-
-    for (let sampleRow = 0; sampleRow < sampleHeight; sampleRow += 1) {
-      for (let sampleColumn = 0; sampleColumn < sampleWidth; sampleColumn += 1) {
-        const u = alignUToRectEdges && sampleWidth > 1
-          ? sampleColumn / (sampleWidth - 1)
-          : (sampleColumn + 0.5) / sampleWidth
-        const v = (sampleRow + 0.5) / sampleHeight
-        const color = sampleColor(u, v)
-        const gridOffset = ((sampleRow * sampleWidth) + sampleColumn) * 3
-
-        gridData[gridOffset] = Math.max(0, color[0] ?? 0)
-        gridData[gridOffset + 1] = Math.max(0, color[1] ?? 0)
-        gridData[gridOffset + 2] = Math.max(0, color[2] ?? 0)
-      }
-    }
-
-    for (let row = 0; row < rect.height; row += 1) {
-      const sampleY = sampleHeight > 1
-        ? (row / Math.max(1, rect.height - 1)) * (sampleHeight - 1)
-        : 0
-      const y0 = Math.floor(sampleY)
-      const y1 = Math.min(sampleHeight - 1, y0 + 1)
-      const ty = sampleY - y0
-
-      for (let column = 0; column < rect.width; column += 1) {
-        const sampleX = sampleWidth > 1
-          ? (column / Math.max(1, rect.width - 1)) * (sampleWidth - 1)
-          : 0
-        const x0 = Math.floor(sampleX)
-        const x1 = Math.min(sampleWidth - 1, x0 + 1)
-        const tx = sampleX - x0
-        const pixelOffset = ((((rect.y + row) * atlasWidth) + rect.x + column) * 3)
-        const c00Offset = ((y0 * sampleWidth) + x0) * 3
-        const c10Offset = ((y0 * sampleWidth) + x1) * 3
-        const c01Offset = ((y1 * sampleWidth) + x0) * 3
-        const c11Offset = ((y1 * sampleWidth) + x1) * 3
-
-        for (let channel = 0; channel < 3; channel += 1) {
-          const c00 = gridData[c00Offset + channel]
-          const c10 = gridData[c10Offset + channel]
-          const c01 = gridData[c01Offset + channel]
-          const c11 = gridData[c11Offset + channel]
-          const top = c00 + ((c10 - c00) * tx)
-          const bottom = c01 + ((c11 - c01) * tx)
-
-          target[pixelOffset + channel] += top + ((bottom - top) * ty)
-        }
-      }
-    }
-  }
-
-  writeColorRect(
-    atlasFloatData,
-    groundRect,
-    MAZE_LIGHTMAP_GROUND_SUPERSAMPLE_GRID,
-    (u, v) => {
-      const sample = getGroundSample(groundBounds, u, v)
-      return accumulateTorchLighting(
-        sample.position,
-        sample.normal,
-        torchPlacements,
-        walls,
-        null,
-        null,
-        sconceRadius
-      )
-    }
+  const nodeLightmapperModulePath = './gpuLightmapperNode.js'
+  const { bakeGpuLightmapJob } = await import(
+    /* @vite-ignore */ nodeLightmapperModulePath
   )
-  writeUpscaledAmbientRect(
-    atlasFloatData,
-    groundRect,
-    MAZE_LIGHTMAP_GROUND_AMBIENT_SAMPLE_GRID,
-    (u, v) => {
-      const sample = getGroundSample(groundBounds, u, v)
-      return sampleSkylight(
-        sample.position,
-        sample.normal,
-        walls,
-        null,
-        null
-      )
-    }
-  )
-
-  for (const surfaceGroup of surfaceGroups) {
-    for (const faceKey of ['nz', 'pz']) {
-      const rect = surfaceGroupRects[surfaceGroup.id][faceKey]
-
-      if (!rect) {
-        continue
-      }
-
-      writeColorRect(
-        atlasFloatData,
-        rect,
-        MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID,
-        (u, v) => {
-          const sample = getWallSurfaceFaceSample(surfaceGroup, faceKey, u, v)
-          return accumulateTorchLighting(
-            sample.position,
-            sample.normal,
-            torchPlacements,
-            walls,
-            null,
-            null,
-            sconceRadius
-          )
-        },
-        { alignUToRectEdges: true }
-      )
-      writeUpscaledAmbientRect(
-        atlasFloatData,
-        rect,
-        MAZE_LIGHTMAP_WALL_AMBIENT_SAMPLE_GRID,
-        (u, v) => {
-          const sample = getWallSurfaceFaceSample(surfaceGroup, faceKey, u, v)
-          return sampleSkylight(
-            sample.position,
-            sample.normal,
-            walls,
-            null,
-            null
-          )
-        },
-        { alignUToRectEdges: true }
-      )
-    }
-  }
-
-  for (const wall of walls) {
-    for (const faceKey of ['nx', 'px']) {
-      writeColorRect(
-        atlasFloatData,
-        wallRects[wall.id][faceKey],
-        MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID,
-        (u, v) => {
-          const sample = getWallShortFaceSample(wall, faceKey, u, v)
-          return accumulateTorchLighting(
-            sample.position,
-            sample.normal,
-            torchPlacements,
-            walls,
-            null,
-            null,
-            sconceRadius
-          )
-        }
-      )
-      writeUpscaledAmbientRect(
-        atlasFloatData,
-        wallRects[wall.id][faceKey],
-        MAZE_LIGHTMAP_WALL_AMBIENT_SAMPLE_GRID,
-        (u, v) => {
-          const sample = getWallShortFaceSample(wall, faceKey, u, v)
-          return sampleSkylight(
-            sample.position,
-            sample.normal,
-            walls,
-            null,
-            null
-          )
-        }
-      )
-    }
-  }
-
-  const atlasData = new Uint16Array(atlasWidth * atlasHeight * 3)
-
-  for (let pixelIndex = 0; pixelIndex < atlasWidth * atlasHeight; pixelIndex += 1) {
-    const sourceOffset = pixelIndex * 3
-    const outputOffset = pixelIndex * 3
-
-    atlasData[outputOffset] = DataUtils.toHalfFloat(atlasFloatData[sourceOffset])
-    atlasData[outputOffset + 1] = DataUtils.toHalfFloat(atlasFloatData[sourceOffset + 1])
-    atlasData[outputOffset + 2] = DataUtils.toHalfFloat(atlasFloatData[sourceOffset + 2])
-  }
+  const result = await bakeGpuLightmapJob({
+    atlasHeight,
+    atlasWidth,
+    constants: {
+      cellSize: MAZE_CELL_SIZE,
+      sampleEpsilon: MAZE_LIGHTMAP_SAMPLE_EPSILON,
+      sconceRadius,
+      skyLightColor: MAZE_SKY_LIGHT_COLOR,
+      skyRayDistance: MAZE_LIGHTMAP_SKY_RAY_DISTANCE,
+      torchLightColor: MAZE_TORCH_LIGHT_COLOR,
+      torchStrength: MAZE_LIGHTMAP_TORCH_STRENGTH,
+      wallHeight: MAZE_WALL_HEIGHT,
+      wallThickness: MAZE_WALL_THICKNESS
+    },
+    surfaces,
+    torches: torchPlacements,
+    walls: walls.map((wall) => ({
+      maxX: wall.bounds.maxX,
+      maxY: wall.bounds.maxY,
+      maxZ: wall.bounds.maxZ,
+      minX: wall.bounds.minX,
+      minY: wall.bounds.minY,
+      minZ: wall.bounds.minZ
+    }))
+  })
 
   return {
     atlasHeight,
     atlasWidth,
     bakeMs: performance.now() - bakeStart,
-    dataBase64: encodeBytesToBase64(
-      new Uint8Array(atlasData.buffer, atlasData.byteOffset, atlasData.byteLength)
-    ),
+    bakeRenderer: result.renderer,
+    bakeVendor: result.vendor,
+    dataBase64: result.dataBase64,
     encoding: 'rgb16f',
     groundBounds,
     groundRect,
