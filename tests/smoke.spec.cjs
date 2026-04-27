@@ -17,6 +17,12 @@ const PERFORMANCE_PROFILE_PATH = path.resolve(
   '..',
   'PERFORMANCE.md'
 )
+const PERFORMANCE_TRACE_PATH = path.resolve(
+  __dirname,
+  '..',
+  'logs',
+  'latest-performance-trace.json'
+)
 let activeSmokeTimingProfile = null
 const CURRENT_GIT_BRANCH = execSync('git branch --show-current', {
   cwd: path.resolve(__dirname, '..'),
@@ -58,6 +64,276 @@ function writeSmokeTimingProfile(timingProfile) {
     SMOKE_TIMING_LOG_PATH,
     JSON.stringify(completedProfile, null, 2)
   )
+}
+
+function formatProfileMs(value) {
+  return Number.isFinite(value) ? value.toFixed(3) : 'n/a'
+}
+
+async function startChromeTrace(page) {
+  const client = await page.context().newCDPSession(page)
+
+  await client.send('Tracing.start', {
+    categories: [
+      'toplevel',
+      'devtools.timeline',
+      'disabled-by-default-devtools.timeline',
+      'blink',
+      'blink.console',
+      'cc',
+      'gpu',
+      'renderer.scheduler',
+      'v8',
+      'viz'
+    ].join(','),
+    options: 'sampling-frequency=10000',
+    transferMode: 'ReturnAsStream'
+  })
+
+  return client
+}
+
+async function stopChromeTrace(client) {
+  const tracingComplete = new Promise((resolve) => {
+    client.once('Tracing.tracingComplete', resolve)
+  })
+
+  await client.send('Tracing.end')
+  const { stream } = await tracingComplete
+  let traceJson = ''
+
+  for (;;) {
+    const chunk = await client.send('IO.read', { handle: stream })
+
+    traceJson += chunk.data ?? ''
+
+    if (chunk.eof) {
+      break
+    }
+  }
+
+  await client.send('IO.close', { handle: stream })
+  await client.detach()
+
+  return JSON.parse(traceJson)
+}
+
+function getTraceThreadNames(traceEvents) {
+  const threadNames = new Map()
+
+  for (const event of traceEvents) {
+    if (event.ph !== 'M' || event.name !== 'thread_name') {
+      continue
+    }
+
+    threadNames.set(
+      `${event.pid}:${event.tid}`,
+      event.args?.name ?? `${event.pid}:${event.tid}`
+    )
+  }
+
+  return threadNames
+}
+
+function createTraceNode(name) {
+  return {
+    children: new Map(),
+    count: 0,
+    inclusiveUs: 0,
+    maxUs: 0,
+    name
+  }
+}
+
+function getTraceChild(parent, name) {
+  let child = parent.children.get(name)
+
+  if (!child) {
+    child = createTraceNode(name)
+    parent.children.set(name, child)
+  }
+
+  return child
+}
+
+function addTraceEventToTree(root, path, durationUs) {
+  let node = root
+
+  for (let index = 0; index < path.length; index += 1) {
+    const part = path[index]
+
+    node = getTraceChild(node, part)
+  }
+
+  node.inclusiveUs += durationUs
+  node.maxUs = Math.max(node.maxUs, durationUs)
+  node.count += 1
+}
+
+function getTraceEventLabel(event) {
+  const detail = event.args?.data?.functionName ||
+    event.args?.data?.url ||
+    event.args?.beginData?.frame ||
+    event.args?.name
+
+  if (!detail || typeof detail !== 'string') {
+    return event.name
+  }
+
+  const compactDetail = detail
+    .replace(/^https?:\/\/127\.0\.0\.1:\d+\//, '')
+    .replace(/^https?:\/\/localhost:\d+\//, '')
+
+  return compactDetail && compactDetail !== event.name
+    ? `${event.name}: ${compactDetail.slice(0, 90)}`
+    : event.name
+}
+
+function unionIntervalsUs(intervals) {
+  if (intervals.length === 0) {
+    return 0
+  }
+
+  const sorted = intervals
+    .slice()
+    .sort((left, right) => left[0] - right[0])
+  let total = 0
+  let [currentStart, currentEnd] = sorted[0]
+
+  for (const [start, end] of sorted.slice(1)) {
+    if (start <= currentEnd) {
+      currentEnd = Math.max(currentEnd, end)
+      continue
+    }
+
+    total += currentEnd - currentStart
+    currentStart = start
+    currentEnd = end
+  }
+
+  total += currentEnd - currentStart
+
+  return total
+}
+
+function appendTraceTreeLines(lines, node, frameSamples, depth) {
+  const children = Array.from(node.children.values())
+    .sort((left, right) => right.inclusiveUs - left.inclusiveUs)
+  const childInclusiveUs = children.reduce(
+    (sum, child) => sum + child.inclusiveUs,
+    0
+  )
+  const selfUs = Math.max(0, node.inclusiveUs - childInclusiveUs)
+  const nodeMsPerFrame = node.inclusiveUs / 1000 / frameSamples
+  const indent = '  '.repeat(depth)
+
+  if (nodeMsPerFrame < 0.1) {
+    return
+  }
+
+  lines.push(
+    `${indent}- ${node.name}: ${formatProfileMs(nodeMsPerFrame)}ms/frame inclusive; ${formatProfileMs(node.maxUs / 1000)}ms max; ${node.count} events`
+  )
+
+  for (const child of children) {
+    appendTraceTreeLines(lines, child, frameSamples, depth + 1)
+  }
+
+  const selfMsPerFrame = selfUs / 1000 / frameSamples
+
+  if (selfMsPerFrame >= 0.1) {
+    const label = children.length > 0
+      ? 'self/untraced child work'
+      : 'trace leaf; browser did not expose smaller child events'
+
+    lines.push(`${indent}  - ${label}: ${formatProfileMs(selfMsPerFrame)}ms/frame`)
+  }
+}
+
+function buildChromeTraceMarkdown(trace, performanceProfile) {
+  const traceEvents = Array.isArray(trace?.traceEvents) ? trace.traceEvents : []
+  const threadNames = getTraceThreadNames(traceEvents)
+  const frameSamples = Math.max(1, performanceProfile?.liveFrames?.samples ?? 1)
+  const rootsByThread = new Map()
+  const intervalsByThread = new Map()
+  const stacksByThread = new Map()
+  const completeEvents = traceEvents
+    .filter((event) => (
+      event.ph === 'X' &&
+      Number.isFinite(event.ts) &&
+      Number.isFinite(event.dur) &&
+      event.dur > 0
+    ))
+    .sort((left, right) => (
+      left.ts === right.ts
+        ? (right.dur ?? 0) - (left.dur ?? 0)
+        : left.ts - right.ts
+    ))
+
+  for (const event of completeEvents) {
+    const threadKey = `${event.pid}:${event.tid}`
+    const threadName = threadNames.get(threadKey) ?? threadKey
+    const root = rootsByThread.get(threadKey) ?? createTraceNode(threadName)
+    const stack = stacksByThread.get(threadKey) ?? []
+    const endTs = event.ts + event.dur
+
+    while (stack.length > 0 && stack[stack.length - 1].endTs <= event.ts) {
+      stack.pop()
+    }
+
+    const parentPath = stack.map((entry) => entry.label)
+    const label = getTraceEventLabel(event)
+
+    addTraceEventToTree(root, [...parentPath, label], event.dur)
+    stack.push({ endTs, label })
+
+    const intervals = intervalsByThread.get(threadKey) ?? []
+    intervals.push([event.ts, endTs])
+    intervalsByThread.set(threadKey, intervals)
+    rootsByThread.set(threadKey, root)
+    stacksByThread.set(threadKey, stack)
+  }
+
+  const roots = Array.from(rootsByThread.entries())
+    .map(([threadKey, root]) => ({
+      busyUs: unionIntervalsUs(intervalsByThread.get(threadKey) ?? []),
+      root,
+      traceUs: Array.from(root.children.values()).reduce(
+        (sum, child) => sum + child.inclusiveUs,
+        0
+      ),
+      threadKey
+    }))
+    .sort((left, right) => right.busyUs - left.busyUs)
+  const lines = [
+    '',
+    '## Chrome Trace Event Tree',
+    '',
+    '- Durations are normalized to the same live traversal frame count as the FPS sample.',
+    '- Thread trees can overlap each other; use them to locate expensive work, not as additive wall-clock children.',
+    '- Every captured thread with at least 0.1ms/frame of busy work is included.',
+    '- Leaves above 0.1ms/frame are marked as trace leaves when Chrome did not expose lower-level child events.',
+    ''
+  ]
+
+  for (const entry of roots) {
+    const busyMsPerFrame = entry.busyUs / 1000 / frameSamples
+
+    if (busyMsPerFrame < 0.1) {
+      continue
+    }
+
+    lines.push(
+      `- ${entry.root.name} (${entry.threadKey}) busy: ${formatProfileMs(busyMsPerFrame)}ms/frame union; ${formatProfileMs(entry.traceUs / 1000 / frameSamples)}ms/frame top-level trace events`
+    )
+
+    for (const child of Array.from(entry.root.children.values())
+      .sort((left, right) => right.inclusiveUs - left.inclusiveUs)) {
+      appendTraceTreeLines(lines, child, frameSamples, 1)
+    }
+  }
+
+  return lines.join('\n')
 }
 
 test.afterEach(() => {
@@ -253,6 +529,7 @@ async function pressGameplayKeyAndWaitIdle(page, key, label = '') {
   })
 
   try {
+    await page.keyboard.up(key)
     await page.keyboard.press(key)
     await page.waitForFunction(
       (previous) => {
@@ -370,6 +647,13 @@ async function moveInOpenLevelToCell(page, targetCell, label) {
   }
 
   if (targetCell.y === 17) {
+    const current = await getGameplayState(page)
+
+    if (current.cell.y === 17 && current.cell.x !== targetCell.x) {
+      await turnGameplayTo(page, 'north')
+      await pressGameplayKeyAndWaitIdle(page, 'KeyW', `${label} leave entrance row`)
+    }
+
     await moveX()
     await moveY()
   } else {
@@ -409,6 +693,11 @@ async function visitMazeFromChamber(page, exitCell, exitDirection, label) {
   await moveInOpenLevelToCell(page, exitCell, `${label} chamber approach`)
   await turnGameplayTo(page, exitDirection)
   await pressGameplayKeyAndWaitIdle(page, 'KeyW', `${label} enter`)
+  await page.waitForFunction(
+    () => window.__levelsjamDebug?.getMazeLifecycleState?.()?.instantiatedMazeId !== 'chamber-1',
+    undefined,
+    { timeout: 10_000 }
+  )
 
   const entered = await getGameplayState(page)
 
@@ -416,6 +705,11 @@ async function visitMazeFromChamber(page, exitCell, exitDirection, label) {
 
   await turnGameplayTo(page, 'west')
   await pressGameplayKeyAndWaitIdle(page, 'KeyW', `${label} return`)
+  await page.waitForFunction(
+    () => window.__levelsjamDebug?.getMazeLifecycleState?.()?.instantiatedMazeId === 'chamber-1',
+    undefined,
+    { timeout: 10_000 }
+  )
 
   const returned = await getGameplayState(page)
 
@@ -447,13 +741,6 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
     undefined,
     { timeout: 10_000 }
   )
-  await page.evaluate(() => {
-    window.__levelsjamTraversalPerformanceProfile = window.__levelsjamCapturePerformanceProfile?.({
-      liveDurationMs: 45_000,
-      liveOnly: true,
-      traversalLabel: 'Entrance, Chamber 1, Maze 1, Maze 2, Maze 3, Maze 4, and return'
-    }) ?? null
-  })
 
   const state = await page.evaluate(() => ({
     activeLighting: window.__levelsjamDebug?.getActiveLightingResourceState?.() ?? null,
@@ -667,6 +954,15 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
   expect(Math.abs(returnedState.camera.yaw - beforeReturnMove.camera.yaw)).toBeLessThan(0.001)
   expect(Math.abs(returnedState.camera.pitch - beforeReturnMove.camera.pitch)).toBeLessThan(0.001)
 
+  const traceClient = await startChromeTrace(page)
+  await page.evaluate(() => {
+    window.__levelsjamTraversalPerformanceProfile = window.__levelsjamCapturePerformanceProfile?.({
+      liveDurationMs: 45_000,
+      liveOnly: true,
+      traversalLabel: 'Entrance, Chamber 1, Maze 1, Maze 2, Maze 3, Maze 4, and return'
+    }) ?? null
+  })
+
   await turnGameplayTo(page, 'north')
   await pressGameplayKeyAndWaitIdle(page, 'KeyW', 'return to chamber for full traversal')
   await visitMazeFromChamber(page, { x: 0, y: 3 }, 'west', 'maze-001')
@@ -696,14 +992,25 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
     direction: 'south'
   })
 
+  const trace = await stopChromeTrace(traceClient)
+  fs.mkdirSync(path.dirname(PERFORMANCE_TRACE_PATH), { recursive: true })
+  fs.writeFileSync(PERFORMANCE_TRACE_PATH, JSON.stringify(trace))
+
   const performanceProfile = await page.evaluate(
     () => window.__levelsjamTraversalPerformanceProfile ?? null
   )
+  const appPerformanceMarkdown = performanceProfile.markdown.replace(
+    /(  - Browser, GPU driver, GPU execution, compositor, vsync, and uninstrumented library work: .*\n)    - Not reasonably breakable from app-level JavaScript instrumentation below this point\.\n/,
+    '$1    - App-level JavaScript instrumentation stops here; the Chrome Trace Event Tree below breaks this bucket down from browser trace events.\n'
+  )
+  const chromeTraceMarkdown = buildChromeTraceMarkdown(trace, performanceProfile)
+  const performanceMarkdown = `${appPerformanceMarkdown}\n${chromeTraceMarkdown}\n`
 
   expect(performanceProfile?.markdown).toContain('# Performance Profile')
   expect(performanceProfile?.markdown).toContain('## Frame-Time Tree')
+  expect(chromeTraceMarkdown).toContain('## Chrome Trace Event Tree')
   expect(performanceProfile?.liveFrames?.samples ?? 0).toBeGreaterThan(0)
-  fs.writeFileSync(PERFORMANCE_PROFILE_PATH, performanceProfile.markdown)
+  fs.writeFileSync(PERFORMANCE_PROFILE_PATH, performanceMarkdown)
 
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])

@@ -407,6 +407,8 @@
 - `PERFORMANCE.md` captures live gameplay performance during an end-to-end traversal through every currently authored runtime level rather than only an isolated controlled render loop.
 - The frame-cost profile records live gameplay RAF timing, renderer submission counts, scene object counts, and loop population sizes where the renderer iterates over resident resources.
 - The frame-cost profile answers where frame time is going with a markdown tree of frame steps; any measured step averaging at least `0.1ms/frame` is broken down further when the runtime can reasonably instrument its children.
+- The frame-cost profile includes a Chrome tracing tree captured during the same end-to-end traversal so browser main-thread, compositor, and GPU-thread work are broken down from real trace events instead of being hidden in an unmeasured browser bucket.
+- The Chrome tracing tree reports inclusive child costs and explicit self/untraced residual costs for every displayed node, and no displayed leaf may exceed `0.1ms/frame` unless the trace does not expose lower-level child events for that work.
 - The performance profiler records normal gameplay traversal with active level walking and active scene resources so reported FPS is representative of player-visible stutter.
 - The visual debug panel includes a `Performance` tab with a `Capture` button that records the next second of frames and displays the same kind of profile shown in `PERFORMANCE.md`.
 
