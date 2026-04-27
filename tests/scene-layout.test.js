@@ -48,18 +48,50 @@ function decodeBase64Bytes(base64) {
   return Uint8Array.from(Buffer.from(base64, 'base64'))
 }
 
-function averageTorchLightmapChannel(bytes, atlasWidth, rect) {
+function decodeHalfFloat(value) {
+  const sign = (value & 0x8000) ? -1 : 1
+  const exponent = (value & 0x7c00) >> 10
+  const fraction = value & 0x03ff
+
+  if (exponent === 0) {
+    return sign * 2 ** -14 * (fraction / 2 ** 10)
+  }
+
+  if (exponent === 31) {
+    return fraction ? NaN : sign * Infinity
+  }
+
+  return sign * 2 ** (exponent - 15) * (1 + (fraction / 2 ** 10))
+}
+
+function averageLightmapLuminance(bytes, lightmap, rect) {
   let sum = 0
+  const halfFloatView = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
 
   for (let row = 0; row < rect.height; row += 1) {
     for (let column = 0; column < rect.width; column += 1) {
-      const atlasIndex = ((((rect.y + row) * atlasWidth) + rect.x + column) * 4)
-      const decoded = decodeRgbE8(
-        bytes[atlasIndex],
-        bytes[atlasIndex + 1],
-        bytes[atlasIndex + 2],
-        bytes[atlasIndex + 3]
-      )
+      const pixelIndex = ((rect.y + row) * lightmap.atlasWidth) + rect.x + column
+      let decoded
+
+      if (lightmap.encoding === 'rgb16f') {
+        const byteOffset = pixelIndex * 6
+
+        decoded = [
+          decodeHalfFloat(halfFloatView.getUint16(byteOffset, true)),
+          decodeHalfFloat(halfFloatView.getUint16(byteOffset + 2, true)),
+          decodeHalfFloat(halfFloatView.getUint16(byteOffset + 4, true))
+        ]
+      } else {
+        const byteOffset = pixelIndex * 4
+
+        decoded = decodeRgbE8(
+          bytes[byteOffset],
+          bytes[byteOffset + 1],
+          bytes[byteOffset + 2],
+          bytes[byteOffset + 3]
+        )
+      }
+
       sum += (decoded[0] + decoded[1] + decoded[2]) / 3
     }
   }
@@ -249,19 +281,19 @@ test('keeps the sealed 3x3 center-facing wall lightmap faces dark', () => {
     assert.ok(wall, `missing debug wall at ${JSON.stringify(expectation.center)}`)
 
     const rects = sealed.maze.lightmap.wallRects[wall.id]
-    const litAverage = averageTorchLightmapChannel(
+    const litAverage = averageLightmapLuminance(
       bytes,
-      sealed.maze.lightmap.atlasWidth,
+      sealed.maze.lightmap,
       rects[expectation.litFace]
     )
-    const darkAverage = averageTorchLightmapChannel(
+    const darkAverage = averageLightmapLuminance(
       bytes,
-      sealed.maze.lightmap.atlasWidth,
+      sealed.maze.lightmap,
       rects[expectation.darkFace]
     )
 
     assert.ok(
-      litAverage > 1,
+      litAverage > 0.1,
       `expected ${wall.id} ${expectation.litFace} to contain baked torch light, got ${litAverage}`
     )
     assert.ok(
