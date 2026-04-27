@@ -509,8 +509,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   await timedStep(timingProfile, 'probe-debug-visualization', async () => {
     await page.evaluate(() => {
       window.__levelsjamDebug.setView(
-        [5.4, 1.55, -6.9],
-        [7, 1.1, -6]
+        [-12, 1.55, -28],
+        [-14, 1.1, -28]
       )
     })
     await page.waitForTimeout(250)
@@ -692,8 +692,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
 
     await page.evaluate(() => {
       window.__levelsjamDebug.setView(
-        [5.4, 1.55, -6.9],
-        [7, 1.1, -6]
+        [-12, 1.55, -28],
+        [-14, 1.1, -28]
       )
     })
     await page.waitForTimeout(200)

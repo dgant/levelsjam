@@ -340,3 +340,4 @@ Regenerate the mazes, and give each one randomly placed minotaur, wolf, spider (
 [x] Player starts the game holding a trophy for some reason.
 [x] When walking through the Entrance into Chamber 1, lighting changes drastically.
 [x] Gates are starting down instead of up.
+[x] Add <script async src="https://jam.pieter.com/2026/widget.js"></script> to the page, per game jam instructions from https://x.com/levelsio/status/2039906656864072108

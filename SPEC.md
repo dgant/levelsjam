@@ -9,6 +9,7 @@
 - The project runs in a web browser without login or signup.
 - The project is deployed to GitHub Pages.
 - The public site loads directly from the hosted page without a separate launcher or install step.
+- The public page includes the required asynchronous Vibe Jam 2026 widget script from `https://jam.pieter.com/2026/widget.js`.
 - When the page is loaded with a `?maze=<maze-id>` query parameter, the runtime loads that exact persisted maze.
 - The runtime does not silently replace a requested maze with a different random maze.
 - If a requested maze cannot be loaded, the runtime fails that request explicitly instead of swapping to another maze.
@@ -18,6 +19,18 @@
 - Selecting a level through the runtime menu resets that level's character and maze state before placing the player at that level's entrance.
 - The game begins in the authored `Entrance` level.
 - Player movement through an authored level exit transitions seamlessly into the connected level without fading, showing a loading transition, or exposing the boundary between levels.
+- Runtime gameplay state is one continuous world state, not one independent state per level.
+- Runtime levels provide authored data, streaming/resource grouping, solution metadata, debug teleport targets, and future save/load anchors; they do not own separate active player inventory or camera-held item state during ordinary walking.
+- The rules engine resolves movement, pickups, monsters, gates, death, and inventory against the continuous world-space cell contents assembled from all loaded level data.
+- The player has one canonical world-space cell, direction, inventory state, checkpoint, and active animation state across ordinary level boundaries.
+- Pickup state is global in the continuous world; a pickup's owning level identifies its authored location, but crossing a level boundary must not create, overwrite, or swap pickup state.
+- Level geometry exists in one continuous world grid where each occupied cell has one canonical set of contents and runtime levels must not overlap.
+- Rendered level groups are resource and visibility groups only; changing the player's current level focus must not remount the scene, reset startup readiness, replace global rules state, or change camera-attached held-item rendering.
+- Full-screen effects and global render passes sample currently resident world resources rather than a single active level's resources.
+- Volumetric fog is level-agnostic at runtime and samples the currently resident world-space volumetric-lightmap resources.
+- Lens flares are level-agnostic at runtime and choose from the currently rendered visible torch billboards/lights, regardless of the level that authored them.
+- Reflection and volumetric probe debug visualization shows all currently loaded/rendered probes rather than only the active level's probes.
+- Walking across a level boundary updates only the active debug/resource-priority focus and any rules context needed to interpret the player's current world cell.
 - Walking across a connected level boundary preserves the player's world-space position, camera yaw, camera pitch, inventory flags, held-item visibility, and current input flow.
 - Walking across a connected level boundary keeps the player camera continuous through the final frame of the move animation and the first frame of the destination level; the camera must not snap back to the source exit cell before settling in the destination ingress cell.
 - Only the active gameplay level may render camera-attached held pickup models; adjacent rendered levels may render their ground pickups but must not attach their saved inventory state to the active camera.

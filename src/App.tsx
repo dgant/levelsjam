@@ -650,6 +650,8 @@ uniform float noisePeriod;
 uniform float noiseStrength;
 uniform vec4 probeAmbientBounds;
 uniform vec2 probeAmbientGrid;
+uniform vec2 probeWorldOrigin;
+uniform vec2 probeWorldRotation;
 uniform sampler2D probeCoeffTextureL0;
 uniform sampler2D probeConnectivityTexture;
 uniform float probeHeight;
@@ -705,6 +707,35 @@ vec2 fogProbeGridCellToWorld(vec2 cell) {
   return vec2(
     probeAmbientBounds.x + (cell.x * fogProbeCellSize(probeAmbientBounds.z, probeAmbientGrid.x)),
     probeAmbientBounds.y + (cell.y * fogProbeCellSize(probeAmbientBounds.w, probeAmbientGrid.y))
+  );
+}
+
+vec2 fogWorldToProbeLocal(vec3 worldPosition) {
+  vec2 delta = vec2(worldPosition.x, worldPosition.z) - probeWorldOrigin;
+  float c = probeWorldRotation.x;
+  float s = probeWorldRotation.y;
+
+  return vec2(
+    (delta.x * c) - (delta.y * s),
+    (delta.x * s) + (delta.y * c)
+  );
+}
+
+vec2 fogWorldToProbeGrid(vec3 worldPosition) {
+  vec2 localPosition = fogWorldToProbeLocal(worldPosition);
+
+  return vec2(
+    (localPosition.x - probeAmbientBounds.x) / max(fogProbeCellSize(probeAmbientBounds.z, probeAmbientGrid.x), 0.0001),
+    (localPosition.y - probeAmbientBounds.y) / max(fogProbeCellSize(probeAmbientBounds.w, probeAmbientGrid.y), 0.0001)
+  );
+}
+
+bool fogIsInsideProbeGrid(vec2 gridPosition) {
+  return (
+    gridPosition.x >= -0.5 &&
+    gridPosition.y >= -0.5 &&
+    gridPosition.x <= probeAmbientGrid.x - 0.5 &&
+    gridPosition.y <= probeAmbientGrid.y - 0.5
   );
 }
 
@@ -810,10 +841,12 @@ vec3 sampleFogAmbientColor(vec3 worldPosition) {
     return vec3(0.0);
   }
 
-  vec2 worldGridPosition = vec2(
-    (worldPosition.x - probeAmbientBounds.x) / max(fogProbeCellSize(probeAmbientBounds.z, probeAmbientGrid.x), 0.0001),
-    (worldPosition.z - probeAmbientBounds.y) / max(fogProbeCellSize(probeAmbientBounds.w, probeAmbientGrid.y), 0.0001)
-  );
+  vec2 worldGridPosition = fogWorldToProbeGrid(worldPosition);
+
+  if (!fogIsInsideProbeGrid(worldGridPosition)) {
+    return vec3(0.0);
+  }
+
   vec2 nearestCell = floor(worldGridPosition + vec2(0.5));
   vec4 accumulated = vec4(0.0);
 
@@ -889,6 +922,10 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
     float sampleHeight = samplePosition.y - groundHeight;
 
     if (sampleHeight < 0.0 || sampleHeight > volumeHeight) {
+      continue;
+    }
+
+    if (!fogIsInsideProbeGrid(fogWorldToProbeGrid(samplePosition))) {
       continue;
     }
 
@@ -1614,6 +1651,8 @@ class FogVolumeEffectImpl extends Effect {
         ['noiseStrength', new Uniform(DEFAULT_VOLUMETRIC_NOISE_STRENGTH)],
         ['probeAmbientBounds', new Uniform(new Vector4())],
         ['probeAmbientGrid', new Uniform(new Vector2())],
+        ['probeWorldOrigin', new Uniform(new Vector2())],
+        ['probeWorldRotation', new Uniform(new Vector2(1, 0))],
         ['probeCoeffTextureL0', new Uniform<Texture | null>(null)],
         ['probeConnectivityTexture', new Uniform<Texture | null>(null)],
         ['probeHeight', new Uniform(1.25)],
@@ -1682,6 +1721,14 @@ class FogVolumeEffectImpl extends Effect {
 
   set probeAmbientGrid(value: Vector2) {
     this.uniforms.get('probeAmbientGrid').value.copy(value)
+  }
+
+  set probeWorldOrigin(value: Vector2) {
+    this.uniforms.get('probeWorldOrigin').value.copy(value)
+  }
+
+  set probeWorldRotation(value: Vector2) {
+    this.uniforms.get('probeWorldRotation').value.copy(value)
   }
 
   set probeCoeffTextureL0(value: Texture | null) {
@@ -2004,6 +2051,19 @@ function matchesDebugRole(
     userData.debugRole === role ||
     (Array.isArray(userData.debugRoles) && userData.debugRoles.includes(role))
   )
+}
+
+function isObjectEffectivelyVisible(object: Object3D) {
+  let current: Object3D | null = object
+
+  while (current) {
+    if (!current.visible) {
+      return false
+    }
+    current = current.parent
+  }
+
+  return true
 }
 
 const PROBE_CUBEUV_SAMPLING_GLSL = `
@@ -8595,6 +8655,7 @@ function FogVolume({
   probeCoefficientTextures,
   probeDepthAtlasTextures,
   rayStepCount,
+  transform,
   visible,
   volumeIntensity
 }: {
@@ -8609,6 +8670,7 @@ function FogVolume({
   probeCoefficientTextures: [Texture, Texture, Texture, Texture]
   probeDepthAtlasTextures: ProbeDepthAtlasTextures
   rayStepCount: number
+  transform: LevelWorldTransform
   visible: boolean
   volumeIntensity: number
 }) {
@@ -8633,6 +8695,14 @@ function FogVolume({
     () => new Vector2(layout.maze.width, layout.maze.height),
     [layout.maze.height, layout.maze.width]
   )
+  const probeWorldOrigin = useMemo(
+    () => new Vector2(transform.x, transform.z),
+    [transform.x, transform.z]
+  )
+  const probeWorldRotation = useMemo(
+    () => new Vector2(Math.cos(transform.rotationY), Math.sin(transform.rotationY)),
+    [transform.rotationY]
+  )
   const probeConnectivityTexture = getProbeConnectivityTexture(layout)
 
   useEffect(() => {
@@ -8647,6 +8717,8 @@ function FogVolume({
     effect.noiseStrength = noiseStrength
     effect.probeAmbientBounds = probeBounds
     effect.probeAmbientGrid = probeGrid
+    effect.probeWorldOrigin = probeWorldOrigin
+    effect.probeWorldRotation = probeWorldRotation
     effect.probeCoeffTextureL0 = probeCoefficientTextures[0]
     effect.probeConnectivityTexture = probeConnectivityTexture
     effect.probeHeight = layout.reflectionProbes[0]?.position.y ?? 1.25
@@ -8657,7 +8729,7 @@ function FogVolume({
       volumetricShadowsEnabled && probeConnectivityTexture ? 1 : 0
     effect.useProbeAmbientTexture = 0
     effect.volumeHeight = FOG_VOLUME_HEIGHT
-    scene.userData.fogEffectState = {
+    const nextFogState = {
       density: visible ? volumeIntensity : 0,
       fogDistance,
       environmentFogColor: [
@@ -8682,11 +8754,26 @@ function FogVolume({
         probeGrid.x,
         probeGrid.y
       ],
+      probeWorldOrigin: [
+        probeWorldOrigin.x,
+        probeWorldOrigin.y
+      ],
+      probeWorldRotation: [
+        probeWorldRotation.x,
+        probeWorldRotation.y
+      ],
       rayStepCount,
       useProbeAmbientTexture: 0,
       useProbeCoefficientTexture: probeCoefficientTextures[0] ? 1 : 0,
       useProbeConnectivity:
         volumetricShadowsEnabled && probeConnectivityTexture ? 1 : 0
+    }
+
+    scene.userData.fogEffectStatesByLevel ??= {}
+    scene.userData.fogEffectStatesByLevel[layout.maze.id] = nextFogState
+    scene.userData.fogEffectState = {
+      ...nextFogState,
+      byLevel: scene.userData.fogEffectStatesByLevel
     }
   }, [
     ambientColor,
@@ -8701,6 +8788,8 @@ function FogVolume({
     probeConnectivityTexture,
     probeBounds,
     probeGrid,
+    probeWorldOrigin,
+    probeWorldRotation,
     rayStepCount,
     scene,
     visible,
@@ -8710,9 +8799,23 @@ function FogVolume({
 
   useEffect(() => {
     return () => {
-      delete scene.userData.fogEffectState
+      if (scene.userData.fogEffectStatesByLevel) {
+        delete scene.userData.fogEffectStatesByLevel[layout.maze.id]
+      }
+      const remainingStates = scene.userData.fogEffectStatesByLevel ?? {}
+      const firstRemainingState = Object.values(remainingStates)[0]
+
+      if (firstRemainingState) {
+        scene.userData.fogEffectState = {
+          ...(firstRemainingState as object),
+          byLevel: remainingStates
+        }
+      } else {
+        delete scene.userData.fogEffectState
+        delete scene.userData.fogEffectStatesByLevel
+      }
     }
-  }, [scene])
+  }, [layout.maze.id, scene])
 
   useFrame((state) => {
     effect.cameraProjectionMatrixInverse = camera.projectionMatrixInverse
@@ -11279,7 +11382,7 @@ function MazeItems({
             reflectionProbeCoefficients={reflectionProbeCoefficients}
             reflectionProbeDepthTextures={reflectionProbeDepthTextures}
             reflectionProbeTextures={reflectionProbeTextures}
-            visible={turnState.player.hasSword || turnState.swordState === 'held'}
+            visible={turnState.player.hasSword}
           />
           <HeldItemView
             debugIndex={1}
@@ -11295,7 +11398,7 @@ function MazeItems({
             reflectionProbeCoefficients={reflectionProbeCoefficients}
             reflectionProbeDepthTextures={reflectionProbeDepthTextures}
             reflectionProbeTextures={reflectionProbeTextures}
-            visible={turnState.player.hasTrophy || turnState.trophyState === 'held'}
+            visible={turnState.player.hasTrophy}
           />
         </>
       ) : null}
@@ -12350,11 +12453,9 @@ function DitherEffectPrimitive() {
 }
 
 function TorchLensFlare({
-  settings,
-  layout
+  settings
 }: {
   settings: LensFlareSettings
-  layout: MazeLayout
 }) {
   const camera = useThree((state) => state.camera)
   const raycaster = useThree((state) => state.raycaster)
@@ -12363,19 +12464,9 @@ function TorchLensFlare({
   const [visibleSlotCount, setVisibleSlotCount] = useState(0)
   const projectedPosition = useMemo(() => new Vector3(), [])
   const raycasterPosition = useMemo(() => new Vector2(), [])
+  const scratchWorldPosition = useMemo(() => new Vector3(), [])
   const occlusionMeshes = useRef<Mesh[]>([])
-  const lensPositions = useMemo(
-    () =>
-      layout.lights.map(
-        (mazeLight) =>
-          new Vector3(
-            mazeLight.torchPosition.x,
-            mazeLight.torchPosition.y,
-            mazeLight.torchPosition.z
-          )
-      ),
-    [layout.lights]
-  )
+  const lensPositions = useRef<Vector3[]>([])
   const flareSlots = useMemo(
     () =>
       Array.from({ length: MAX_SIMULTANEOUS_LENS_FLARES }, (_, index) => {
@@ -12459,11 +12550,15 @@ function TorchLensFlare({
     }
   }, [flareSlots, settings])
 
-  useEffect(() => {
+  useFrame((_, delta) => {
     const nextOcclusionMeshes: Mesh[] = []
+    const nextLensPositions: Vector3[] = []
 
     scene.traverse((object) => {
       if (!(object instanceof Mesh)) {
+        return
+      }
+      if (!isObjectEffectivelyVisible(object)) {
         return
       }
 
@@ -12476,27 +12571,21 @@ function TorchLensFlare({
       if (isMazeWall || isMonster) {
         nextOcclusionMeshes.push(object)
       }
+
+      if (object.userData?.debugRole === 'torch-billboard') {
+        object.getWorldPosition(scratchWorldPosition)
+        nextLensPositions.push(scratchWorldPosition.clone())
+      }
     })
 
     occlusionMeshes.current = nextOcclusionMeshes
-  }, [layout.maze.id, scene])
-
-  useEffect(() => {
-    for (const slot of flareSlots) {
-      if (!slot.screenResUniform) {
-        continue
-      }
-      slot.screenResUniform.value.set(size.width, size.height)
-    }
-  }, [flareSlots, size.height, size.width])
-
-  useFrame((_, delta) => {
+    lensPositions.current = nextLensPositions
     const visibleLensPositions: Array<{
       position: Vector3
       score: number
     }> = []
 
-    for (const lensPosition of lensPositions) {
+    for (const lensPosition of lensPositions.current) {
       projectedPosition.copy(lensPosition).project(camera)
 
       if (
@@ -12566,7 +12655,7 @@ function TorchLensFlare({
     scene.userData.lensFlareState = {
       enabled: settings.enabled,
       intensity: settings.intensity,
-      totalLensCount: lensPositions.length,
+      totalLensCount: lensPositions.current.length,
       visibleLensCount: visibleLensPositions.length,
       visibleLenses: visibleLensPositions.map((lens) => ({
         position: [lens.position.x, lens.position.y, lens.position.z],
@@ -12580,6 +12669,15 @@ function TorchLensFlare({
         : visibleLensPositions.length
     )
   })
+
+  useEffect(() => {
+    for (const slot of flareSlots) {
+      if (!slot.screenResUniform) {
+        continue
+      }
+      slot.screenResUniform.value.set(size.width, size.height)
+    }
+  }, [flareSlots, size.height, size.width])
 
   useEffect(() => {
     return () => {
@@ -14010,7 +14108,7 @@ function Scene({
   onLevelTransition,
   onReplayActiveChange,
   onTurnStateChange,
-  initialTurnState,
+  turnState,
   replayRequestId,
   replayRequestMazeId,
   visualSettings
@@ -14024,14 +14122,16 @@ function Scene({
   onAssetsReady: () => void
   onLevelTransition: (request: SeamlessLevelTransitionRequest) => void
   onReplayActiveChange: (active: boolean) => void
-  onTurnStateChange: (mazeId: string, turnState: TurnState) => void
-  initialTurnState: TurnState
+  onTurnStateChange: (
+    mazeId: string,
+    value: TurnState | ((current: TurnState) => TurnState)
+  ) => void
+  turnState: TurnState
   replayRequestId: number
   replayRequestMazeId: string | null
   visualSettings: VisualSettings
 }) {
   recordStartupMarker('sceneRenderStartedAt')
-  const [turnState, rawSetTurnState] = useState<TurnState>(() => initialTurnState)
   const [displayedOpenGateIds, setDisplayedOpenGateIds] = useState<string[]>([])
   const [runtimeModelsEnabled, setRuntimeModelsEnabled] = useState(false)
   const [startupAdjacentLevelsMounted, setStartupAdjacentLevelsMounted] = useState(false)
@@ -14050,32 +14150,10 @@ function Scene({
   }, [])
   const setTurnState = useCallback(
     (value: TurnState | ((current: TurnState) => TurnState)) => {
-      rawSetTurnState((current) => {
-        const next = typeof value === 'function'
-          ? (value as (current: TurnState) => TurnState)(current)
-          : value
-
-        onTurnStateChange(layout.maze.id, next)
-        return next
-      })
+      onTurnStateChange(layout.maze.id, value)
     },
     [layout.maze.id, onTurnStateChange]
   )
-
-  useEffect(() => {
-    rawSetTurnState(initialTurnState)
-    onTurnStateChange(layout.maze.id, initialTurnState)
-    setDisplayedOpenGateIds([])
-  }, [initialTurnState, layout.maze, onTurnStateChange])
-  useEffect(() => {
-    const wasAlreadyReady = hasReportedBasicAssetsReady.current
-
-    hasReportedBasicAssetsReady.current = false
-    setStartupSceneReady(false)
-    setStartupAdjacentLevelsMounted(wasAlreadyReady)
-    setRuntimeModelsEnabledState(wasAlreadyReady)
-    setStartupGeometryExpandedState(wasAlreadyReady)
-  }, [layout.maze.id, setRuntimeModelsEnabledState, setStartupGeometryExpandedState])
   useEffect(() => {
     if (startupAdjacentLevelsMounted) {
       return
@@ -14246,11 +14324,15 @@ function Scene({
 
     return () => {
       cancelled = true
-      setStartupSceneReady(false)
+      if (!hasReportedBasicAssetsReady.current) {
+        setStartupSceneReady(false)
+      }
       window.cancelAnimationFrame(rafId)
       window.clearTimeout(geometryContractHandle)
       window.clearTimeout(sceneProgramWarmHandle)
-      delete document.body.dataset.sceneProgramsReady
+      if (!hasReportedBasicAssetsReady.current) {
+        delete document.body.dataset.sceneProgramsReady
+      }
     }
   }, [
     camera,
@@ -14280,6 +14362,8 @@ function Scene({
           noiseStrength: number | null
           probeAmbientBounds: [number, number, number, number] | null
           probeAmbientGrid: [number, number] | null
+          probeWorldOrigin?: [number, number] | null
+          probeWorldRotation?: [number, number] | null
           rayStepCount: number | null
           useProbeAmbientTexture: number | null
           useProbeCoefficientTexture?: number | null
@@ -15191,7 +15275,7 @@ function Scene({
               mountAllGeometry={startupGeometryExpanded}
               onLightingResourcesChange={handleLevelLightingResourcesChange}
               openGateIdsOverride={isActive ? activeOpenGateIds : closedGateIds}
-              probeDebugMode={isActive ? visualSettings.probeDebugMode : 'none'}
+              probeDebugMode={visualSettings.probeDebugMode}
               priorityPosition={{
                 x: priorityLocalPosition.x,
                 z: priorityLocalPosition.z
@@ -15245,23 +15329,35 @@ function Scene({
             samples={48}
           />
         ) : null}
-        {visualSettings.volumetricLighting.enabled ? (
-          <FogVolume
-            ambientColor={fogAmbientColor}
-            fogDistance={visualSettings.volumetricDistance}
-            heightFalloff={visualSettings.volumetricHeightFalloff}
-            layout={layout}
-            lightingStrength={visualSettings.volumetricLightingStrength}
-            noiseFrequency={visualSettings.volumetricNoiseFrequency}
-            noisePeriod={visualSettings.volumetricNoisePeriod}
-            noiseStrength={visualSettings.volumetricNoiseStrength}
-            probeCoefficientTextures={probeCoefficientTextures}
-            probeDepthAtlasTextures={probeDepthAtlasTextures}
-            rayStepCount={visualSettings.volumetricStepCount}
-            visible={visualSettings.volumetricLighting.enabled}
-            volumeIntensity={visualSettings.volumetricLighting.intensity}
-          />
-        ) : null}
+        {visualSettings.volumetricLighting.enabled
+          ? runtimeRenderedLayouts.map((fogLayout) => {
+              const resources = levelLightingResources.get(fogLayout.maze.id)
+
+              if (!resources?.reflectionProbeState.ready) {
+                return null
+              }
+
+              return (
+                <FogVolume
+                  ambientColor={fogAmbientColor}
+                  fogDistance={visualSettings.volumetricDistance}
+                  heightFalloff={visualSettings.volumetricHeightFalloff}
+                  key={`fog-volume-${fogLayout.maze.id}`}
+                  layout={fogLayout}
+                  lightingStrength={visualSettings.volumetricLightingStrength}
+                  noiseFrequency={visualSettings.volumetricNoiseFrequency}
+                  noisePeriod={visualSettings.volumetricNoisePeriod}
+                  noiseStrength={visualSettings.volumetricNoiseStrength}
+                  probeCoefficientTextures={resources.probeCoefficientTextures}
+                  probeDepthAtlasTextures={resources.probeDepthAtlasTextures}
+                  rayStepCount={visualSettings.volumetricStepCount}
+                  transform={getRuntimeLevelWorldTransform(fogLayout.maze.id)}
+                  visible={visualSettings.volumetricLighting.enabled}
+                  volumeIntensity={visualSettings.volumetricLighting.intensity}
+                />
+              )
+            })
+          : null}
         <BillboardCompositePass />
         {depthOfFieldActive ? (
           <DepthOfField
@@ -15280,7 +15376,6 @@ function Scene({
         {lensFlareActive ? (
           <TorchLensFlare
             settings={visualSettings.lensFlare}
-            layout={layout}
           />
         ) : null}
         <PlayerFadeEffectPrimitive />
@@ -17152,6 +17247,7 @@ export default function App() {
   )
   const [instantiatedMazeId, setInstantiatedMazeId] = useState<string | null>(null)
   const [mazeLayout, setMazeLayout] = useState<MazeLayout | null>(null)
+  const [activeTurnState, setActiveTurnState] = useState<TurnState | null>(null)
   const [renderedMazeLayouts, setRenderedMazeLayouts] = useState<MazeLayout[]>([])
   const [mazeLoadError, setMazeLoadError] = useState<string | null>(null)
   const [replayActive, setReplayActive] = useState(false)
@@ -17302,6 +17398,7 @@ export default function App() {
     setInstantiatedMazeId(mazeId)
     setMazeSceneKey((current) => current + 1)
     setMazeLayout(nextLayout)
+    setActiveTurnState(getOrCreateLevelTurnState(nextLayout))
     document.body.dataset.loadedMazeId = mazeId
     getOrCreateLevelTurnState(nextLayout)
     updateRenderedMazeLayouts(mazeId)
@@ -17312,6 +17409,7 @@ export default function App() {
     setSceneLoaded(false)
     setInstantiatedMazeId(null)
     setMazeLayout(null)
+    setActiveTurnState(null)
     updateRenderedMazeLayouts(null)
   }
 
@@ -17353,6 +17451,7 @@ export default function App() {
 
       loadedMazeLayoutsRef.current.set(request.targetLevelId, targetLayout)
       levelTurnStatesRef.current.set(request.targetLevelId, nextTargetState)
+      setActiveTurnState(nextTargetState)
       setInstantiatedMazeId(request.targetLevelId)
       setMazeLayout(targetLayout)
       document.body.dataset.loadedMazeId = request.targetLevelId
@@ -17391,9 +17490,38 @@ export default function App() {
     }
   }, [instantiatedMazeId, preloadAdjacentTransitionNeighborhoods])
 
-  const handleTurnStateChange = useCallback((mazeId: string, nextTurnState: TurnState) => {
-    levelTurnStatesRef.current.set(mazeId, nextTurnState)
-  }, [])
+  const handleTurnStateChange = useCallback((
+    mazeId: string,
+    value: TurnState | ((current: TurnState) => TurnState)
+  ) => {
+    setActiveTurnState((current) => {
+      if (!current) {
+        const layout = loadedMazeLayoutsRef.current.get(mazeId)
+        const fallback = layout
+          ? getOrCreateLevelTurnState(layout)
+          : null
+        const next = typeof value === 'function'
+          ? (
+              fallback
+                ? (value as (current: TurnState) => TurnState)(fallback)
+                : null
+            )
+          : value
+
+        if (next) {
+          levelTurnStatesRef.current.set(mazeId, next)
+        }
+        return next ?? current
+      }
+
+      const next = typeof value === 'function'
+        ? (value as (current: TurnState) => TurnState)(current)
+        : value
+
+      levelTurnStatesRef.current.set(mazeId, next)
+      return next
+    })
+  }, [getOrCreateLevelTurnState])
 
   const loadAndActivateLevel = async (level: AuthoredLevel, index: number) => {
     const mazeIds = availableMazeIdsRef.current.length > 0
@@ -17437,6 +17565,7 @@ export default function App() {
 
       setMazeLayout(null)
       setInstantiatedMazeId(null)
+      setActiveTurnState(null)
       setMazeLoadError(message)
     }
   }
@@ -17467,10 +17596,11 @@ export default function App() {
           document.body.dataset.mazeLayoutLoadedAt = performance.now().toFixed(1)
           document.body.dataset.loadedMazeId = nextLayout.maze.id
           loadedMazeLayoutsRef.current.set(nextLayout.maze.id, nextLayout)
-          getOrCreateLevelTurnState(nextLayout)
+          const initialTurnState = getOrCreateLevelTurnState(nextLayout)
           await loadLevelNeighborhood(nextLayout.maze.id)
           setInstantiatedMazeId(nextLayout.maze.id)
           setReplayActive(false)
+          setActiveTurnState(initialTurnState)
           setMazeLayout(nextLayout)
         }
       } catch (error) {
@@ -18190,7 +18320,7 @@ export default function App() {
     [mazeLayout?.maze.id]
   )
 
-  if (!mazeLayout) {
+  if (!mazeLayout || !activeTurnState) {
     return (
       <div className="app-shell">
         {mazeLoadError
@@ -18208,7 +18338,6 @@ export default function App() {
     )
   }
 
-  const activeTurnState = getOrCreateLevelTurnState(mazeLayout)
   const sceneRenderedLayouts = renderedMazeLayouts.length > 0
     ? renderedMazeLayouts
     : [mazeLayout]
@@ -18314,13 +18443,13 @@ export default function App() {
                 levelTransform={activeLevelTransform}
                 renderedLayouts={sceneRenderedLayouts}
                 getRenderedTurnState={getOrCreateLevelTurnState}
-                initialTurnState={activeTurnState}
                 onAssetsReady={onAssetsReady}
                 onLevelTransition={handleLevelTransition}
                 onReplayActiveChange={setReplayActive}
                 onTurnStateChange={handleTurnStateChange}
                 replayRequestId={replayRequestId}
                 replayRequestMazeId={replayRequestMazeId}
+                turnState={activeTurnState}
                 visualSettings={visualSettings}
               />
             </Suspense>
