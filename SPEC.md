@@ -122,6 +122,7 @@
 - Each baked maze lightmap stores raw lighting values and is never tone-mapped, exposure-compensated, or artistically re-tinted at runtime.
 - Each baked maze lightmap uses an HDR encoding that preserves headroom instead of clipping bright torch-adjacent texels to full white during bake generation.
 - Each baked maze lightmap uses supersampled texel evaluation so torch gradients on walls and the maze floor patch are smoother than a single-sample bake.
+- The current full baked maze lightmap uses a release-quality indirect sampler with at least 64 diffuse bounce directions per surface sample and per-texel sample decorrelation so indirect lighting artifacts can be evaluated separately from low-sample noise.
 - Baked torch lighting uses physical inverse-square falloff across all represented lightmapped surfaces without an authored hard maximum distance cutoff.
 - Exterior wall faces that are not expected to be player-visible omit baked lightmap rectangles and sample the neutral lightmap region at runtime.
 - Baked torch lighting samples multiple points on each spherical emitter so occluders produce soft penumbrae rather than only hard binary shadowing.
@@ -601,7 +602,7 @@
 - Automated unit-test measurement records per-file and per-subtest timing data in addition to the overall suite duration so individual regressions can be identified directly.
 - Maze topology generation for one valid maze must complete in under 100 milliseconds before the later baked-lightmap step runs.
 - Full maze topology generation and validation for one maze must complete in under 5 seconds before the offline surface-lightmap bake runs.
-- The offline path-traced surface-lightmap bake may take approximately 10-15 seconds for one authored or persisted maze on the current hardware.
+- The offline path-traced surface-lightmap bake may take several minutes for one authored or persisted maze when release-quality indirect sampling is enabled.
 - Maze-regeneration loops have a bounded maximum attempt count and fail with a diagnostic error instead of hanging indefinitely when the maze factory repeatedly returns invalid mazes.
 - Maze-generation performance tests record per-case reported and wall-clock durations in `logs/latest-maze-test-profile.json`.
 - The runtime records high-water RAM and VRAM usage so those values can be inspected during debugging.

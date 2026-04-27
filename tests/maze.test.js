@@ -89,7 +89,12 @@ function bakeCachedMazeLightmap(maze) {
   const cacheKey = getLightmapBakeCacheKey(maze)
 
   if (!lightmapBakeCache.has(cacheKey)) {
-    lightmapBakeCache.set(cacheKey, bakeMazeLightmap(maze))
+    lightmapBakeCache.set(
+      cacheKey,
+      bakeMazeLightmap(maze, undefined, {
+        bakeModes: [{ key: 'default', mode: 2 }]
+      })
+    )
   }
 
   return lightmapBakeCache.get(cacheKey)

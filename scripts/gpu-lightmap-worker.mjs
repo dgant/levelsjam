@@ -69,8 +69,11 @@ const int MAX_TORCHES = 96;
 const int SKY_DIRECTION_COUNT = 13;
 const int DIRECT_SPHERE_SAMPLE_COUNT = 6;
 const int INDIRECT_SPHERE_SAMPLE_COUNT = 3;
-const int INDIRECT_RAY_COUNT = 2;
-const int HIGH_INDIRECT_RAY_COUNT = 32;
+const int DEBUG_INDIRECT_RAY_COUNT = 2;
+const int DEBUG_HIGH_INDIRECT_RAY_COUNT = 32;
+const int RELEASE_INDIRECT_RAY_COUNT = 64;
+const int RELEASE_INDIRECT_PASS_RAY_COUNT = 32;
+const int MAX_INDIRECT_RAY_COUNT = 32;
 const int BAKE_MODE = 1;
 const float GROUND_Y = 0.0;
 const float PI = 3.141592653589793;
@@ -98,6 +101,8 @@ uniform float uSconceRadius;
 uniform float uTorchSourceRadius;
 uniform float uTorchStrength;
 uniform int uSupersampleGrid;
+uniform int uIndirectSampleOffset;
+uniform int uIndirectSequenceSampleCount;
 uniform bool uAlignUToRectEdges;
 
 out vec4 outColor;
@@ -128,6 +133,37 @@ vec4 readTorch(int torchIndex, int row) {
 
 float hash11(float value) {
   return fract(sin(value * 12.9898) * 43758.5453123);
+}
+
+float radicalInverseVdC(int bits) {
+  float inverse = 0.5;
+  float result = 0.0;
+
+  for (int index = 0; index < 24; index += 1) {
+    if (bits <= 0) {
+      break;
+    }
+
+    int bit = bits - ((bits / 2) * 2);
+    result += float(bit) * inverse;
+    bits = bits / 2;
+    inverse *= 0.5;
+  }
+
+  return result;
+}
+
+vec2 hammersleySample(int sampleIndex, int sampleCount, float seed) {
+  float count = max(float(sampleCount), 1.0);
+  vec2 rotation = vec2(
+    hash11(seed + 11.137),
+    hash11(seed + 71.419)
+  );
+
+  return vec2(
+    fract((float(sampleIndex) + rotation.x) / count),
+    fract(radicalInverseVdC(sampleIndex) + rotation.y)
+  );
 }
 
 vec2 rotateWallLocalVector(float localX, float localZ, float yaw) {
@@ -386,14 +422,13 @@ vec3 sphereSampleDirection(int sampleIndex, float seed, int sampleCount) {
   return vec3(cos(angle) * radius, z, sin(angle) * radius);
 }
 
-vec3 cosineHemisphereDirection(vec3 normal, int sampleIndex, float seed) {
-  float r1 = hash11(seed + (float(sampleIndex) * 17.371));
-  float r2 = hash11(seed + (float(sampleIndex) * 29.713) + 5.231);
-  float phi = 2.0 * PI * r1;
-  float radius = sqrt(r2);
+vec3 cosineHemisphereDirection(vec3 normal, int sampleIndex, int sampleCount, float seed) {
+  vec2 sampleUv = hammersleySample(sampleIndex, sampleCount, seed);
+  float phi = 2.0 * PI * sampleUv.x;
+  float radius = sqrt(sampleUv.y);
   float localX = cos(phi) * radius;
   float localZ = sin(phi) * radius;
-  float localY = sqrt(max(0.0, 1.0 - r2));
+  float localY = sqrt(max(0.0, 1.0 - sampleUv.y));
   vec3 tangent = abs(normal.y) < 0.95
     ? normalize(cross(vec3(0.0, 1.0, 0.0), normal))
     : normalize(cross(vec3(1.0, 0.0, 0.0), normal));
@@ -614,20 +649,25 @@ vec3 sampleTwoBounceDiffuseLighting(
   vec3 sampleNormal,
   float seed,
   int rayCount,
+  int sampleOffset,
+  int sequenceSampleCount,
   bool useBounceAlbedo
 ) {
   vec3 indirect = vec3(0.0);
   vec3 rayStart = samplePosition + (sampleNormal * uSampleEpsilon);
   int effectiveRayCount = max(rayCount, 1);
+  int effectiveSequenceSampleCount = max(sequenceSampleCount, effectiveRayCount);
 
-  for (int bounceSampleIndex = 0; bounceSampleIndex < HIGH_INDIRECT_RAY_COUNT; bounceSampleIndex += 1) {
+  for (int bounceSampleIndex = 0; bounceSampleIndex < MAX_INDIRECT_RAY_COUNT; bounceSampleIndex += 1) {
     if (bounceSampleIndex >= effectiveRayCount) {
       break;
     }
 
+    int sequenceSampleIndex = bounceSampleIndex + sampleOffset;
     vec3 firstDirection = cosineHemisphereDirection(
       sampleNormal,
-      bounceSampleIndex,
+      sequenceSampleIndex,
+      effectiveSequenceSampleCount,
       seed + 101.0
     );
     vec3 firstHitPosition = vec3(0.0);
@@ -649,7 +689,8 @@ vec3 sampleTwoBounceDiffuseLighting(
     vec3 secondBounce = vec3(0.0);
     vec3 secondDirection = cosineHemisphereDirection(
       firstHitNormal,
-      bounceSampleIndex + effectiveRayCount,
+      sequenceSampleIndex,
+      effectiveSequenceSampleCount,
       firstSeed + 211.0
     );
     vec3 secondHitPosition = vec3(0.0);
@@ -700,7 +741,9 @@ vec3 evaluateBakeMode(vec3 samplePosition, vec3 sampleNormal, float seed) {
       samplePosition,
       sampleNormal,
       seed + 19.0,
-      INDIRECT_RAY_COUNT,
+      DEBUG_INDIRECT_RAY_COUNT,
+      0,
+      DEBUG_INDIRECT_RAY_COUNT,
       true
     );
   }
@@ -710,7 +753,9 @@ vec3 evaluateBakeMode(vec3 samplePosition, vec3 sampleNormal, float seed) {
       samplePosition,
       sampleNormal,
       seed + 19.0,
-      HIGH_INDIRECT_RAY_COUNT,
+      DEBUG_HIGH_INDIRECT_RAY_COUNT,
+      0,
+      DEBUG_HIGH_INDIRECT_RAY_COUNT,
       true
     );
   }
@@ -720,7 +765,9 @@ vec3 evaluateBakeMode(vec3 samplePosition, vec3 sampleNormal, float seed) {
       samplePosition,
       sampleNormal,
       seed + 19.0,
-      INDIRECT_RAY_COUNT,
+      DEBUG_INDIRECT_RAY_COUNT,
+      0,
+      DEBUG_INDIRECT_RAY_COUNT,
       false
     );
   }
@@ -736,7 +783,9 @@ vec3 evaluateBakeMode(vec3 samplePosition, vec3 sampleNormal, float seed) {
       samplePosition,
       sampleNormal,
       seed + 19.0,
-      INDIRECT_RAY_COUNT,
+      RELEASE_INDIRECT_PASS_RAY_COUNT,
+      uIndirectSampleOffset,
+      uIndirectSequenceSampleCount,
       true
     );
 }
@@ -766,7 +815,13 @@ void main() {
       vec3 sampleNormal;
 
       getSurfaceSample(u, v, samplePosition, sampleNormal);
-      float seed = 0.371 + (float(sampleColumn + (sampleRow * 2)) * 0.173);
+      float seed = hash11(
+        ((gl_FragCoord.x + 0.5) * 12.9898) +
+        ((gl_FragCoord.y + 0.5) * 78.233) +
+        (float(uSurfaceType) * 37.719) +
+        (float(sampleColumn + (sampleRow * 2)) * 19.371) +
+        dot(samplePosition, vec3(0.173, 0.317, 0.421))
+      );
       accumulatedColor += evaluateBakeMode(samplePosition, sampleNormal, seed);
       sampleCount += 1.0;
     }
@@ -916,6 +971,8 @@ void main() {
       cellSize: gl.getUniformLocation(program, 'uCellSize'),
       groundBounceAlbedo: gl.getUniformLocation(program, 'uGroundBounceAlbedo'),
       groundBounds: gl.getUniformLocation(program, 'uGroundBounds'),
+      indirectSampleOffset: gl.getUniformLocation(program, 'uIndirectSampleOffset'),
+      indirectSequenceSampleCount: gl.getUniformLocation(program, 'uIndirectSequenceSampleCount'),
       rect: gl.getUniformLocation(program, 'uRect'),
       sampleEpsilon: gl.getUniformLocation(program, 'uSampleEpsilon'),
       sconceRadius: gl.getUniformLocation(program, 'uSconceRadius'),
@@ -993,9 +1050,26 @@ void main() {
       return btoa(binary)
     }
 
+    const getModePasses = (mode) => {
+      if (mode === 1) {
+        return [
+          { offset: 0, sequenceSampleCount: 64 },
+          { offset: 32, sequenceSampleCount: 64 }
+        ]
+      }
+
+      if (mode === 4) {
+        return [{ offset: 0, sequenceSampleCount: 32 }]
+      }
+
+      return [{ offset: 0, sequenceSampleCount: 2 }]
+    }
+
     const renderMode = (mode) => {
       const program = createProgramForMode(mode)
       const locations = getLocations(program)
+      const passes = getModePasses(mode)
+      const accumulatedPixels = new Float32Array(bakeJob.atlasWidth * bakeJob.atlasHeight * 4)
 
       gl.useProgram(program)
       gl.activeTexture(gl.TEXTURE0)
@@ -1019,55 +1093,65 @@ void main() {
       gl.uniform3fv(locations.torchLightColor, bakeJob.constants.torchLightColor)
       gl.uniform3fv(locations.skyLightColor, bakeJob.constants.skyLightColor)
       gl.uniform3fv(locations.wallBounceAlbedo, bakeJob.constants.wallBounceAlbedo)
-      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer)
-      gl.viewport(0, 0, bakeJob.atlasWidth, bakeJob.atlasHeight)
-      gl.scissor(0, 0, bakeJob.atlasWidth, bakeJob.atlasHeight)
-      gl.clearColor(0, 0, 0, 1)
-      gl.clear(gl.COLOR_BUFFER_BIT)
 
-      for (const surface of bakeJob.surfaces) {
-        const rect = surface.rect
-        gl.uniform4f(locations.rect, rect.x, rect.y, rect.width, rect.height)
-        gl.uniform1i(locations.surfaceType, surface.type)
-        gl.uniform4fv(locations.surfaceA, surface.surfaceA)
-        gl.uniform4fv(locations.surfaceB, surface.surfaceB)
-        gl.uniform1i(locations.supersampleGrid, surface.supersampleGrid)
-        gl.uniform1i(locations.alignUToRectEdges, surface.alignUToRectEdges ? 1 : 0)
+      for (const pass of passes) {
+        gl.uniform1i(locations.indirectSampleOffset, pass.offset)
+        gl.uniform1i(locations.indirectSequenceSampleCount, pass.sequenceSampleCount)
+        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer)
+        gl.viewport(0, 0, bakeJob.atlasWidth, bakeJob.atlasHeight)
+        gl.scissor(0, 0, bakeJob.atlasWidth, bakeJob.atlasHeight)
+        gl.clearColor(0, 0, 0, 1)
+        gl.clear(gl.COLOR_BUFFER_BIT)
 
-        for (let tileY = rect.y; tileY < rect.y + rect.height; tileY += renderTileSize) {
-          const tileHeight = Math.min(renderTileSize, rect.y + rect.height - tileY)
+        for (const surface of bakeJob.surfaces) {
+          const rect = surface.rect
+          gl.uniform4f(locations.rect, rect.x, rect.y, rect.width, rect.height)
+          gl.uniform1i(locations.surfaceType, surface.type)
+          gl.uniform4fv(locations.surfaceA, surface.surfaceA)
+          gl.uniform4fv(locations.surfaceB, surface.surfaceB)
+          gl.uniform1i(locations.supersampleGrid, surface.supersampleGrid)
+          gl.uniform1i(locations.alignUToRectEdges, surface.alignUToRectEdges ? 1 : 0)
 
-          for (let tileX = rect.x; tileX < rect.x + rect.width; tileX += renderTileSize) {
-            const tileWidth = Math.min(renderTileSize, rect.x + rect.width - tileX)
+          for (let tileY = rect.y; tileY < rect.y + rect.height; tileY += renderTileSize) {
+            const tileHeight = Math.min(renderTileSize, rect.y + rect.height - tileY)
 
-            gl.viewport(tileX, tileY, tileWidth, tileHeight)
-            gl.scissor(tileX, tileY, tileWidth, tileHeight)
-            gl.drawArrays(gl.TRIANGLES, 0, 3)
+            for (let tileX = rect.x; tileX < rect.x + rect.width; tileX += renderTileSize) {
+              const tileWidth = Math.min(renderTileSize, rect.x + rect.width - tileX)
+
+              gl.viewport(tileX, tileY, tileWidth, tileHeight)
+              gl.scissor(tileX, tileY, tileWidth, tileHeight)
+              gl.drawArrays(gl.TRIANGLES, 0, 3)
+            }
           }
+        }
+
+        const pixels = new Float32Array(bakeJob.atlasWidth * bakeJob.atlasHeight * 4)
+        gl.readPixels(
+          0,
+          0,
+          bakeJob.atlasWidth,
+          bakeJob.atlasHeight,
+          gl.RGBA,
+          gl.FLOAT,
+          pixels
+        )
+
+        for (let index = 0; index < accumulatedPixels.length; index += 1) {
+          accumulatedPixels[index] += pixels[index]
         }
       }
 
-      const pixels = new Float32Array(bakeJob.atlasWidth * bakeJob.atlasHeight * 4)
-      gl.readPixels(
-        0,
-        0,
-        bakeJob.atlasWidth,
-        bakeJob.atlasHeight,
-        gl.RGBA,
-        gl.FLOAT,
-        pixels
-      )
-
       const bytes = new Uint8Array(bakeJob.atlasWidth * bakeJob.atlasHeight * 3 * 2)
       const view = new DataView(bytes.buffer)
+      const passScale = 1 / passes.length
 
       for (let pixelIndex = 0; pixelIndex < bakeJob.atlasWidth * bakeJob.atlasHeight; pixelIndex += 1) {
         const sourceOffset = pixelIndex * 4
         const outputOffset = pixelIndex * 6
 
-        view.setUint16(outputOffset, toHalfFloat(Math.max(0, pixels[sourceOffset])), true)
-        view.setUint16(outputOffset + 2, toHalfFloat(Math.max(0, pixels[sourceOffset + 1])), true)
-        view.setUint16(outputOffset + 4, toHalfFloat(Math.max(0, pixels[sourceOffset + 2])), true)
+        view.setUint16(outputOffset, toHalfFloat(Math.max(0, accumulatedPixels[sourceOffset] * passScale)), true)
+        view.setUint16(outputOffset + 2, toHalfFloat(Math.max(0, accumulatedPixels[sourceOffset + 1] * passScale)), true)
+        view.setUint16(outputOffset + 4, toHalfFloat(Math.max(0, accumulatedPixels[sourceOffset + 2] * passScale)), true)
       }
 
       const dataBase64 = bytesToBase64(bytes)
