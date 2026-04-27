@@ -1120,6 +1120,7 @@ type VisualSettings = {
   cameraFov: number
   iblContribution: LightingContributionSettings
   lightmapContribution: LightingContributionSettings
+  lightmapSource: SurfaceLightmapSourceKey
   lensFlare: LensFlareSettings
   probeDebugMode: ProbeDebugMode
   reflectionContribution: LightingContributionSettings
@@ -1156,6 +1157,7 @@ type VisualSettingsPatch = Partial<{
   iblContribution: Partial<LightingContributionSettings>
   lensFlare: Partial<LensFlareSettings>
   lightmapContribution: Partial<LightingContributionSettings>
+  lightmapSource: SurfaceLightmapSourceKey
   movement: Partial<MovementSettings>
   precomputedVisibilityEnabled: boolean
   probeDebugMode: ProbeDebugMode
@@ -1508,6 +1510,25 @@ type WallMaterialContinuumStepKey =
   | 'runtime-original'
 
 type MazeLightmap = MazeLayout['maze']['lightmap']
+type SurfaceLightmapSourceKey =
+  | 'default'
+  | 'legacy-gpu'
+  | 'soft-shadows'
+  | 'bounce-only'
+  | 'bounce-only-16x'
+  | 'bounce-only-no-pbr'
+
+const SURFACE_LIGHTMAP_SOURCE_OPTIONS: Array<{
+  key: SurfaceLightmapSourceKey
+  label: string
+}> = [
+  { key: 'default', label: 'Current full bake' },
+  { key: 'legacy-gpu', label: 'Legacy GPU direct' },
+  { key: 'soft-shadows', label: 'Soft shadows only' },
+  { key: 'bounce-only', label: 'Bounce only' },
+  { key: 'bounce-only-16x', label: 'Bounce only 16x' },
+  { key: 'bounce-only-no-pbr', label: 'Bounce only no PBR' }
+]
 
 type StandardPbrTextureUrls = {
   ao?: string
@@ -1748,6 +1769,7 @@ function createDefaultVisualSettings(): VisualSettings {
       enabled: true,
       intensity: DEFAULT_LIGHTMAP_CONTRIBUTION_INTENSITY
     },
+    lightmapSource: 'default',
     lensFlare: {
       aditionalStreaks: false,
       animated: false,
@@ -1864,6 +1886,9 @@ function applyVisualSettingsPatch(
     ...(patch.probeDebugMode === undefined
       ? null
       : { probeDebugMode: patch.probeDebugMode }),
+    ...(patch.lightmapSource === undefined
+      ? null
+      : { lightmapSource: patch.lightmapSource }),
     ...(patch.precomputedVisibilityEnabled === undefined
       ? null
       : { precomputedVisibilityEnabled: patch.precomputedVisibilityEnabled }),
@@ -5533,32 +5558,55 @@ function useMazeLightmapAtlasTexture(
   return texture
 }
 
-function getRuntimeSurfaceLightmapAtlasUrl(lightmap: MazeLightmap) {
-  if (!lightmap.atlasUrl) {
+function getSelectedSurfaceLightmapSource(
+  lightmap: MazeLightmap,
+  sourceKey: SurfaceLightmapSourceKey
+) {
+  if (sourceKey === 'default') {
+    return lightmap
+  }
+
+  return lightmap.debugSources?.[sourceKey] ?? lightmap
+}
+
+function getRuntimeSurfaceLightmapAtlasUrl(
+  lightmap: MazeLightmap,
+  sourceKey: SurfaceLightmapSourceKey = 'default'
+) {
+  const source = getSelectedSurfaceLightmapSource(lightmap, sourceKey)
+  const atlasUrl = source.atlasUrl
+  const encoding = source.encoding ?? lightmap.encoding
+
+  if (!atlasUrl) {
     return null
   }
 
   if (
-    lightmap.encoding === 'rgb16f' &&
-    lightmap.atlasUrl.endsWith('/surface-lightmap.bin')
+    encoding === 'rgb16f' &&
+    atlasUrl.endsWith('/surface-lightmap.bin')
   ) {
-    return lightmap.atlasUrl.replace(/surface-lightmap\.bin$/, 'surface-lightmap-rgbe.png')
+    return atlasUrl.replace(/surface-lightmap\.bin$/, 'surface-lightmap-rgbe.png')
   }
 
   if (
-    lightmap.encoding === 'rgb16f' &&
-    lightmap.atlasUrl.endsWith('surface-lightmap.bin')
+    encoding === 'rgb16f' &&
+    atlasUrl.endsWith('surface-lightmap.bin')
   ) {
-    return lightmap.atlasUrl.replace(/surface-lightmap\.bin$/, 'surface-lightmap-rgbe.png')
+    return atlasUrl.replace(/surface-lightmap\.bin$/, 'surface-lightmap-rgbe.png')
   }
 
-  return lightmap.atlasUrl
+  return atlasUrl
 }
 
-function getRuntimeSurfaceLightmapEncoding(lightmap: MazeLightmap) {
-  const imageUrl = getRuntimeSurfaceLightmapAtlasUrl(lightmap)
+function getRuntimeSurfaceLightmapEncoding(
+  lightmap: MazeLightmap,
+  sourceKey: SurfaceLightmapSourceKey = 'default'
+) {
+  const imageUrl = getRuntimeSurfaceLightmapAtlasUrl(lightmap, sourceKey)
+  const source = getSelectedSurfaceLightmapSource(lightmap, sourceKey)
+  const encoding = source.encoding ?? lightmap.encoding
 
-  return imageUrl?.endsWith('surface-lightmap-rgbe.png') || lightmap.encoding === 'rgbe8'
+  return imageUrl?.endsWith('surface-lightmap-rgbe.png') || encoding === 'rgbe8'
     ? 'rgbe8'
     : 'linear'
 }
@@ -5598,8 +5646,11 @@ async function loadRgbEImageDataTexture(url: string) {
   return configureLightmapTexture(texture)
 }
 
-function useSurfaceLightmapAtlasTexture(lightmap: MazeLightmap) {
-  const initialEncoding = getRuntimeSurfaceLightmapEncoding(lightmap)
+function useSurfaceLightmapAtlasTexture(
+  lightmap: MazeLightmap,
+  sourceKey: SurfaceLightmapSourceKey
+) {
+  const initialEncoding = getRuntimeSurfaceLightmapEncoding(lightmap, sourceKey)
   const [state, setState] = useState<{
     encoding: LightmapTextureEncoding
     ready: boolean
@@ -5613,8 +5664,10 @@ function useSurfaceLightmapAtlasTexture(lightmap: MazeLightmap) {
   useEffect(
     () => {
       let cancelled = false
-      const imageUrl = getRuntimeSurfaceLightmapAtlasUrl(lightmap)
-      const imageEncoding = getRuntimeSurfaceLightmapEncoding(lightmap)
+      const source = getSelectedSurfaceLightmapSource(lightmap, sourceKey)
+      const imageUrl = getRuntimeSurfaceLightmapAtlasUrl(lightmap, sourceKey)
+      const imageEncoding = getRuntimeSurfaceLightmapEncoding(lightmap, sourceKey)
+      const sourceEncoding = source.encoding ?? lightmap.encoding
 
       setState((current) => ({
         encoding: imageEncoding,
@@ -5622,8 +5675,15 @@ function useSurfaceLightmapAtlasTexture(lightmap: MazeLightmap) {
         texture: current.texture
       }))
 
-      const load = async () => {
-        if (typeof lightmap.dataBase64 === 'string' && lightmap.dataBase64.length > 0) {
+      const load = async (): Promise<{
+        encoding: LightmapTextureEncoding
+        texture: Texture
+      }> => {
+        if (
+          sourceKey === 'default' &&
+          typeof lightmap.dataBase64 === 'string' &&
+          lightmap.dataBase64.length > 0
+        ) {
           return {
             encoding: 'linear' as const,
             texture: createLightmapAtlasTexture(
@@ -5637,7 +5697,7 @@ function useSurfaceLightmapAtlasTexture(lightmap: MazeLightmap) {
 
         if (
           imageUrl &&
-          (imageUrl.endsWith('surface-lightmap-rgbe.png') || lightmap.encoding === 'rgbe8')
+          (imageUrl.endsWith('surface-lightmap-rgbe.png') || sourceEncoding === 'rgbe8')
         ) {
           return {
             encoding: 'rgbe8' as const,
@@ -5658,7 +5718,7 @@ function useSurfaceLightmapAtlasTexture(lightmap: MazeLightmap) {
               new Uint8Array(await response.arrayBuffer()),
               lightmap.atlasWidth,
               lightmap.atlasHeight,
-              lightmap.encoding ?? 'rgbe8'
+              sourceEncoding ?? 'rgbe8'
             )
           }
         }
@@ -5697,7 +5757,7 @@ function useSurfaceLightmapAtlasTexture(lightmap: MazeLightmap) {
         cancelled = true
       }
     },
-    [lightmap]
+    [lightmap, sourceKey]
   )
 
   state.texture.channel = 1
@@ -5787,10 +5847,11 @@ function createInitialRuntimeReflectionProbeState(
 
 function useRuntimeLevelLightingResources(
   layout: MazeLayout,
-  priorityPosition: { x: number; z: number }
+  priorityPosition: { x: number; z: number },
+  lightmapSource: SurfaceLightmapSourceKey
 ): RuntimeLevelLightingResources {
   const scene = useThree((state) => state.scene)
-  const surfaceLightmap = useSurfaceLightmapAtlasTexture(layout.maze.lightmap)
+  const surfaceLightmap = useSurfaceLightmapAtlasTexture(layout.maze.lightmap, lightmapSource)
   const priorityPositionRef = useRef(priorityPosition)
   priorityPositionRef.current = priorityPosition
   const [reflectionProbeCoefficients, setReflectionProbeCoefficients] = useState<Array<ProbeIrradianceCoefficients | null>>([])
@@ -13870,6 +13931,7 @@ function RuntimeLevelGeometry({
   isActive,
   layout,
   lightmapContributionIntensity,
+  lightmapSource,
   mountAllGeometry = false,
   onLightingResourcesChange,
   openGateIdsOverride = null,
@@ -13887,6 +13949,7 @@ function RuntimeLevelGeometry({
   isActive: boolean
   layout: MazeLayout
   lightmapContributionIntensity: number
+  lightmapSource: SurfaceLightmapSourceKey
   mountAllGeometry?: boolean
   onLightingResourcesChange: (mazeId: string, resources: RuntimeLevelLightingResources | null) => void
   openGateIdsOverride?: Set<string> | null
@@ -13900,7 +13963,11 @@ function RuntimeLevelGeometry({
   visibilityState: PrecomputedVisibilityState
 }) {
   const scene = useThree((state) => state.scene)
-  const lightingResources = useRuntimeLevelLightingResources(layout, priorityPosition)
+  const lightingResources = useRuntimeLevelLightingResources(
+    layout,
+    priorityPosition,
+    lightmapSource
+  )
   const computedOpenGateIds = useMemo(
     () => new Set(getOpenGateIds(layout.maze, turnState)),
     [layout.maze, turnState]
@@ -15188,6 +15255,7 @@ function Scene({
               key={`runtime-level-${renderedLayout.maze.id}`}
               layout={renderedLayout}
               lightmapContributionIntensity={runtimeLightmapIntensity}
+              lightmapSource={visualSettings.lightmapSource}
               mountAllGeometry={startupGeometryExpanded}
               onLightingResourcesChange={handleLevelLightingResourcesChange}
               openGateIdsOverride={isActive ? activeOpenGateIds : closedGateIds}
@@ -15412,6 +15480,7 @@ function VisualControls({
   onEffectSettingChange,
   onFogAmbientHexChange,
   onLensFlareSettingChange,
+  onLightmapSourceChange,
   onProbeDebugModeChange,
   onResetAnamorphicSettings,
   onResetAmbientOcclusionMode,
@@ -15448,6 +15517,7 @@ function VisualControls({
   ) => void
   onFogAmbientHexChange: (value: string) => void
   onLensFlareSettingChange: (patch: Partial<LensFlareSettings>) => void
+  onLightmapSourceChange: (value: SurfaceLightmapSourceKey) => void
   onProbeDebugModeChange: (value: ProbeDebugMode) => void
   onResetAnamorphicSettings: () => void
   onResetAmbientOcclusionMode: () => void
@@ -15672,6 +15742,33 @@ function VisualControls({
           value={visualSettings.lightmapContribution.intensity}
         />
           </div>
+
+          <label className="visual-control-row">
+        <output>
+          {SURFACE_LIGHTMAP_SOURCE_OPTIONS.find(
+            (option) => option.key === visualSettings.lightmapSource
+          )?.label ?? visualSettings.lightmapSource}
+        </output>
+        <ResettableLabel onReset={() => onLightmapSourceChange('default')}>
+          Lightmap Source
+        </ResettableLabel>
+        <select
+          aria-label="Surface Lightmap Source"
+          onChange={(event) => {
+            onLightmapSourceChange(event.target.value as SurfaceLightmapSourceKey)
+          }}
+          value={visualSettings.lightmapSource}
+        >
+          {SURFACE_LIGHTMAP_SOURCE_OPTIONS.map((option) => (
+            <option
+              key={option.key}
+              value={option.key}
+            >
+              {option.label}
+            </option>
+          ))}
+        </select>
+          </label>
 
           <div className="visual-control-row">
         <output>
@@ -17863,6 +17960,13 @@ export default function App() {
     }))
   }
 
+  const onLightmapSourceChange = (value: SurfaceLightmapSourceKey) => {
+    setVisualSettings((current) => ({
+      ...current,
+      lightmapSource: value
+    }))
+  }
+
   const onToneMappingChange = (value: ToneMappingMode) => {
     setVisualSettings((current) => ({
       ...current,
@@ -18242,6 +18346,7 @@ export default function App() {
         onEffectSettingChange={onEffectSettingChange}
         onFogAmbientHexChange={onFogAmbientHexChange}
         onLensFlareSettingChange={onLensFlareSettingChange}
+        onLightmapSourceChange={onLightmapSourceChange}
         onProbeDebugModeChange={onProbeDebugModeChange}
         onResetAnamorphicSettings={onResetAnamorphicSettings}
         onResetAmbientOcclusionMode={onResetAmbientOcclusionMode}

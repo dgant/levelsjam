@@ -593,6 +593,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByLabel('Surface Lightmap Enabled')).toBeVisible()
     await expect(page.getByLabel('Surface Lightmap Enabled')).toBeChecked()
     await expect(page.getByRole('slider', { name: 'Surface Lightmap' })).toHaveValue('1')
+    await expect(page.getByLabel('Surface Lightmap Source')).toHaveValue('default')
     await expect(page.getByLabel('Dynamic Volumetric Enabled')).toBeVisible()
     await expect(page.getByLabel('Dynamic Volumetric Enabled')).toBeChecked()
     await expect(page.getByRole('slider', { name: 'Dynamic Volumetric' })).toHaveValue('1')

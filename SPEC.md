@@ -128,6 +128,8 @@
 - Baked torch emitter brightness uses one fifth of the previous authored baseline and is reduced by another factor of ten from the previous baked baseline while preserving the same torch color and inverse-square energy falloff.
 - Diffuse bounces in the baked lightmap are affected by representative PBR diffuse albedo for the surface that reflected the bounce.
 - Diffuse bounces do not bake view-dependent specular reflection, roughness-dependent glossy transport, metallic reflection, or runtime normal-map detail into the surface lightmap; those remain runtime PBR and reflection-probe responsibilities.
+- The default debug tab exposes a surface-lightmap source selector for comparing the current full bake against diagnostic atlases: legacy hard-shadow GPU direct lighting, soft-shadow direct lighting only, bounced lighting only, bounced lighting only with sixteen times the default bounce-ray sample count, and bounced lighting only with diffuse bounce albedo ignored.
+- Changing the surface-lightmap source selector swaps only the baked surface-lightmap atlas used by runtime wall, floor, and decal materials; it does not alter maze geometry, material selection, probe lighting, reflection intensity, or any gameplay state.
 - Each baked maze wall-face lightmap uses a higher texel density than the current base wall-material textures require for albedo detail.
 - Each baked maze wall-face lightmap uses `128x128` texels per wall face.
 - Each baked maze floor-patch lightmap uses a higher texel density than the previous full-ground bake.

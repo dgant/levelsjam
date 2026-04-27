@@ -6,6 +6,33 @@ const rootDir = path.resolve(__dirname, '..')
 const sourceDirectory = path.join(rootDir, 'src', 'data', 'mazes')
 const outputDirectory = path.join(rootDir, 'public', 'maze-data')
 const mazeFilePattern = /^maze-\d{3}\.js$/
+const lightmapDebugSourceFiles = [
+  {
+    fileName: 'surface-lightmap-legacy-gpu-rgbe.png',
+    key: 'legacy-gpu',
+    label: 'Legacy GPU direct'
+  },
+  {
+    fileName: 'surface-lightmap-soft-shadows-rgbe.png',
+    key: 'soft-shadows',
+    label: 'Soft shadows only'
+  },
+  {
+    fileName: 'surface-lightmap-bounce-only-rgbe.png',
+    key: 'bounce-only',
+    label: 'Bounce only'
+  },
+  {
+    fileName: 'surface-lightmap-bounce-only-16x-rgbe.png',
+    key: 'bounce-only-16x',
+    label: 'Bounce only 16x'
+  },
+  {
+    fileName: 'surface-lightmap-bounce-only-no-pbr-rgbe.png',
+    key: 'bounce-only-no-pbr',
+    label: 'Bounce only no PBR'
+  }
+]
 
 async function importMazeModule(filePath) {
   const moduleUrl = `${pathToFileURL(filePath).href}?cacheBust=${Date.now()}-${Math.random()}`
@@ -13,7 +40,25 @@ async function importMazeModule(filePath) {
   return imported.default
 }
 
-function replaceMazeLightmapWithRuntimeAssetUrls(maze) {
+function getExistingLightmapDebugSources(mazeId, mazeOutputDirectory) {
+  const debugSources = {}
+
+  for (const source of lightmapDebugSourceFiles) {
+    if (!fs.existsSync(path.join(mazeOutputDirectory, source.fileName))) {
+      continue
+    }
+
+    debugSources[source.key] = {
+      atlasUrl: `${mazeId}/${source.fileName}`,
+      encoding: 'rgb16f',
+      label: source.label
+    }
+  }
+
+  return Object.keys(debugSources).length > 0 ? debugSources : undefined
+}
+
+function replaceMazeLightmapWithRuntimeAssetUrls(maze, debugSources) {
   if (!maze.lightmap) {
     return maze
   }
@@ -26,7 +71,8 @@ function replaceMazeLightmapWithRuntimeAssetUrls(maze) {
         maze.lightmap.encoding === 'rgb16f'
           ? `${maze.id}/surface-lightmap-rgbe.png`
           : `${maze.id}/surface-lightmap.png`,
-      dataBase64: undefined
+      dataBase64: undefined,
+      ...(debugSources ? { debugSources } : {})
     }
   }
 }
@@ -60,13 +106,14 @@ async function main() {
 
   const writeRuntimeMaze = (maze, mazeId, position, total) => {
     const mazeOutputDirectory = path.join(outputDirectory, mazeId)
-    const runtimeMaze = replaceMazeLightmapWithRuntimeAssetUrls(maze)
+    fs.mkdirSync(mazeOutputDirectory, { recursive: true })
+    const debugSources = getExistingLightmapDebugSources(mazeId, mazeOutputDirectory)
+    const runtimeMaze = replaceMazeLightmapWithRuntimeAssetUrls(maze, debugSources)
     const lightmapBuffers = buildMazeLightmapArtifactBuffers(maze)
 
     console.log(
       `[sync-maze-runtime-data] writing ${position}/${total} ${mazeId}.json`
     )
-    fs.mkdirSync(mazeOutputDirectory, { recursive: true })
     if (lightmapBuffers) {
       if (lightmapBuffers.runtimeAtlasBytes) {
         fs.writeFileSync(

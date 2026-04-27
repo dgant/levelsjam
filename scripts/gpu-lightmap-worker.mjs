@@ -70,6 +70,8 @@ const int SKY_DIRECTION_COUNT = 13;
 const int DIRECT_SPHERE_SAMPLE_COUNT = 6;
 const int INDIRECT_SPHERE_SAMPLE_COUNT = 3;
 const int INDIRECT_RAY_COUNT = 2;
+const int HIGH_INDIRECT_RAY_COUNT = 32;
+const int BAKE_MODE = 1;
 const float GROUND_Y = 0.0;
 const float PI = 3.141592653589793;
 const float GOLDEN_RATIO = 1.618033988749895;
@@ -553,6 +555,43 @@ vec3 accumulateTorchLighting(
   return litColor;
 }
 
+vec3 accumulateLegacyTorchLighting(vec3 samplePosition, vec3 sampleNormal) {
+  vec3 litColor = vec3(0.0);
+  float sourceRadius = max(uTorchSourceRadius, 0.001);
+
+  for (int torchIndex = 0; torchIndex < MAX_TORCHES; torchIndex += 1) {
+    if (torchIndex >= uTorchCount) {
+      break;
+    }
+
+    vec3 torchPosition = readTorch(torchIndex, 0).xyz;
+    vec3 toTorch = torchPosition - samplePosition;
+    float distanceToTorch = length(toTorch);
+
+    if (distanceToTorch <= 0.000001) {
+      continue;
+    }
+
+    vec3 direction = toTorch / distanceToTorch;
+    float lambert = dot(sampleNormal, direction);
+
+    if (lambert <= 0.0) {
+      continue;
+    }
+
+    vec3 rayStart = samplePosition + (sampleNormal * uSampleEpsilon);
+
+    if (isSegmentOccluded(rayStart, torchPosition)) {
+      continue;
+    }
+
+    float falloff = 1.0 / max(distanceToTorch * distanceToTorch, sourceRadius * sourceRadius);
+    litColor += uTorchLightColor * (lambert * falloff * uTorchStrength);
+  }
+
+  return litColor;
+}
+
 vec3 directAndSkyLighting(
   vec3 samplePosition,
   vec3 sampleNormal,
@@ -564,11 +603,28 @@ vec3 directAndSkyLighting(
     max(vec3(0.0), sampleSkylight(samplePosition, sampleNormal));
 }
 
-vec3 sampleTwoBounceDiffuseLighting(vec3 samplePosition, vec3 sampleNormal, float seed) {
+vec3 legacyDirectAndSkyLighting(vec3 samplePosition, vec3 sampleNormal) {
+  return
+    max(vec3(0.0), accumulateLegacyTorchLighting(samplePosition, sampleNormal)) +
+    max(vec3(0.0), sampleSkylight(samplePosition, sampleNormal));
+}
+
+vec3 sampleTwoBounceDiffuseLighting(
+  vec3 samplePosition,
+  vec3 sampleNormal,
+  float seed,
+  int rayCount,
+  bool useBounceAlbedo
+) {
   vec3 indirect = vec3(0.0);
   vec3 rayStart = samplePosition + (sampleNormal * uSampleEpsilon);
+  int effectiveRayCount = max(rayCount, 1);
 
-  for (int bounceSampleIndex = 0; bounceSampleIndex < INDIRECT_RAY_COUNT; bounceSampleIndex += 1) {
+  for (int bounceSampleIndex = 0; bounceSampleIndex < HIGH_INDIRECT_RAY_COUNT; bounceSampleIndex += 1) {
+    if (bounceSampleIndex >= effectiveRayCount) {
+      break;
+    }
+
     vec3 firstDirection = cosineHemisphereDirection(
       sampleNormal,
       bounceSampleIndex,
@@ -583,6 +639,7 @@ vec3 sampleTwoBounceDiffuseLighting(vec3 samplePosition, vec3 sampleNormal, floa
     }
 
     float firstSeed = seed + float(bounceSampleIndex) * 0.271;
+    vec3 firstAlbedo = useBounceAlbedo ? firstHitAlbedo : vec3(1.0);
     vec3 firstLighting = directAndSkyLighting(
       firstHitPosition + (firstHitNormal * uSampleEpsilon),
       firstHitNormal,
@@ -592,7 +649,7 @@ vec3 sampleTwoBounceDiffuseLighting(vec3 samplePosition, vec3 sampleNormal, floa
     vec3 secondBounce = vec3(0.0);
     vec3 secondDirection = cosineHemisphereDirection(
       firstHitNormal,
-      bounceSampleIndex + INDIRECT_RAY_COUNT,
+      bounceSampleIndex + effectiveRayCount,
       firstSeed + 211.0
     );
     vec3 secondHitPosition = vec3(0.0);
@@ -615,13 +672,73 @@ vec3 sampleTwoBounceDiffuseLighting(vec3 samplePosition, vec3 sampleNormal, floa
         INDIRECT_SPHERE_SAMPLE_COUNT
       );
 
-      secondBounce = secondHitAlbedo * secondLighting;
+      secondBounce = (useBounceAlbedo ? secondHitAlbedo : vec3(1.0)) * secondLighting;
     }
 
-    indirect += firstHitAlbedo * (firstLighting + secondBounce);
+    indirect += firstAlbedo * (firstLighting + secondBounce);
   }
 
-  return indirect / float(INDIRECT_RAY_COUNT);
+  return indirect / float(effectiveRayCount);
+}
+
+vec3 evaluateBakeMode(vec3 samplePosition, vec3 sampleNormal, float seed) {
+  if (BAKE_MODE == 0) {
+    return legacyDirectAndSkyLighting(samplePosition, sampleNormal);
+  }
+
+  if (BAKE_MODE == 2) {
+    return directAndSkyLighting(
+      samplePosition,
+      sampleNormal,
+      seed,
+      DIRECT_SPHERE_SAMPLE_COUNT
+    );
+  }
+
+  if (BAKE_MODE == 3) {
+    return sampleTwoBounceDiffuseLighting(
+      samplePosition,
+      sampleNormal,
+      seed + 19.0,
+      INDIRECT_RAY_COUNT,
+      true
+    );
+  }
+
+  if (BAKE_MODE == 4) {
+    return sampleTwoBounceDiffuseLighting(
+      samplePosition,
+      sampleNormal,
+      seed + 19.0,
+      HIGH_INDIRECT_RAY_COUNT,
+      true
+    );
+  }
+
+  if (BAKE_MODE == 5) {
+    return sampleTwoBounceDiffuseLighting(
+      samplePosition,
+      sampleNormal,
+      seed + 19.0,
+      INDIRECT_RAY_COUNT,
+      false
+    );
+  }
+
+  return
+    directAndSkyLighting(
+      samplePosition,
+      sampleNormal,
+      seed,
+      DIRECT_SPHERE_SAMPLE_COUNT
+    ) +
+    sampleTwoBounceDiffuseLighting(
+      samplePosition,
+      sampleNormal,
+      seed + 19.0,
+      INDIRECT_RAY_COUNT,
+      true
+    );
 }
 
 void main() {
@@ -650,14 +767,7 @@ void main() {
 
       getSurfaceSample(u, v, samplePosition, sampleNormal);
       float seed = 0.371 + (float(sampleColumn + (sampleRow * 2)) * 0.173);
-      accumulatedColor +=
-        directAndSkyLighting(
-          samplePosition,
-          sampleNormal,
-          seed,
-          DIRECT_SPHERE_SAMPLE_COUNT
-        ) +
-        sampleTwoBounceDiffuseLighting(samplePosition, sampleNormal, seed + 19.0);
+      accumulatedColor += evaluateBakeMode(samplePosition, sampleNormal, seed);
       sampleCount += 1.0;
     }
   }
@@ -678,13 +788,26 @@ void main() {
       return shader
     }
 
-    const program = gl.createProgram()
-    gl.attachShader(program, compileShader(gl.VERTEX_SHADER, vertexSource))
-    gl.attachShader(program, compileShader(gl.FRAGMENT_SHADER, fragmentSource))
-    gl.linkProgram(program)
+    const createProgramForMode = (mode) => {
+      const modeFragmentSource = fragmentSource.replace(
+        'const int BAKE_MODE = 1;',
+        `const int BAKE_MODE = ${mode};`
+      )
+      const vertexShader = compileShader(gl.VERTEX_SHADER, vertexSource)
+      const fragmentShader = compileShader(gl.FRAGMENT_SHADER, modeFragmentSource)
+      const program = gl.createProgram()
 
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      throw new Error(gl.getProgramInfoLog(program) || 'Program link failed')
+      gl.attachShader(program, vertexShader)
+      gl.attachShader(program, fragmentShader)
+      gl.linkProgram(program)
+      gl.deleteShader(vertexShader)
+      gl.deleteShader(fragmentShader)
+
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        throw new Error(gl.getProgramInfoLog(program) || 'Program link failed')
+      }
+
+      return program
     }
 
     const targetTexture = gl.createTexture()
@@ -788,7 +911,7 @@ void main() {
 
     const wallTexture = createFloatTexture(wallTextureWidth, 2, wallData)
     const torchTexture = createFloatTexture(torchTextureWidth, 4, torchData)
-    const locations = {
+    const getLocations = (program) => ({
       alignUToRectEdges: gl.getUniformLocation(program, 'uAlignUToRectEdges'),
       cellSize: gl.getUniformLocation(program, 'uCellSize'),
       groundBounceAlbedo: gl.getUniformLocation(program, 'uGroundBounceAlbedo'),
@@ -812,73 +935,11 @@ void main() {
       wallHeight: gl.getUniformLocation(program, 'uWallHeight'),
       wallTexture: gl.getUniformLocation(program, 'uWallTexture'),
       wallThickness: gl.getUniformLocation(program, 'uWallThickness')
-    }
-
-    gl.useProgram(program)
-    gl.activeTexture(gl.TEXTURE0)
-    gl.bindTexture(gl.TEXTURE_2D, wallTexture)
-    gl.uniform1i(locations.wallTexture, 0)
-    gl.activeTexture(gl.TEXTURE1)
-    gl.bindTexture(gl.TEXTURE_2D, torchTexture)
-    gl.uniform1i(locations.torchTexture, 1)
-    gl.uniform1i(locations.wallCount, bakeJob.walls.length)
-    gl.uniform1i(locations.torchCount, bakeJob.torches.length)
-    gl.uniform1f(locations.cellSize, bakeJob.constants.cellSize)
-    gl.uniform1f(locations.wallHeight, bakeJob.constants.wallHeight)
-    gl.uniform1f(locations.wallThickness, bakeJob.constants.wallThickness)
-    gl.uniform1f(locations.sampleEpsilon, bakeJob.constants.sampleEpsilon)
-    gl.uniform1f(locations.skyRayDistance, bakeJob.constants.skyRayDistance)
-    gl.uniform1f(locations.sconceRadius, bakeJob.constants.sconceRadius)
-    gl.uniform1f(locations.torchSourceRadius, bakeJob.constants.torchSourceRadius)
-    gl.uniform1f(locations.torchStrength, bakeJob.constants.torchStrength)
-    gl.uniform4fv(locations.groundBounds, bakeJob.constants.groundBounds)
-    gl.uniform3fv(locations.groundBounceAlbedo, bakeJob.constants.groundBounceAlbedo)
-    gl.uniform3fv(locations.torchLightColor, bakeJob.constants.torchLightColor)
-    gl.uniform3fv(locations.skyLightColor, bakeJob.constants.skyLightColor)
-    gl.uniform3fv(locations.wallBounceAlbedo, bakeJob.constants.wallBounceAlbedo)
+    })
     gl.disable(gl.BLEND)
     gl.disable(gl.DEPTH_TEST)
     gl.enable(gl.SCISSOR_TEST)
-    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer)
-    gl.viewport(0, 0, bakeJob.atlasWidth, bakeJob.atlasHeight)
-    gl.scissor(0, 0, bakeJob.atlasWidth, bakeJob.atlasHeight)
-    gl.clearColor(0, 0, 0, 1)
-    gl.clear(gl.COLOR_BUFFER_BIT)
-
     const renderTileSize = 32
-
-    for (const surface of bakeJob.surfaces) {
-      const rect = surface.rect
-      gl.uniform4f(locations.rect, rect.x, rect.y, rect.width, rect.height)
-      gl.uniform1i(locations.surfaceType, surface.type)
-      gl.uniform4fv(locations.surfaceA, surface.surfaceA)
-      gl.uniform4fv(locations.surfaceB, surface.surfaceB)
-      gl.uniform1i(locations.supersampleGrid, surface.supersampleGrid)
-      gl.uniform1i(locations.alignUToRectEdges, surface.alignUToRectEdges ? 1 : 0)
-
-      for (let tileY = rect.y; tileY < rect.y + rect.height; tileY += renderTileSize) {
-        const tileHeight = Math.min(renderTileSize, rect.y + rect.height - tileY)
-
-        for (let tileX = rect.x; tileX < rect.x + rect.width; tileX += renderTileSize) {
-          const tileWidth = Math.min(renderTileSize, rect.x + rect.width - tileX)
-
-          gl.viewport(tileX, tileY, tileWidth, tileHeight)
-          gl.scissor(tileX, tileY, tileWidth, tileHeight)
-          gl.drawArrays(gl.TRIANGLES, 0, 3)
-        }
-      }
-    }
-
-    const pixels = new Float32Array(bakeJob.atlasWidth * bakeJob.atlasHeight * 4)
-    gl.readPixels(
-      0,
-      0,
-      bakeJob.atlasWidth,
-      bakeJob.atlasHeight,
-      gl.RGBA,
-      gl.FLOAT,
-      pixels
-    )
 
     const toHalfFloat = (value) => {
       if (Number.isNaN(value)) {
@@ -921,18 +982,6 @@ void main() {
       return sign | (halfExponent << 10) | (halfMantissa & 0x3ff)
     }
 
-    const bytes = new Uint8Array(bakeJob.atlasWidth * bakeJob.atlasHeight * 3 * 2)
-    const view = new DataView(bytes.buffer)
-
-    for (let pixelIndex = 0; pixelIndex < bakeJob.atlasWidth * bakeJob.atlasHeight; pixelIndex += 1) {
-      const sourceOffset = pixelIndex * 4
-      const outputOffset = pixelIndex * 6
-
-      view.setUint16(outputOffset, toHalfFloat(Math.max(0, pixels[sourceOffset])), true)
-      view.setUint16(outputOffset + 2, toHalfFloat(Math.max(0, pixels[sourceOffset + 1])), true)
-      view.setUint16(outputOffset + 4, toHalfFloat(Math.max(0, pixels[sourceOffset + 2])), true)
-    }
-
     const bytesToBase64 = (byteArray) => {
       let binary = ''
       const chunkSize = 0x8000
@@ -944,16 +993,110 @@ void main() {
       return btoa(binary)
     }
 
+    const renderMode = (mode) => {
+      const program = createProgramForMode(mode)
+      const locations = getLocations(program)
+
+      gl.useProgram(program)
+      gl.activeTexture(gl.TEXTURE0)
+      gl.bindTexture(gl.TEXTURE_2D, wallTexture)
+      gl.uniform1i(locations.wallTexture, 0)
+      gl.activeTexture(gl.TEXTURE1)
+      gl.bindTexture(gl.TEXTURE_2D, torchTexture)
+      gl.uniform1i(locations.torchTexture, 1)
+      gl.uniform1i(locations.wallCount, bakeJob.walls.length)
+      gl.uniform1i(locations.torchCount, bakeJob.torches.length)
+      gl.uniform1f(locations.cellSize, bakeJob.constants.cellSize)
+      gl.uniform1f(locations.wallHeight, bakeJob.constants.wallHeight)
+      gl.uniform1f(locations.wallThickness, bakeJob.constants.wallThickness)
+      gl.uniform1f(locations.sampleEpsilon, bakeJob.constants.sampleEpsilon)
+      gl.uniform1f(locations.skyRayDistance, bakeJob.constants.skyRayDistance)
+      gl.uniform1f(locations.sconceRadius, bakeJob.constants.sconceRadius)
+      gl.uniform1f(locations.torchSourceRadius, bakeJob.constants.torchSourceRadius)
+      gl.uniform1f(locations.torchStrength, bakeJob.constants.torchStrength)
+      gl.uniform4fv(locations.groundBounds, bakeJob.constants.groundBounds)
+      gl.uniform3fv(locations.groundBounceAlbedo, bakeJob.constants.groundBounceAlbedo)
+      gl.uniform3fv(locations.torchLightColor, bakeJob.constants.torchLightColor)
+      gl.uniform3fv(locations.skyLightColor, bakeJob.constants.skyLightColor)
+      gl.uniform3fv(locations.wallBounceAlbedo, bakeJob.constants.wallBounceAlbedo)
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer)
+      gl.viewport(0, 0, bakeJob.atlasWidth, bakeJob.atlasHeight)
+      gl.scissor(0, 0, bakeJob.atlasWidth, bakeJob.atlasHeight)
+      gl.clearColor(0, 0, 0, 1)
+      gl.clear(gl.COLOR_BUFFER_BIT)
+
+      for (const surface of bakeJob.surfaces) {
+        const rect = surface.rect
+        gl.uniform4f(locations.rect, rect.x, rect.y, rect.width, rect.height)
+        gl.uniform1i(locations.surfaceType, surface.type)
+        gl.uniform4fv(locations.surfaceA, surface.surfaceA)
+        gl.uniform4fv(locations.surfaceB, surface.surfaceB)
+        gl.uniform1i(locations.supersampleGrid, surface.supersampleGrid)
+        gl.uniform1i(locations.alignUToRectEdges, surface.alignUToRectEdges ? 1 : 0)
+
+        for (let tileY = rect.y; tileY < rect.y + rect.height; tileY += renderTileSize) {
+          const tileHeight = Math.min(renderTileSize, rect.y + rect.height - tileY)
+
+          for (let tileX = rect.x; tileX < rect.x + rect.width; tileX += renderTileSize) {
+            const tileWidth = Math.min(renderTileSize, rect.x + rect.width - tileX)
+
+            gl.viewport(tileX, tileY, tileWidth, tileHeight)
+            gl.scissor(tileX, tileY, tileWidth, tileHeight)
+            gl.drawArrays(gl.TRIANGLES, 0, 3)
+          }
+        }
+      }
+
+      const pixels = new Float32Array(bakeJob.atlasWidth * bakeJob.atlasHeight * 4)
+      gl.readPixels(
+        0,
+        0,
+        bakeJob.atlasWidth,
+        bakeJob.atlasHeight,
+        gl.RGBA,
+        gl.FLOAT,
+        pixels
+      )
+
+      const bytes = new Uint8Array(bakeJob.atlasWidth * bakeJob.atlasHeight * 3 * 2)
+      const view = new DataView(bytes.buffer)
+
+      for (let pixelIndex = 0; pixelIndex < bakeJob.atlasWidth * bakeJob.atlasHeight; pixelIndex += 1) {
+        const sourceOffset = pixelIndex * 4
+        const outputOffset = pixelIndex * 6
+
+        view.setUint16(outputOffset, toHalfFloat(Math.max(0, pixels[sourceOffset])), true)
+        view.setUint16(outputOffset + 2, toHalfFloat(Math.max(0, pixels[sourceOffset + 1])), true)
+        view.setUint16(outputOffset + 4, toHalfFloat(Math.max(0, pixels[sourceOffset + 2])), true)
+      }
+
+      const dataBase64 = bytesToBase64(bytes)
+
+      gl.deleteProgram(program)
+      return dataBase64
+    }
+
+    const bakeModes = Array.isArray(bakeJob.bakeModes) && bakeJob.bakeModes.length > 0
+      ? bakeJob.bakeModes
+      : [{ key: 'default', mode: 1 }]
+    const modeResults = {}
+
+    for (const bakeMode of bakeModes) {
+      modeResults[bakeMode.key] = renderMode(bakeMode.mode)
+    }
+
     const debugInfo = gl.getExtension('WEBGL_debug_renderer_info')
+    const defaultResult = modeResults.default ?? modeResults[bakeModes[0].key]
 
     return {
-      dataBase64: bytesToBase64(bytes),
+      dataBase64: defaultResult,
       renderer: debugInfo
         ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL)
         : gl.getParameter(gl.RENDERER),
       vendor: debugInfo
         ? gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL)
-        : gl.getParameter(gl.VENDOR)
+        : gl.getParameter(gl.VENDOR),
+      variants: modeResults
     }
   }, job)
 

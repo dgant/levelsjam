@@ -1953,7 +1953,8 @@ export function computeMazeVolumetricLightmapCoefficients(
 
 export async function bakeMazeLightmap(
   maze,
-  sconceRadius = MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS
+  sconceRadius = MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS,
+  options = {}
 ) {
   const bakeStart = performance.now()
   const walls = getMazeWallSegments(maze)
@@ -2107,6 +2108,7 @@ export async function bakeMazeLightmap(
   const result = await bakeGpuLightmapJob({
     atlasHeight,
     atlasWidth,
+    bakeModes: options.bakeModes,
     constants: {
       cellSize: MAZE_CELL_SIZE,
       groundBounds: [
@@ -2146,6 +2148,7 @@ export async function bakeMazeLightmap(
     bakeRenderer: result.renderer,
     bakeVendor: result.vendor,
     dataBase64: result.dataBase64,
+    ...(options.bakeModes ? { debugVariantDataBase64: result.variants } : {}),
     encoding: 'rgb16f',
     groundBounds,
     groundRect,

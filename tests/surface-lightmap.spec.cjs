@@ -96,3 +96,27 @@ test('surface lightmapped wall remains visibly lit with runtime effects disabled
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
 })
+
+test('surface lightmap debug selector loads alternate atlas sources', async ({ page }) => {
+  await page.goto('/?maze=entrance', { waitUntil: 'domcontentloaded' })
+  await expect
+    .poll(async () => page.locator('#root .loading-overlay').getAttribute('data-loading-complete'), {
+      timeout: 20_000,
+      intervals: [100, 250, 500]
+    })
+    .toBe('true')
+
+  await page.keyboard.press('Backquote')
+  await expect(page.getByLabel('Surface Lightmap Source')).toHaveValue('default')
+
+  const responsePromise = page.waitForResponse(
+    (response) =>
+      response.status() === 200 &&
+      response.url().includes('/maze-data/entrance/surface-lightmap-bounce-only-rgbe.png'),
+    { timeout: 15_000 }
+  )
+
+  await page.getByLabel('Surface Lightmap Source').selectOption('bounce-only')
+  await responsePromise
+  await expect(page.getByLabel('Surface Lightmap Source')).toHaveValue('bounce-only')
+})
