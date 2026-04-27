@@ -647,15 +647,28 @@ async function moveInOpenLevelToCell(page, targetCell, label) {
   }
 
   if (targetCell.y === 17) {
-    const current = await getGameplayState(page)
+    let current = await getGameplayState(page)
 
-    if (current.cell.y === 17 && current.cell.x !== targetCell.x) {
+    if (current.cell.y === 17) {
       await turnGameplayTo(page, 'north')
       await pressGameplayKeyAndWaitIdle(page, 'KeyW', `${label} leave entrance row`)
+      current = await getGameplayState(page)
     }
 
-    await moveX()
-    await moveY()
+    if (current.cell.y !== 16) {
+      await turnGameplayTo(page, current.cell.y < 16 ? 'south' : 'north')
+      await moveGameplayForward(page, Math.abs(16 - current.cell.y), `${label} y-to-threshold`)
+    }
+
+    current = await getGameplayState(page)
+
+    if (current.cell.x !== targetCell.x) {
+      await turnGameplayTo(page, current.cell.x < targetCell.x ? 'east' : 'west')
+      await moveGameplayForward(page, Math.abs(targetCell.x - current.cell.x), `${label} x-to-threshold`)
+    }
+
+    await turnGameplayTo(page, 'south')
+    await pressGameplayKeyAndWaitIdle(page, 'KeyW', `${label} enter threshold row`)
   } else {
     await moveY()
     await moveX()
@@ -663,6 +676,10 @@ async function moveInOpenLevelToCell(page, targetCell, label) {
 
   for (let guard = 0; guard < 10; guard += 1) {
     const current = await getGameplayState(page)
+
+    if (current.mazeId !== start.mazeId) {
+      return
+    }
 
     if (current.cell.x === targetCell.x && current.cell.y === targetCell.y) {
       return
@@ -689,15 +706,46 @@ async function moveInOpenLevelToCell(page, targetCell, label) {
   )
 }
 
+async function ensureInChamber(page, label) {
+  for (let guard = 0; guard < 4; guard += 1) {
+    const state = await getGameplayState(page)
+
+    if (state.mazeId === 'chamber-1') {
+      return
+    }
+
+    if (state.mazeId === 'entrance') {
+      await turnGameplayTo(page, 'north')
+      await pressGameplayKeyAndWaitIdle(page, 'KeyW', `${label} enter chamber from entrance`)
+    } else {
+      await turnGameplayTo(page, 'west')
+      await pressGameplayKeyAndWaitIdle(page, 'KeyW', `${label} return from ${state.mazeId}`)
+    }
+
+    await page.waitForFunction(
+      () => window.__levelsjamDebug?.getMazeLifecycleState?.()?.instantiatedMazeId === 'chamber-1',
+      undefined,
+      { timeout: 10_000 }
+    )
+  }
+
+  throw new Error(`Could not recover chamber traversal state; current=${JSON.stringify(await getGameplayState(page))}`)
+}
+
 async function visitMazeFromChamber(page, exitCell, exitDirection, label) {
+  await ensureInChamber(page, `${label} preflight`)
   await moveInOpenLevelToCell(page, exitCell, `${label} chamber approach`)
-  await turnGameplayTo(page, exitDirection)
-  await pressGameplayKeyAndWaitIdle(page, 'KeyW', `${label} enter`)
-  await page.waitForFunction(
-    () => window.__levelsjamDebug?.getMazeLifecycleState?.()?.instantiatedMazeId !== 'chamber-1',
-    undefined,
-    { timeout: 10_000 }
-  )
+  const approached = await getGameplayState(page)
+
+  if (approached.mazeId === 'chamber-1') {
+    await turnGameplayTo(page, exitDirection)
+    await pressGameplayKeyAndWaitIdle(page, 'KeyW', `${label} enter`)
+    await page.waitForFunction(
+      () => window.__levelsjamDebug?.getMazeLifecycleState?.()?.instantiatedMazeId !== 'chamber-1',
+      undefined,
+      { timeout: 10_000 }
+    )
+  }
 
   const entered = await getGameplayState(page)
 
@@ -714,6 +762,168 @@ async function visitMazeFromChamber(page, exitCell, exitDirection, label) {
   const returned = await getGameplayState(page)
 
   expect(returned.mazeId).toBe('chamber-1')
+}
+
+async function moveToChamberEntranceExit(page, label) {
+  for (let guard = 0; guard < 20; guard += 1) {
+    const state = await getGameplayState(page)
+
+    if (state.mazeId !== 'chamber-1') {
+      throw new Error(`Cannot move to chamber entrance exit from ${JSON.stringify(state)}`)
+    }
+
+    if (state.cell.x === 2 && state.cell.y === 17) {
+      return
+    }
+
+    if (state.cell.y === 17) {
+      await turnGameplayTo(page, 'north')
+      await pressGameplayKeyAndWaitIdle(page, 'KeyW', `${label} leave boundary row`)
+      continue
+    }
+
+    if (state.cell.x !== 2) {
+      await turnGameplayTo(page, state.cell.x < 2 ? 'east' : 'west')
+      await pressGameplayKeyAndWaitIdle(page, 'KeyW', `${label} center x`)
+      continue
+    }
+
+    await turnGameplayTo(page, state.cell.y < 17 ? 'south' : 'north')
+    await pressGameplayKeyAndWaitIdle(page, 'KeyW', `${label} approach y`)
+  }
+
+  throw new Error(
+    `Could not reach chamber entrance exit; current=${JSON.stringify(await getGameplayState(page))}`
+  )
+}
+
+async function waitForPerformanceCooldown(page) {
+  await page.evaluate(() => window.__levelsjamWarmPerformanceScene?.() ?? Promise.resolve(false))
+
+  const getCooldownState = () => {
+    const lifecycle = window.__levelsjamDebug?.getMazeLifecycleState?.()
+    const lightingStates = window.__levelsjamDebug?.getLevelLightingState?.() ?? []
+    const expectedLevelIds = ['entrance', 'chamber-1', 'maze-001', 'maze-002', 'maze-003', 'maze-005']
+    const loaded = Boolean(
+      lifecycle &&
+      expectedLevelIds.every((id) => lifecycle.loadedMazeIds?.includes(id))
+    )
+    const renderedMazeIds = lifecycle?.renderedMazeIds ?? []
+    const lightingReady = renderedMazeIds.every((levelId) => {
+      const lightingState = lightingStates.find((state) => state.mazeId === levelId)
+
+      return Boolean(
+        lightingState?.ready &&
+        lightingState.reflectionReady &&
+        lightingState.surfaceLightmapReady
+      )
+    })
+    const overlayComplete = Boolean(document.body.dataset.loadingOverlayCompleteAt) &&
+      document.body.dataset.loadingOverlayCompleteAt !== 'pending'
+    const sceneProgramsReady = document.body.dataset.sceneProgramsReady === 'true'
+    const fireFlipbookReady = document.body.dataset.fireFlipbookReady === 'true'
+
+    return {
+      fireFlipbookReady,
+      loaded,
+      lightingReady,
+      lifecycle,
+      lightingStates,
+      overlayComplete,
+      ready: loaded && lightingReady && overlayComplete && sceneProgramsReady && fireFlipbookReady,
+      sceneProgramsReady
+    }
+  }
+
+  try {
+    await page.waitForFunction(
+      () => {
+        const lifecycle = window.__levelsjamDebug?.getMazeLifecycleState?.()
+        const lightingStates = window.__levelsjamDebug?.getLevelLightingState?.() ?? []
+        const expectedLevelIds = ['entrance', 'chamber-1', 'maze-001', 'maze-002', 'maze-003', 'maze-005']
+        const loaded = Boolean(
+          lifecycle &&
+          expectedLevelIds.every((id) => lifecycle.loadedMazeIds?.includes(id))
+        )
+        const renderedMazeIds = lifecycle?.renderedMazeIds ?? []
+        const lightingReady = renderedMazeIds.every((levelId) => {
+          const lightingState = lightingStates.find((state) => state.mazeId === levelId)
+
+          return Boolean(
+            lightingState?.ready &&
+            lightingState.reflectionReady &&
+            lightingState.surfaceLightmapReady
+          )
+        })
+        const overlayComplete = Boolean(document.body.dataset.loadingOverlayCompleteAt) &&
+          document.body.dataset.loadingOverlayCompleteAt !== 'pending'
+        const sceneProgramsReady = document.body.dataset.sceneProgramsReady === 'true'
+        const fireFlipbookReady = document.body.dataset.fireFlipbookReady === 'true'
+
+        return loaded && lightingReady && overlayComplete && sceneProgramsReady && fireFlipbookReady
+      },
+      undefined,
+      { timeout: 45_000 }
+    )
+  } catch (error) {
+    const state = await page.evaluate(getCooldownState)
+
+    throw new Error(
+      `Performance cooldown did not complete; state=${JSON.stringify(state)}; ${error instanceof Error ? error.message : String(error)}`
+    )
+  }
+
+  let previousSignature = null
+  let stableSamples = 0
+  const startedAt = Date.now()
+
+  while (Date.now() - startedAt < 30_000) {
+    const state = await page.evaluate(getCooldownState)
+
+    if (!state.ready) {
+      throw new Error(`Performance cooldown regressed after ready state; state=${JSON.stringify(state)}`)
+    }
+
+    const renderedIds = state.lifecycle?.renderedMazeIds ?? []
+    const renderedLightingStates = state.lightingStates
+      .filter((lightingState) => renderedIds.includes(lightingState.mazeId))
+      .map((lightingState) => ({
+        loadedProbeCount: lightingState.loadedProbeCount,
+        loadedVolumetricProbeCount: lightingState.loadedVolumetricProbeCount,
+        mazeId: lightingState.mazeId,
+        probeCount: lightingState.probeCount,
+        ready: lightingState.ready,
+        reflectionReady: lightingState.reflectionReady,
+        startupVolumetricProbeCount: lightingState.startupVolumetricProbeCount,
+        surfaceLightmapReady: lightingState.surfaceLightmapReady
+      }))
+    const signature = JSON.stringify({
+      loadedMazeIds: state.lifecycle?.loadedMazeIds ?? [],
+      renderedMazeIds: renderedIds,
+      fireFlipbookReady: state.fireFlipbookReady,
+      lightingStates: renderedLightingStates,
+      overlayComplete: state.overlayComplete,
+      sceneProgramsReady: state.sceneProgramsReady
+    })
+
+    if (signature === previousSignature) {
+      stableSamples += 1
+    } else {
+      previousSignature = signature
+      stableSamples = 0
+    }
+
+    if (stableSamples >= 5) {
+      await page.waitForTimeout(500)
+      return
+    }
+
+    await page.waitForTimeout(250)
+  }
+
+  throw new Error(
+    `Performance cooldown did not stabilize; state=${JSON.stringify(await page.evaluate(getCooldownState))}`
+  )
 }
 
 test('default route loads the authored Entrance level to scene-ready', async ({ page }) => {
@@ -954,22 +1164,49 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
   expect(Math.abs(returnedState.camera.yaw - beforeReturnMove.camera.yaw)).toBeLessThan(0.001)
   expect(Math.abs(returnedState.camera.pitch - beforeReturnMove.camera.pitch)).toBeLessThan(0.001)
 
+  await turnGameplayTo(page, 'north')
+  await pressGameplayKeyAndWaitIdle(page, 'KeyW', 'warm traversal return to chamber')
+  await page.waitForFunction(
+    () => window.__levelsjamDebug?.getMazeLifecycleState?.()?.instantiatedMazeId === 'chamber-1',
+    undefined,
+    { timeout: 10_000 }
+  )
+  await visitMazeFromChamber(page, { x: 0, y: 3 }, 'west', 'warm maze-001')
+  await visitMazeFromChamber(page, { x: 0, y: 12 }, 'west', 'warm maze-002')
+  await visitMazeFromChamber(page, { x: 4, y: 3 }, 'east', 'warm maze-003')
+  await visitMazeFromChamber(page, { x: 4, y: 12 }, 'east', 'warm maze-005')
+  await moveToChamberEntranceExit(page, 'warm return entrance approach')
+  await turnGameplayTo(page, 'south')
+  await pressGameplayKeyAndWaitIdle(page, 'KeyW', 'warm return to entrance')
+  await page.waitForFunction(
+    () => window.__levelsjamDebug?.getMazeLifecycleState?.()?.instantiatedMazeId === 'entrance',
+    undefined,
+    { timeout: 10_000 }
+  )
+  await waitForPerformanceCooldown(page)
+
   const traceClient = await startChromeTrace(page)
   await page.evaluate(() => {
     window.__levelsjamTraversalPerformanceProfile = window.__levelsjamCapturePerformanceProfile?.({
       liveDurationMs: 45_000,
-      liveOnly: true,
+      liveOnly: false,
+      samples: 16,
       traversalLabel: 'Entrance, Chamber 1, Maze 1, Maze 2, Maze 3, Maze 4, and return'
     }) ?? null
   })
 
   await turnGameplayTo(page, 'north')
   await pressGameplayKeyAndWaitIdle(page, 'KeyW', 'return to chamber for full traversal')
+  await page.waitForFunction(
+    () => window.__levelsjamDebug?.getMazeLifecycleState?.()?.instantiatedMazeId === 'chamber-1',
+    undefined,
+    { timeout: 10_000 }
+  )
   await visitMazeFromChamber(page, { x: 0, y: 3 }, 'west', 'maze-001')
   await visitMazeFromChamber(page, { x: 0, y: 12 }, 'west', 'maze-002')
   await visitMazeFromChamber(page, { x: 4, y: 3 }, 'east', 'maze-003')
   await visitMazeFromChamber(page, { x: 4, y: 12 }, 'east', 'maze-005')
-  await moveInOpenLevelToCell(page, { x: 2, y: 17 }, 'return entrance approach')
+  await moveToChamberEntranceExit(page, 'return entrance approach')
   await turnGameplayTo(page, 'south')
   await pressGameplayKeyAndWaitIdle(page, 'KeyW', 'return to entrance after full traversal')
   await page.waitForFunction(

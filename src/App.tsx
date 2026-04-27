@@ -254,11 +254,28 @@ function normalizeAngleRadians(value: number) {
 const activeFrameProfile = {
   enabled: false,
   frameCount: 0,
+  gpu: null as {
+    activeQuery: WebGLQuery | null
+    context: WebGL2RenderingContext
+    extension: EXT_disjoint_timer_query_webgl2
+    pending: Array<{ label: string; query: WebGLQuery }>
+    steps: Map<string, { count: number; maxMs: number; totalMs: number }>
+  } | null,
+  renderStats: new Map<string, {
+    count: number
+    maxCalls: number
+    maxTriangles: number
+    totalCalls: number
+    totalTriangles: number
+  }>(),
+  scopeStack: [] as string[],
   steps: new Map<string, { count: number; maxMs: number; totalMs: number }>()
 }
 
 function resetFrameProfileSteps() {
   activeFrameProfile.frameCount = 0
+  activeFrameProfile.gpu?.steps.clear()
+  activeFrameProfile.renderStats.clear()
   activeFrameProfile.steps.clear()
 }
 
@@ -272,13 +289,20 @@ function beginFrameProfileStep() {
   return activeFrameProfile.enabled ? performance.now() : null
 }
 
+function getScopedFrameProfileLabel(label: string) {
+  return activeFrameProfile.scopeStack.length > 0
+    ? [...activeFrameProfile.scopeStack, label].join('/')
+    : label
+}
+
 function endFrameProfileStep(label: string, startedAt: number | null) {
   if (!activeFrameProfile.enabled || startedAt === null) {
     return
   }
 
   const duration = performance.now() - startedAt
-  const current = activeFrameProfile.steps.get(label) ?? {
+  const scopedLabel = getScopedFrameProfileLabel(label)
+  const current = activeFrameProfile.steps.get(scopedLabel) ?? {
     count: 0,
     maxMs: 0,
     totalMs: 0
@@ -287,13 +311,202 @@ function endFrameProfileStep(label: string, startedAt: number | null) {
   current.count += 1
   current.totalMs += duration
   current.maxMs = Math.max(current.maxMs, duration)
-  activeFrameProfile.steps.set(label, current)
+  activeFrameProfile.steps.set(scopedLabel, current)
 }
 
-function collectFrameProfileSteps(frameCount = activeFrameProfile.frameCount): FrameProfileStep[] {
+function recordFrameProfileStep(
+  target: Map<string, { count: number; maxMs: number; totalMs: number }>,
+  label: string,
+  duration: number
+) {
+  const current = target.get(label) ?? {
+    count: 0,
+    maxMs: 0,
+    totalMs: 0
+  }
+
+  current.count += 1
+  current.totalMs += duration
+  current.maxMs = Math.max(current.maxMs, duration)
+  target.set(label, current)
+}
+
+function recordRenderProfileStats(label: string, calls: number, triangles: number) {
+  if (!activeFrameProfile.enabled) {
+    return
+  }
+
+  const current = activeFrameProfile.renderStats.get(label) ?? {
+    count: 0,
+    maxCalls: 0,
+    maxTriangles: 0,
+    totalCalls: 0,
+    totalTriangles: 0
+  }
+
+  current.count += 1
+  current.totalCalls += Math.max(0, calls)
+  current.totalTriangles += Math.max(0, triangles)
+  current.maxCalls = Math.max(current.maxCalls, calls)
+  current.maxTriangles = Math.max(current.maxTriangles, triangles)
+  activeFrameProfile.renderStats.set(label, current)
+}
+
+function beginGpuFrameProfileStep(label: string) {
+  const gpu = activeFrameProfile.gpu
+
+  if (!activeFrameProfile.enabled || !gpu || gpu.activeQuery) {
+    return null
+  }
+
+  const query = gpu.context.createQuery()
+
+  if (!query) {
+    return null
+  }
+
+  try {
+    gpu.context.beginQuery(gpu.extension.TIME_ELAPSED_EXT, query)
+    gpu.activeQuery = query
+    return { label, query }
+  } catch {
+    gpu.context.deleteQuery(query)
+    return null
+  }
+}
+
+function endGpuFrameProfileStep(queryState: { label: string; query: WebGLQuery } | null) {
+  const gpu = activeFrameProfile.gpu
+
+  if (!gpu || !queryState || gpu.activeQuery !== queryState.query) {
+    return
+  }
+
+  try {
+    gpu.context.endQuery(gpu.extension.TIME_ELAPSED_EXT)
+    gpu.pending.push(queryState)
+  } catch {
+    gpu.context.deleteQuery(queryState.query)
+  } finally {
+    gpu.activeQuery = null
+  }
+}
+
+function withFrameProfileScope<T>(
+  label: string,
+  callback: () => T,
+  options: { gpu?: boolean } = {}
+) {
+  if (!activeFrameProfile.enabled) {
+    return callback()
+  }
+
+  const startedAt = performance.now()
+  const scopedLabel = getScopedFrameProfileLabel(label)
+  const gpuQuery = options.gpu
+    ? beginGpuFrameProfileStep(scopedLabel)
+    : null
+
+  activeFrameProfile.scopeStack.push(label)
+  try {
+    return callback()
+  } finally {
+    activeFrameProfile.scopeStack.pop()
+    endGpuFrameProfileStep(gpuQuery)
+    recordFrameProfileStep(
+      activeFrameProfile.steps,
+      scopedLabel,
+      performance.now() - startedAt
+    )
+  }
+}
+
+function configureGpuFrameProfiler(gl: WebGLRenderer) {
+  const context = gl.getContext()
+
+  if (!(context instanceof WebGL2RenderingContext)) {
+    activeFrameProfile.gpu = null
+    return false
+  }
+
+  const extension = context.getExtension('EXT_disjoint_timer_query_webgl2')
+
+  if (!extension) {
+    activeFrameProfile.gpu = null
+    return false
+  }
+
+  activeFrameProfile.gpu = {
+    activeQuery: null,
+    context,
+    extension,
+    pending: [],
+    steps: new Map()
+  }
+
+  return true
+}
+
+async function collectGpuFrameProfileSteps(timeoutMs = 2000) {
+  const gpu = activeFrameProfile.gpu
+
+  if (!gpu) {
+    return []
+  }
+
+  const deadline = performance.now() + timeoutMs
+  const poll = () => {
+    for (let index = gpu.pending.length - 1; index >= 0; index -= 1) {
+      const pending = gpu.pending[index]
+      const available = gpu.context.getQueryParameter(
+        pending.query,
+        gpu.context.QUERY_RESULT_AVAILABLE
+      ) as boolean
+      const disjoint = gpu.context.getParameter(
+        gpu.extension.GPU_DISJOINT_EXT
+      ) as boolean
+
+      if (!available || disjoint) {
+        continue
+      }
+
+      const elapsedNanoseconds = gpu.context.getQueryParameter(
+        pending.query,
+        gpu.context.QUERY_RESULT
+      ) as number
+
+      recordFrameProfileStep(
+        gpu.steps,
+        pending.label,
+        elapsedNanoseconds / 1_000_000
+      )
+      gpu.context.deleteQuery(pending.query)
+      gpu.pending.splice(index, 1)
+    }
+  }
+
+  while (gpu.pending.length > 0 && performance.now() < deadline) {
+    poll()
+    if (gpu.pending.length === 0) {
+      break
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 16))
+  }
+
+  for (const pending of gpu.pending.splice(0)) {
+    gpu.context.deleteQuery(pending.query)
+  }
+
+  return collectFrameProfileSteps(activeFrameProfile.frameCount, gpu.steps)
+}
+
+function collectFrameProfileSteps(
+  frameCount = activeFrameProfile.frameCount,
+  steps = activeFrameProfile.steps
+): FrameProfileStep[] {
   const divisor = Math.max(1, frameCount)
 
-  return Array.from(activeFrameProfile.steps.entries())
+  return Array.from(steps.entries())
     .map(([label, step]) => ({
       averageMs: step.totalMs / divisor,
       count: step.count,
@@ -303,6 +516,101 @@ function collectFrameProfileSteps(frameCount = activeFrameProfile.frameCount): F
     }))
     .sort((left, right) => right.averageMs - left.averageMs)
 }
+
+function collectRenderProfileSteps(frameCount = activeFrameProfile.frameCount) {
+  const divisor = Math.max(1, frameCount)
+
+  return Array.from(activeFrameProfile.renderStats.entries())
+    .map(([label, step]) => ({
+      averageCalls: step.totalCalls / divisor,
+      averageTriangles: step.totalTriangles / divisor,
+      count: step.count,
+      label,
+      maxCalls: step.maxCalls,
+      maxTriangles: step.maxTriangles,
+      totalCalls: step.totalCalls,
+      totalTriangles: step.totalTriangles
+    }))
+    .sort((left, right) => right.averageCalls - left.averageCalls)
+}
+
+const PROFILED_PASS_RENDER = Symbol('levelsjam.profiledPassRender')
+let postprocessingPassInstrumentationInstalled = false
+
+function getPostprocessingPassProfileLabel(pass: Pass) {
+  const constructorName = pass.constructor?.name || 'Pass'
+  const passName = typeof pass.name === 'string' && pass.name.length > 0
+    ? pass.name
+    : constructorName
+  const effects = (pass as { effects?: Iterable<Effect> }).effects
+
+  if (effects) {
+    const effectNames = Array.from(effects)
+      .map((effect) => (
+        (effect as { name?: string }).name ||
+        effect.constructor?.name ||
+        'Effect'
+      ))
+      .join('+')
+
+    if (effectNames) {
+      return `Composer/${passName}[${effectNames}]`
+    }
+  }
+
+  return `Composer/${passName}`
+}
+
+function instrumentPostprocessingPass(pass: Pass) {
+  const profiledPass = pass as Pass & {
+    [PROFILED_PASS_RENDER]?: boolean
+  }
+
+  if (profiledPass[PROFILED_PASS_RENDER]) {
+    return
+  }
+
+  const originalRender = pass.render.bind(pass)
+
+  pass.render = ((...args: Parameters<Pass['render']>) => {
+    const label = getPostprocessingPassProfileLabel(pass)
+
+    return withFrameProfileScope(
+      label,
+      () => originalRender(...args),
+      { gpu: true }
+    )
+  }) as Pass['render']
+  profiledPass[PROFILED_PASS_RENDER] = true
+}
+
+function installPostprocessingPassInstrumentation() {
+  if (postprocessingPassInstrumentationInstalled) {
+    return
+  }
+
+  const composerPrototype = PostEffectComposer.prototype as typeof PostEffectComposer.prototype & {
+    addPass?: (pass: Pass, index?: number) => void
+  }
+  const originalAddPass = composerPrototype.addPass
+
+  if (!originalAddPass) {
+    return
+  }
+
+  composerPrototype.addPass = function profiledAddPass(
+    this: PostEffectComposer,
+    pass: Pass,
+    index?: number
+  ) {
+    instrumentPostprocessingPass(pass)
+    return originalAddPass.call(this, pass, index)
+  }
+
+  postprocessingPassInstrumentationInstalled = true
+}
+
+installPostprocessingPassInstrumentation()
 
 const FIRE_FLIPBOOK_FRAME_CROP = {
   maxX: 0.6187683284457478,
@@ -1366,6 +1674,7 @@ type PerformanceProfileResult = {
     longFrames: Array<{
       frameMs: number
       loadedMazeId: string | null
+      renderLoopDelta: Record<string, number>
       sceneProgramsReady: string | null
       fireFlipbookReady: string | null
       renderLoops: Record<string, number>
@@ -1376,7 +1685,19 @@ type PerformanceProfileResult = {
     samples: number
   }
   frameSteps: FrameProfileStep[]
+  gpuFrameSteps: FrameProfileStep[]
+  gpuTimerSupported: boolean
   markdown: string
+  renderSteps: Array<{
+    averageCalls: number
+    averageTriangles: number
+    count: number
+    label: string
+    maxCalls: number
+    maxTriangles: number
+    totalCalls: number
+    totalTriangles: number
+  }>
   renderer: string
 }
 
@@ -5075,7 +5396,9 @@ function useFireFlipbookTexture() {
       cancelled = true
       window.clearTimeout(overlayPollHandle)
       window.clearTimeout(loadDelayHandle)
-      delete document.body.dataset.fireFlipbookReady
+      if (!sharedFireFlipbookTexture) {
+        delete document.body.dataset.fireFlipbookReady
+      }
       setTexture(null)
     }
   }, [maxAnisotropy])
@@ -8609,32 +8932,38 @@ class BillboardCompositePassImpl extends Pass {
       const shaderMaterial = this.fullscreenMaterial as ShaderMaterial
       shaderMaterial.uniforms.sceneDepthBuffer.value = this.sceneDepthTexture
     } else if (this.opaqueScene) {
-      this.billboardCamera.layers.set(0)
-      this.opaqueScene.overrideMaterial = this.depthMaterial
-      renderer.setRenderTarget(this.depthRenderTarget)
-      renderer.setClearColor(0x000000, 0)
-      renderer.clear(true, true, true)
-      renderer.render(this.opaqueScene, this.billboardCamera)
-      this.opaqueScene.overrideMaterial = previousOverrideMaterial
+      withFrameProfileScope('scene depth prepass', () => {
+        this.billboardCamera.layers.set(0)
+        this.opaqueScene!.overrideMaterial = this.depthMaterial
+        renderer.setRenderTarget(this.depthRenderTarget)
+        renderer.setClearColor(0x000000, 0)
+        renderer.clear(true, true, true)
+        renderer.render(this.opaqueScene!, this.billboardCamera)
+        this.opaqueScene!.overrideMaterial = previousOverrideMaterial
+      })
 
       const shaderMaterial = this.fullscreenMaterial as ShaderMaterial
       shaderMaterial.uniforms.sceneDepthBuffer.value = this.depthRenderTarget.depthTexture
     }
-    this.billboardCamera.layers.set(TORCH_BILLBOARD_LAYER)
-    renderer.setRenderTarget(this.billboardRenderTarget)
-    renderer.setClearColor(0x000000, 0)
-    renderer.clear(true, true, true)
-    if (this.opaqueScene) {
-      this.opaqueScene.background = null
-      renderer.render(this.opaqueScene, this.billboardCamera)
-      this.opaqueScene.background = previousBackground
-    }
+    withFrameProfileScope('torch billboard color pass', () => {
+      this.billboardCamera.layers.set(TORCH_BILLBOARD_LAYER)
+      renderer.setRenderTarget(this.billboardRenderTarget)
+      renderer.setClearColor(0x000000, 0)
+      renderer.clear(true, true, true)
+      if (this.opaqueScene) {
+        this.opaqueScene.background = null
+        renderer.render(this.opaqueScene, this.billboardCamera)
+        this.opaqueScene.background = previousBackground
+      }
+    })
 
     const shaderMaterial = this.fullscreenMaterial as ShaderMaterial
     shaderMaterial.uniforms.inputBuffer.value = inputBuffer.texture
 
-    renderer.setRenderTarget(this.renderToScreen ? null : outputBuffer)
-    renderer.render(this.scene, this.camera)
+    withFrameProfileScope('additive fullscreen composite', () => {
+      renderer.setRenderTarget(this.renderToScreen ? null : outputBuffer)
+      renderer.render(this.scene, this.camera)
+    })
 
     this.billboardCamera.layers.mask = previousLayerMask
     renderer.setClearColor(this.clearColor, previousClearAlpha)
@@ -12091,21 +12420,27 @@ void main() {
 
     renderer.autoClear = false
     this.copyMaterial.uniforms.inputBuffer.value = inputBuffer.texture
-    renderer.setRenderTarget(this.tempRenderTarget)
-    renderer.render(this.copyScene, this.copyCamera)
+    withFrameProfileScope('copy input to bloom target', () => {
+      renderer.setRenderTarget(this.tempRenderTarget)
+      renderer.render(this.copyScene, this.copyCamera)
+    })
 
     this.inner.renderToScreen = false
-    this.inner.render(
-      renderer,
-      outputBuffer,
-      this.tempRenderTarget,
-      deltaTime,
-      stencilTest
-    )
+    withFrameProfileScope('unreal bloom inner pass', () => {
+      this.inner.render(
+        renderer,
+        outputBuffer,
+        this.tempRenderTarget,
+        deltaTime,
+        stencilTest
+      )
+    })
 
     this.copyMaterial.uniforms.inputBuffer.value = this.tempRenderTarget.texture
-    renderer.setRenderTarget(this.renderToScreen ? null : outputBuffer)
-    renderer.render(this.copyScene, this.copyCamera)
+    withFrameProfileScope('copy bloom output', () => {
+      renderer.setRenderTarget(this.renderToScreen ? null : outputBuffer)
+      renderer.render(this.copyScene, this.copyCamera)
+    })
     renderer.autoClear = previousAutoClear
   }
 
@@ -12328,9 +12663,14 @@ function TunedN8AO({
     configuration?: {
       denoiseIterations?: number
     }
+    name?: string
   } | null>(null)
 
   useEffect(() => {
+    if (passRef.current) {
+      passRef.current.name = 'N8AO'
+    }
+
     const configuration = passRef.current?.configuration
 
     if (!configuration) {
@@ -12357,6 +12697,7 @@ function TunedN8AO({
 
 function PerformanceBenchmarkBridge() {
   const advance = useThree((state) => state.advance)
+  const camera = useThree((state) => state.camera)
   const gl = useThree((state) => state.gl)
   const get = useThree((state) => state.get)
   const invalidate = useThree((state) => state.invalidate)
@@ -12371,17 +12712,24 @@ function PerformanceBenchmarkBridge() {
       ) => Promise<PerformanceProfileResult>
       __levelsjamGetVisualSettings?: () => VisualSettings
       __levelsjamSetVisualSettings?: (patch: VisualSettingsPatch) => void
+      __levelsjamWarmPerformanceScene?: () => Promise<boolean>
     }
     const finish = gl.getContext().finish?.bind(gl.getContext())
     const originalRender = gl.render.bind(gl)
     const profiledGl = gl as typeof gl & {
       __levelsjamOriginalRender?: typeof gl.render
     }
+    const gpuTimerSupported = configureGpuFrameProfiler(gl)
 
     if (!profiledGl.__levelsjamOriginalRender) {
       profiledGl.__levelsjamOriginalRender = originalRender
       gl.render = ((...args: Parameters<typeof gl.render>) => {
         const profileStartedAt = beginFrameProfileStep()
+        const scopedRenderLabel = getScopedFrameProfileLabel(
+          'Renderer/WebGLRenderer.render submission'
+        )
+        const beforeCalls = gl.info.render.calls
+        const beforeTriangles = gl.info.render.triangles
 
         try {
           return profiledGl.__levelsjamOriginalRender?.(...args)
@@ -12391,6 +12739,11 @@ function PerformanceBenchmarkBridge() {
             ? `render target ${target.width}x${target.height}`
             : 'screen'
 
+          recordRenderProfileStats(
+            `${scopedRenderLabel}/${targetLabel}`,
+            gl.info.render.calls - beforeCalls,
+            gl.info.render.triangles - beforeTriangles
+          )
           endFrameProfileStep(
             `Renderer/WebGLRenderer.render submission/${targetLabel}`,
             profileStartedAt
@@ -12467,6 +12820,7 @@ function PerformanceBenchmarkBridge() {
       const deadline = previous + Math.max(250, durationMs)
       const startedAt = previous
       const longFrames: PerformanceProfileResult['liveFrames']['longFrames'] = []
+      let previousRenderLoops = collectRenderLoops()
 
       resetFrameProfileSteps()
       activeFrameProfile.enabled = true
@@ -12475,18 +12829,27 @@ function PerformanceBenchmarkBridge() {
         const delta = now - previous
 
         if (delta > 0) {
+          const renderLoops = collectRenderLoops()
           recordFrameProfileFrame()
           frames.push(delta)
           if (delta >= 50) {
+            const renderLoopDelta = Object.fromEntries(
+              Object.entries(renderLoops).map(([key, value]) => [
+                key,
+                value - (previousRenderLoops[key] ?? 0)
+              ])
+            )
             longFrames.push({
               frameMs: delta,
               fireFlipbookReady: document.body.dataset.fireFlipbookReady ?? null,
               loadedMazeId: document.body.dataset.loadedMazeId ?? null,
-              renderLoops: collectRenderLoops(),
+              renderLoopDelta,
+              renderLoops,
               sceneProgramsReady: document.body.dataset.sceneProgramsReady ?? null,
               t: now - startedAt
             })
           }
+          previousRenderLoops = renderLoops
         }
         previous = now
 
@@ -12575,6 +12938,9 @@ function PerformanceBenchmarkBridge() {
         .filter(Boolean) as RuntimeReflectionProbeState[]
 
       return {
+        rendererGeometries: gl.info.memory.geometries,
+        rendererPrograms: gl.info.programs?.length ?? 0,
+        rendererTextures: gl.info.memory.textures,
         mountedLevels: Object.keys(levelLightingStates).length,
         residentReflectionProbes: reflectionProbeStates.reduce(
           (sum, state) => sum + (state.loadedProbeCount ?? 0),
@@ -12601,17 +12967,33 @@ function PerformanceBenchmarkBridge() {
       ? value.toFixed(3)
       : 'n/a'
     const formatProfileMarkdown = (profile: Omit<PerformanceProfileResult, 'markdown'>) => {
-      const appStepTotalMs = profile.frameSteps.reduce((sum, step) => sum + step.averageMs, 0)
+      const frameStepLabelSet = new Set(profile.frameSteps.map((step) => step.label))
+      const isTopLevelStep = (step: FrameProfileStep) => {
+        const parts = step.label.split('/')
+
+        for (let index = 1; index < parts.length; index += 1) {
+          if (frameStepLabelSet.has(parts.slice(0, index).join('/'))) {
+            return false
+          }
+        }
+
+        return true
+      }
+      const appStepTotalMs = profile.frameSteps
+        .filter(isTopLevelStep)
+        .reduce((sum, step) => sum + step.averageMs, 0)
       const uninstrumentedMs = Math.max(0, profile.liveFrames.averageFrameMs - appStepTotalMs)
       type TreeNode = {
         children: Map<string, TreeNode>
         count: number
+        exactAverageMs: number
         maxMs: number
         totalAverageMs: number
       }
       const rootNode: TreeNode = {
         children: new Map(),
         count: 0,
+        exactAverageMs: 0,
         maxMs: 0,
         totalAverageMs: 0
       }
@@ -12626,17 +13008,27 @@ function PerformanceBenchmarkBridge() {
             child = {
               children: new Map(),
               count: 0,
+              exactAverageMs: 0,
               maxMs: 0,
               totalAverageMs: 0
             }
             node.children.set(part, child)
           }
 
-          child.totalAverageMs += step.averageMs
-          child.count += step.count
-          child.maxMs = Math.max(child.maxMs, step.maxMs)
           node = child
         }
+
+        node.exactAverageMs += step.averageMs
+        node.count += step.count
+        node.maxMs = Math.max(node.maxMs, step.maxMs)
+      }
+      const finalizeTreeNode = (node: TreeNode): number => {
+        const childTotal = Array.from(node.children.values())
+          .reduce((sum, child) => sum + finalizeTreeNode(child), 0)
+
+        node.totalAverageMs = Math.max(node.exactAverageMs, childTotal)
+
+        return node.totalAverageMs
       }
       const formatTreeNode = (
         label: string,
@@ -12663,10 +13055,10 @@ function PerformanceBenchmarkBridge() {
         if (node.children.size > 0) {
           const childTotal = Array.from(node.children.values())
             .reduce((sum, child) => sum + child.totalAverageMs, 0)
-          const residual = node.totalAverageMs - childTotal
+          const residual = Math.max(0, node.exactAverageMs - childTotal)
 
           if (residual >= 0.1) {
-            lines.push(`${indent}  - uninstrumented child work: ${formatNumber(residual)}ms`)
+            lines.push(`${indent}  - self/uninstrumented child work: ${formatNumber(residual)}ms`)
           }
         }
 
@@ -12676,10 +13068,21 @@ function PerformanceBenchmarkBridge() {
       for (const step of profile.frameSteps) {
         addTreeStep(step)
       }
+      finalizeTreeNode(rootNode)
 
       const instrumentedTreeLines = Array.from(rootNode.children.entries())
         .sort((left, right) => right[1].totalAverageMs - left[1].totalAverageMs)
         .flatMap(([label, node]) => formatTreeNode(label, node, 2))
+      const longFrameResourceChanges = profile.liveFrames.longFrames
+        .filter((frame) => Object.values(frame.renderLoopDelta).some((value) => value !== 0))
+      const topCpuSteps = profile.frameSteps
+        .filter((step) => step.averageMs >= 0.1)
+        .sort((left, right) => right.averageMs - left.averageMs)
+        .slice(0, 5)
+      const topGpuSteps = profile.gpuFrameSteps
+        .filter((step) => step.averageMs >= 0.1)
+        .sort((left, right) => right.averageMs - left.averageMs)
+        .slice(0, 5)
       const frameTreeLines = [
         `- Live traversal frame: ${formatNumber(profile.liveFrames.averageFrameMs)}ms (${formatNumber(profile.liveFrames.fps)} FPS)`,
         ...(
@@ -12689,7 +13092,7 @@ function PerformanceBenchmarkBridge() {
         ),
         ...instrumentedTreeLines,
         `  - Browser, GPU driver, GPU execution, compositor, vsync, and uninstrumented library work: ${formatNumber(uninstrumentedMs)}ms`,
-        `    - Not reasonably breakable from app-level JavaScript instrumentation below this point.`
+        `    - App-owned CPU scopes stop here; compare against the GPU timer-query and Chrome trace sections below.`
       ]
       const lines: string[] = [
         '# Performance Profile',
@@ -12704,6 +13107,27 @@ function PerformanceBenchmarkBridge() {
         `- Samples: ${profile.liveFrames.samples}`,
         `- Long frames over 50ms: ${profile.liveFrames.longFrames.length}`,
         '',
+        '## Diagnosis',
+        '',
+        `- App-owned JavaScript/render scopes account for ${formatNumber(appStepTotalMs)}ms/frame of the ${formatNumber(profile.liveFrames.averageFrameMs)}ms average frame interval.`,
+        `- The remaining ${formatNumber(uninstrumentedMs)}ms/frame is browser frame cadence, compositor, GPU driver, vsync/idle, or library work outside the app-owned scopes; use the Chrome trace thread tree below for that residual.`,
+        `- Long frames with changing render-loop resource counts: ${longFrameResourceChanges.length}/${profile.liveFrames.longFrames.length}.`,
+        ...(
+          longFrameResourceChanges.length > 0
+            ? ['- The long-frame table includes per-frame resource deltas so streaming/probe residency churn is visible instead of hidden inside the frame average.']
+            : ['- No long frame in this sample coincided with a tracked render-loop resource-count change.']
+        ),
+        ...(
+          topCpuSteps.length > 0
+            ? [`- Largest app CPU scopes: ${topCpuSteps.map((step) => `${step.label} ${formatNumber(step.averageMs)}ms`).join('; ')}.`]
+            : []
+        ),
+        ...(
+          profile.gpuTimerSupported && topGpuSteps.length > 0
+            ? [`- Largest GPU timer-query scopes: ${topGpuSteps.map((step) => `${step.label} ${formatNumber(step.averageMs)}ms`).join('; ')}.`]
+            : []
+        ),
+        '',
         '## Frame-Time Tree',
         '',
         ...frameTreeLines,
@@ -12713,7 +13137,7 @@ function PerformanceBenchmarkBridge() {
         ...(
           profile.liveFrames.longFrames.length > 0
             ? profile.liveFrames.longFrames.map((frame) => (
-              `- ${formatNumber(frame.frameMs)}ms at +${formatNumber(frame.t)}ms; maze=${frame.loadedMazeId ?? 'n/a'}; programs=${frame.sceneProgramsReady ?? 'n/a'}; fire=${frame.fireFlipbookReady ?? 'n/a'}; loops=${JSON.stringify(frame.renderLoops)}`
+              `- ${formatNumber(frame.frameMs)}ms at +${formatNumber(frame.t)}ms; maze=${frame.loadedMazeId ?? 'n/a'}; programs=${frame.sceneProgramsReady ?? 'n/a'}; fire=${frame.fireFlipbookReady ?? 'n/a'}; delta=${JSON.stringify(frame.renderLoopDelta)}; loops=${JSON.stringify(frame.renderLoops)}`
             ))
             : ['- None over 50ms.']
         ),
@@ -12725,6 +13149,32 @@ function PerformanceBenchmarkBridge() {
         ...profile.controlledSteps.map((step) => (
           `| ${step.label} | ${formatNumber(step.benchmark.averageFrameMs)} | ${formatNumber(step.benchmark.fps)} | ${formatNumber(step.benchmark.maxFrameMs)} | ${formatNumber(step.benchmark.averageRenderCalls ?? 0)} | ${formatNumber(step.benchmark.averageTriangles ?? 0)} | ${step.benchmark.samples} |`
         )),
+        '',
+        '## GPU Timer Query Steps',
+        '',
+        profile.gpuTimerSupported
+          ? '| Step | Avg GPU ms/frame | Max GPU ms | Calls |'
+          : '- WebGL GPU timer queries are unavailable in this browser.',
+        ...(profile.gpuTimerSupported ? ['| --- | ---: | ---: | ---: |'] : []),
+        ...(
+          profile.gpuTimerSupported
+            ? profile.gpuFrameSteps
+              .filter((step) => step.averageMs >= 0.1)
+              .map((step) => (
+                `| ${step.label} | ${formatNumber(step.averageMs)} | ${formatNumber(step.maxMs)} | ${step.count} |`
+              ))
+            : []
+        ),
+        '',
+        '## Render Submission Workload',
+        '',
+        '| Step | Avg calls/frame | Avg triangles/frame | Max calls | Max triangles | Submissions |',
+        '| --- | ---: | ---: | ---: | ---: | ---: |',
+        ...profile.renderSteps
+          .filter((step) => step.averageCalls >= 0.1 || step.averageTriangles >= 1)
+          .map((step) => (
+            `| ${step.label} | ${formatNumber(step.averageCalls)} | ${formatNumber(step.averageTriangles)} | ${step.maxCalls} | ${step.maxTriangles} | ${step.count} |`
+          )),
         '',
         '## Hierarchical Deltas',
         '',
@@ -12807,6 +13257,18 @@ function PerformanceBenchmarkBridge() {
     }
 
     globalWindow.__levelsjamBenchmark = runBenchmark
+    globalWindow.__levelsjamWarmPerformanceScene = async () => {
+      document.body.dataset.sceneProgramsReady = 'false'
+      recordStartupMarker('performanceSceneWarmStartedAt')
+      await loadSharedFireFlipbookTexture(gl.capabilities.getMaxAnisotropy())
+      document.body.dataset.fireFlipbookReady = 'true'
+      await warmSceneTextures(gl, scene, () => false)
+      await warmScenePrograms(gl, scene, camera, () => false)
+      recordStartupMarker('performanceSceneWarmCompleteAt')
+      document.body.dataset.sceneProgramsReady = 'true'
+
+      return true
+    }
 
     globalWindow.__levelsjamCapturePerformanceProfile = async (options = {}) => {
       const samples = Math.max(4, Math.floor(options.samples ?? 24))
@@ -12816,7 +13278,9 @@ function PerformanceBenchmarkBridge() {
         ? cloneVisualSettings(originalVisualSettings)
         : null
       const liveFrames = await captureLiveFrames(liveDurationMs)
+      const gpuFrameSteps = await collectGpuFrameProfileSteps()
       const frameSteps = collectFrameProfileSteps(liveFrames.samples)
+      const renderSteps = collectRenderProfileSteps(liveFrames.samples)
       const steps: PerformanceProfileStep[] = []
 
       try {
@@ -12861,7 +13325,10 @@ function PerformanceBenchmarkBridge() {
         controlledSteps: steps,
         deltas: buildDeltas(steps),
         frameSteps,
+        gpuFrameSteps,
+        gpuTimerSupported,
         liveFrames,
+        renderSteps,
         renderer: getRendererString()
       }
       const markdown = formatProfileMarkdown(profileWithoutMarkdown)
@@ -12879,8 +13346,10 @@ function PerformanceBenchmarkBridge() {
       }
       delete globalWindow.__levelsjamBenchmark
       delete globalWindow.__levelsjamCapturePerformanceProfile
+      delete globalWindow.__levelsjamWarmPerformanceScene
+      activeFrameProfile.gpu = null
     }
-  }, [advance, get, gl, invalidate, scene, setFrameloop])
+  }, [advance, camera, get, gl, invalidate, scene, setFrameloop])
 
   return null
 }
@@ -12957,45 +13426,51 @@ function PlayerFadeEffectPrimitive() {
   const deathColor = useMemo(() => new Color(0, 0, 0), [])
 
   useFrame(() => {
-    const name = document.body.dataset.playerEffect ?? ''
-    const now = performance.now()
-    const setFade = (color: Color, alpha: number) => {
-      effect.fadeColor = color
-      effect.fadeAlpha = alpha
-      latestFadeState.current = {
-        alpha: MathUtils.clamp(alpha, 0, 1),
-        color: [color.r, color.g, color.b],
-        name
+    const profileStartedAt = beginFrameProfileStep()
+
+    try {
+      const name = document.body.dataset.playerEffect ?? ''
+      const now = performance.now()
+      const setFade = (color: Color, alpha: number) => {
+        effect.fadeColor = color
+        effect.fadeAlpha = alpha
+        latestFadeState.current = {
+          alpha: MathUtils.clamp(alpha, 0, 1),
+          color: [color.r, color.g, color.b],
+          name
+        }
       }
+
+      if (stateRef.current.name !== name) {
+        stateRef.current = { name, startedAt: now }
+      }
+
+      const elapsed = now - stateRef.current.startedAt
+
+      if (name === 'sword-strike') {
+        setFade(strikeColor, elapsed / 125)
+        return
+      }
+
+      if (name === 'sword-strike-out') {
+        setFade(strikeColor, 1 - (elapsed / 375))
+        return
+      }
+
+      if (name === 'death') {
+        setFade(deathColor, elapsed / 125)
+        return
+      }
+
+      if (name === 'death-out') {
+        setFade(deathColor, 1 - (elapsed / 1000))
+        return
+      }
+
+      setFade(deathColor, 0)
+    } finally {
+      endFrameProfileStep('player fade uniforms', profileStartedAt)
     }
-
-    if (stateRef.current.name !== name) {
-      stateRef.current = { name, startedAt: now }
-    }
-
-    const elapsed = now - stateRef.current.startedAt
-
-    if (name === 'sword-strike') {
-      setFade(strikeColor, elapsed / 125)
-      return
-    }
-
-    if (name === 'sword-strike-out') {
-      setFade(strikeColor, 1 - (elapsed / 375))
-      return
-    }
-
-    if (name === 'death') {
-      setFade(deathColor, elapsed / 125)
-      return
-    }
-
-    if (name === 'death-out') {
-      setFade(deathColor, 1 - (elapsed / 1000))
-      return
-    }
-
-    setFade(deathColor, 0)
   })
 
   useEffect(() => {
@@ -13029,13 +13504,19 @@ function AnimatedVignette({ settings }: { settings: VignetteSettings }) {
   )
 
   useFrame((state) => {
-    const period = Math.max(settings.noisePeriod, 0.0001)
-    const noise = sampleContinuousUnitNoise(state.clock.getElapsedTime() / period)
-    const nextDarkness = settings.noiseIntensity > 0
-      ? settings.intensity + (noise * settings.noiseIntensity)
-      : settings.intensity
+    const profileStartedAt = beginFrameProfileStep()
 
-    effect.darkness = MathUtils.clamp(nextDarkness, 0, 1)
+    try {
+      const period = Math.max(settings.noisePeriod, 0.0001)
+      const noise = sampleContinuousUnitNoise(state.clock.getElapsedTime() / period)
+      const nextDarkness = settings.noiseIntensity > 0
+        ? settings.intensity + (noise * settings.noiseIntensity)
+        : settings.intensity
+
+      effect.darkness = MathUtils.clamp(nextDarkness, 0, 1)
+    } finally {
+      endFrameProfileStep('vignette uniforms', profileStartedAt)
+    }
   })
 
   useEffect(() => () => effect.dispose(), [effect])
@@ -13093,6 +13574,7 @@ function TorchLensFlare({
           starPoints: settings.starPoints
         })
         const pass = new EffectPass(camera as ThreeCamera, effect)
+        pass.name = 'TorchLensFlarePass'
 
         return {
           effect,
@@ -13150,8 +13632,11 @@ function TorchLensFlare({
   }, [flareSlots, settings])
 
   useFrame((_, delta) => {
-    const nextOcclusionMeshes: Mesh[] = []
-    const nextLensPositions: Vector3[] = []
+    const profileStartedAt = beginFrameProfileStep()
+
+    try {
+      const nextOcclusionMeshes: Mesh[] = []
+      const nextLensPositions: Vector3[] = []
 
     scene.traverse((object) => {
       if (!(object instanceof Mesh)) {
@@ -13262,11 +13747,14 @@ function TorchLensFlare({
       }))
     }
 
-    setVisibleSlotCount((currentCount) =>
-      currentCount === visibleLensPositions.length
-        ? currentCount
-        : visibleLensPositions.length
-    )
+      setVisibleSlotCount((currentCount) =>
+        currentCount === visibleLensPositions.length
+          ? currentCount
+          : visibleLensPositions.length
+      )
+    } finally {
+      endFrameProfileStep('lens flare source selection', profileStartedAt)
+    }
   })
 
   useEffect(() => {
@@ -14916,18 +15404,22 @@ function Scene({
       }
 
       recordStartupMarker('sceneTextureWarmCompleteAt')
-      if (cancelled || hasReportedBasicAssetsReady.current) {
+      if (cancelled) {
         return
       }
 
-      hasReportedBasicAssetsReady.current = true
-      setStartupSceneReady(true)
-      onAssetsReady()
-      geometryContractHandle = window.setTimeout(() => {
-        if (!cancelled) {
-          setStartupGeometryExpandedState(false)
-        }
-      }, 0)
+      if (!hasReportedBasicAssetsReady.current) {
+        hasReportedBasicAssetsReady.current = true
+        setStartupSceneReady(true)
+        onAssetsReady()
+        geometryContractHandle = window.setTimeout(() => {
+          if (!cancelled) {
+            setStartupGeometryExpandedState(false)
+          }
+        }, 0)
+      }
+
+      delete document.body.dataset.sceneProgramsReady
       sceneProgramWarmHandle = window.setTimeout(() => {
         if (cancelled) {
           return

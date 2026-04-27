@@ -409,6 +409,10 @@
 - The frame-cost profile answers where frame time is going with a markdown tree of frame steps; any measured step averaging at least `0.1ms/frame` is broken down further when the runtime can reasonably instrument its children.
 - The frame-cost profile includes a Chrome tracing tree captured during the same end-to-end traversal so browser main-thread, compositor, and GPU-thread work are broken down from real trace events instead of being hidden in an unmeasured browser bucket.
 - The Chrome tracing tree reports inclusive child costs and explicit self/untraced residual costs for every displayed node, and no displayed leaf may exceed `0.1ms/frame` unless the trace does not expose lower-level child events for that work.
+- The frame-cost profile records application-owned named render pipeline scopes, including the main composer frame, each composer pass, custom pass sub-steps, WebGL render submissions, and hot per-frame gameplay/update systems.
+- The frame-cost profile reports GPU timer-query measurements for render/composer scopes when the browser exposes WebGL GPU timer queries.
+- The frame-cost profile annotates long frames with resource-residency deltas so runtime probe, volumetric-lightmap, level, or scene-object churn is visible in the report.
+- The frame-cost profile waits for startup loading, adjacent level resources, lightmaps, volumetric probes, reflection probes, shader warmup, and deferred texture work, including the fire flipbook atlas, to cool down before starting the representative live traversal capture.
 - The performance profiler records normal gameplay traversal with active level walking and active scene resources so reported FPS is representative of player-visible stutter.
 - The visual debug panel includes a `Performance` tab with a `Capture` button that records the next second of frames and displays the same kind of profile shown in `PERFORMANCE.md`.
 
