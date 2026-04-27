@@ -14,7 +14,7 @@ export const MAZE_CELL_SIZE = 2
 export const MAZE_WALL_THICKNESS = 0.25
 export const MAZE_WALL_HEIGHT = 2
 export const MAZE_TARGET_COUNT = 5
-export const MAZE_LIGHTMAP_VERSION = 26
+export const MAZE_LIGHTMAP_VERSION = 27
 export const MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS = 0.125
 
 const MAZE_LIGHTMAP_GROUND_TILE_SIZE = 256
@@ -28,6 +28,8 @@ const MAZE_LIGHTMAP_GROUND_SUPERSAMPLE_GRID = 1
 const MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID = 2
 const MAZE_LIGHTMAP_SKY_RAY_DISTANCE = 24
 const MAZE_REFLECTION_PROBE_Y = 1.25
+const MAZE_LIGHTMAP_GROUND_BOUNCE_ALBEDO = [0.34, 0.32, 0.28]
+const MAZE_LIGHTMAP_WALL_BOUNCE_ALBEDO = [0.5, 0.48, 0.43]
 const MAZE_TORCH_LIGHT_COLOR = [10, 2.0863687013464577, 0]
 const MAZE_SKY_LIGHT_COLOR = [
   1.4241132301976904 * getHdrLightingIntensity(AUTHORED_LIGHTING_SOURCE_SCALE),
@@ -2107,12 +2109,21 @@ export async function bakeMazeLightmap(
     atlasWidth,
     constants: {
       cellSize: MAZE_CELL_SIZE,
+      groundBounds: [
+        groundBounds.minX,
+        groundBounds.minZ,
+        groundBounds.maxX,
+        groundBounds.maxZ
+      ],
+      groundBounceAlbedo: MAZE_LIGHTMAP_GROUND_BOUNCE_ALBEDO,
       sampleEpsilon: MAZE_LIGHTMAP_SAMPLE_EPSILON,
       sconceRadius,
       skyLightColor: MAZE_SKY_LIGHT_COLOR,
       skyRayDistance: MAZE_LIGHTMAP_SKY_RAY_DISTANCE,
       torchLightColor: MAZE_TORCH_LIGHT_COLOR,
+      torchSourceRadius: sconceRadius,
       torchStrength: MAZE_LIGHTMAP_TORCH_STRENGTH,
+      wallBounceAlbedo: MAZE_LIGHTMAP_WALL_BOUNCE_ALBEDO,
       wallHeight: MAZE_WALL_HEIGHT,
       wallThickness: MAZE_WALL_THICKNESS
     },

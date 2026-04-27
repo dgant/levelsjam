@@ -77,14 +77,15 @@ test('authored runtime levels are real level ids with authored payloads', async 
     'maze-001'
   )
 
-  const entrance = await createAuthoredRuntimeMaze('entrance')
+  const entrance = await createAuthoredRuntimeMaze('entrance', { bakeLightmap: false })
 
   assert.equal(entrance.id, 'entrance')
   assert.equal(entrance.width, 3)
   assert.equal(entrance.height, 3)
   assert.equal(entrance.playerStart.direction, 'north')
   assert.equal(entrance.exitRequiresTrophy, false)
-  assert.ok(entrance.lightmap)
+  assert.equal(entrance.lightmap, undefined)
+  assert.ok(loadRuntimeMaze('entrance').lightmap?.atlasUrl)
 })
 
 test('runtime level graph keeps authored neighbors and spatial transforms explicit', () => {

@@ -52,6 +52,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Run `npm run test:maze:runner` after changing maze generation, maze validation, baked lightmap construction, or persisted maze cleanup. It writes per-test timings to `logs/latest-maze-test-profile.json` and enforces the bounded maze-test budget.
 - Run `npm run ensure:mazes` when persisted maze runtime payloads or reflection-probe assets must be refreshed. Expect the fast existing-maze validation and artifact sync phase to be separate from the much slower full reflection-probe export phase.
 - The surface-lightmap bake uses a WebGL2 GPU worker launched through installed Chrome; keep Chrome available on development machines so persisted maze and authored-level lightmaps can be regenerated.
+- The surface-lightmap bake path now samples finite spherical torch emitters, traces two diffuse bounces, and tiles atlas draws in small WebGL viewports to avoid GPU watchdog resets during offline baking.
 - Verify the main page renders the 3D scene without console errors.
 - Verify the loading overlay appears with `MINOTAUR` and `Entering the labyrinth...` before the scene fades in.
 - Verify the loading overlay does not fade out before the basic required scene textures are available in the mounted scene.
@@ -164,7 +165,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Keep `npm run test:unit` under 20 seconds.
 - Keep `npm run test:perf:runner` under 1 minute, and expect it to benchmark the initial gameplay view after all monsters have rendered and the recorded solution replay rather than only a cheap static camera angle.
 - Keep the prepared smoke startup phase under 1 minute after a single `npm run build:pages`, and keep the total benchmarked smoke runner under 3 minutes while deeper render assertions remain split into slower integration specs.
-- Latest measured benchmark on April 24, 2026: `npm run build:pages` took about `19.2s`; `npm run test:unit` reported about `2.2s`; `npm run test:perf:runner` reported about `42.5s`; `npm run test:smoke:runner` reported about `37.5s`; `npm run test:render:integration:runner` reported about `10.0s`; `npm run test:maze:runner` previously reported about `11.5s` with an `11.9s` wall total; and `npm run ensure:mazes` previously took about `4.9m`, dominated by `export:maze-probes` at about `4.5m` for all 245 persisted probe captures.
+- Latest measured benchmark on April 27, 2026: `npm run build:pages` took about `74s`; `npm run test:unit` reported about `2.2s`; `npm run test:smoke:runner` passed in about `46s`; `npm run test:maze:runner` reported about `38.4s` with the offline path-traced lightmap bake tests cached inside one Node process; each full-quality surface-lightmap bake currently takes about `10-15s`; and `npm run ensure:mazes` previously took about `4.9m`, dominated by `export:maze-probes` at about `4.5m` for all 245 persisted probe captures.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.

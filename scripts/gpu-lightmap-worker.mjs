@@ -15,6 +15,7 @@ const browser = await chromium.launch({
   headless: true,
   args: [
     '--disable-background-timer-throttling',
+    '--disable-gpu-watchdog',
     '--disable-renderer-backgrounding',
     '--enable-gpu',
     '--ignore-gpu-blocklist',
@@ -66,7 +67,12 @@ precision highp int;
 const int MAX_WALLS = 320;
 const int MAX_TORCHES = 96;
 const int SKY_DIRECTION_COUNT = 13;
+const int DIRECT_SPHERE_SAMPLE_COUNT = 6;
+const int INDIRECT_SPHERE_SAMPLE_COUNT = 3;
+const int INDIRECT_RAY_COUNT = 2;
 const float GROUND_Y = 0.0;
+const float PI = 3.141592653589793;
+const float GOLDEN_RATIO = 1.618033988749895;
 
 uniform sampler2D uWallTexture;
 uniform sampler2D uTorchTexture;
@@ -76,14 +82,18 @@ uniform int uSurfaceType;
 uniform vec4 uRect;
 uniform vec4 uSurfaceA;
 uniform vec4 uSurfaceB;
+uniform vec4 uGroundBounds;
+uniform vec3 uGroundBounceAlbedo;
 uniform vec3 uTorchLightColor;
 uniform vec3 uSkyLightColor;
+uniform vec3 uWallBounceAlbedo;
 uniform float uCellSize;
 uniform float uWallHeight;
 uniform float uWallThickness;
 uniform float uSampleEpsilon;
 uniform float uSkyRayDistance;
 uniform float uSconceRadius;
+uniform float uTorchSourceRadius;
 uniform float uTorchStrength;
 uniform int uSupersampleGrid;
 uniform bool uAlignUToRectEdges;
@@ -112,6 +122,10 @@ vec4 readWall(int wallIndex, int row) {
 
 vec4 readTorch(int torchIndex, int row) {
   return texelFetch(uTorchTexture, ivec2(torchIndex, row), 0);
+}
+
+float hash11(float value) {
+  return fract(sin(value * 12.9898) * 43758.5453123);
 }
 
 vec2 rotateWallLocalVector(float localX, float localZ, float yaw) {
@@ -199,6 +213,71 @@ bool segmentIntersectsBounds(vec3 start, vec3 end, vec3 boundsMin, vec3 boundsMa
   return exit > 0.0 && entry < 1.0;
 }
 
+bool rayIntersectsBounds(
+  vec3 origin,
+  vec3 direction,
+  vec3 boundsMin,
+  vec3 boundsMax,
+  out float hitT,
+  out vec3 hitNormal
+) {
+  float entry = 0.000001;
+  float exit = 1.0e20;
+
+  for (int axis = 0; axis < 3; axis += 1) {
+    float delta = direction[axis];
+    float originAxis = origin[axis];
+    float minValue = boundsMin[axis];
+    float maxValue = boundsMax[axis];
+
+    if (abs(delta) < 0.000001) {
+      if (originAxis < minValue || originAxis > maxValue) {
+        return false;
+      }
+    } else {
+      float nearValue = (minValue - originAxis) / delta;
+      float farValue = (maxValue - originAxis) / delta;
+
+      if (nearValue > farValue) {
+        float swapValue = nearValue;
+        nearValue = farValue;
+        farValue = swapValue;
+      }
+
+      entry = max(entry, nearValue);
+      exit = min(exit, farValue);
+
+      if (entry > exit) {
+        return false;
+      }
+    }
+  }
+
+  if (entry <= 0.000001) {
+    return false;
+  }
+
+  hitT = entry;
+  vec3 hitPosition = origin + (direction * hitT);
+  float normalEpsilon = max(uSampleEpsilon * 1.5, 0.001);
+
+  if (abs(hitPosition.x - boundsMin.x) <= normalEpsilon) {
+    hitNormal = vec3(-1.0, 0.0, 0.0);
+  } else if (abs(hitPosition.x - boundsMax.x) <= normalEpsilon) {
+    hitNormal = vec3(1.0, 0.0, 0.0);
+  } else if (abs(hitPosition.y - boundsMin.y) <= normalEpsilon) {
+    hitNormal = vec3(0.0, -1.0, 0.0);
+  } else if (abs(hitPosition.y - boundsMax.y) <= normalEpsilon) {
+    hitNormal = vec3(0.0, 1.0, 0.0);
+  } else if (abs(hitPosition.z - boundsMin.z) <= normalEpsilon) {
+    hitNormal = vec3(0.0, 0.0, -1.0);
+  } else {
+    hitNormal = vec3(0.0, 0.0, 1.0);
+  }
+
+  return true;
+}
+
 bool segmentIntersectsLowerHemisphereCap(vec3 start, vec3 end, vec3 center, float radius) {
   vec3 direction = end - start;
   vec3 toStart = start - center;
@@ -247,72 +326,9 @@ bool segmentIntersectsLowerHemisphereCap(vec3 start, vec3 end, vec3 center, floa
   return false;
 }
 
-bool isAttachedWallFaceSample(vec3 samplePosition, vec3 sampleNormal, int torchIndex) {
-  vec4 wallCenterAndAxis = readTorch(torchIndex, 2);
-  vec3 torchNormal = readTorch(torchIndex, 3).xyz;
-  float normalDot = dot(sampleNormal.xz, torchNormal.xz);
-
-  if (normalDot < 0.99) {
-    return false;
-  }
-
-  vec2 wallCenter = wallCenterAndAxis.xy;
-  vec2 wallNormal = torchNormal.xz;
-  float acrossDistance = abs(dot(samplePosition.xz - wallCenter, wallNormal));
-
-  if (acrossDistance > (uWallThickness + uSampleEpsilon)) {
-    return false;
-  }
-
-  float horizontalDistance = wallCenterAndAxis.z < 0.5
-    ? abs(samplePosition.x - wallCenter.x)
-    : abs(samplePosition.z - wallCenter.y);
-
-  return horizontalDistance <= (uCellSize * 0.5) + uSampleEpsilon;
-}
-
-float getAttachedSconceContactShadow(vec3 samplePosition, vec3 sampleNormal, int torchIndex) {
-  if (!isAttachedWallFaceSample(samplePosition, sampleNormal, torchIndex)) {
-    return 0.0;
-  }
-
-  vec3 sconcePosition = readTorch(torchIndex, 1).xyz;
-
-  if (samplePosition.y > sconcePosition.y + uSconceRadius) {
-    return 0.0;
-  }
-
-  vec4 wallCenterAndAxis = readTorch(torchIndex, 2);
-  float horizontalDistance = wallCenterAndAxis.z < 0.5
-    ? abs(samplePosition.x - wallCenterAndAxis.x)
-    : abs(samplePosition.z - wallCenterAndAxis.y);
-  float horizontalMask =
-    1.0 - smoothstep(uSconceRadius * 0.55, uSconceRadius * 1.45, horizontalDistance);
-  float verticalMask = smoothstep(
-    GROUND_Y,
-    sconcePosition.y + uSconceRadius,
-    samplePosition.y
-  );
-
-  return clamp(horizontalMask * (0.9 + (0.1 * verticalMask)), 0.0, 1.0);
-}
-
-bool isTorchBlockedBySconce(vec3 samplePosition, vec3 sampleNormal, int torchIndex) {
-  if (!isAttachedWallFaceSample(samplePosition, sampleNormal, torchIndex)) {
-    return false;
-  }
-
-  return segmentIntersectsLowerHemisphereCap(
-    samplePosition,
-    readTorch(torchIndex, 0).xyz,
-    readTorch(torchIndex, 1).xyz,
-    uSconceRadius
-  );
-}
-
-bool isTorchOccluded(vec3 samplePosition, vec3 torchPosition) {
-  vec3 segmentMin = min(samplePosition, torchPosition);
-  vec3 segmentMax = max(samplePosition, torchPosition);
+bool isSegmentOccluded(vec3 samplePosition, vec3 targetPosition) {
+  vec3 segmentMin = min(samplePosition, targetPosition);
+  vec3 segmentMax = max(samplePosition, targetPosition);
 
   for (int wallIndex = 0; wallIndex < MAX_WALLS; wallIndex += 1) {
     if (wallIndex >= uWallCount) {
@@ -333,12 +349,122 @@ bool isTorchOccluded(vec3 samplePosition, vec3 torchPosition) {
       continue;
     }
 
-    if (segmentIntersectsBounds(samplePosition, torchPosition, boundsMin, boundsMax)) {
+    if (segmentIntersectsBounds(samplePosition, targetPosition, boundsMin, boundsMax)) {
+      return true;
+    }
+  }
+
+  for (int torchIndex = 0; torchIndex < MAX_TORCHES; torchIndex += 1) {
+    if (torchIndex >= uTorchCount) {
+      break;
+    }
+
+    if (
+      segmentIntersectsLowerHemisphereCap(
+        samplePosition,
+        targetPosition,
+        readTorch(torchIndex, 1).xyz,
+        uSconceRadius
+      )
+    ) {
       return true;
     }
   }
 
   return false;
+}
+
+vec3 sphereSampleDirection(int sampleIndex, float seed, int sampleCount) {
+  float count = max(float(sampleCount), 1.0);
+  float sampleValue = float(sampleIndex) + 0.5;
+  float z = 1.0 - (2.0 * sampleValue / count);
+  float radius = sqrt(max(0.0, 1.0 - (z * z)));
+  float angle = 2.0 * PI * fract((float(sampleIndex) + seed) / GOLDEN_RATIO);
+
+  return vec3(cos(angle) * radius, z, sin(angle) * radius);
+}
+
+vec3 cosineHemisphereDirection(vec3 normal, int sampleIndex, float seed) {
+  float r1 = hash11(seed + (float(sampleIndex) * 17.371));
+  float r2 = hash11(seed + (float(sampleIndex) * 29.713) + 5.231);
+  float phi = 2.0 * PI * r1;
+  float radius = sqrt(r2);
+  float localX = cos(phi) * radius;
+  float localZ = sin(phi) * radius;
+  float localY = sqrt(max(0.0, 1.0 - r2));
+  vec3 tangent = abs(normal.y) < 0.95
+    ? normalize(cross(vec3(0.0, 1.0, 0.0), normal))
+    : normalize(cross(vec3(1.0, 0.0, 0.0), normal));
+  vec3 bitangent = normalize(cross(normal, tangent));
+
+  return normalize((tangent * localX) + (normal * localY) + (bitangent * localZ));
+}
+
+bool traceScene(
+  vec3 origin,
+  vec3 direction,
+  out vec3 hitPosition,
+  out vec3 hitNormal,
+  out vec3 hitAlbedo
+) {
+  bool hit = false;
+  float nearestT = 1.0e20;
+  vec3 nearestNormal = vec3(0.0);
+  vec3 nearestAlbedo = vec3(0.0);
+
+  if (direction.y < -0.000001) {
+    float groundT = (GROUND_Y - origin.y) / direction.y;
+    vec3 groundPosition = origin + (direction * groundT);
+
+    if (
+      groundT > 0.000001 &&
+      groundT < nearestT &&
+      groundPosition.x >= uGroundBounds.x &&
+      groundPosition.x <= uGroundBounds.z &&
+      groundPosition.z >= uGroundBounds.y &&
+      groundPosition.z <= uGroundBounds.w
+    ) {
+      hit = true;
+      nearestT = groundT;
+      nearestNormal = vec3(0.0, 1.0, 0.0);
+      nearestAlbedo = uGroundBounceAlbedo;
+    }
+  }
+
+  for (int wallIndex = 0; wallIndex < MAX_WALLS; wallIndex += 1) {
+    if (wallIndex >= uWallCount) {
+      break;
+    }
+
+    float wallT = 0.0;
+    vec3 wallNormal = vec3(0.0);
+
+    if (
+      rayIntersectsBounds(
+        origin,
+        direction,
+        readWall(wallIndex, 0).xyz,
+        readWall(wallIndex, 1).xyz,
+        wallT,
+        wallNormal
+      ) &&
+      wallT < nearestT
+    ) {
+      hit = true;
+      nearestT = wallT;
+      nearestNormal = wallNormal;
+      nearestAlbedo = uWallBounceAlbedo;
+    }
+  }
+
+  if (!hit) {
+    return false;
+  }
+
+  hitPosition = origin + (direction * nearestT);
+  hitNormal = nearestNormal;
+  hitAlbedo = nearestAlbedo;
+  return true;
 }
 
 vec3 sampleSkylight(vec3 samplePosition, vec3 sampleNormal) {
@@ -356,7 +482,7 @@ vec3 sampleSkylight(vec3 samplePosition, vec3 sampleNormal) {
 
     accumulatedWeight += lambert;
 
-    if (isTorchOccluded(rayStart, rayStart + (direction * uSkyRayDistance))) {
+    if (isSegmentOccluded(rayStart, rayStart + (direction * uSkyRayDistance))) {
       continue;
     }
 
@@ -370,8 +496,15 @@ vec3 sampleSkylight(vec3 samplePosition, vec3 sampleNormal) {
   return color / accumulatedWeight;
 }
 
-vec3 accumulateTorchLighting(vec3 samplePosition, vec3 sampleNormal) {
+vec3 accumulateTorchLighting(
+  vec3 samplePosition,
+  vec3 sampleNormal,
+  float seed,
+  int sphereSampleCount
+) {
   vec3 litColor = vec3(0.0);
+  float sourceRadius = max(uTorchSourceRadius, 0.001);
+  int effectiveSphereSampleCount = max(sphereSampleCount, 1);
 
   for (int torchIndex = 0; torchIndex < MAX_TORCHES; torchIndex += 1) {
     if (torchIndex >= uTorchCount) {
@@ -379,41 +512,116 @@ vec3 accumulateTorchLighting(vec3 samplePosition, vec3 sampleNormal) {
     }
 
     vec3 torchPosition = readTorch(torchIndex, 0).xyz;
-    vec3 toTorch = torchPosition - samplePosition;
-    float distanceToTorch = length(toTorch);
+    vec3 torchAccumulated = vec3(0.0);
 
-    if (distanceToTorch <= 0.000001) {
-      continue;
+    for (int sphereSampleIndex = 0; sphereSampleIndex < DIRECT_SPHERE_SAMPLE_COUNT; sphereSampleIndex += 1) {
+      if (sphereSampleIndex >= effectiveSphereSampleCount) {
+        break;
+      }
+
+      float sampleSeed = seed + float(torchIndex) * 0.37;
+      vec3 emitterPosition =
+        torchPosition +
+        (sphereSampleDirection(sphereSampleIndex, sampleSeed, effectiveSphereSampleCount) * sourceRadius);
+      vec3 toTorch = emitterPosition - samplePosition;
+      float distanceToTorch = length(toTorch);
+
+      if (distanceToTorch <= 0.000001) {
+        continue;
+      }
+
+      vec3 direction = toTorch / distanceToTorch;
+      float lambert = dot(sampleNormal, direction);
+
+      if (lambert <= 0.0) {
+        continue;
+      }
+
+      vec3 rayStart = samplePosition + (sampleNormal * uSampleEpsilon);
+
+      if (isSegmentOccluded(rayStart, emitterPosition)) {
+        continue;
+      }
+
+      float falloff = 1.0 / max(distanceToTorch * distanceToTorch, sourceRadius * sourceRadius);
+      torchAccumulated += uTorchLightColor * (lambert * falloff * uTorchStrength);
     }
 
-    vec3 direction = toTorch / distanceToTorch;
-    float lambert = dot(sampleNormal, direction);
-
-    if (lambert <= 0.0) {
-      continue;
-    }
-
-    float sourceRadius = max(uSconceRadius, 0.01);
-    float falloff = 1.0 / max(distanceToTorch * distanceToTorch, sourceRadius * sourceRadius);
-    float strength = lambert * falloff * uTorchStrength;
-    float sconceContactShadow =
-      getAttachedSconceContactShadow(samplePosition, sampleNormal, torchIndex);
-    float contactShadowedStrength = strength * (1.0 - (0.98 * sconceContactShadow));
-
-    if (isTorchBlockedBySconce(samplePosition, sampleNormal, torchIndex)) {
-      continue;
-    }
-
-    vec3 rayStart = samplePosition + (sampleNormal * uSampleEpsilon);
-
-    if (isTorchOccluded(rayStart, torchPosition)) {
-      continue;
-    }
-
-    litColor += uTorchLightColor * contactShadowedStrength;
+    litColor += torchAccumulated / float(effectiveSphereSampleCount);
   }
 
   return litColor;
+}
+
+vec3 directAndSkyLighting(
+  vec3 samplePosition,
+  vec3 sampleNormal,
+  float seed,
+  int sphereSampleCount
+) {
+  return
+    max(vec3(0.0), accumulateTorchLighting(samplePosition, sampleNormal, seed, sphereSampleCount)) +
+    max(vec3(0.0), sampleSkylight(samplePosition, sampleNormal));
+}
+
+vec3 sampleTwoBounceDiffuseLighting(vec3 samplePosition, vec3 sampleNormal, float seed) {
+  vec3 indirect = vec3(0.0);
+  vec3 rayStart = samplePosition + (sampleNormal * uSampleEpsilon);
+
+  for (int bounceSampleIndex = 0; bounceSampleIndex < INDIRECT_RAY_COUNT; bounceSampleIndex += 1) {
+    vec3 firstDirection = cosineHemisphereDirection(
+      sampleNormal,
+      bounceSampleIndex,
+      seed + 101.0
+    );
+    vec3 firstHitPosition = vec3(0.0);
+    vec3 firstHitNormal = vec3(0.0);
+    vec3 firstHitAlbedo = vec3(0.0);
+
+    if (!traceScene(rayStart, firstDirection, firstHitPosition, firstHitNormal, firstHitAlbedo)) {
+      continue;
+    }
+
+    float firstSeed = seed + float(bounceSampleIndex) * 0.271;
+    vec3 firstLighting = directAndSkyLighting(
+      firstHitPosition + (firstHitNormal * uSampleEpsilon),
+      firstHitNormal,
+      firstSeed,
+      INDIRECT_SPHERE_SAMPLE_COUNT
+    );
+    vec3 secondBounce = vec3(0.0);
+    vec3 secondDirection = cosineHemisphereDirection(
+      firstHitNormal,
+      bounceSampleIndex + INDIRECT_RAY_COUNT,
+      firstSeed + 211.0
+    );
+    vec3 secondHitPosition = vec3(0.0);
+    vec3 secondHitNormal = vec3(0.0);
+    vec3 secondHitAlbedo = vec3(0.0);
+
+    if (
+      traceScene(
+        firstHitPosition + (firstHitNormal * uSampleEpsilon),
+        secondDirection,
+        secondHitPosition,
+        secondHitNormal,
+        secondHitAlbedo
+      )
+    ) {
+      vec3 secondLighting = directAndSkyLighting(
+        secondHitPosition + (secondHitNormal * uSampleEpsilon),
+        secondHitNormal,
+        firstSeed + 409.0,
+        INDIRECT_SPHERE_SAMPLE_COUNT
+      );
+
+      secondBounce = secondHitAlbedo * secondLighting;
+    }
+
+    indirect += firstHitAlbedo * (firstLighting + secondBounce);
+  }
+
+  return indirect / float(INDIRECT_RAY_COUNT);
 }
 
 void main() {
@@ -441,9 +649,15 @@ void main() {
       vec3 sampleNormal;
 
       getSurfaceSample(u, v, samplePosition, sampleNormal);
+      float seed = 0.371 + (float(sampleColumn + (sampleRow * 2)) * 0.173);
       accumulatedColor +=
-        max(vec3(0.0), accumulateTorchLighting(samplePosition, sampleNormal)) +
-        max(vec3(0.0), sampleSkylight(samplePosition, sampleNormal));
+        directAndSkyLighting(
+          samplePosition,
+          sampleNormal,
+          seed,
+          DIRECT_SPHERE_SAMPLE_COUNT
+        ) +
+        sampleTwoBounceDiffuseLighting(samplePosition, sampleNormal, seed + 19.0);
       sampleCount += 1.0;
     }
   }
@@ -577,6 +791,8 @@ void main() {
     const locations = {
       alignUToRectEdges: gl.getUniformLocation(program, 'uAlignUToRectEdges'),
       cellSize: gl.getUniformLocation(program, 'uCellSize'),
+      groundBounceAlbedo: gl.getUniformLocation(program, 'uGroundBounceAlbedo'),
+      groundBounds: gl.getUniformLocation(program, 'uGroundBounds'),
       rect: gl.getUniformLocation(program, 'uRect'),
       sampleEpsilon: gl.getUniformLocation(program, 'uSampleEpsilon'),
       sconceRadius: gl.getUniformLocation(program, 'uSconceRadius'),
@@ -588,9 +804,11 @@ void main() {
       surfaceType: gl.getUniformLocation(program, 'uSurfaceType'),
       torchCount: gl.getUniformLocation(program, 'uTorchCount'),
       torchLightColor: gl.getUniformLocation(program, 'uTorchLightColor'),
+      torchSourceRadius: gl.getUniformLocation(program, 'uTorchSourceRadius'),
       torchStrength: gl.getUniformLocation(program, 'uTorchStrength'),
       torchTexture: gl.getUniformLocation(program, 'uTorchTexture'),
       wallCount: gl.getUniformLocation(program, 'uWallCount'),
+      wallBounceAlbedo: gl.getUniformLocation(program, 'uWallBounceAlbedo'),
       wallHeight: gl.getUniformLocation(program, 'uWallHeight'),
       wallTexture: gl.getUniformLocation(program, 'uWallTexture'),
       wallThickness: gl.getUniformLocation(program, 'uWallThickness')
@@ -611,9 +829,13 @@ void main() {
     gl.uniform1f(locations.sampleEpsilon, bakeJob.constants.sampleEpsilon)
     gl.uniform1f(locations.skyRayDistance, bakeJob.constants.skyRayDistance)
     gl.uniform1f(locations.sconceRadius, bakeJob.constants.sconceRadius)
+    gl.uniform1f(locations.torchSourceRadius, bakeJob.constants.torchSourceRadius)
     gl.uniform1f(locations.torchStrength, bakeJob.constants.torchStrength)
+    gl.uniform4fv(locations.groundBounds, bakeJob.constants.groundBounds)
+    gl.uniform3fv(locations.groundBounceAlbedo, bakeJob.constants.groundBounceAlbedo)
     gl.uniform3fv(locations.torchLightColor, bakeJob.constants.torchLightColor)
     gl.uniform3fv(locations.skyLightColor, bakeJob.constants.skyLightColor)
+    gl.uniform3fv(locations.wallBounceAlbedo, bakeJob.constants.wallBounceAlbedo)
     gl.disable(gl.BLEND)
     gl.disable(gl.DEPTH_TEST)
     gl.enable(gl.SCISSOR_TEST)
@@ -623,17 +845,28 @@ void main() {
     gl.clearColor(0, 0, 0, 1)
     gl.clear(gl.COLOR_BUFFER_BIT)
 
+    const renderTileSize = 32
+
     for (const surface of bakeJob.surfaces) {
       const rect = surface.rect
-      gl.viewport(rect.x, rect.y, rect.width, rect.height)
-      gl.scissor(rect.x, rect.y, rect.width, rect.height)
       gl.uniform4f(locations.rect, rect.x, rect.y, rect.width, rect.height)
       gl.uniform1i(locations.surfaceType, surface.type)
       gl.uniform4fv(locations.surfaceA, surface.surfaceA)
       gl.uniform4fv(locations.surfaceB, surface.surfaceB)
       gl.uniform1i(locations.supersampleGrid, surface.supersampleGrid)
       gl.uniform1i(locations.alignUToRectEdges, surface.alignUToRectEdges ? 1 : 0)
-      gl.drawArrays(gl.TRIANGLES, 0, 3)
+
+      for (let tileY = rect.y; tileY < rect.y + rect.height; tileY += renderTileSize) {
+        const tileHeight = Math.min(renderTileSize, rect.y + rect.height - tileY)
+
+        for (let tileX = rect.x; tileX < rect.x + rect.width; tileX += renderTileSize) {
+          const tileWidth = Math.min(renderTileSize, rect.x + rect.width - tileX)
+
+          gl.viewport(tileX, tileY, tileWidth, tileHeight)
+          gl.scissor(tileX, tileY, tileWidth, tileHeight)
+          gl.drawArrays(gl.TRIANGLES, 0, 3)
+        }
+      }
     }
 
     const pixels = new Float32Array(bakeJob.atlasWidth * bakeJob.atlasHeight * 4)

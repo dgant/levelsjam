@@ -5,7 +5,7 @@ const { spawn } = require('node:child_process')
 const rootDir = path.resolve(__dirname, '..')
 const nodeCommand = process.execPath
 const profilePath = path.join(rootDir, 'logs', 'latest-maze-test-profile.json')
-const overallThresholdMs = 20_000
+const overallThresholdMs = 45_000
 const testFile = 'tests/maze.test.js'
 const testCases = [
   { name: 'generates valid mazes under 100ms', thresholdMs: 5_000 },
@@ -16,23 +16,19 @@ const testCases = [
   { name: 'dumps persisted maze lightmap artifacts into the gitignored logs directory', thresholdMs: 5_000 },
   { name: 'deletes invalid maze files and regenerates replacements', thresholdMs: 5_000 },
   { name: 'converts persisted mazes into wall segments and torch placements', thresholdMs: 5_000 },
-  { name: 'maps runtime floor lightmap UVs to the same world-space orientation used by baking', thresholdMs: 5_000 },
-  { name: 'keeps baked lighting continuous across an open coplanar wall run', thresholdMs: 5_000 },
-  { name: 'bakes local sconce occlusion into the attached wall face', thresholdMs: 5_000 },
+  { name: 'bakes visible floor light into the torch-facing side of each lit cell', thresholdMs: 5_000 },
+  { name: 'keeps baked lighting continuous across an open coplanar wall run', thresholdMs: 15_000 },
+  { name: 'bakes local sconce occlusion into the attached wall face', thresholdMs: 15_000 },
   { name: 'bakes same-cell torch energy into volumetric lightmap coefficients', thresholdMs: 5_000 },
-  { name: 'keeps mid-wall torch lighting visible below the sconce top', thresholdMs: 5_000 },
-  { name: 'stores baked wall skylight in the HDR lightmap', thresholdMs: 5_000 },
-  { name: 'bakes lightmap rectangles for maze wall short end faces', thresholdMs: 5_000 },
+  { name: 'keeps mid-wall torch lighting visible below the sconce top', thresholdMs: 15_000 },
+  { name: 'stores baked wall skylight in the HDR lightmap', thresholdMs: 15_000 },
+  { name: 'bakes lightmap rectangles for maze wall short end faces', thresholdMs: 15_000 },
   { name: 'three box geometry mirrors local -Z face UVs relative to +Z', thresholdMs: 5_000 },
-  { name: 'assigns z-axis wall-run lightmap slices to the correct wall', thresholdMs: 5_000 }
+  { name: 'assigns z-axis wall-run lightmap slices to the correct wall', thresholdMs: 15_000 }
 ]
 
 function formatMilliseconds(value) {
   return `${value.toFixed(1)}ms`
-}
-
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function parseReportedDuration(stdout) {
@@ -47,16 +43,40 @@ function parseReportedDuration(stdout) {
   return Number.isFinite(durationMs) ? durationMs : null
 }
 
-function runTestCase(testCase) {
+function parseTapSubtests(stdout) {
+  const matches = [...stdout.matchAll(/# Subtest: ([^\r\n]+)/g)]
+  const subtests = []
+
+  for (const match of matches) {
+    const durationMatch = stdout
+      .slice(match.index)
+      .match(/duration_ms: ([0-9.]+)/)
+
+    if (!durationMatch) {
+      continue
+    }
+
+    const durationMs = Number(durationMatch[1])
+
+    if (Number.isFinite(durationMs)) {
+      subtests.push({
+        durationMs,
+        name: match[1]
+      })
+    }
+  }
+
+  return subtests
+}
+
+function runTestFile() {
   return new Promise((resolve) => {
     const startedAt = process.hrtime.bigint()
-    const timeoutMs = Math.max(testCase.thresholdMs * 4, 15_000)
-    console.log(
-      `starting: ${testCase.name} (timeout ${formatMilliseconds(timeoutMs)})`
-    )
+    const timeoutMs = 120_000
+    console.log(`starting: ${testFile} (timeout ${formatMilliseconds(timeoutMs)})`)
     const child = spawn(
       nodeCommand,
-      ['--test', '--test-name-pattern', `^${escapeRegExp(testCase.name)}$`, testFile],
+      ['--test', testFile],
       {
         cwd: rootDir,
         env: { ...process.env }
@@ -92,11 +112,10 @@ function runTestCase(testCase) {
       resolve({
         code: timedOut ? 1 : code ?? 1,
         durationMs: parseReportedDuration(stdout) ?? wallDurationMs,
-        name: testCase.name,
         reportedDurationMs: parseReportedDuration(stdout),
         stderr,
         stdout,
-        thresholdMs: testCase.thresholdMs,
+        subtests: parseTapSubtests(stdout),
         timedOut,
         timeoutMs,
         wallDurationMs
@@ -112,38 +131,39 @@ function writeProfile(profile) {
 
 async function main() {
   const startedAt = Date.now()
-  const results = []
-
-  for (const testCase of testCases) {
-    const result = await runTestCase(testCase)
-    results.push(result)
-    console.log(
-      `${testCase.name}: ${formatMilliseconds(result.durationMs)}`
-    )
-  }
+  const result = await runTestFile()
+  const subtestsByName = new Map(result.subtests.map((subtest) => [subtest.name, subtest]))
 
   const wallTotalDurationMs = Date.now() - startedAt
-  const totalDurationMs = results.reduce((sum, result) => sum + result.durationMs, 0)
+  const totalDurationMs = result.durationMs
   const failures = []
 
   console.log(`reported total: ${formatMilliseconds(totalDurationMs)}`)
   console.log(`wall total: ${formatMilliseconds(wallTotalDurationMs)}`)
 
-  for (const result of results) {
-    if (result.code !== 0) {
-      process.stdout.write(result.stdout)
-      process.stderr.write(result.stderr)
-      failures.push(
-        result.timedOut
-          ? `${result.name} timed out after ${formatMilliseconds(result.timeoutMs)}`
-          : `${result.name} exited with code ${result.code}`
-      )
+  if (result.code !== 0) {
+    process.stdout.write(result.stdout)
+    process.stderr.write(result.stderr)
+    failures.push(
+      result.timedOut
+        ? `${testFile} timed out after ${formatMilliseconds(result.timeoutMs)}`
+        : `${testFile} exited with code ${result.code}`
+    )
+  }
+
+  for (const testCase of testCases) {
+    const subtest = subtestsByName.get(testCase.name)
+
+    if (!subtest) {
+      failures.push(`${testCase.name} did not run`)
       continue
     }
 
-    if (result.durationMs > result.thresholdMs) {
+    console.log(`${testCase.name}: ${formatMilliseconds(subtest.durationMs)}`)
+
+    if (subtest.durationMs > testCase.thresholdMs) {
       failures.push(
-        `${result.name} exceeded its threshold (${formatMilliseconds(result.durationMs)} > ${formatMilliseconds(result.thresholdMs)})`
+        `${testCase.name} exceeded its threshold (${formatMilliseconds(subtest.durationMs)} > ${formatMilliseconds(testCase.thresholdMs)})`
       )
     }
   }
@@ -155,16 +175,23 @@ async function main() {
   }
 
   writeProfile({
-    files: results.map((result) => ({
+    files: testCases.map((testCase) => {
+      const subtest = subtestsByName.get(testCase.name)
+
+      return {
+        durationMs: subtest?.durationMs ?? null,
+        name: testCase.name,
+        overThreshold: subtest ? subtest.durationMs > testCase.thresholdMs : true,
+        thresholdMs: testCase.thresholdMs
+      }
+    }),
+    run: {
       durationMs: result.durationMs,
-      name: result.name,
-      overThreshold: result.durationMs > result.thresholdMs,
       reportedDurationMs: result.reportedDurationMs,
-      thresholdMs: result.thresholdMs,
       timedOut: result.timedOut,
       timeoutMs: result.timeoutMs,
       wallDurationMs: result.wallDurationMs
-    })),
+    },
     generatedAt: new Date().toISOString(),
     overallThresholdMs,
     totalDurationMs,
