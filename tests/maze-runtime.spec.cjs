@@ -14,8 +14,11 @@ async function waitForSceneReady(page, mazeId = 'maze-001') {
     .poll(async () => page.evaluate(() => ({
       getDebugPosition: typeof window.__levelsjamDebug?.getDebugPosition,
       getMazeLifecycleState: typeof window.__levelsjamDebug?.getMazeLifecycleState,
+      getMonsterRenderState: typeof window.__levelsjamDebug?.getMonsterRenderState,
       getRuntimeMemoryHighWater: typeof window.__levelsjamDebug?.getRuntimeMemoryHighWater,
+      setDebugMonsterCell: typeof window.__levelsjamDebug?.setDebugMonsterCell,
       getTurnStateSummary: typeof window.__levelsjamDebug?.getTurnStateSummary,
+      setAnimationSpeedMultiplier: typeof window.__levelsjamDebug?.setAnimationSpeedMultiplier,
       startSolutionReplay: typeof window.__levelsjamDebug?.startSolutionReplay
     })), {
       timeout: 15_000,
@@ -24,8 +27,11 @@ async function waitForSceneReady(page, mazeId = 'maze-001') {
     .toEqual({
       getDebugPosition: 'function',
       getMazeLifecycleState: 'function',
+      getMonsterRenderState: 'function',
       getRuntimeMemoryHighWater: 'function',
+      setDebugMonsterCell: 'function',
       getTurnStateSummary: 'function',
+      setAnimationSpeedMultiplier: 'function',
       startSolutionReplay: 'function'
     })
 }
@@ -298,6 +304,131 @@ test('maze 005 sword pickup swaps the floor sword for the held sword', async ({ 
   )
 
   expect(heldSwordDistance).toBeLessThan(1.5)
+
+  expect(consoleErrors).toEqual([])
+  expect(pageErrors).toEqual([])
+})
+
+test('monster movement renders intermediate positions instead of snapping', async ({ page }) => {
+  const consoleErrors = []
+  const pageErrors = []
+
+  page.on('console', (message) => {
+    if (message.type() === 'error') {
+      consoleErrors.push(message.text())
+    }
+  })
+
+  page.on('pageerror', (error) => {
+    pageErrors.push(String(error))
+  })
+
+  await waitForSceneReady(page, 'maze-001')
+  await expect
+    .poll(
+      async () => page.evaluate(() =>
+        Array.from({ length: 3 }, (_, index) => Boolean(
+          window.__levelsjamDebug?.getMonsterRenderState?.(index)
+        ))
+      ),
+      {
+        timeout: 20_000,
+        intervals: [100, 250, 500]
+      }
+    )
+    .toEqual([true, true, true])
+
+  const result = await page.evaluate(async () => {
+    const raf = () => new Promise((resolve) => requestAnimationFrame(resolve))
+    const distance = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+    window.__levelsjamDebug.setAnimationSpeedMultiplier?.(1)
+    window.__levelsjamSetVisualSettings?.({ precomputedVisibilityEnabled: false })
+    await raf()
+    await raf()
+
+    const initialSummary = window.__levelsjamDebug.getTurnStateSummary?.()
+    const monster = initialSummary?.monsters?.[0] ?? null
+    const startPosition = window.__levelsjamDebug.getDebugPosition?.('monster', 0) ?? null
+    const mounted = Array.from({ length: 3 }, (_, index) =>
+      Boolean(window.__levelsjamDebug.getMonsterRenderState?.(index))
+    )
+
+    if (!monster || !startPosition) {
+      return { mounted, reason: 'monster-not-ready' }
+    }
+
+    const targetCell = monster.cell.x > 0
+      ? { x: monster.cell.x - 1, y: monster.cell.y }
+      : { x: monster.cell.x + 1, y: monster.cell.y }
+    const applied = window.__levelsjamDebug.setDebugMonsterCell?.(0, targetCell, 'west') ?? false
+    const samples = []
+
+    if (!applied) {
+      return { mounted, reason: 'debug-monster-cell-not-applied' }
+    }
+
+    for (let sampleIndex = 0; sampleIndex < 24; sampleIndex += 1) {
+      await raf()
+      samples.push({
+        animationActive:
+          window.__levelsjamDebug?.getMonsterRenderState?.(0)?.animationActive === true,
+        position: window.__levelsjamDebug?.getDebugPosition?.('monster', 0) ?? null
+      })
+    }
+
+    for (let waitIndex = 0; waitIndex < 60; waitIndex += 1) {
+      const state = window.__levelsjamDebug?.getMonsterRenderState?.(0)
+      if (state && !state.animationActive) {
+        break
+      }
+      await raf()
+    }
+
+    let finalPosition = window.__levelsjamDebug?.getDebugPosition?.('monster', 0) ?? null
+
+    for (let waitIndex = 0; !finalPosition && waitIndex < 60; waitIndex += 1) {
+      await raf()
+      finalPosition = window.__levelsjamDebug?.getDebugPosition?.('monster', 0) ?? null
+    }
+
+    return {
+      finalPosition,
+      index: 0,
+      mounted,
+      samples,
+      startPosition,
+      targetCell,
+      totalDistance: finalPosition ? distance(startPosition, finalPosition) : null,
+      type: monster.type
+    }
+  })
+
+  expect(result.reason ?? null).toBe(null)
+  expect(result.mounted).toEqual([true, true, true])
+  expect(result.totalDistance).toBeGreaterThan(1)
+  expect(result.samples.some((sample) => sample.animationActive)).toBe(true)
+
+  const hasIntermediatePose = result.samples.some((sample) => {
+    if (!sample.position || !result.finalPosition) {
+      return false
+    }
+
+    const fromStart = Math.hypot(
+      sample.position[0] - result.startPosition[0],
+      sample.position[1] - result.startPosition[1],
+      sample.position[2] - result.startPosition[2]
+    )
+    const fromEnd = Math.hypot(
+      sample.position[0] - result.finalPosition[0],
+      sample.position[1] - result.finalPosition[1],
+      sample.position[2] - result.finalPosition[2]
+    )
+
+    return fromStart > 0.05 && fromEnd > 0.05
+  })
+
+  expect(hasIntermediatePose).toBe(true)
 
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])

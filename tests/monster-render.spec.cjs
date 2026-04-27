@@ -70,6 +70,10 @@ test('monsters render, stay off surface lightmaps, and land near intended size',
   })
 
   await waitForSceneReady(page)
+  await page.evaluate(() => {
+    window.__levelsjamSetVisualSettings?.({ precomputedVisibilityEnabled: false })
+  })
+  await page.waitForTimeout(100)
 
   await expect
     .poll(

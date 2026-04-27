@@ -239,6 +239,189 @@ async function measureRafLatency(page) {
   }))
 }
 
+async function pressGameplayKeyAndWaitIdle(page, key, label = '') {
+  const before = await page.evaluate(() => {
+    const summary = window.__levelsjamDebug?.getTurnStateSummary?.()
+    const lifecycle = window.__levelsjamDebug?.getMazeLifecycleState?.()
+
+    return {
+      cell: summary?.player?.cell ?? null,
+      direction: summary?.player?.direction ?? null,
+      mazeId: lifecycle?.instantiatedMazeId ?? null,
+      turn: summary?.turn ?? null
+    }
+  })
+
+  try {
+    await page.keyboard.press(key)
+    await page.waitForFunction(
+      (previous) => {
+        const summary = window.__levelsjamDebug?.getTurnStateSummary?.()
+        const lifecycle = window.__levelsjamDebug?.getMazeLifecycleState?.()
+        const controller = window.__levelsjamDebug?.getReplayControllerState?.()
+
+        if (!summary || !lifecycle || !controller) {
+          return false
+        }
+
+        const changed =
+          summary.turn !== previous.turn ||
+          summary.player.direction !== previous.direction ||
+          summary.player.cell.x !== previous.cell?.x ||
+          summary.player.cell.y !== previous.cell?.y ||
+          lifecycle.instantiatedMazeId !== previous.mazeId
+
+        return changed && controller.playerAnimationAction === null
+      },
+      before,
+      { timeout: 10_000 }
+    )
+  } catch (error) {
+    const after = await page.evaluate(() => {
+      const summary = window.__levelsjamDebug?.getTurnStateSummary?.()
+      const lifecycle = window.__levelsjamDebug?.getMazeLifecycleState?.()
+      const controller = window.__levelsjamDebug?.getReplayControllerState?.()
+
+      return {
+        action: controller?.playerAnimationAction ?? null,
+        cell: summary?.player?.cell ?? null,
+        direction: summary?.player?.direction ?? null,
+        mazeId: lifecycle?.instantiatedMazeId ?? null,
+        turn: summary?.turn ?? null
+      }
+    })
+
+    throw new Error(
+      `Timed out after key ${key}${label ? ` (${label})` : ''}; before=${JSON.stringify(before)} after=${JSON.stringify(after)}; ${error instanceof Error ? error.message : String(error)}`
+    )
+  }
+}
+
+async function getGameplayState(page) {
+  return page.evaluate(() => {
+    const summary = window.__levelsjamDebug?.getTurnStateSummary?.()
+    const lifecycle = window.__levelsjamDebug?.getMazeLifecycleState?.()
+
+    return {
+      cell: summary?.player?.cell ?? null,
+      direction: summary?.player?.direction ?? null,
+      mazeId: lifecycle?.instantiatedMazeId ?? null,
+      turn: summary?.turn ?? null
+    }
+  })
+}
+
+async function turnGameplayTo(page, targetDirection) {
+  const directions = ['north', 'east', 'south', 'west']
+
+  for (let guard = 0; guard < 4; guard += 1) {
+    const state = await getGameplayState(page)
+
+    if (state.direction === targetDirection) {
+      return
+    }
+
+    const currentIndex = directions.indexOf(state.direction)
+    const targetIndex = directions.indexOf(targetDirection)
+
+    if (currentIndex < 0 || targetIndex < 0) {
+      throw new Error(`Cannot turn from ${state.direction} to ${targetDirection}`)
+    }
+
+    const rightTurns = (targetIndex - currentIndex + directions.length) % directions.length
+    const key = rightTurns > 0 && rightTurns <= 2 ? 'ArrowRight' : 'ArrowLeft'
+
+    await pressGameplayKeyAndWaitIdle(page, key, `turn ${state.direction}->${targetDirection}`)
+  }
+
+  throw new Error(`Failed to turn to ${targetDirection}`)
+}
+
+async function moveGameplayForward(page, count, label) {
+  for (let index = 0; index < count; index += 1) {
+    await pressGameplayKeyAndWaitIdle(page, 'KeyW', `${label} step ${index + 1}/${count}`)
+  }
+}
+
+async function moveInOpenLevelToCell(page, targetCell, label) {
+  const start = await getGameplayState(page)
+
+  if (!start.cell) {
+    throw new Error(`Cannot move ${label}; player cell is unavailable`)
+  }
+
+  const moveX = async () => {
+    const current = await getGameplayState(page)
+    const deltaX = targetCell.x - current.cell.x
+
+    if (deltaX !== 0) {
+      await turnGameplayTo(page, deltaX > 0 ? 'east' : 'west')
+      await moveGameplayForward(page, Math.abs(deltaX), `${label} x`)
+    }
+  }
+  const moveY = async () => {
+    const current = await getGameplayState(page)
+    const deltaY = targetCell.y - current.cell.y
+
+    if (deltaY !== 0) {
+      await turnGameplayTo(page, deltaY > 0 ? 'south' : 'north')
+      await moveGameplayForward(page, Math.abs(deltaY), `${label} y`)
+    }
+  }
+
+  if (targetCell.y === 17) {
+    await moveX()
+    await moveY()
+  } else {
+    await moveY()
+    await moveX()
+  }
+
+  for (let guard = 0; guard < 10; guard += 1) {
+    const current = await getGameplayState(page)
+
+    if (current.cell.x === targetCell.x && current.cell.y === targetCell.y) {
+      return
+    }
+
+    if (current.cell.y !== targetCell.y) {
+      await turnGameplayTo(page, current.cell.y < targetCell.y ? 'south' : 'north')
+      await pressGameplayKeyAndWaitIdle(page, 'KeyW', `${label} correction y`)
+      continue
+    }
+
+    if (targetCell.y === 17 && current.cell.y === 17) {
+      await turnGameplayTo(page, 'north')
+      await pressGameplayKeyAndWaitIdle(page, 'KeyW', `${label} correction leave blocked threshold`)
+      continue
+    }
+
+    await turnGameplayTo(page, current.cell.x < targetCell.x ? 'east' : 'west')
+    await pressGameplayKeyAndWaitIdle(page, 'KeyW', `${label} correction x`)
+  }
+
+  throw new Error(
+    `Could not reach ${label} target cell ${JSON.stringify(targetCell)}; current=${JSON.stringify(await getGameplayState(page))}`
+  )
+}
+
+async function visitMazeFromChamber(page, exitCell, exitDirection, label) {
+  await moveInOpenLevelToCell(page, exitCell, `${label} chamber approach`)
+  await turnGameplayTo(page, exitDirection)
+  await pressGameplayKeyAndWaitIdle(page, 'KeyW', `${label} enter`)
+
+  const entered = await getGameplayState(page)
+
+  expect(entered.mazeId).not.toBe('chamber-1')
+
+  await turnGameplayTo(page, 'west')
+  await pressGameplayKeyAndWaitIdle(page, 'KeyW', `${label} return`)
+
+  const returned = await getGameplayState(page)
+
+  expect(returned.mazeId).toBe('chamber-1')
+}
+
 test('default route loads the authored Entrance level to scene-ready', async ({ page }) => {
   const consoleErrors = []
   const pageErrors = []
@@ -259,6 +442,18 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
     undefined,
     { timeout: 30_000 }
   )
+  await page.waitForFunction(
+    () => typeof window.__levelsjamCapturePerformanceProfile === 'function',
+    undefined,
+    { timeout: 10_000 }
+  )
+  await page.evaluate(() => {
+    window.__levelsjamTraversalPerformanceProfile = window.__levelsjamCapturePerformanceProfile?.({
+      liveDurationMs: 45_000,
+      liveOnly: true,
+      traversalLabel: 'Entrance, Chamber 1, Maze 1, Maze 2, Maze 3, Maze 4, and return'
+    }) ?? null
+  })
 
   const state = await page.evaluate(() => ({
     activeLighting: window.__levelsjamDebug?.getActiveLightingResourceState?.() ?? null,
@@ -472,17 +667,42 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
   expect(Math.abs(returnedState.camera.yaw - beforeReturnMove.camera.yaw)).toBeLessThan(0.001)
   expect(Math.abs(returnedState.camera.pitch - beforeReturnMove.camera.pitch)).toBeLessThan(0.001)
 
+  await turnGameplayTo(page, 'north')
+  await pressGameplayKeyAndWaitIdle(page, 'KeyW', 'return to chamber for full traversal')
+  await visitMazeFromChamber(page, { x: 0, y: 3 }, 'west', 'maze-001')
+  await visitMazeFromChamber(page, { x: 0, y: 12 }, 'west', 'maze-002')
+  await visitMazeFromChamber(page, { x: 4, y: 3 }, 'east', 'maze-003')
+  await visitMazeFromChamber(page, { x: 4, y: 12 }, 'east', 'maze-005')
+  await moveInOpenLevelToCell(page, { x: 2, y: 17 }, 'return entrance approach')
+  await turnGameplayTo(page, 'south')
+  await pressGameplayKeyAndWaitIdle(page, 'KeyW', 'return to entrance after full traversal')
   await page.waitForFunction(
-    () => typeof window.__levelsjamCapturePerformanceProfile === 'function',
+    () => window.__levelsjamDebug?.getMazeLifecycleState?.()?.instantiatedMazeId === 'entrance',
     undefined,
     { timeout: 10_000 }
   )
+
+  const finalTraversalState = await page.evaluate(() => ({
+    lifecycle: window.__levelsjamDebug?.getMazeLifecycleState?.() ?? null,
+    turn: window.__levelsjamDebug?.getTurnStateSummary?.() ?? null
+  }))
+
+  expect(finalTraversalState.lifecycle.instantiatedMazeId).toBe('entrance')
+  expect(finalTraversalState.lifecycle.loadedMazeIds).toEqual(
+    expect.arrayContaining(['entrance', 'chamber-1', 'maze-001', 'maze-002', 'maze-003', 'maze-005'])
+  )
+  expect(finalTraversalState.turn.player).toMatchObject({
+    cell: { x: 1, y: 0 },
+    direction: 'south'
+  })
+
   const performanceProfile = await page.evaluate(
-    () => window.__levelsjamCapturePerformanceProfile?.({ liveDurationMs: 1000, samples: 16 }) ?? null
+    () => window.__levelsjamTraversalPerformanceProfile ?? null
   )
 
   expect(performanceProfile?.markdown).toContain('# Performance Profile')
-  expect(performanceProfile?.controlledSteps?.length ?? 0).toBeGreaterThan(0)
+  expect(performanceProfile?.markdown).toContain('## Frame-Time Tree')
+  expect(performanceProfile?.liveFrames?.samples ?? 0).toBeGreaterThan(0)
   fs.writeFileSync(PERFORMANCE_PROFILE_PATH, performanceProfile.markdown)
 
   expect(consoleErrors).toEqual([])

@@ -158,6 +158,41 @@ test('sleeping monsters wake on sight and move on a later turn', () => {
   assert.deepEqual(minotaurAfterMove.cell, { x: 1, y: 1 })
 })
 
+test('minotaurs refresh line of sight after moving', () => {
+  const maze = testMaze({
+    gates: [],
+    height: 3,
+    monsters: [
+      { cell: { x: 2, y: 0 }, type: 'minotaur' }
+    ],
+    openEdges: [
+      { from: { x: 0, y: 1 }, to: { x: 1, y: 1 } },
+      { from: { x: 1, y: 1 }, to: { x: 2, y: 1 } },
+      { from: { x: 2, y: 0 }, to: { x: 2, y: 1 } }
+    ],
+    opening: { cell: { x: 0, y: 1 }, side: 'west' },
+    sword: null,
+    trophy: null,
+    width: 3
+  })
+  const state = createInitialTurnState(maze)
+  state.monsters[0] = {
+    ...state.monsters[0],
+    awake: true,
+    direction: 'south',
+    lastSeenDirection: 'south'
+  }
+
+  const result = applyTurnAction(maze, state, 'move-forward').state
+  const minotaur = result.monsters[0]
+
+  assert.deepEqual(result.player.cell, { x: 1, y: 1 })
+  assert.deepEqual(minotaur.cell, { x: 2, y: 1 })
+  assert.equal(minotaur.awake, true)
+  assert.equal(minotaur.lastSeenDirection, 'west')
+  assert.equal(minotaur.direction, 'west')
+})
+
 test('walls block line of sight for monster wakeups', () => {
   const maze = testMaze({
     openEdges: [

@@ -1,86 +1,57 @@
 # Performance Profile
 
-Captured: 2026-04-27T16:31:58.018Z
+Captured: 2026-04-27T17:48:24.390Z
 Renderer: Google Inc. (NVIDIA) ANGLE (NVIDIA, NVIDIA GeForce RTX 4090 (0x00002684) Direct3D11 vs_5_0 ps_5_0, D3D11)
 
-## Live RAF
+## Live End-To-End Traversal
 
-- Average frame: 16.530ms (60.498 FPS)
-- Min/max frame: 8.200ms / 16.800ms
-- Samples: 61
+- Average frame: 25.073ms (39.884 FPS)
+- Min/max frame: 7.700ms / 3799.900ms
+- Samples: 1795
+- Long frames over 50ms: 20
+
+## Frame-Time Tree
+
+- Live traversal frame: 25.073ms (39.884 FPS)
+  - Instrumented frame work: 12.301ms
+    - Renderer: 12.209ms
+      - WebGLRenderer.render submission: 12.209ms
+        - render target 800x450: 12.129ms avg, 3134.300ms max, 17694 calls
+  - Browser, GPU driver, GPU execution, compositor, vsync, and uninstrumented library work: 12.772ms
+    - Not reasonably breakable from app-level JavaScript instrumentation below this point.
+
+## Long Frames
+
+- 233.300ms at +1307.600ms; maze=chamber-1; programs=n/a; fire=n/a; loops={"mountedLevels":2,"residentReflectionProbes":4,"residentVolumetricProbes":99,"sceneChildren":4}
+- 1033.200ms at +2357.600ms; maze=chamber-1; programs=n/a; fire=n/a; loops={"mountedLevels":6,"residentReflectionProbes":4,"residentVolumetricProbes":99,"sceneChildren":8}
+- 50.000ms at +2407.600ms; maze=chamber-1; programs=n/a; fire=n/a; loops={"mountedLevels":6,"residentReflectionProbes":4,"residentVolumetricProbes":99,"sceneChildren":8}
+- 83.300ms at +2490.900ms; maze=chamber-1; programs=n/a; fire=n/a; loops={"mountedLevels":6,"residentReflectionProbes":4,"residentVolumetricProbes":99,"sceneChildren":8}
+- 50.000ms at +2540.900ms; maze=chamber-1; programs=n/a; fire=n/a; loops={"mountedLevels":6,"residentReflectionProbes":4,"residentVolumetricProbes":99,"sceneChildren":8}
+- 516.700ms at +3090.900ms; maze=chamber-1; programs=n/a; fire=true; loops={"mountedLevels":6,"residentReflectionProbes":4,"residentVolumetricProbes":295,"sceneChildren":8}
+- 66.700ms at +3190.900ms; maze=chamber-1; programs=n/a; fire=true; loops={"mountedLevels":6,"residentReflectionProbes":4,"residentVolumetricProbes":295,"sceneChildren":8}
+- 83.300ms at +3274.200ms; maze=chamber-1; programs=n/a; fire=true; loops={"mountedLevels":6,"residentReflectionProbes":4,"residentVolumetricProbes":295,"sceneChildren":8}
+- 333.400ms at +3607.600ms; maze=chamber-1; programs=n/a; fire=true; loops={"mountedLevels":6,"residentReflectionProbes":4,"residentVolumetricProbes":295,"sceneChildren":8}
+- 350.000ms at +4007.500ms; maze=chamber-1; programs=n/a; fire=true; loops={"mountedLevels":6,"residentReflectionProbes":4,"residentVolumetricProbes":295,"sceneChildren":8}
+- 366.700ms at +4374.200ms; maze=chamber-1; programs=n/a; fire=true; loops={"mountedLevels":6,"residentReflectionProbes":4,"residentVolumetricProbes":295,"sceneChildren":8}
+- 3799.900ms at +8224.100ms; maze=chamber-1; programs=n/a; fire=true; loops={"mountedLevels":6,"residentReflectionProbes":12,"residentVolumetricProbes":295,"sceneChildren":8}
+- 316.700ms at +9090.700ms; maze=chamber-1; programs=n/a; fire=true; loops={"mountedLevels":6,"residentReflectionProbes":12,"residentVolumetricProbes":295,"sceneChildren":8}
+- 1299.900ms at +10807.200ms; maze=entrance; programs=n/a; fire=n/a; loops={"mountedLevels":2,"residentReflectionProbes":4,"residentVolumetricProbes":99,"sceneChildren":4}
+- 2016.500ms at +13690.400ms; maze=chamber-1; programs=n/a; fire=n/a; loops={"mountedLevels":6,"residentReflectionProbes":4,"residentVolumetricProbes":99,"sceneChildren":8}
+- 66.700ms at +13757.100ms; maze=chamber-1; programs=n/a; fire=true; loops={"mountedLevels":6,"residentReflectionProbes":4,"residentVolumetricProbes":99,"sceneChildren":8}
+- 250.000ms at +14007.100ms; maze=chamber-1; programs=n/a; fire=true; loops={"mountedLevels":6,"residentReflectionProbes":4,"residentVolumetricProbes":99,"sceneChildren":8}
+- 66.700ms at +14173.800ms; maze=chamber-1; programs=n/a; fire=true; loops={"mountedLevels":6,"residentReflectionProbes":4,"residentVolumetricProbes":295,"sceneChildren":8}
+- 50.000ms at +14223.800ms; maze=chamber-1; programs=n/a; fire=true; loops={"mountedLevels":6,"residentReflectionProbes":4,"residentVolumetricProbes":295,"sceneChildren":8}
+- 50.000ms at +14273.800ms; maze=chamber-1; programs=n/a; fire=true; loops={"mountedLevels":6,"residentReflectionProbes":4,"residentVolumetricProbes":295,"sceneChildren":8}
 
 ## Controlled Render Cost
 
 | Step | Avg ms/frame | FPS | Max ms | Calls | Triangles | Samples |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Default | 0.813 | 1230.769 | 1.000 | 45.000 | 169.000 | 16 |
-| Post disabled | 0.456 | 2191.781 | 1.100 | 29.000 | 145.000 | 16 |
-| Post + reflections disabled | 0.494 | 2025.316 | 1.300 | 29.000 | 145.000 | 16 |
-| Post + all local lighting disabled | 0.381 | 2622.951 | 0.600 | 29.000 | 145.000 | 16 |
-| Unlit baseline | 0.463 | 2162.162 | 1.100 | 29.000 | 145.000 | 16 |
 
 ## Hierarchical Deltas
 
-- All optional postprocessing: 0.356ms/frame (Default -> Post disabled)
-- Baked/probe lighting: 0.112ms/frame (Post + reflections disabled -> Post + all local lighting disabled)
 
 ## Loop Populations
 
-- mountedLevels: 2
-- residentReflectionProbes: 40
-- residentVolumetricProbes: 99
-- sceneChildren: 4
 
 ## Scene Object Counts
-
-```json
-{
-  "effectivelyVisible": {
-    "Scene": 1,
-    "AmbientLight": 1,
-    "Group": 3,
-    "maze-ground-lightmap": 95,
-    "maze-wall": 47,
-    "maze-wall-decal": 24,
-    "maze-corner-filler": 6,
-    "sconce-body": 10,
-    "torch-billboard": 20
-  },
-  "memory": {
-    "geometries": 215,
-    "textures": 102
-  },
-  "mounted": {
-    "Scene": 1,
-    "AmbientLight": 1,
-    "Group": 5,
-    "maze-ground-lightmap": 95,
-    "maze-wall": 47,
-    "maze-wall-decal": 24,
-    "maze-corner-filler": 6,
-    "sconce-body": 10,
-    "torch-billboard": 20,
-    "held-sword": 2,
-    "Object3D": 6,
-    "held-trophy": 2
-  },
-  "programs": 27,
-  "totalEffectivelyVisible": 207,
-  "totalMounted": 219,
-  "totalVisible": 217,
-  "visible": {
-    "Scene": 1,
-    "AmbientLight": 1,
-    "Group": 5,
-    "maze-ground-lightmap": 95,
-    "maze-wall": 47,
-    "maze-wall-decal": 24,
-    "maze-corner-filler": 6,
-    "sconce-body": 10,
-    "torch-billboard": 20,
-    "Object3D": 6,
-    "held-sword": 1,
-    "held-trophy": 1
-  }
-}
-```

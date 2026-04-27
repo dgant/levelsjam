@@ -566,6 +566,28 @@ function consumeSword(state) {
   state.swordState = 'consumed'
 }
 
+function updateMinotaurSight(maze, visibilityEdges, monster, playerCell) {
+  if (monster.type !== 'minotaur') {
+    return false
+  }
+
+  const sawPlayer = canSeeCell(maze, visibilityEdges, monster.cell, playerCell)
+
+  if (!sawPlayer) {
+    return false
+  }
+
+  const seenDirection = directionBetween(monster.cell, playerCell)
+
+  monster.awake = true
+  monster.lastSeenDirection = seenDirection
+  if (seenDirection) {
+    monster.direction = seenDirection
+  }
+
+  return true
+}
+
 function resolveMonsterTurn(maze, openEdges, visibilityEdges, monster, playerCell) {
   const nextMonster = cloneMonster(monster)
   const sawPlayer = canSeeCell(maze, visibilityEdges, monster.cell, playerCell)
@@ -617,6 +639,8 @@ function resolveMonsterTurn(maze, openEdges, visibilityEdges, monster, playerCel
   nextMonster.direction = moveDirection
   nextMonster.lastMoveDirection = moveDirection
   nextMonster.movedPreviousTurn = true
+
+  updateMinotaurSight(maze, visibilityEdges, nextMonster, playerCell)
 
   return nextMonster
 }

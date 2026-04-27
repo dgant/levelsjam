@@ -81,6 +81,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   type RefObject,
   type ReactNode,
@@ -244,6 +245,63 @@ let globalAnimationSpeedMultiplier = 1
 
 function getScaledAnimationDuration(baseDurationMs: number) {
   return baseDurationMs / MathUtils.clamp(globalAnimationSpeedMultiplier, 0.01, 100)
+}
+
+function normalizeAngleRadians(value: number) {
+  return Math.atan2(Math.sin(value), Math.cos(value))
+}
+
+const activeFrameProfile = {
+  enabled: false,
+  frameCount: 0,
+  steps: new Map<string, { count: number; maxMs: number; totalMs: number }>()
+}
+
+function resetFrameProfileSteps() {
+  activeFrameProfile.frameCount = 0
+  activeFrameProfile.steps.clear()
+}
+
+function recordFrameProfileFrame() {
+  if (activeFrameProfile.enabled) {
+    activeFrameProfile.frameCount += 1
+  }
+}
+
+function beginFrameProfileStep() {
+  return activeFrameProfile.enabled ? performance.now() : null
+}
+
+function endFrameProfileStep(label: string, startedAt: number | null) {
+  if (!activeFrameProfile.enabled || startedAt === null) {
+    return
+  }
+
+  const duration = performance.now() - startedAt
+  const current = activeFrameProfile.steps.get(label) ?? {
+    count: 0,
+    maxMs: 0,
+    totalMs: 0
+  }
+
+  current.count += 1
+  current.totalMs += duration
+  current.maxMs = Math.max(current.maxMs, duration)
+  activeFrameProfile.steps.set(label, current)
+}
+
+function collectFrameProfileSteps(frameCount = activeFrameProfile.frameCount): FrameProfileStep[] {
+  const divisor = Math.max(1, frameCount)
+
+  return Array.from(activeFrameProfile.steps.entries())
+    .map(([label, step]) => ({
+      averageMs: step.totalMs / divisor,
+      count: step.count,
+      label,
+      maxMs: step.maxMs,
+      totalMs: step.totalMs
+    }))
+    .sort((left, right) => right.averageMs - left.averageMs)
 }
 
 const FIRE_FLIPBOOK_FRAME_CROP = {
@@ -1285,6 +1343,14 @@ type PerformanceProfileStep = {
   sceneStats: Record<string, unknown>
 }
 
+type FrameProfileStep = {
+  averageMs: number
+  count: number
+  label: string
+  maxMs: number
+  totalMs: number
+}
+
 type PerformanceProfileResult = {
   capturedAt: string
   controlledSteps: PerformanceProfileStep[]
@@ -1297,10 +1363,19 @@ type PerformanceProfileResult = {
   liveFrames: {
     averageFrameMs: number
     fps: number
+    longFrames: Array<{
+      frameMs: number
+      loadedMazeId: string | null
+      sceneProgramsReady: string | null
+      fireFlipbookReady: string | null
+      renderLoops: Record<string, number>
+      t: number
+    }>
     maxFrameMs: number
     minFrameMs: number
     samples: number
   }
+  frameSteps: FrameProfileStep[]
   markdown: string
   renderer: string
 }
@@ -6122,7 +6197,10 @@ function useRuntimeLevelLightingResources(
             return
           }
 
-          const processedTexture = requestedResidentProbeIndexSet.has(probeIndex)
+          const shouldLoadProcessedTexture =
+            startupProbeIndexSet.has(probeIndex) ||
+            (backgroundProbeLoadingReleased && requestedResidentProbeIndexSet.has(probeIndex))
+          const processedTexture = shouldLoadProcessedTexture
             ? await loadRuntimeProbeCubeUvTexture(
                 resolveMazeDataUrl(manifestProbe.processedCubeUvRgbE)
               )
@@ -7293,7 +7371,10 @@ function EnvironmentLighting({
               return
             }
 
-            const processedTexture = requestedResidentProbeIndexSet.has(probeIndex)
+            const shouldLoadProcessedTexture =
+              startupProbeIndexSet.has(probeIndex) ||
+              (backgroundProbeLoadingReleased && requestedResidentProbeIndexSet.has(probeIndex))
+            const processedTexture = shouldLoadProcessedTexture
               ? await loadRuntimeProbeCubeUvTexture(
                   resolveMazeDataUrl(manifestProbe.processedCubeUvRgbE)
                 )
@@ -8122,35 +8203,41 @@ function TorchBillboard({
   const localBillboardQuaternion = useMemo(() => new Quaternion(), [])
 
   useFrame((state) => {
-    const elapsed = state.clock.getElapsedTime()
-    const frameIndex = Math.floor(
-      ((elapsed % FIRE_FLIPBOOK_DURATION_SECONDS) / FIRE_FLIPBOOK_DURATION_SECONDS) *
-        FIRE_FLIPBOOK_FRAME_COUNT
-    )
-    const column = frameIndex % FIRE_FLIPBOOK_GRID
-    const row = Math.floor(frameIndex / FIRE_FLIPBOOK_GRID)
+    const profileStartedAt = beginFrameProfileStep()
 
-    if (group.current) {
-      if (group.current.parent) {
-        group.current.parent.getWorldQuaternion(parentWorldQuaternion)
-        group.current.quaternion.copy(
-          computeLocalBillboardQuaternion(
-            parentWorldQuaternion,
-            camera.quaternion,
-            localBillboardQuaternion
+    try {
+      const elapsed = state.clock.getElapsedTime()
+      const frameIndex = Math.floor(
+        ((elapsed % FIRE_FLIPBOOK_DURATION_SECONDS) / FIRE_FLIPBOOK_DURATION_SECONDS) *
+          FIRE_FLIPBOOK_FRAME_COUNT
+      )
+      const column = frameIndex % FIRE_FLIPBOOK_GRID
+      const row = Math.floor(frameIndex / FIRE_FLIPBOOK_GRID)
+
+      if (group.current) {
+        if (group.current.parent) {
+          group.current.parent.getWorldQuaternion(parentWorldQuaternion)
+          group.current.quaternion.copy(
+            computeLocalBillboardQuaternion(
+              parentWorldQuaternion,
+              camera.quaternion,
+              localBillboardQuaternion
+            )
           )
-        )
-      } else {
-        group.current.quaternion.copy(camera.quaternion)
+        } else {
+          group.current.quaternion.copy(camera.quaternion)
+        }
       }
-    }
 
-    if (texture) {
-      texture.offset.x =
-        (column + FIRE_FLIPBOOK_FRAME_CROP.minX) / FIRE_FLIPBOOK_GRID
-      texture.offset.y =
-        1 -
-        ((row + FIRE_FLIPBOOK_FRAME_CROP.maxY) / FIRE_FLIPBOOK_GRID)
+      if (texture) {
+        texture.offset.x =
+          (column + FIRE_FLIPBOOK_FRAME_CROP.minX) / FIRE_FLIPBOOK_GRID
+        texture.offset.y =
+          1 -
+          ((row + FIRE_FLIPBOOK_FRAME_CROP.maxY) / FIRE_FLIPBOOK_GRID)
+      }
+    } finally {
+      endFrameProfileStep('torch billboard animation', profileStartedAt)
     }
 
     if (material.current) {
@@ -8788,10 +8875,16 @@ function FogVolume({
   }, [layout.maze.id, scene])
 
   useFrame((state) => {
-    effect.cameraProjectionMatrixInverse = camera.projectionMatrixInverse
-    effect.cameraWorldMatrix = camera.matrixWorld
-    effect.cameraWorldPosition = camera.getWorldPosition(new Vector3())
-    effect.time = state.clock.getElapsedTime()
+    const profileStartedAt = beginFrameProfileStep()
+
+    try {
+      effect.cameraProjectionMatrixInverse = camera.projectionMatrixInverse
+      effect.cameraWorldMatrix = camera.matrixWorld
+      effect.cameraWorldPosition = camera.getWorldPosition(new Vector3())
+      effect.time = state.clock.getElapsedTime()
+    } finally {
+      endFrameProfileStep('volumetric fog uniforms', profileStartedAt)
+    }
   })
 
   useEffect(() => () => effect.dispose(), [effect])
@@ -10773,16 +10866,22 @@ function GateActor({
   }, [gate.center.x, gate.center.z, transform])
 
   useFrame((_, delta) => {
-    if (!group.current || !transform) {
-      return
-    }
+    const profileStartedAt = beginFrameProfileStep()
 
-    group.current.position.y = MathUtils.damp(
-      group.current.position.y,
-      isOpen ? transform.openY : transform.closedY,
-      18,
-      delta
-    )
+    try {
+      if (!group.current || !transform) {
+        return
+      }
+
+      group.current.position.y = MathUtils.damp(
+        group.current.position.y,
+        isOpen ? transform.openY : transform.closedY,
+        18,
+        delta
+      )
+    } finally {
+      endFrameProfileStep('gate animation', profileStartedAt)
+    }
   })
 
   if (!model || !transform) {
@@ -11235,56 +11334,62 @@ function HeldItemView({
   }, [model])
 
   useFrame(() => {
-    if (!group.current) {
-      return
-    }
+    const profileStartedAt = beginFrameProfileStep()
 
-    const cameraQuaternion = camera.quaternion
+    try {
+      if (!group.current) {
+        return
+      }
 
-    if (itemType === 'sword') {
+      const cameraQuaternion = camera.quaternion
+
+      if (itemType === 'sword') {
+        heldWorldPosition.current
+          .set(0.34, -0.42, -0.50)
+          .applyQuaternion(cameraQuaternion)
+          .add(camera.position)
+        heldWorldTarget.current
+          .set(0.04, -0.18, -1.18)
+          .applyQuaternion(cameraQuaternion)
+          .add(camera.position)
+        heldWorldObject.current.position.copy(heldWorldPosition.current)
+        heldWorldObject.current.lookAt(heldWorldTarget.current)
+
+        transformWorldPositionToLevelLocal(
+          heldWorldPosition.current,
+          levelWorldTransform,
+          heldLocalPosition.current
+        )
+        transformWorldQuaternionToLevelLocal(
+          heldWorldObject.current.quaternion,
+          levelWorldTransform,
+          heldLocalQuaternion.current
+        )
+        group.current.position.copy(heldLocalPosition.current)
+        group.current.quaternion.copy(heldLocalQuaternion.current)
+        return
+      }
+
       heldWorldPosition.current
-        .set(0.34, -0.42, -0.50)
+        .set(-0.42, -0.52, -0.62)
         .applyQuaternion(cameraQuaternion)
         .add(camera.position)
-      heldWorldTarget.current
-        .set(0.04, -0.18, -1.18)
-        .applyQuaternion(cameraQuaternion)
-        .add(camera.position)
-      heldWorldObject.current.position.copy(heldWorldPosition.current)
-      heldWorldObject.current.lookAt(heldWorldTarget.current)
-
       transformWorldPositionToLevelLocal(
         heldWorldPosition.current,
         levelWorldTransform,
         heldLocalPosition.current
       )
       transformWorldQuaternionToLevelLocal(
-        heldWorldObject.current.quaternion,
+        cameraQuaternion,
         levelWorldTransform,
         heldLocalQuaternion.current
       )
+
       group.current.position.copy(heldLocalPosition.current)
       group.current.quaternion.copy(heldLocalQuaternion.current)
-      return
+    } finally {
+      endFrameProfileStep('held item pose', profileStartedAt)
     }
-
-    heldWorldPosition.current
-      .set(-0.42, -0.52, -0.62)
-      .applyQuaternion(cameraQuaternion)
-      .add(camera.position)
-    transformWorldPositionToLevelLocal(
-      heldWorldPosition.current,
-      levelWorldTransform,
-      heldLocalPosition.current
-    )
-    transformWorldQuaternionToLevelLocal(
-      cameraQuaternion,
-      levelWorldTransform,
-      heldLocalQuaternion.current
-    )
-
-    group.current.position.copy(heldLocalPosition.current)
-    group.current.quaternion.copy(heldLocalQuaternion.current)
   })
 
   if (!model || !transform) {
@@ -11643,18 +11748,29 @@ function MonsterActor({
     >
     startedAt: number
   } | null>(null)
+  const initialized = useRef(false)
+  const targetVisible = useRef(visible)
   const targetPosition = useMemo(
     () => getMazeCellWorldPosition(layout.maze, monster.cell, GROUND_Y),
     [layout.maze, monster.cell.x, monster.cell.y]
   )
   const targetYaw = directionToYaw(monster.direction)
 
+  useLayoutEffect(() => {
+    targetVisible.current = visible
+
+    if (group.current && !sequenceAnimation.current) {
+      group.current.visible = visible
+      group.current.userData.targetVisible = visible
+    }
+  }, [visible])
+
   useEffect(() => {
     if (!group.current) {
       return
     }
 
-    if (group.current.userData.initialized) {
+    if (initialized.current) {
       const currentPosition = group.current.position.clone()
       const currentYaw = group.current.rotation.y
       const phases: NonNullable<typeof sequenceAnimation.current>['phases'] = []
@@ -11699,6 +11815,10 @@ function MonsterActor({
             startedAt: performance.now()
           }
         : null
+      group.current.visible = phases.length > 0
+        ? Boolean(group.current.visible || targetVisible.current)
+        : targetVisible.current
+      group.current.userData.targetVisible = targetVisible.current
 
       if (phases.length === 0) {
         group.current.position.copy(targetPosition)
@@ -11710,50 +11830,60 @@ function MonsterActor({
 
     group.current.position.copy(targetPosition)
     group.current.rotation.y = targetYaw
-    group.current.userData.initialized = true
+    group.current.visible = targetVisible.current
+    initialized.current = true
     group.current.userData.animationActive = false
+    group.current.userData.targetVisible = targetVisible.current
   }, [targetPosition, targetYaw])
 
   useFrame(() => {
-    if (!group.current) {
-      return
-    }
+    const profileStartedAt = beginFrameProfileStep()
 
-    const activeSequenceAnimation = sequenceAnimation.current
-    group.current.userData.animationActive = Boolean(activeSequenceAnimation)
+    try {
+      if (!group.current) {
+        return
+      }
 
-    if (activeSequenceAnimation) {
-      const phaseDuration = getScaledAnimationDuration(TURN_ANIMATION_DURATION_MS)
-      const elapsed = performance.now() - activeSequenceAnimation.startedAt
-      const phaseIndex = Math.min(
-        activeSequenceAnimation.phases.length - 1,
-        Math.floor(elapsed / phaseDuration)
-      )
-      const phaseAlpha = Math.min(1, (elapsed - (phaseIndex * phaseDuration)) / phaseDuration)
-      const phase = activeSequenceAnimation.phases[phaseIndex]
+      const activeSequenceAnimation = sequenceAnimation.current
+      group.current.userData.animationActive = Boolean(activeSequenceAnimation)
 
-      for (let index = 0; index < phaseIndex; index += 1) {
-        const completedPhase = activeSequenceAnimation.phases[index]
+      if (activeSequenceAnimation) {
+        const phaseDuration = getScaledAnimationDuration(TURN_ANIMATION_DURATION_MS)
+        const elapsed = performance.now() - activeSequenceAnimation.startedAt
+        const phaseIndex = Math.min(
+          activeSequenceAnimation.phases.length - 1,
+          Math.floor(elapsed / phaseDuration)
+        )
+        const phaseAlpha = Math.min(1, (elapsed - (phaseIndex * phaseDuration)) / phaseDuration)
+        const phase = activeSequenceAnimation.phases[phaseIndex]
 
-        if (completedPhase.type === 'move') {
-          group.current.position.copy(completedPhase.to)
+        for (let index = 0; index < phaseIndex; index += 1) {
+          const completedPhase = activeSequenceAnimation.phases[index]
+
+          if (completedPhase.type === 'move') {
+            group.current.position.copy(completedPhase.to)
+          } else {
+            group.current.rotation.y = completedPhase.toYaw
+          }
+        }
+
+        if (phase.type === 'move') {
+          group.current.position.lerpVectors(phase.from, phase.to, phaseAlpha)
         } else {
-          group.current.rotation.y = completedPhase.toYaw
+          group.current.rotation.y = phase.fromYaw + ((phase.toYaw - phase.fromYaw) * phaseAlpha)
+        }
+
+        if (elapsed >= activeSequenceAnimation.phases.length * phaseDuration) {
+          sequenceAnimation.current = null
+          group.current.position.copy(targetPosition)
+          group.current.rotation.y = targetYaw
+          group.current.visible = targetVisible.current
+          group.current.userData.animationActive = false
+          group.current.userData.targetVisible = targetVisible.current
         }
       }
-
-      if (phase.type === 'move') {
-        group.current.position.lerpVectors(phase.from, phase.to, phaseAlpha)
-      } else {
-        group.current.rotation.y = phase.fromYaw + ((phase.toYaw - phase.fromYaw) * phaseAlpha)
-      }
-
-      if (elapsed >= activeSequenceAnimation.phases.length * phaseDuration) {
-        sequenceAnimation.current = null
-        group.current.position.copy(targetPosition)
-        group.current.rotation.y = targetYaw
-        group.current.userData.animationActive = false
-      }
+    } finally {
+      endFrameProfileStep('monster animation', profileStartedAt)
     }
   })
 
@@ -11766,7 +11896,6 @@ function MonsterActor({
         monsterId: monster.id,
         monsterType: monster.type
       }}
-      visible={visible}
     >
       <MonsterModel
         debugIndex={debugIndex}
@@ -11826,10 +11955,6 @@ function MonsterActors({
           isCellVisible(visibilityState, monster.cell) ||
           (monster.type === 'minotaur' && playerDistance <= 5)
 
-        if (!visible) {
-          return null
-        }
-
         return (
           <MonsterActor
             debugIndex={index}
@@ -11847,6 +11972,7 @@ function MonsterActors({
             reflectionProbeCoefficients={reflectionProbeCoefficients}
             reflectionProbeDepthTextures={reflectionProbeDepthTextures}
             reflectionProbeTextures={reflectionProbeTextures}
+            visible={visible}
           />
         )
       })}
@@ -12241,12 +12367,37 @@ function PerformanceBenchmarkBridge() {
     const globalWindow = window as Window & {
       __levelsjamBenchmark?: (samples?: number) => Promise<BenchmarkResult>
       __levelsjamCapturePerformanceProfile?: (
-        options?: { liveDurationMs?: number; samples?: number }
+        options?: { liveDurationMs?: number; liveOnly?: boolean; samples?: number; traversalLabel?: string }
       ) => Promise<PerformanceProfileResult>
       __levelsjamGetVisualSettings?: () => VisualSettings
       __levelsjamSetVisualSettings?: (patch: VisualSettingsPatch) => void
     }
     const finish = gl.getContext().finish?.bind(gl.getContext())
+    const originalRender = gl.render.bind(gl)
+    const profiledGl = gl as typeof gl & {
+      __levelsjamOriginalRender?: typeof gl.render
+    }
+
+    if (!profiledGl.__levelsjamOriginalRender) {
+      profiledGl.__levelsjamOriginalRender = originalRender
+      gl.render = ((...args: Parameters<typeof gl.render>) => {
+        const profileStartedAt = beginFrameProfileStep()
+
+        try {
+          return profiledGl.__levelsjamOriginalRender?.(...args)
+        } finally {
+          const target = gl.getRenderTarget()
+          const targetLabel = target
+            ? `render target ${target.width}x${target.height}`
+            : 'screen'
+
+          endFrameProfileStep(
+            `Renderer/WebGLRenderer.render submission/${targetLabel}`,
+            profileStartedAt
+          )
+        }
+      }) as typeof gl.render
+    }
 
     const waitForFrames = (frameCount: number) => new Promise<void>((resolve) => {
       let remaining = Math.max(1, frameCount)
@@ -12314,22 +12465,40 @@ function PerformanceBenchmarkBridge() {
       const frames: number[] = []
       let previous = performance.now()
       const deadline = previous + Math.max(250, durationMs)
+      const startedAt = previous
+      const longFrames: PerformanceProfileResult['liveFrames']['longFrames'] = []
+
+      resetFrameProfileSteps()
+      activeFrameProfile.enabled = true
 
       const step = (now: number) => {
         const delta = now - previous
 
         if (delta > 0) {
+          recordFrameProfileFrame()
           frames.push(delta)
+          if (delta >= 50) {
+            longFrames.push({
+              frameMs: delta,
+              fireFlipbookReady: document.body.dataset.fireFlipbookReady ?? null,
+              loadedMazeId: document.body.dataset.loadedMazeId ?? null,
+              renderLoops: collectRenderLoops(),
+              sceneProgramsReady: document.body.dataset.sceneProgramsReady ?? null,
+              t: now - startedAt
+            })
+          }
         }
         previous = now
 
         if (now >= deadline) {
+          activeFrameProfile.enabled = false
           const total = frames.reduce((sum, value) => sum + value, 0)
           const averageFrameMs = total / Math.max(1, frames.length)
 
           resolve({
             averageFrameMs,
             fps: 1000 / averageFrameMs,
+            longFrames: longFrames.slice(0, 20),
             maxFrameMs: Math.max(...frames),
             minFrameMs: Math.min(...frames),
             samples: frames.length
@@ -12432,17 +12601,122 @@ function PerformanceBenchmarkBridge() {
       ? value.toFixed(3)
       : 'n/a'
     const formatProfileMarkdown = (profile: Omit<PerformanceProfileResult, 'markdown'>) => {
+      const appStepTotalMs = profile.frameSteps.reduce((sum, step) => sum + step.averageMs, 0)
+      const uninstrumentedMs = Math.max(0, profile.liveFrames.averageFrameMs - appStepTotalMs)
+      type TreeNode = {
+        children: Map<string, TreeNode>
+        count: number
+        maxMs: number
+        totalAverageMs: number
+      }
+      const rootNode: TreeNode = {
+        children: new Map(),
+        count: 0,
+        maxMs: 0,
+        totalAverageMs: 0
+      }
+      const addTreeStep = (step: FrameProfileStep) => {
+        const parts = step.label.split('/').filter(Boolean)
+        let node = rootNode
+
+        for (const part of parts) {
+          let child = node.children.get(part)
+
+          if (!child) {
+            child = {
+              children: new Map(),
+              count: 0,
+              maxMs: 0,
+              totalAverageMs: 0
+            }
+            node.children.set(part, child)
+          }
+
+          child.totalAverageMs += step.averageMs
+          child.count += step.count
+          child.maxMs = Math.max(child.maxMs, step.maxMs)
+          node = child
+        }
+      }
+      const formatTreeNode = (
+        label: string,
+        node: TreeNode,
+        depth: number
+      ): string[] => {
+        if (node.totalAverageMs < 0.1) {
+          return []
+        }
+
+        const indent = '  '.repeat(depth)
+        const suffix = node.children.size === 0
+          ? ` avg, ${formatNumber(node.maxMs)}ms max, ${node.count} calls`
+          : ''
+        const lines = [
+          `${indent}- ${label}: ${formatNumber(node.totalAverageMs)}ms${suffix}`
+        ]
+
+        for (const [childLabel, childNode] of Array.from(node.children.entries())
+          .sort((left, right) => right[1].totalAverageMs - left[1].totalAverageMs)) {
+          lines.push(...formatTreeNode(childLabel, childNode, depth + 1))
+        }
+
+        if (node.children.size > 0) {
+          const childTotal = Array.from(node.children.values())
+            .reduce((sum, child) => sum + child.totalAverageMs, 0)
+          const residual = node.totalAverageMs - childTotal
+
+          if (residual >= 0.1) {
+            lines.push(`${indent}  - uninstrumented child work: ${formatNumber(residual)}ms`)
+          }
+        }
+
+        return lines
+      }
+
+      for (const step of profile.frameSteps) {
+        addTreeStep(step)
+      }
+
+      const instrumentedTreeLines = Array.from(rootNode.children.entries())
+        .sort((left, right) => right[1].totalAverageMs - left[1].totalAverageMs)
+        .flatMap(([label, node]) => formatTreeNode(label, node, 2))
+      const frameTreeLines = [
+        `- Live traversal frame: ${formatNumber(profile.liveFrames.averageFrameMs)}ms (${formatNumber(profile.liveFrames.fps)} FPS)`,
+        ...(
+          appStepTotalMs >= 0.1
+            ? [`  - Instrumented frame work: ${formatNumber(appStepTotalMs)}ms`]
+            : []
+        ),
+        ...instrumentedTreeLines,
+        `  - Browser, GPU driver, GPU execution, compositor, vsync, and uninstrumented library work: ${formatNumber(uninstrumentedMs)}ms`,
+        `    - Not reasonably breakable from app-level JavaScript instrumentation below this point.`
+      ]
       const lines: string[] = [
         '# Performance Profile',
         '',
         `Captured: ${profile.capturedAt}`,
         `Renderer: ${profile.renderer}`,
         '',
-        '## Live RAF',
+        '## Live End-To-End Traversal',
         '',
         `- Average frame: ${formatNumber(profile.liveFrames.averageFrameMs)}ms (${formatNumber(profile.liveFrames.fps)} FPS)`,
         `- Min/max frame: ${formatNumber(profile.liveFrames.minFrameMs)}ms / ${formatNumber(profile.liveFrames.maxFrameMs)}ms`,
         `- Samples: ${profile.liveFrames.samples}`,
+        `- Long frames over 50ms: ${profile.liveFrames.longFrames.length}`,
+        '',
+        '## Frame-Time Tree',
+        '',
+        ...frameTreeLines,
+        '',
+        '## Long Frames',
+        '',
+        ...(
+          profile.liveFrames.longFrames.length > 0
+            ? profile.liveFrames.longFrames.map((frame) => (
+              `- ${formatNumber(frame.frameMs)}ms at +${formatNumber(frame.t)}ms; maze=${frame.loadedMazeId ?? 'n/a'}; programs=${frame.sceneProgramsReady ?? 'n/a'}; fire=${frame.fireFlipbookReady ?? 'n/a'}; loops=${JSON.stringify(frame.renderLoops)}`
+            ))
+            : ['- None over 50ms.']
+        ),
         '',
         '## Controlled Render Cost',
         '',
@@ -12542,36 +12816,39 @@ function PerformanceBenchmarkBridge() {
         ? cloneVisualSettings(originalVisualSettings)
         : null
       const liveFrames = await captureLiveFrames(liveDurationMs)
+      const frameSteps = collectFrameProfileSteps(liveFrames.samples)
       const steps: PerformanceProfileStep[] = []
 
       try {
-        steps.push(await measureStep('Default', {}, samples))
-        steps.push(await measureStep('Post disabled', makePostDisabledPatch(), samples))
-        steps.push(await measureStep(
-          'Post + reflections disabled',
-          {
-            ...makePostDisabledPatch(),
-            reflectionContribution: { enabled: false, intensity: 0 }
-          },
-          samples
-        ))
-        steps.push(await measureStep(
-          'Post + all local lighting disabled',
-          {
-            ...makePostDisabledPatch(),
-            ...makeLightingDisabledPatch()
-          },
-          samples
-        ))
-        steps.push(await measureStep(
-          'Unlit baseline',
-          {
-            ...makePostDisabledPatch(),
-            ...makeLightingDisabledPatch(),
-            unlitMode: true
-          },
-          samples
-        ))
+        if (!options.liveOnly) {
+          steps.push(await measureStep('Default', {}, samples))
+          steps.push(await measureStep('Post disabled', makePostDisabledPatch(), samples))
+          steps.push(await measureStep(
+            'Post + reflections disabled',
+            {
+              ...makePostDisabledPatch(),
+              reflectionContribution: { enabled: false, intensity: 0 }
+            },
+            samples
+          ))
+          steps.push(await measureStep(
+            'Post + all local lighting disabled',
+            {
+              ...makePostDisabledPatch(),
+              ...makeLightingDisabledPatch()
+            },
+            samples
+          ))
+          steps.push(await measureStep(
+            'Unlit baseline',
+            {
+              ...makePostDisabledPatch(),
+              ...makeLightingDisabledPatch(),
+              unlitMode: true
+            },
+            samples
+          ))
+        }
       } finally {
         if (originalPatch) {
           globalWindow.__levelsjamSetVisualSettings?.(originalPatch)
@@ -12583,6 +12860,7 @@ function PerformanceBenchmarkBridge() {
         capturedAt: new Date().toISOString(),
         controlledSteps: steps,
         deltas: buildDeltas(steps),
+        frameSteps,
         liveFrames,
         renderer: getRendererString()
       }
@@ -12595,6 +12873,10 @@ function PerformanceBenchmarkBridge() {
     }
 
     return () => {
+      if (profiledGl.__levelsjamOriginalRender) {
+        gl.render = profiledGl.__levelsjamOriginalRender
+        delete profiledGl.__levelsjamOriginalRender
+      }
       delete globalWindow.__levelsjamBenchmark
       delete globalWindow.__levelsjamCapturePerformanceProfile
     }
@@ -12619,16 +12901,22 @@ function ExposureEffectPrimitive({
   }, [effect, exposure])
 
   useFrame((state) => {
-    if (noiseIntensity <= 0) {
-      effect.exposure = exposure
-      return
+    const profileStartedAt = beginFrameProfileStep()
+
+    try {
+      if (noiseIntensity <= 0) {
+        effect.exposure = exposure
+        return
+      }
+
+      const period = Math.max(noisePeriod, 0.0001)
+      const phase = (state.clock.getElapsedTime() / period) * Math.PI * 2
+      const flicker = 1 + (Math.sin(phase) * noiseIntensity)
+
+      effect.exposure = exposure * Math.max(0, flicker)
+    } finally {
+      endFrameProfileStep('exposure effect uniforms', profileStartedAt)
     }
-
-    const period = Math.max(noisePeriod, 0.0001)
-    const phase = (state.clock.getElapsedTime() / period) * Math.PI * 2
-    const flicker = 1 + (Math.sin(phase) * noiseIntensity)
-
-    effect.exposure = exposure * Math.max(0, flicker)
   })
 
   useEffect(() => () => effect.dispose(), [effect])
@@ -13436,6 +13724,11 @@ function FlightRig({
           replayActive: boolean
           replayQueueLength: number
         }
+        setDebugMonsterCell?: (
+          index: number,
+          cell: { x: number; y: number },
+          direction?: CardinalDirection
+        ) => boolean
         getCameraState?: () => {
           pitch: number
           position: [number, number, number]
@@ -13505,6 +13798,19 @@ function FlightRig({
     const monsterBounds = new Box3()
     const monsterBoundsSize = new Vector3()
     const getDebugRoots = () => [scene]
+    const isEffectivelyVisible = (object: Object3D) => {
+      let current: Object3D | null = object
+
+      while (current) {
+        if (!current.visible) {
+          return false
+        }
+
+        current = current.parent
+      }
+
+      return true
+    }
 
     globalWindow.__levelsjamDebug = {
       ...existing,
@@ -13854,7 +14160,7 @@ function FlightRig({
               return
             }
 
-            visible = visible || object.visible
+            visible = visible || isEffectivelyVisible(object)
             animationActive = animationActive || object.userData?.animationActive === true
             monsterBounds.expandByObject(object)
             targetSize =
@@ -13962,6 +14268,40 @@ function FlightRig({
         replayActive: replayActive.current,
         replayQueueLength: replayQueue.current.length
       }),
+      setDebugMonsterCell: (index, cell, direction) => {
+        const monster = turnStateRef.current.monsters[index]
+
+        if (!monster) {
+          return false
+        }
+
+        const nextState: TurnState = {
+          ...turnStateRef.current,
+          checkpoint: {
+            cell: { ...turnStateRef.current.checkpoint.cell },
+            direction: turnStateRef.current.checkpoint.direction
+          },
+          monsters: turnStateRef.current.monsters.map((currentMonster, currentIndex) => ({
+            ...currentMonster,
+            cell: currentIndex === index
+              ? { x: cell.x, y: cell.y }
+              : { ...currentMonster.cell },
+            direction:
+              currentIndex === index && direction
+                ? direction
+                : currentMonster.direction,
+            lastPath: [...(currentMonster.lastPath ?? [])]
+          })),
+          player: {
+            ...turnStateRef.current.player,
+            cell: { ...turnStateRef.current.player.cell }
+          }
+        }
+
+        turnStateRef.current = nextState
+        setTurnState(nextState)
+        return true
+      },
       getCameraState: () => ({
         pitch: pitch.current,
         position: [
@@ -14014,6 +14354,7 @@ function FlightRig({
       delete globalWindow.__levelsjamDebug.getMonsterRenderState
       delete globalWindow.__levelsjamDebug.getTurnStateSummary
       delete globalWindow.__levelsjamDebug.getReplayControllerState
+      delete globalWindow.__levelsjamDebug.setDebugMonsterCell
       delete globalWindow.__levelsjamDebug.getCameraState
       delete globalWindow.__levelsjamDebug.setAnimationSpeedMultiplier
       delete globalWindow.__levelsjamDebug.getDebugProgramUniformState
@@ -14026,7 +14367,10 @@ function FlightRig({
   }, [camera, gl, scene])
 
   useFrame((_, delta) => {
-    if (!freeCamera.current) {
+    const profileStartedAt = beginFrameProfileStep()
+
+    try {
+      if (!freeCamera.current) {
       if (!playerAnimation.current) {
         const action = replayQueue.current.shift() ?? inputQueue.current.shift()
 
@@ -14229,8 +14573,8 @@ function FlightRig({
         camera.position.add(cameraShakeOffset.current)
       }
       camera.updateMatrixWorld()
-      return
-    }
+        return
+      }
 
     camera.getWorldDirection(forward.current)
     if (forward.current.lengthSq() > 0) {
@@ -14253,7 +14597,10 @@ function FlightRig({
       .addScaledVector(right.current, keyboardLocal.current.x * resolvedMovementSettings.maxHorizontalSpeed * delta)
       .addScaledVector(up, keyboardLocal.current.y * resolvedMovementSettings.maxHorizontalSpeed * delta)
       .addScaledVector(forward.current, keyboardLocal.current.z * resolvedMovementSettings.maxHorizontalSpeed * delta)
-    camera.updateMatrixWorld()
+      camera.updateMatrixWorld()
+    } finally {
+      endFrameProfileStep('player rules and camera', profileStartedAt)
+    }
   }, -1)
 
   useEffect(() => {
