@@ -20,6 +20,7 @@
 - The game begins in the authored `Entrance` level.
 - Player movement through an authored level exit transitions seamlessly into the connected level without fading, showing a loading transition, or exposing the boundary between levels.
 - Runtime gameplay state is one continuous world state, not one independent state per level.
+- Runtime gameplay state is represented by one global rules state with a canonical player, inventory, checkpoint, turn counter, and per-level entity/pickup slices used only as authored-world contents.
 - Runtime levels provide authored data, streaming/resource grouping, solution metadata, debug teleport targets, and future save/load anchors; they do not own separate active player inventory or camera-held item state during ordinary walking.
 - The rules engine resolves movement, pickups, monsters, gates, death, and inventory against the continuous world-space cell contents assembled from all loaded level data.
 - The player has one canonical world-space cell, direction, inventory state, checkpoint, and active animation state across ordinary level boundaries.

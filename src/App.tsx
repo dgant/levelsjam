@@ -164,6 +164,18 @@ import {
   type TurnMonster,
   type TurnState
 } from './lib/turnRules.js'
+import {
+  activateGlobalTurnStateLevel,
+  createInitialGlobalTurnState,
+  ensureGlobalTurnStateLevel,
+  ensureGlobalTurnStateLevels,
+  findIngressCellForGlobalTransition,
+  getGlobalTurnStateForLevel,
+  replaceGlobalTurnStateForLevel,
+  resetGlobalTurnStateLevel,
+  transitionGlobalTurnState,
+  type GlobalTurnState
+} from './lib/globalTurnRules.js'
 import { cloneCachedGltfRoot, getCachedGltfRootUrls } from './lib/gltfRuntimeCache'
 
 declare const __GIT_BRANCH__: string
@@ -3652,6 +3664,7 @@ type LevelWorldTransform = {
 }
 
 type SeamlessLevelTransitionRequest = {
+  sourcePreviousState?: TurnState
   sourceLevelId: string
   sourceState: TurnState
   targetLevelId: string
@@ -3709,107 +3722,11 @@ function directionToYaw(direction: CardinalDirection) {
   }
 }
 
-function normalizeAngleRadians(value: number) {
-  return Math.atan2(Math.sin(value), Math.cos(value))
-}
-
-function yawToDirection(yaw: number): CardinalDirection {
-  const normalized = normalizeAngleRadians(yaw)
-  const candidates: Array<{ direction: CardinalDirection; yaw: number }> = [
-    { direction: 'north', yaw: 0 },
-    { direction: 'east', yaw: -Math.PI / 2 },
-    { direction: 'south', yaw: Math.PI },
-    { direction: 'west', yaw: Math.PI / 2 }
-  ]
-
-  return candidates.reduce((best, candidate) => {
-    const bestDistance = Math.abs(normalizeAngleRadians(normalized - best.yaw))
-    const candidateDistance = Math.abs(normalizeAngleRadians(normalized - candidate.yaw))
-
-    return candidateDistance < bestDistance ? candidate : best
-  }).direction
-}
-
-function cloneTurnStateForRuntime(state: TurnState): TurnState {
-  return {
-    ...state,
-    checkpoint: {
-      cell: { ...state.checkpoint.cell },
-      direction: state.checkpoint.direction
-    },
-    monsters: state.monsters.map((monster) => ({
-      ...monster,
-      cell: { ...monster.cell },
-      lastPath: [...monster.lastPath]
-    })),
-    player: {
-      ...state.player,
-      cell: { ...state.player.cell }
-    }
-  }
-}
-
 function findIngressCellForTransition(
   targetMaze: MazeLayout['maze'],
   sourceLevelId: string
 ) {
-  const reverseExit = Array.isArray(targetMaze.levelExits)
-    ? targetMaze.levelExits.find((exit) => exit.targetLevelId === sourceLevelId)
-    : null
-
-  return {
-    ...(reverseExit?.cell ?? targetMaze.playerStart?.cell ?? targetMaze.opening.cell)
-  }
-}
-
-function createSeamlessTargetTurnState({
-  previousTargetState,
-  sourceLevelId,
-  sourceState,
-  sourceTransform,
-  targetLayout,
-  targetTransform
-}: {
-  previousTargetState: TurnState
-  sourceLevelId: string
-  sourceState: TurnState
-  sourceTransform: LevelWorldTransform
-  targetLayout: MazeLayout
-  targetTransform: LevelWorldTransform
-}) {
-  const nextState = cloneTurnStateForRuntime(previousTargetState)
-  const sourceWorldYaw =
-    directionToYaw(sourceState.player.direction) + sourceTransform.rotationY
-  const targetLocalYaw = sourceWorldYaw - targetTransform.rotationY
-
-  nextState.dead = false
-  nextState.escaped = false
-  nextState.player = {
-    ...nextState.player,
-    cell: findIngressCellForTransition(targetLayout.maze, sourceLevelId),
-    direction: yawToDirection(targetLocalYaw),
-    hasSword: sourceState.player.hasSword,
-    hasTrophy: sourceState.player.hasTrophy
-  }
-  nextState.turn = Math.max(nextState.turn, sourceState.turn)
-
-  if (sourceState.player.hasSword) {
-    nextState.swordState = 'held'
-  } else if (nextState.swordState === 'held') {
-    nextState.swordState = 'consumed'
-  }
-
-  if (sourceState.player.hasTrophy) {
-    nextState.trophyState = 'held'
-  } else if (targetLayout.maze.trophy?.cell) {
-    nextState.trophyState = nextState.trophyState === 'held'
-      ? 'ground'
-      : nextState.trophyState
-  } else {
-    nextState.trophyState = 'consumed'
-  }
-
-  return nextState
+  return findIngressCellForGlobalTransition(targetMaze, sourceLevelId)
 }
 
 function directionToWorldOffset(direction: CardinalDirection) {
@@ -13798,6 +13715,7 @@ function FlightRig({
             }
             onLevelTransition({
               sourceLevelId: layout.maze.id,
+              sourcePreviousState: activeAnimation.from,
               sourceState: activeAnimation.to,
               targetLevelId: activeAnimation.levelTransition.targetLevelId
             })
@@ -17234,7 +17152,7 @@ export default function App() {
   const [canvasBootstrapReady, setCanvasBootstrapReady] = useState(false)
   const availableMazeIdsRef = useRef<string[]>([])
   const loadedMazeLayoutsRef = useRef(new Map<string, MazeLayout>())
-  const levelTurnStatesRef = useRef(new Map<string, TurnState>())
+  const globalTurnStateRef = useRef<GlobalTurnState | null>(null)
   const memoryHighWaterRef = useRef({
     estimatedTextureBytes: 0,
     jsHeapBytes: 0,
@@ -17247,7 +17165,7 @@ export default function App() {
   )
   const [instantiatedMazeId, setInstantiatedMazeId] = useState<string | null>(null)
   const [mazeLayout, setMazeLayout] = useState<MazeLayout | null>(null)
-  const [activeTurnState, setActiveTurnState] = useState<TurnState | null>(null)
+  const [globalTurnState, setGlobalTurnStateRaw] = useState<GlobalTurnState | null>(null)
   const [renderedMazeLayouts, setRenderedMazeLayouts] = useState<MazeLayout[]>([])
   const [mazeLoadError, setMazeLoadError] = useState<string | null>(null)
   const [replayActive, setReplayActive] = useState(false)
@@ -17305,17 +17223,25 @@ export default function App() {
       })
   }, [])
 
-  const getOrCreateLevelTurnState = useCallback((layout: MazeLayout) => {
-    const existing = levelTurnStatesRef.current.get(layout.maze.id)
+  const setGlobalTurnState = useCallback((
+    value: GlobalTurnState | null | ((current: GlobalTurnState | null) => GlobalTurnState | null)
+  ) => {
+    setGlobalTurnStateRaw((current) => {
+      const next = typeof value === 'function'
+        ? (value as (current: GlobalTurnState | null) => GlobalTurnState | null)(current)
+        : value
 
-    if (existing) {
-      return existing
-    }
+      globalTurnStateRef.current = next
+      return next
+    })
+  }, [])
 
-    const nextState = createInitialTurnState(layout.maze)
+  const getRenderedTurnState = useCallback((layout: MazeLayout) => {
+    const currentGlobalState = globalTurnStateRef.current
 
-    levelTurnStatesRef.current.set(layout.maze.id, nextState)
-    return nextState
+    return currentGlobalState
+      ? getGlobalTurnStateForLevel(currentGlobalState, layout.maze.id, layout.maze)
+      : createInitialTurnState(layout.maze)
   }, [])
 
   const updateRenderedMazeLayouts = useCallback((centerMazeId: string | null) => {
@@ -17353,9 +17279,18 @@ export default function App() {
       }
 
       loadedMazeLayoutsRef.current.set(entry.id, entry.layout)
-      getOrCreateLevelTurnState(entry.layout)
     }
-  }, [getOrCreateLevelTurnState])
+
+    setGlobalTurnState((current) => current
+      ? ensureGlobalTurnStateLevels(
+          current,
+          loadedLayouts
+            .map((entry) => entry.layout)
+            .filter((layout): layout is MazeLayout => Boolean(layout))
+        )
+      : current
+    )
+  }, [setGlobalTurnState])
 
   const loadLevelNeighborhood = useCallback(async (
     mazeId: string,
@@ -17398,9 +17333,11 @@ export default function App() {
     setInstantiatedMazeId(mazeId)
     setMazeSceneKey((current) => current + 1)
     setMazeLayout(nextLayout)
-    setActiveTurnState(getOrCreateLevelTurnState(nextLayout))
+    setGlobalTurnState((current) => current
+      ? activateGlobalTurnStateLevel(current, nextLayout)
+      : createInitialGlobalTurnState(nextLayout, Array.from(loadedMazeLayoutsRef.current.values()))
+    )
     document.body.dataset.loadedMazeId = mazeId
-    getOrCreateLevelTurnState(nextLayout)
     updateRenderedMazeLayouts(mazeId)
   }
 
@@ -17409,7 +17346,7 @@ export default function App() {
     setSceneLoaded(false)
     setInstantiatedMazeId(null)
     setMazeLayout(null)
-    setActiveTurnState(null)
+    setGlobalTurnState(null)
     updateRenderedMazeLayouts(null)
   }
 
@@ -17420,6 +17357,10 @@ export default function App() {
 
     setReplayActive(false)
     setSceneLoaded(false)
+    setGlobalTurnState((current) => current
+      ? activateGlobalTurnStateLevel(resetGlobalTurnStateLevel(current, mazeLayout), mazeLayout)
+      : createInitialGlobalTurnState(mazeLayout, Array.from(loadedMazeLayoutsRef.current.values()))
+    )
     setMazeSceneKey((current) => current + 1)
   }
 
@@ -17437,21 +17378,14 @@ export default function App() {
         throw new Error(`Target level "${request.targetLevelId}" could not be loaded`)
       }
 
-      const previousTargetState = getOrCreateLevelTurnState(targetLayout)
-      const targetTransform = getRuntimeLevelWorldTransform(targetLayout.maze.id)
-      const sourceTransform = getRuntimeLevelWorldTransform(request.sourceLevelId)
-      const nextTargetState = createSeamlessTargetTurnState({
-        previousTargetState,
-        sourceLevelId: request.sourceLevelId,
-        sourceState: request.sourceState,
-        sourceTransform,
-        targetLayout,
-        targetTransform
-      })
-
       loadedMazeLayoutsRef.current.set(request.targetLevelId, targetLayout)
-      levelTurnStatesRef.current.set(request.targetLevelId, nextTargetState)
-      setActiveTurnState(nextTargetState)
+      setGlobalTurnState((current) => transitionGlobalTurnState({
+        sourceLevelId: request.sourceLevelId,
+        sourcePreviousState: request.sourcePreviousState,
+        sourceState: request.sourceState,
+        state: current ?? createInitialGlobalTurnState(targetLayout, Array.from(loadedMazeLayoutsRef.current.values())),
+        targetLayout
+      }))
       setInstantiatedMazeId(request.targetLevelId)
       setMazeLayout(targetLayout)
       document.body.dataset.loadedMazeId = request.targetLevelId
@@ -17461,7 +17395,7 @@ export default function App() {
 
       setMazeLoadError(message)
     }
-  }, [getOrCreateLevelTurnState, loadLevelNeighborhood, updateRenderedMazeLayouts])
+  }, [loadLevelNeighborhood, setGlobalTurnState, updateRenderedMazeLayouts])
 
   useEffect(() => {
     if (!instantiatedMazeId) {
@@ -17494,34 +17428,28 @@ export default function App() {
     mazeId: string,
     value: TurnState | ((current: TurnState) => TurnState)
   ) => {
-    setActiveTurnState((current) => {
-      if (!current) {
-        const layout = loadedMazeLayoutsRef.current.get(mazeId)
-        const fallback = layout
-          ? getOrCreateLevelTurnState(layout)
-          : null
-        const next = typeof value === 'function'
-          ? (
-              fallback
-                ? (value as (current: TurnState) => TurnState)(fallback)
-                : null
-            )
-          : value
+    setGlobalTurnState((current) => {
+      const layout = loadedMazeLayoutsRef.current.get(mazeId)
 
-        if (next) {
-          levelTurnStatesRef.current.set(mazeId, next)
-        }
-        return next ?? current
+      if (!layout) {
+        return current
       }
 
-      const next = typeof value === 'function'
-        ? (value as (current: TurnState) => TurnState)(current)
+      const ensuredState = current
+        ? ensureGlobalTurnStateLevel(current, layout)
+        : createInitialGlobalTurnState(layout, Array.from(loadedMazeLayoutsRef.current.values()))
+      const currentTurnState = getGlobalTurnStateForLevel(
+        ensuredState,
+        mazeId,
+        layout.maze
+      )
+      const nextTurnState = typeof value === 'function'
+        ? (value as (current: TurnState) => TurnState)(currentTurnState)
         : value
 
-      levelTurnStatesRef.current.set(mazeId, next)
-      return next
+      return replaceGlobalTurnStateForLevel(ensuredState, mazeId, nextTurnState)
     })
-  }, [getOrCreateLevelTurnState])
+  }, [setGlobalTurnState])
 
   const loadAndActivateLevel = async (level: AuthoredLevel, index: number) => {
     const mazeIds = availableMazeIdsRef.current.length > 0
@@ -17557,15 +17485,21 @@ export default function App() {
         throw new Error(`Level "${level.name}" could not load runtime maze "${mazeId}"`)
       }
 
-      levelTurnStatesRef.current.set(mazeId, createInitialTurnState(nextLayout.maze))
       loadedMazeLayoutsRef.current.set(mazeId, nextLayout)
+      setGlobalTurnState((current) => {
+        const baseState = current
+          ? ensureGlobalTurnStateLevel(current, nextLayout)
+          : createInitialGlobalTurnState(nextLayout, Array.from(loadedMazeLayoutsRef.current.values()))
+
+        return resetGlobalTurnStateLevel(baseState, nextLayout)
+      })
       instantiateLoadedMaze(mazeId)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
 
       setMazeLayout(null)
       setInstantiatedMazeId(null)
-      setActiveTurnState(null)
+      setGlobalTurnState(null)
       setMazeLoadError(message)
     }
   }
@@ -17596,11 +17530,13 @@ export default function App() {
           document.body.dataset.mazeLayoutLoadedAt = performance.now().toFixed(1)
           document.body.dataset.loadedMazeId = nextLayout.maze.id
           loadedMazeLayoutsRef.current.set(nextLayout.maze.id, nextLayout)
-          const initialTurnState = getOrCreateLevelTurnState(nextLayout)
           await loadLevelNeighborhood(nextLayout.maze.id)
           setInstantiatedMazeId(nextLayout.maze.id)
           setReplayActive(false)
-          setActiveTurnState(initialTurnState)
+          setGlobalTurnState(createInitialGlobalTurnState(
+            nextLayout,
+            Array.from(loadedMazeLayoutsRef.current.values())
+          ))
           setMazeLayout(nextLayout)
         }
       } catch (error) {
@@ -17620,7 +17556,7 @@ export default function App() {
       cancelled = true
       document.body.dataset.mazeLayoutCancelledAt = performance.now().toFixed(1)
     }
-  }, [getOrCreateLevelTurnState, loadLevelNeighborhood, requestedMazeId])
+  }, [loadLevelNeighborhood, requestedMazeId, setGlobalTurnState])
 
   useEffect(() => {
     const globalWindow = window as Window & {
@@ -18313,6 +18249,9 @@ export default function App() {
     recordStartupMarker('sceneAssetsReadyAt')
     setSceneLoaded(true)
   }, [])
+  const activeTurnState = mazeLayout && globalTurnState
+    ? getGlobalTurnStateForLevel(globalTurnState, mazeLayout.maze.id, mazeLayout.maze)
+    : null
   const activeLevelTransform = useMemo(
     () => mazeLayout
       ? getRuntimeLevelWorldTransform(mazeLayout.maze.id)
@@ -18442,7 +18381,7 @@ export default function App() {
                 layout={mazeLayout}
                 levelTransform={activeLevelTransform}
                 renderedLayouts={sceneRenderedLayouts}
-                getRenderedTurnState={getOrCreateLevelTurnState}
+                getRenderedTurnState={getRenderedTurnState}
                 onAssetsReady={onAssetsReady}
                 onLevelTransition={handleLevelTransition}
                 onReplayActiveChange={setReplayActive}

@@ -9,6 +9,7 @@ const unitProfilePath = path.join(rootDir, 'logs', 'latest-unit-test-profile.jso
 const overallThresholdMs = 20_000
 const testFiles = [
   'tests/billboard.test.js',
+  'tests/global-turn-rules.test.js',
   'tests/levels.test.js',
   'tests/lighting-calibration.test.js',
   'tests/maze-solver.test.js',
@@ -22,6 +23,7 @@ const testFiles = [
 ]
 const perFileThresholdsMs = {
   'tests/billboard.test.js': 3_000,
+  'tests/global-turn-rules.test.js': 3_000,
   'tests/levels.test.js': 3_000,
   'tests/lighting-calibration.test.js': 3_000,
   'tests/maze-solver.test.js': 4_000,
