@@ -12,6 +12,11 @@ const SMOKE_TIMING_LOG_PATH = path.resolve(
   'logs',
   'latest-smoke-profile.json'
 )
+const PERFORMANCE_PROFILE_PATH = path.resolve(
+  __dirname,
+  '..',
+  'PERFORMANCE.md'
+)
 let activeSmokeTimingProfile = null
 const CURRENT_GIT_BRANCH = execSync('git branch --show-current', {
   cwd: path.resolve(__dirname, '..'),
@@ -466,6 +471,20 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
   expect(returnedState.sceneMountCount).toBe(beforeBoundaryMove.sceneMountCount)
   expect(Math.abs(returnedState.camera.yaw - beforeReturnMove.camera.yaw)).toBeLessThan(0.001)
   expect(Math.abs(returnedState.camera.pitch - beforeReturnMove.camera.pitch)).toBeLessThan(0.001)
+
+  await page.waitForFunction(
+    () => typeof window.__levelsjamCapturePerformanceProfile === 'function',
+    undefined,
+    { timeout: 10_000 }
+  )
+  const performanceProfile = await page.evaluate(
+    () => window.__levelsjamCapturePerformanceProfile?.({ liveDurationMs: 1000, samples: 16 }) ?? null
+  )
+
+  expect(performanceProfile?.markdown).toContain('# Performance Profile')
+  expect(performanceProfile?.controlledSteps?.length ?? 0).toBeGreaterThan(0)
+  fs.writeFileSync(PERFORMANCE_PROFILE_PATH, performanceProfile.markdown)
+
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
 })

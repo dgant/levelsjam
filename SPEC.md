@@ -35,6 +35,7 @@
 - Walking across a connected level boundary preserves the player's world-space position, camera yaw, camera pitch, inventory flags, held-item visibility, and current input flow.
 - Walking across a connected level boundary keeps the player camera continuous through the final frame of the move animation and the first frame of the destination level; the camera must not snap back to the source exit cell before settling in the destination ingress cell.
 - Only the active gameplay level may render camera-attached held pickup models; adjacent rendered levels may render their ground pickups but must not attach their saved inventory state to the active camera.
+- Camera-attached held pickup models are positioned relative to the camera in continuous world space and must not inherit a rendered level group's transform as an extra offset or rotation.
 - Walking across a connected level boundary updates only the active rules context and streamed-neighborhood bookkeeping; it does not teleport the player, rotate the player, remount the scene, reset the target level, or show pickup items that were not actually picked up.
 - Walking across a connected level boundary maps the player into the destination-owned ingress cell in the destination level while leaving all scene geometry in its authored world-space position.
 - The runtime renders the current level and the levels directly adjacent to it so ordinary walking between connected levels does not reveal level streaming.
@@ -48,8 +49,10 @@
 - The active level affects gameplay input, rules updates, debug focus, and loading-readiness bookkeeping; it does not determine which lighting/probe resources are bound to other rendered levels.
 - Adjacent rendered levels use their own lightmaps and probe data while they are visible from the current level, so walking across a boundary does not cause lighting bindings to churn or appear unlit until the destination becomes active.
 - Runtime lighting resources are owned and tracked per rendered level id; cleanup from the previously active level must not clear or replace the newly active level's lighting resources during a seamless boundary transition.
+- Runtime lighting resources remain published for every mounted rendered level until that level unmounts; changing which level has debug focus must not temporarily clear surface-lightmap, volumetric-lightmap, or reflection-probe bindings.
 - When precomputed visibility is enabled and the player's current visible cell set includes a level transition cell, the adjacent streamed level renders the cells that are precomputed-visible from that adjacent level's ingress cell rather than rendering the entire adjacent maze.
 - When precomputed visibility is disabled, adjacent streamed levels may render their full geometry for debugging.
+- Level-boundary walls that face playable cells render with the same visibility and baked-lightmap treatment as ordinary interior-facing walls.
 - Runtime level transitions do not synchronously fetch, decode, upload, instantiate, or shader-compile level assets at the moment the player crosses a boundary; that work is completed ahead of time for adjacent levels.
 - Level floor meshes are spawned only inside the level's own cell footprint and not in the lightmap margin or any neighboring level's footprint.
 - Level floor visibility is evaluated per whole cell; precomputed visibility may hide an entire floor cell, but it must not clip a visible floor cell into partial missing-cell fragments.
@@ -251,6 +254,7 @@
 - Player movement and rotation animations last `250ms`.
 - Monster movement animations last `250ms`.
 - Monster model translation between grid cells is interpolated over `250ms` rather than teleporting at turn boundaries.
+- Monster render positions remain at the previous rendered pose until their turn/move animation advances them; receiving a new rules cell must not snap the rendered model to the target cell before the animation starts.
 - The player has no rendered character model.
 - Player inputs are buffered and consumed in order when the rules engine is ready for the next player action.
 - Held movement keys enqueue at most one action until that key is released and pressed again.
@@ -396,6 +400,9 @@
 - Lens flares must not collapse performance by an order of magnitude when a visible torch enters frame.
 - Automated performance coverage remains enabled for the supported render path and fails when the enforced performance target is missed.
 - Performance investigations record where frame time is spent instead of inferring the cause from FPS alone.
+- The browser smoke runner writes `PERFORMANCE.md` with a hierarchical frame-cost profile for the current build.
+- The frame-cost profile records controlled render benchmark timings, live one-second RAF frame timing, renderer submission counts, scene object counts, and loop population sizes where the renderer iterates over resident resources.
+- The visual debug panel includes a `Performance` tab with a `Capture` button that records the next second of frames and displays the same kind of profile shown in `PERFORMANCE.md`.
 
 ## Loading And Startup
 - The page shows a centered loading overlay before the scene becomes visible.

@@ -271,18 +271,33 @@ test('maze 005 sword pickup swaps the floor sword for the held sword', async ({ 
   await expect
     .poll(async () => ({
       floorSword: await findDebugPosition(page, 'maze-sword'),
+      camera: await page.evaluate(() => window.__levelsjamDebug.getCameraState?.() ?? null),
       heldSword: await findDebugPosition(page, 'held-sword')
     }), {
       timeout: 10_000,
       intervals: [100, 250, 500]
     })
     .toMatchObject({
+      camera: {
+        position: expect.any(Array)
+      },
       floorSword: null,
       heldSword: {
         index: expect.any(Number),
         position: expect.any(Array)
       }
     })
+  const heldSwordPose = await page.evaluate(() => ({
+    camera: window.__levelsjamDebug.getCameraState?.() ?? null,
+    heldSword: window.__levelsjamDebug.getDebugPosition?.('held-sword', 0) ?? null
+  }))
+  const heldSwordDistance = Math.hypot(
+    heldSwordPose.heldSword[0] - heldSwordPose.camera.position[0],
+    heldSwordPose.heldSword[1] - heldSwordPose.camera.position[1],
+    heldSwordPose.heldSword[2] - heldSwordPose.camera.position[2]
+  )
+
+  expect(heldSwordDistance).toBeLessThan(1.5)
 
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])

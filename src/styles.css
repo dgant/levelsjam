@@ -377,6 +377,21 @@ body {
   white-space: nowrap;
 }
 
+.visual-performance-report {
+  box-sizing: border-box;
+  width: 100%;
+  max-height: min(58vh, 620px);
+  overflow: auto;
+  margin: 10px 0 0;
+  padding: 10px;
+  background: rgb(0 0 0 / 45%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 10px;
+  color: rgb(231 238 248 / 92%);
+  font: 500 11px/1.45 ui-monospace, "SFMono-Regular", "Cascadia Code", monospace;
+  white-space: pre;
+}
+
 .visual-inline-controls {
   display: flex;
   align-items: center;

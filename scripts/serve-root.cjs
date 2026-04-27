@@ -37,13 +37,40 @@ const server = http.createServer((request, response) => {
     }
 
     const extension = path.extname(filePath)
+    const stream = fs.createReadStream(filePath)
+
+    stream.on('error', (streamError) => {
+      console.error('[serve-root] failed to stream asset', filePath, streamError)
+      if (!response.headersSent) {
+        response.writeHead(500)
+      }
+      response.end()
+    })
+    response.on('error', (responseError) => {
+      console.error('[serve-root] response error', filePath, responseError)
+      stream.destroy()
+    })
+
     response.writeHead(200, {
       'Content-Length': stats.size,
       'Content-Type': contentTypes.get(extension) ?? 'application/octet-stream'
     })
 
-    fs.createReadStream(filePath).pipe(response)
+    stream.pipe(response)
   })
+})
+
+server.on('clientError', (error, socket) => {
+  console.error('[serve-root] client error', error)
+  socket.end('HTTP/1.1 400 Bad Request\r\n\r\n')
+})
+
+process.on('uncaughtException', (error) => {
+  console.error('[serve-root] uncaught exception', error)
+})
+
+process.on('unhandledRejection', (error) => {
+  console.error('[serve-root] unhandled rejection', error)
 })
 
 server.listen(port, '127.0.0.1')

@@ -499,11 +499,7 @@ async function warmScenePrograms(
       return
     }
 
-    if (typeof gl.compileAsync === 'function') {
-      await gl.compileAsync(scene, camera)
-    } else {
-      gl.compile(scene, camera)
-    }
+    gl.compile(scene, camera)
   } finally {
     for (const object of hiddenObjects) {
       object.visible = false
@@ -538,6 +534,7 @@ const MIN_LOADING_OVERLAY_MS = 200
 const DEFAULT_PROBE_BOX_MAX = new Vector3(0.5, WALL_HEIGHT, 0.5)
 const DEFAULT_PROBE_BOX_MIN = new Vector3(-0.5, GROUND_Y, -0.5)
 const DEFAULT_PROBE_POSITION = new Vector3(0, 1, 0)
+const LEVEL_UP_VECTOR = new Vector3(0, 1, 0)
 const DEFAULT_FOG_IBL_COLOR = new Color(DEFAULT_VOLUMETRIC_AMBIENT_HEX)
 const AMBIENT_OCCLUSION_OPTIONS = [
   { key: 'off', label: 'Off' },
@@ -1003,6 +1000,7 @@ type VisualControlTabKey =
   | 'fog'
   | 'vignette'
   | 'anamorphic'
+  | 'performance'
   | 'solution'
 
 type LightingContributionSettings = {
@@ -1131,6 +1129,7 @@ const VISUAL_CONTROL_TABS: Array<{
   { hotkey: '7', key: 'fog', label: 'Fog' },
   { hotkey: '8', key: 'vignette', label: 'Vignette' },
   { hotkey: '9', key: 'anamorphic', label: 'Anamorphic' },
+  { hotkey: 'P', key: 'performance', label: 'Performance' },
   { hotkey: '0', key: 'solution', label: 'Solution' }
 ]
 
@@ -1277,6 +1276,33 @@ type BenchmarkResult = {
   maxFrameMs: number
   minFrameMs: number
   samples: number
+}
+
+type PerformanceProfileStep = {
+  benchmark: BenchmarkResult
+  label: string
+  renderLoops: Record<string, number>
+  sceneStats: Record<string, unknown>
+}
+
+type PerformanceProfileResult = {
+  capturedAt: string
+  controlledSteps: PerformanceProfileStep[]
+  deltas: Array<{
+    from: string
+    label: string
+    ms: number
+    to: string
+  }>
+  liveFrames: {
+    averageFrameMs: number
+    fps: number
+    maxFrameMs: number
+    minFrameMs: number
+    samples: number
+  }
+  markdown: string
+  renderer: string
 }
 
 type ProbeMetric = {
@@ -3707,6 +3733,33 @@ function getTransformedMazeCellWorldPosition(
     localPosition.y,
     transform.z - (localPosition.x * sin) + (localPosition.z * cos)
   )
+}
+
+function transformWorldPositionToLevelLocal(
+  position: Vector3,
+  transform: LevelWorldTransform,
+  target = new Vector3()
+) {
+  const dx = position.x - transform.x
+  const dz = position.z - transform.z
+  const cos = Math.cos(transform.rotationY)
+  const sin = Math.sin(transform.rotationY)
+
+  return target.set(
+    (dx * cos) - (dz * sin),
+    position.y,
+    (dx * sin) + (dz * cos)
+  )
+}
+
+function transformWorldQuaternionToLevelLocal(
+  quaternion: Quaternion,
+  transform: LevelWorldTransform,
+  target = new Quaternion()
+) {
+  return target
+    .setFromAxisAngle(LEVEL_UP_VECTOR, -transform.rotationY)
+    .multiply(quaternion)
 }
 
 function directionToYaw(direction: CardinalDirection) {
@@ -11032,6 +11085,11 @@ function HeldItemView({
   const levelWorldTransform = useContext(LevelRenderTransformContext)
   const volumetricShadowsEnabled = useContext(VolumetricShadowContext)
   const group = useRef<Group>(null)
+  const heldWorldPosition = useRef(new Vector3())
+  const heldWorldTarget = useRef(new Vector3())
+  const heldLocalPosition = useRef(new Vector3())
+  const heldLocalQuaternion = useRef(new Quaternion())
+  const heldWorldObject = useRef(new Object3D())
   const camera = useThree((state) => state.camera)
   const playerWorldPosition = useMemo(
     () => getMazeCellWorldPosition(layout.maze, playerCell, GROUND_Y),
@@ -11184,21 +11242,49 @@ function HeldItemView({
     const cameraQuaternion = camera.quaternion
 
     if (itemType === 'sword') {
-      const handleLocal = new Vector3(0.34, -0.42, -0.50)
-      const targetLocal = new Vector3(0.04, -0.18, -1.18)
-      const handleWorld = handleLocal.applyQuaternion(cameraQuaternion).add(camera.position)
-      const targetWorld = targetLocal.applyQuaternion(cameraQuaternion).add(camera.position)
+      heldWorldPosition.current
+        .set(0.34, -0.42, -0.50)
+        .applyQuaternion(cameraQuaternion)
+        .add(camera.position)
+      heldWorldTarget.current
+        .set(0.04, -0.18, -1.18)
+        .applyQuaternion(cameraQuaternion)
+        .add(camera.position)
+      heldWorldObject.current.position.copy(heldWorldPosition.current)
+      heldWorldObject.current.lookAt(heldWorldTarget.current)
 
-      group.current.position.copy(handleWorld)
-      group.current.lookAt(targetWorld)
+      transformWorldPositionToLevelLocal(
+        heldWorldPosition.current,
+        levelWorldTransform,
+        heldLocalPosition.current
+      )
+      transformWorldQuaternionToLevelLocal(
+        heldWorldObject.current.quaternion,
+        levelWorldTransform,
+        heldLocalQuaternion.current
+      )
+      group.current.position.copy(heldLocalPosition.current)
+      group.current.quaternion.copy(heldLocalQuaternion.current)
       return
     }
 
-    const trophyLocal = new Vector3(-0.42, -0.52, -0.62)
-    const trophyWorld = trophyLocal.applyQuaternion(cameraQuaternion).add(camera.position)
+    heldWorldPosition.current
+      .set(-0.42, -0.52, -0.62)
+      .applyQuaternion(cameraQuaternion)
+      .add(camera.position)
+    transformWorldPositionToLevelLocal(
+      heldWorldPosition.current,
+      levelWorldTransform,
+      heldLocalPosition.current
+    )
+    transformWorldQuaternionToLevelLocal(
+      cameraQuaternion,
+      levelWorldTransform,
+      heldLocalQuaternion.current
+    )
 
-    group.current.position.copy(trophyWorld)
-    group.current.quaternion.copy(cameraQuaternion)
+    group.current.position.copy(heldLocalPosition.current)
+    group.current.quaternion.copy(heldLocalQuaternion.current)
   })
 
   if (!model || !transform) {
@@ -11617,6 +11703,7 @@ function MonsterActor({
       if (phases.length === 0) {
         group.current.position.copy(targetPosition)
         group.current.rotation.y = targetYaw
+        group.current.userData.animationActive = false
       }
       return
     }
@@ -11624,6 +11711,7 @@ function MonsterActor({
     group.current.position.copy(targetPosition)
     group.current.rotation.y = targetYaw
     group.current.userData.initialized = true
+    group.current.userData.animationActive = false
   }, [targetPosition, targetYaw])
 
   useFrame(() => {
@@ -11632,6 +11720,7 @@ function MonsterActor({
     }
 
     const activeSequenceAnimation = sequenceAnimation.current
+    group.current.userData.animationActive = Boolean(activeSequenceAnimation)
 
     if (activeSequenceAnimation) {
       const phaseDuration = getScaledAnimationDuration(TURN_ANIMATION_DURATION_MS)
@@ -11663,10 +11752,8 @@ function MonsterActor({
         sequenceAnimation.current = null
         group.current.position.copy(targetPosition)
         group.current.rotation.y = targetYaw
+        group.current.userData.animationActive = false
       }
-    } else {
-      group.current.position.copy(targetPosition)
-      group.current.rotation.y = targetYaw
     }
   })
 
@@ -12147,21 +12234,43 @@ function PerformanceBenchmarkBridge() {
   const gl = useThree((state) => state.gl)
   const get = useThree((state) => state.get)
   const invalidate = useThree((state) => state.invalidate)
+  const scene = useThree((state) => state.scene)
   const setFrameloop = useThree((state) => state.setFrameloop)
 
   useEffect(() => {
     const globalWindow = window as Window & {
       __levelsjamBenchmark?: (samples?: number) => Promise<BenchmarkResult>
+      __levelsjamCapturePerformanceProfile?: (
+        options?: { liveDurationMs?: number; samples?: number }
+      ) => Promise<PerformanceProfileResult>
+      __levelsjamGetVisualSettings?: () => VisualSettings
+      __levelsjamSetVisualSettings?: (patch: VisualSettingsPatch) => void
     }
     const finish = gl.getContext().finish?.bind(gl.getContext())
 
-    globalWindow.__levelsjamBenchmark = async (samples = 90) => {
+    const waitForFrames = (frameCount: number) => new Promise<void>((resolve) => {
+      let remaining = Math.max(1, frameCount)
+      const step = () => {
+        remaining -= 1
+        if (remaining <= 0) {
+          resolve()
+          return
+        }
+        requestAnimationFrame(step)
+      }
+
+      requestAnimationFrame(step)
+    })
+
+    const runBenchmark = async (samples = 90) => {
       const durations: number[] = []
       const renderCalls: number[] = []
       const triangles: number[] = []
       const initialTimestamp = performance.now()
       const originalFrameloop = get().frameloop
+      const originalInfoAutoReset = gl.info.autoReset
 
+      gl.info.autoReset = false
       setFrameloop('never')
 
       try {
@@ -12177,6 +12286,7 @@ function PerformanceBenchmarkBridge() {
           triangles.push(gl.info.render.triangles)
         }
       } finally {
+        gl.info.autoReset = originalInfoAutoReset
         setFrameloop(originalFrameloop)
         invalidate()
       }
@@ -12200,11 +12310,295 @@ function PerformanceBenchmarkBridge() {
         samples
       }
     }
+    const captureLiveFrames = async (durationMs: number) => new Promise<PerformanceProfileResult['liveFrames']>((resolve) => {
+      const frames: number[] = []
+      let previous = performance.now()
+      const deadline = previous + Math.max(250, durationMs)
+
+      const step = (now: number) => {
+        const delta = now - previous
+
+        if (delta > 0) {
+          frames.push(delta)
+        }
+        previous = now
+
+        if (now >= deadline) {
+          const total = frames.reduce((sum, value) => sum + value, 0)
+          const averageFrameMs = total / Math.max(1, frames.length)
+
+          resolve({
+            averageFrameMs,
+            fps: 1000 / averageFrameMs,
+            maxFrameMs: Math.max(...frames),
+            minFrameMs: Math.min(...frames),
+            samples: frames.length
+          })
+          return
+        }
+
+        requestAnimationFrame(step)
+      }
+
+      requestAnimationFrame(step)
+    })
+    const collectSceneStats = () => {
+      const effectivelyVisible: Record<string, number> = {}
+      const mounted: Record<string, number> = {}
+      const visible: Record<string, number> = {}
+      let totalEffectivelyVisible = 0
+      let totalMounted = 0
+      let totalVisible = 0
+
+      scene.traverse((object) => {
+        totalMounted += 1
+        const role = typeof object.userData?.debugRole === 'string'
+          ? object.userData.debugRole
+          : (
+            Array.isArray(object.userData?.debugRoles)
+              ? object.userData.debugRoles[0]
+              : object.type
+          )
+
+        mounted[role] = (mounted[role] ?? 0) + 1
+
+        if (object.visible) {
+          totalVisible += 1
+          visible[role] = (visible[role] ?? 0) + 1
+        }
+
+        let effectiveVisible = object.visible
+        let parent = object.parent
+
+        while (effectiveVisible && parent) {
+          effectiveVisible = parent.visible
+          parent = parent.parent
+        }
+
+        if (effectiveVisible) {
+          totalEffectivelyVisible += 1
+          effectivelyVisible[role] = (effectivelyVisible[role] ?? 0) + 1
+        }
+      })
+
+      return {
+        effectivelyVisible,
+        memory: {
+          geometries: gl.info.memory.geometries,
+          textures: gl.info.memory.textures
+        },
+        mounted,
+        programs: gl.info.programs?.length ?? null,
+        totalEffectivelyVisible,
+        totalMounted,
+        totalVisible,
+        visible
+      }
+    }
+    const collectRenderLoops = () => {
+      const levelLightingStates = (scene.userData as {
+        levelLightingStatesByLevel?: Record<string, {
+          reflectionProbeState?: RuntimeReflectionProbeState
+        }>
+      }).levelLightingStatesByLevel ?? {}
+      const reflectionProbeStates = Object.values(levelLightingStates)
+        .map((state) => state.reflectionProbeState)
+        .filter(Boolean) as RuntimeReflectionProbeState[]
+
+      return {
+        mountedLevels: Object.keys(levelLightingStates).length,
+        residentReflectionProbes: reflectionProbeStates.reduce(
+          (sum, state) => sum + (state.loadedProbeCount ?? 0),
+          0
+        ),
+        residentVolumetricProbes: reflectionProbeStates.reduce(
+          (sum, state) => sum + (state.loadedVolumetricProbeCount ?? 0),
+          0
+        ),
+        sceneChildren: scene.children.length
+      }
+    }
+    const getRendererString = () => {
+      const rawGl = gl.getContext()
+      const extension = rawGl.getExtension('WEBGL_debug_renderer_info')
+
+      if (!extension) {
+        return rawGl.getParameter(rawGl.RENDERER)
+      }
+
+      return `${rawGl.getParameter(extension.UNMASKED_VENDOR_WEBGL)} ${rawGl.getParameter(extension.UNMASKED_RENDERER_WEBGL)}`
+    }
+    const formatNumber = (value: number) => Number.isFinite(value)
+      ? value.toFixed(3)
+      : 'n/a'
+    const formatProfileMarkdown = (profile: Omit<PerformanceProfileResult, 'markdown'>) => {
+      const lines: string[] = [
+        '# Performance Profile',
+        '',
+        `Captured: ${profile.capturedAt}`,
+        `Renderer: ${profile.renderer}`,
+        '',
+        '## Live RAF',
+        '',
+        `- Average frame: ${formatNumber(profile.liveFrames.averageFrameMs)}ms (${formatNumber(profile.liveFrames.fps)} FPS)`,
+        `- Min/max frame: ${formatNumber(profile.liveFrames.minFrameMs)}ms / ${formatNumber(profile.liveFrames.maxFrameMs)}ms`,
+        `- Samples: ${profile.liveFrames.samples}`,
+        '',
+        '## Controlled Render Cost',
+        '',
+        '| Step | Avg ms/frame | FPS | Max ms | Calls | Triangles | Samples |',
+        '| --- | ---: | ---: | ---: | ---: | ---: | ---: |',
+        ...profile.controlledSteps.map((step) => (
+          `| ${step.label} | ${formatNumber(step.benchmark.averageFrameMs)} | ${formatNumber(step.benchmark.fps)} | ${formatNumber(step.benchmark.maxFrameMs)} | ${formatNumber(step.benchmark.averageRenderCalls ?? 0)} | ${formatNumber(step.benchmark.averageTriangles ?? 0)} | ${step.benchmark.samples} |`
+        )),
+        '',
+        '## Hierarchical Deltas',
+        '',
+        ...profile.deltas
+          .filter((delta) => Math.abs(delta.ms) >= 0.1)
+          .map((delta) => `- ${delta.label}: ${formatNumber(delta.ms)}ms/frame (${delta.from} -> ${delta.to})`),
+        '',
+        '## Loop Populations',
+        ''
+      ]
+      const latestStep = profile.controlledSteps[0]
+
+      if (latestStep) {
+        for (const [key, value] of Object.entries(latestStep.renderLoops)) {
+          lines.push(`- ${key}: ${value}`)
+        }
+      }
+
+      lines.push('', '## Scene Object Counts', '')
+
+      if (latestStep) {
+        lines.push('```json')
+        lines.push(JSON.stringify(latestStep.sceneStats, null, 2))
+        lines.push('```')
+      }
+
+      return lines.join('\n')
+    }
+    const makePostDisabledPatch = (): VisualSettingsPatch => ({
+      ambientOcclusionMode: 'off',
+      anamorphic: { enabled: false },
+      bloom: { enabled: false },
+      depthOfField: { enabled: false },
+      lensFlare: { enabled: false },
+      ssr: { enabled: false, intensity: 0 },
+      volumetricLighting: { enabled: false, intensity: 0 },
+      vignette: { enabled: false }
+    })
+    const makeLightingDisabledPatch = (): VisualSettingsPatch => ({
+      iblContribution: { enabled: false, intensity: 0 },
+      lightmapContribution: { enabled: false, intensity: 0 },
+      reflectionContribution: { enabled: false, intensity: 0 },
+      staticVolumetricContribution: { enabled: false, intensity: 0 }
+    })
+    const measureStep = async (
+      label: string,
+      patch: VisualSettingsPatch,
+      samples: number
+    ): Promise<PerformanceProfileStep> => {
+      globalWindow.__levelsjamSetVisualSettings?.(patch)
+      await waitForFrames(4)
+
+      return {
+        benchmark: await runBenchmark(samples),
+        label,
+        renderLoops: collectRenderLoops(),
+        sceneStats: collectSceneStats()
+      }
+    }
+    const cloneVisualSettings = (settings: VisualSettings): VisualSettings => (
+      JSON.parse(JSON.stringify(settings)) as VisualSettings
+    )
+    const buildDeltas = (steps: PerformanceProfileStep[]) => {
+      const stepByLabel = new Map(steps.map((step) => [step.label, step]))
+      const makeDelta = (label: string, from: string, to: string) => ({
+        from,
+        label,
+        ms:
+          (stepByLabel.get(from)?.benchmark.averageFrameMs ?? 0) -
+          (stepByLabel.get(to)?.benchmark.averageFrameMs ?? 0),
+        to
+      })
+
+      return [
+        makeDelta('All optional postprocessing', 'Default', 'Post disabled'),
+        makeDelta('Local reflections', 'Post disabled', 'Post + reflections disabled'),
+        makeDelta('Baked/probe lighting', 'Post + reflections disabled', 'Post + all local lighting disabled'),
+        makeDelta('PBR/textured opaque over unlit', 'Post + all local lighting disabled', 'Unlit baseline')
+      ]
+    }
+
+    globalWindow.__levelsjamBenchmark = runBenchmark
+
+    globalWindow.__levelsjamCapturePerformanceProfile = async (options = {}) => {
+      const samples = Math.max(4, Math.floor(options.samples ?? 24))
+      const liveDurationMs = Math.max(250, options.liveDurationMs ?? 1000)
+      const originalVisualSettings = globalWindow.__levelsjamGetVisualSettings?.()
+      const originalPatch = originalVisualSettings
+        ? cloneVisualSettings(originalVisualSettings)
+        : null
+      const liveFrames = await captureLiveFrames(liveDurationMs)
+      const steps: PerformanceProfileStep[] = []
+
+      try {
+        steps.push(await measureStep('Default', {}, samples))
+        steps.push(await measureStep('Post disabled', makePostDisabledPatch(), samples))
+        steps.push(await measureStep(
+          'Post + reflections disabled',
+          {
+            ...makePostDisabledPatch(),
+            reflectionContribution: { enabled: false, intensity: 0 }
+          },
+          samples
+        ))
+        steps.push(await measureStep(
+          'Post + all local lighting disabled',
+          {
+            ...makePostDisabledPatch(),
+            ...makeLightingDisabledPatch()
+          },
+          samples
+        ))
+        steps.push(await measureStep(
+          'Unlit baseline',
+          {
+            ...makePostDisabledPatch(),
+            ...makeLightingDisabledPatch(),
+            unlitMode: true
+          },
+          samples
+        ))
+      } finally {
+        if (originalPatch) {
+          globalWindow.__levelsjamSetVisualSettings?.(originalPatch)
+          await waitForFrames(2)
+        }
+      }
+
+      const profileWithoutMarkdown = {
+        capturedAt: new Date().toISOString(),
+        controlledSteps: steps,
+        deltas: buildDeltas(steps),
+        liveFrames,
+        renderer: getRendererString()
+      }
+      const markdown = formatProfileMarkdown(profileWithoutMarkdown)
+
+      return {
+        ...profileWithoutMarkdown,
+        markdown
+      }
+    }
 
     return () => {
       delete globalWindow.__levelsjamBenchmark
+      delete globalWindow.__levelsjamCapturePerformanceProfile
     }
-  }, [advance, get, gl, invalidate, setFrameloop])
+  }, [advance, get, gl, invalidate, scene, setFrameloop])
 
   return null
 }
@@ -13002,6 +13396,7 @@ function FlightRig({
           worldPosition: [number, number, number]
         } | null
         getMonsterRenderState?: (index: number) => {
+          animationActive: boolean
           boundsSize: [number, number, number] | null
           doubleSidedMaterialCount: number
           hasLightMap: boolean
@@ -13443,6 +13838,7 @@ function FlightRig({
         let totalTriangleCount = 0
         let doubleSidedMaterialCount = 0
         let hasLightMap = false
+        let animationActive = false
         let visible = false
         let targetSize: number | null = null
         let monsterType: 'minotaur' | 'spider' | 'werewolf' | null = null
@@ -13459,6 +13855,7 @@ function FlightRig({
             }
 
             visible = visible || object.visible
+            animationActive = animationActive || object.userData?.animationActive === true
             monsterBounds.expandByObject(object)
             targetSize =
               typeof object.userData?.monsterTargetSize === 'number'
@@ -13510,6 +13907,7 @@ function FlightRig({
         monsterBounds.getSize(monsterBoundsSize)
 
         return {
+          animationActive,
           boundsMax: [
             monsterBounds.max.x,
             monsterBounds.max.y,
@@ -13940,19 +14338,7 @@ function RuntimeLevelGeometry({
     }
 
     onLightingResourcesChange(layout.maze.id, lightingResources)
-
-    if (isActive) {
-      scene.userData.reflectionProbeState = lightingResources.reflectionProbeState
-    }
-
-    return () => {
-      if (userData.levelLightingStatesByLevel) {
-        delete userData.levelLightingStatesByLevel[layout.maze.id]
-      }
-      onLightingResourcesChange(layout.maze.id, null)
-    }
   }, [
-    isActive,
     layout.maze.id,
     lightingResources,
     lightingResources.reflectionProbeState,
@@ -13960,6 +14346,25 @@ function RuntimeLevelGeometry({
     onLightingResourcesChange,
     scene
   ])
+
+  useEffect(() => {
+    if (isActive) {
+      scene.userData.reflectionProbeState = lightingResources.reflectionProbeState
+    }
+  }, [isActive, lightingResources.reflectionProbeState, scene])
+
+  useEffect(() => {
+    return () => {
+      const userData = scene.userData as typeof scene.userData & {
+        levelLightingStatesByLevel?: Record<string, unknown>
+      }
+
+      if (userData.levelLightingStatesByLevel) {
+        delete userData.levelLightingStatesByLevel[layout.maze.id]
+      }
+      onLightingResourcesChange(layout.maze.id, null)
+    }
+  }, [layout.maze.id, onLightingResourcesChange, scene])
 
   return (
     <LevelRenderTransformContext.Provider value={transform}>
@@ -15483,6 +15888,41 @@ function VisualControls({
   visualSettings: VisualSettings
 }) {
   const [activeTab, setActiveTab] = useState<VisualControlTabKey>('core')
+  const [performanceCapturePending, setPerformanceCapturePending] = useState(false)
+  const [performanceReport, setPerformanceReport] = useState(
+    'Press Capture to record the next second of live frames and controlled render-cost samples.'
+  )
+
+  const capturePerformanceReport = useCallback(async () => {
+    const globalWindow = window as Window & {
+      __levelsjamCapturePerformanceProfile?: (
+        options?: { liveDurationMs?: number; samples?: number }
+      ) => Promise<PerformanceProfileResult>
+    }
+
+    if (!globalWindow.__levelsjamCapturePerformanceProfile) {
+      setPerformanceReport('Performance profiler is not ready yet.')
+      return
+    }
+
+    setPerformanceCapturePending(true)
+    setPerformanceReport('Capturing performance profile...')
+
+    try {
+      const profile = await globalWindow.__levelsjamCapturePerformanceProfile({
+        liveDurationMs: 1000,
+        samples: 24
+      })
+
+      setPerformanceReport(profile.markdown)
+    } catch (error) {
+      setPerformanceReport(
+        `Performance capture failed: ${error instanceof Error ? error.message : String(error)}`
+      )
+    } finally {
+      setPerformanceCapturePending(false)
+    }
+  }, [])
 
   useEffect(() => {
     if (!controlsOpen) {
@@ -15490,7 +15930,8 @@ function VisualControls({
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
-      const tab = VISUAL_CONTROL_TABS.find((option) => option.hotkey === event.key)
+      const eventKey = event.key.toLowerCase()
+      const tab = VISUAL_CONTROL_TABS.find((option) => option.hotkey.toLowerCase() === eventKey)
 
       if (!tab) {
         return
@@ -17048,6 +17489,23 @@ function VisualControls({
           value={visualSettings.anamorphic.colorGain}
         />
           </label>
+        </>
+      ) : null}
+
+      {activeTab === 'performance' ? (
+        <>
+          <div className="visual-control-row">
+            <output>{performanceCapturePending ? 'running' : 'ready'}</output>
+            <span>Frame Profile</span>
+            <button
+              disabled={performanceCapturePending}
+              onClick={capturePerformanceReport}
+              type="button"
+            >
+              Capture
+            </button>
+          </div>
+          <pre className="visual-performance-report">{performanceReport}</pre>
         </>
       ) : null}
 
