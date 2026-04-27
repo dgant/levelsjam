@@ -98,6 +98,15 @@ test('initial turn state starts at the maze entrance facing inward', () => {
   assert.equal(state.monsters.length, 3)
 })
 
+test('initial turn state does not treat an absent trophy as held', () => {
+  const state = createInitialTurnState(testMaze({
+    trophy: null
+  }))
+
+  assert.equal(state.player.hasTrophy, false)
+  assert.equal(state.trophyState, 'consumed')
+})
+
 test('left-wall spiders prefer left, straight, right, then backwards', () => {
   assert.deepEqual(resolveAwakeSpiderMove('left', ['west', 'north', 'east', 'south']).cell, { x: 1, y: 2 })
   assert.equal(resolveAwakeSpiderMove('left', ['west', 'north', 'east', 'south']).direction, 'west')

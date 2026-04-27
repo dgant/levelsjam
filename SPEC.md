@@ -33,6 +33,7 @@
 - Each rendered level owns its own resident baked surface lightmap, volumetric-lightmap coefficients, and local reflection-probe textures.
 - The active level affects gameplay input, rules updates, debug focus, and loading-readiness bookkeeping; it does not determine which lighting/probe resources are bound to other rendered levels.
 - Adjacent rendered levels use their own lightmaps and probe data while they are visible from the current level, so walking across a boundary does not cause lighting bindings to churn or appear unlit until the destination becomes active.
+- Runtime lighting resources are owned and tracked per rendered level id; cleanup from the previously active level must not clear or replace the newly active level's lighting resources during a seamless boundary transition.
 - When precomputed visibility is enabled and the player's current visible cell set includes a level transition cell, the adjacent streamed level renders the cells that are precomputed-visible from that adjacent level's ingress cell rather than rendering the entire adjacent maze.
 - When precomputed visibility is disabled, adjacent streamed levels may render their full geometry for debugging.
 - Runtime level transitions do not synchronously fetch, decode, upload, instantiate, or shader-compile level assets at the moment the player crosses a boundary; that work is completed ahead of time for adjacent levels.
@@ -202,6 +203,7 @@
 - Generated pickup cells are selected so each pickup can host a same-cell torch against a valid wall side.
 - Before the player resolves a move, every gate adjacent to the player opens if no monster occupies the cell on the opposite side of that gate.
 - After the player resolves a move, every gate closes unless it is already closed.
+- Gates start visually closed and raised when a level is first instantiated; adjacent safe gates open only as part of resolving the player's next movement command.
 - Gates not adjacent to the player are closed in both the headless rules state and the rendered animation state.
 - Raised gates block player and monster movement exactly like walls.
 - Raised gates do not block monster line of sight to the player.
@@ -218,6 +220,7 @@
 - The sword mesh is oriented upside down when placed in the maze, with its tip pointing into the ground.
 - The trophy uses the `head_of_a_bull` model, scaled proportionally to `0.5m` tall, and starts resting on the ground in its cell.
 - The trophy runtime model uses an offline-resized texture set instead of the source asset's oversized `8k` texture so loading the page does not allocate hundreds of megabytes for a small prop.
+- Levels and mazes without a trophy represent trophy state as absent rather than held, so the player never starts with a held trophy unless they have actually picked one up.
 - When the player enters the sword cell without already holding a sword, the sword is picked up and attached to the first-person camera rig in the right hand.
 - When the player picks up the sword, the floor sword disappears and the held sword appears attached to the player camera for the active level.
 - When the player enters the trophy cell without already holding the trophy, the trophy is picked up and attached to the first-person camera rig in the left hand.

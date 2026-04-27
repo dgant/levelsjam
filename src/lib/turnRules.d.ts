@@ -35,7 +35,7 @@ export type TurnState = {
     hasTrophy: boolean
   }
   swordState: 'ground' | 'held' | 'consumed'
-  trophyState: 'ground' | 'held'
+  trophyState: 'ground' | 'held' | 'consumed'
   turn: number
 }
 

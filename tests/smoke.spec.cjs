@@ -256,17 +256,30 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
   )
 
   const state = await page.evaluate(() => ({
+    activeLighting: window.__levelsjamDebug?.getActiveLightingResourceState?.() ?? null,
     error: document.body.dataset.mazeLayoutLoadError ?? null,
     lighting: window.__levelsjamDebug?.getLevelLightingState?.() ?? [],
     lifecycle: window.__levelsjamDebug?.getMazeLifecycleState?.() ?? null,
     loadedMazeId: document.body.dataset.loadedMazeId ?? null,
-    requestedMazeId: document.body.dataset.requestedMazeId ?? null
+    requestedMazeId: document.body.dataset.requestedMazeId ?? null,
+    turn: window.__levelsjamDebug?.getTurnStateSummary?.() ?? null
   }))
 
   expect(state).toMatchObject({
     error: null,
     loadedMazeId: 'entrance',
     requestedMazeId: 'entrance'
+  })
+  expect(state.turn.player).toMatchObject({
+    hasSword: false,
+    hasTrophy: false
+  })
+  expect(state.turn.trophyState).toBe('consumed')
+  expect(state.activeLighting).toMatchObject({
+    activeMazeId: 'entrance',
+    hasActiveResources: true,
+    reflectionReady: true,
+    surfaceLightmapReady: true
   })
   expect(state.lifecycle.loadedMazeIds).toEqual(expect.arrayContaining(['entrance', 'chamber-1']))
   expect(state.lighting).toEqual(
@@ -353,6 +366,7 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
   )
 
   const transitionedState = await page.evaluate(() => ({
+    activeLighting: window.__levelsjamDebug?.getActiveLightingResourceState?.() ?? null,
     lifecycle: window.__levelsjamDebug?.getMazeLifecycleState?.() ?? null,
     camera: window.__levelsjamDebug?.getCameraState?.() ?? null,
     lighting: window.__levelsjamDebug?.getLevelLightingState?.() ?? [],
@@ -379,6 +393,15 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
       ])
     )
   expect(transitionedState.turn.escaped).toBe(false)
+  expect(transitionedState.activeLighting).toMatchObject({
+    activeMazeId: 'chamber-1',
+    hasActiveResources: true,
+    reflectionReady: true,
+    surfaceLightmapReady: true
+  })
+  expect(transitionedState.activeLighting.trackedMazeIds).toEqual(
+    expect.arrayContaining(['entrance', 'chamber-1'])
+  )
   expect(transitionedState.turn.player.cell).toEqual({ x: 2, y: 17 })
   expect(transitionedState.turn.player).toMatchObject({
     direction: 'north',

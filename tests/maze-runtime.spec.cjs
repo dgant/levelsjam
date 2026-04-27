@@ -76,6 +76,23 @@ test('maze runtime exposes gate/item/lifecycle and memory state', async ({ page 
 
   await waitForSceneReady(page, 'maze-001')
 
+  const initialGateYs = await page.evaluate(() => {
+    const positions = []
+
+    for (let index = 0; index < 8; index += 1) {
+      const position = window.__levelsjamDebug.getDebugPosition?.('maze-gate', index) ?? null
+
+      if (Array.isArray(position)) {
+        positions.push(position[1])
+      }
+    }
+
+    return positions
+  })
+
+  expect(initialGateYs.length).toBeGreaterThan(0)
+  expect(Math.min(...initialGateYs)).toBeGreaterThan(-0.25)
+
   await expect
     .poll(
       async () => page.evaluate(() => ({

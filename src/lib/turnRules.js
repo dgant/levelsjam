@@ -333,7 +333,7 @@ export function createInitialTurnState(maze) {
     })),
     player: createPlayerState(maze, playerDirection),
     swordState: maze.sword?.cell ? 'ground' : 'consumed',
-    trophyState: maze.trophy?.cell ? 'ground' : 'held',
+    trophyState: maze.trophy?.cell ? 'ground' : 'consumed',
     turn: 0
   }
 }

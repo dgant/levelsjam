@@ -3745,6 +3745,8 @@ function createSeamlessTargetTurnState({
     nextState.trophyState = nextState.trophyState === 'held'
       ? 'ground'
       : nextState.trophyState
+  } else {
+    nextState.trophyState = 'consumed'
   }
 
   return nextState
@@ -12687,10 +12689,7 @@ function FlightRig({
   )
 
   useEffect(() => {
-    if (
-      replayActive.current &&
-      turnState.turn < turnStateRef.current.turn
-    ) {
+    if (replayActive.current) {
       return
     }
 
@@ -12739,7 +12738,7 @@ function FlightRig({
       cameraEuler.set(DEFAULT_CAMERA_PITCH, yaw.current, 0, 'YXZ')
     )
     camera.updateMatrixWorld()
-    setDisplayedOpenGateIds(getOpenGateIds(layout.maze, nextState))
+    setDisplayedOpenGateIds([])
     setTurnState(nextState)
     onReplayActiveChange(replayActive.current)
   }, [camera, layout.maze, levelTransform, onReplayActiveChange, replayRequestId, replayRequestMazeId, setDisplayedOpenGateIds, setTurnState])
@@ -13017,7 +13016,7 @@ function FlightRig({
           }
           replayActive: boolean
           swordState: 'consumed' | 'ground' | 'held'
-          trophyState: 'ground' | 'held'
+          trophyState: 'ground' | 'held' | 'consumed'
           turn: number
         }
         getReplayControllerState?: () => {
@@ -13872,7 +13871,7 @@ function RuntimeLevelGeometry({
   layout,
   lightmapContributionIntensity,
   mountAllGeometry = false,
-  onActiveLightingResourcesChange,
+  onLightingResourcesChange,
   openGateIdsOverride = null,
   probeDebugMode,
   priorityPosition,
@@ -13889,7 +13888,7 @@ function RuntimeLevelGeometry({
   layout: MazeLayout
   lightmapContributionIntensity: number
   mountAllGeometry?: boolean
-  onActiveLightingResourcesChange: (resources: RuntimeLevelLightingResources | null) => void
+  onLightingResourcesChange: (mazeId: string, resources: RuntimeLevelLightingResources | null) => void
   openGateIdsOverride?: Set<string> | null
   probeDebugMode: ProbeDebugMode
   priorityPosition: { x: number; z: number }
@@ -13924,18 +13923,17 @@ function RuntimeLevelGeometry({
       surfaceLightmapReady: lightingResources.surfaceLightmap.ready
     }
 
+    onLightingResourcesChange(layout.maze.id, lightingResources)
+
     if (isActive) {
       scene.userData.reflectionProbeState = lightingResources.reflectionProbeState
-      onActiveLightingResourcesChange(lightingResources)
     }
 
     return () => {
       if (userData.levelLightingStatesByLevel) {
         delete userData.levelLightingStatesByLevel[layout.maze.id]
       }
-      if (isActive) {
-        onActiveLightingResourcesChange(null)
-      }
+      onLightingResourcesChange(layout.maze.id, null)
     }
   }, [
     isActive,
@@ -13943,7 +13941,7 @@ function RuntimeLevelGeometry({
     lightingResources,
     lightingResources.reflectionProbeState,
     lightingResources.surfaceLightmap.ready,
-    onActiveLightingResourcesChange,
+    onLightingResourcesChange,
     scene
   ])
 
@@ -14067,7 +14065,7 @@ function Scene({
   useEffect(() => {
     rawSetTurnState(initialTurnState)
     onTurnStateChange(layout.maze.id, initialTurnState)
-    setDisplayedOpenGateIds(getOpenGateIds(layout.maze, initialTurnState))
+    setDisplayedOpenGateIds([])
   }, [initialTurnState, layout.maze, onTurnStateChange])
   useEffect(() => {
     const wasAlreadyReady = hasReportedBasicAssetsReady.current
@@ -14099,13 +14097,14 @@ function Scene({
   const gl = useThree((state) => state.gl)
   const camera = useThree((state) => state.camera)
   const scene = useThree((state) => state.scene)
-  const [activeLightingResources, setActiveLightingResources] = useState<RuntimeLevelLightingResources | null>(null)
+  const [levelLightingResources, setLevelLightingResources] = useState<Map<string, RuntimeLevelLightingResources>>(() => new Map())
   const composerRef = useRef<PostEffectComposer | null>(null)
   const environmentIntensity = BAKED_ENVIRONMENT_INTENSITY
   const fallbackProbeCoefficientTextures = useProbeCoefficientTextures(
     layout,
     []
   ) as [Texture, Texture, Texture, Texture]
+  const activeLightingResources = levelLightingResources.get(layout.maze.id) ?? null
   const environmentTexture = activeLightingResources?.environmentTexture ?? null
   const reflectionProbeCoefficients = activeLightingResources?.reflectionProbeCoefficients ?? []
   const reflectionProbeDepthTextures = activeLightingResources?.reflectionProbeDepthTextures ?? []
@@ -14119,12 +14118,40 @@ function Scene({
     () => new Set(displayedOpenGateIds),
     [displayedOpenGateIds]
   )
+  const closedGateIds = useMemo(() => new Set<string>(), [])
   const stagedRenderedLayouts = useMemo(
     () => startupAdjacentLevelsMounted
       ? renderedLayouts
       : renderedLayouts.filter((renderedLayout) => renderedLayout.maze.id === layout.maze.id),
     [layout.maze.id, renderedLayouts, startupAdjacentLevelsMounted]
   )
+  const handleLevelLightingResourcesChange = useCallback((
+    mazeId: string,
+    resources: RuntimeLevelLightingResources | null
+  ) => {
+    setLevelLightingResources((current) => {
+      const existing = current.get(mazeId)
+
+      if (resources === null) {
+        if (!current.has(mazeId)) {
+          return current
+        }
+        const next = new Map(current)
+
+        next.delete(mazeId)
+        return next
+      }
+
+      if (existing === resources) {
+        return current
+      }
+
+      const next = new Map(current)
+
+      next.set(mazeId, resources)
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -14268,6 +14295,13 @@ function Scene({
           startupVolumetricProbeCount: number | null
           surfaceLightmapReady: boolean
         }>
+        getActiveLightingResourceState?: () => {
+          activeMazeId: string
+          hasActiveResources: boolean
+          reflectionReady: boolean
+          surfaceLightmapReady: boolean
+          trackedMazeIds: string[]
+        }
         setDebugVisible?: (
           role: string,
           index: number,
@@ -14410,6 +14444,13 @@ function Scene({
           surfaceLightmapReady: Boolean(state.surfaceLightmapReady)
         }))
     }
+    const getActiveLightingResourceState = () => ({
+      activeMazeId: layout.maze.id,
+      hasActiveResources: Boolean(activeLightingResources),
+      reflectionReady: Boolean(activeLightingResources?.reflectionProbeState.ready),
+      surfaceLightmapReady: Boolean(activeLightingResources?.surfaceLightmap.ready),
+      trackedMazeIds: Array.from(levelLightingResources.keys()).sort()
+    })
     const getSceneObjectStats = () => {
       const effectivelyVisible: Record<string, number> = {}
       const mounted: Record<string, number> = {}
@@ -14995,6 +15036,7 @@ function Scene({
       captureReflectionProbeWallMaterialContinuum,
       clearDebugIsolation,
       getFogState,
+      getActiveLightingResourceState,
       getLevelLightingState,
       getReflectionCaptureSceneState: getReflectionCaptureSceneStateDebug,
       getRendererStats: () => ({
@@ -15024,6 +15066,7 @@ function Scene({
       delete globalWindow.__levelsjamDebug.captureReflectionProbeWallMaterialContinuum
       delete globalWindow.__levelsjamDebug.clearDebugIsolation
       delete globalWindow.__levelsjamDebug.getFogState
+      delete globalWindow.__levelsjamDebug.getActiveLightingResourceState
       delete globalWindow.__levelsjamDebug.getLevelLightingState
       delete globalWindow.__levelsjamDebug.getReflectionCaptureSceneState
       delete globalWindow.__levelsjamDebug.getRendererStats
@@ -15036,7 +15079,7 @@ function Scene({
         delete globalWindow.__levelsjamDebug
       }
     }
-  }, [environmentIntensity, environmentTexture, gl, layout, reflectionProbeDepthTextures, reflectionProbeRawTextures, reflectionProbeTextures, scene])
+  }, [activeLightingResources, environmentIntensity, environmentTexture, gl, layout, levelLightingResources, reflectionProbeDepthTextures, reflectionProbeRawTextures, reflectionProbeTextures, scene])
 
   const ambientOcclusionActive = isAmbientOcclusionActive(visualSettings)
   const bloomActive = isEffectActive(visualSettings.bloom)
@@ -15146,8 +15189,8 @@ function Scene({
               layout={renderedLayout}
               lightmapContributionIntensity={runtimeLightmapIntensity}
               mountAllGeometry={startupGeometryExpanded}
-              onActiveLightingResourcesChange={setActiveLightingResources}
-              openGateIdsOverride={isActive ? activeOpenGateIds : null}
+              onLightingResourcesChange={handleLevelLightingResourcesChange}
+              openGateIdsOverride={isActive ? activeOpenGateIds : closedGateIds}
               probeDebugMode={isActive ? visualSettings.probeDebugMode : 'none'}
               priorityPosition={{
                 x: priorityLocalPosition.x,
