@@ -1649,6 +1649,14 @@ test('four forward moves keep Chamber 1 surfaces lit with postprocessing disable
     undefined,
     { timeout: 30_000 }
   )
+  await page.waitForTimeout(500)
+  const postReadyState = await page.evaluate(() => ({
+    lifecycle: window.__levelsjamDebug?.getMazeLifecycleState?.() ?? null,
+    turn: window.__levelsjamDebug?.getTurnStateSummary?.() ?? null
+  }))
+
+  expect(postReadyState.lifecycle.instantiatedMazeId).toBe('entrance')
+  expect(postReadyState.turn.player.cell).toEqual({ x: 1, y: 2 })
   await page.evaluate(() => {
     window.__levelsjamDebug?.setVisualSettings?.({
       ambientOcclusionMode: 'off',
@@ -1671,18 +1679,30 @@ test('four forward moves keep Chamber 1 surfaces lit with postprocessing disable
 
   for (const expectedState of expectedStates) {
     await page.keyboard.press('KeyW')
-    await page.waitForFunction(
-      (state) => {
-        const lifecycle = window.__levelsjamDebug?.getMazeLifecycleState?.()
-        const player = window.__levelsjamDebug?.getTurnStateSummary?.()?.player
+    try {
+      await page.waitForFunction(
+        (state) => {
+          const lifecycle = window.__levelsjamDebug?.getMazeLifecycleState?.()
+          const player = window.__levelsjamDebug?.getTurnStateSummary?.()?.player
 
-        return lifecycle?.instantiatedMazeId === state.maze &&
-          player?.cell?.x === state.cell.x &&
-          player?.cell?.y === state.cell.y
-      },
-      expectedState,
-      { timeout: 10_000 }
-    )
+          return lifecycle?.instantiatedMazeId === state.maze &&
+            player?.cell?.x === state.cell.x &&
+            player?.cell?.y === state.cell.y
+        },
+        expectedState,
+        { timeout: 10_000 }
+      )
+    } catch (error) {
+      const observedState = await page.evaluate(() => ({
+        lifecycle: window.__levelsjamDebug?.getMazeLifecycleState?.() ?? null,
+        pendingLevelTransitionId: document.body.dataset.pendingLevelTransitionId ?? null,
+        turn: window.__levelsjamDebug?.getTurnStateSummary?.() ?? null
+      }))
+
+      throw new Error(
+        `Timed out waiting for ${JSON.stringify(expectedState)}; observed ${JSON.stringify(observedState)}; ${error}`
+      )
+    }
     await page.waitForTimeout(100)
   }
 
@@ -1721,6 +1741,135 @@ test('four forward moves keep Chamber 1 surfaces lit with postprocessing disable
   expect(centerFrame.max).toBeGreaterThan(120)
   expect(floorFrame.average).toBeGreaterThan(7)
   expect(floorFrame.max).toBeGreaterThan(25)
+  expect(consoleErrors).toEqual([])
+  expect(pageErrors).toEqual([])
+})
+
+test('startup turn input waits for streamed lighting resources before moving', async ({ page }) => {
+  const consoleErrors = []
+  const pageErrors = []
+  let delayedRequestCount = 0
+  let releaseDelayedResources = () => {}
+  const delayedResourcesReleased = new Promise((resolve) => {
+    releaseDelayedResources = resolve
+  })
+
+  page.on('console', (message) => {
+    if (message.type() === 'error') {
+      consoleErrors.push(message.text())
+    }
+  })
+
+  page.on('pageerror', (error) => {
+    pageErrors.push(String(error))
+  })
+
+  await page.route(
+    /\/maze-data\/chamber-1\/(?:surface-lightmap-rgbe\.rgbe|probe-assets\.json)$/,
+    async (route) => {
+      delayedRequestCount += 1
+      await delayedResourcesReleased
+      await route.continue()
+    }
+  )
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await page.waitForFunction(
+    () => typeof window.__levelsjamDebug?.getTurnStateSummary === 'function',
+    undefined,
+    { timeout: 30_000 }
+  )
+
+  for (let index = 0; index < 4; index += 1) {
+    await page.keyboard.press('KeyW')
+  }
+
+  await page.waitForTimeout(1_200)
+
+  const blockedState = await page.evaluate(() => ({
+    lifecycle: window.__levelsjamDebug?.getMazeLifecycleState?.() ?? null,
+    turn: window.__levelsjamDebug?.getTurnStateSummary?.() ?? null
+  }))
+
+  expect(blockedState.lifecycle.instantiatedMazeId).toBe('entrance')
+  expect(blockedState.lifecycle.sceneLoaded).toBe(false)
+  expect(blockedState.turn.player.cell).toEqual({ x: 1, y: 2 })
+  expect(delayedRequestCount).toBeGreaterThan(0)
+
+  releaseDelayedResources()
+
+  await page.waitForFunction(
+    () => document.querySelector('canvas')?.dataset.sceneReady === 'true',
+    undefined,
+    { timeout: 30_000 }
+  )
+  await page.evaluate(() => {
+    window.__levelsjamDebug?.setVisualSettings?.({
+      ambientOcclusionMode: 'off',
+      anamorphic: { enabled: false, intensity: 0 },
+      bloom: { enabled: false },
+      depthOfField: { enabled: false, bokehScale: 0 },
+      lensFlare: { enabled: false, intensity: 0 },
+      ssr: { enabled: false, intensity: 0 },
+      vignette: { enabled: false, intensity: 0 },
+      volumetricLighting: { enabled: false, intensity: 0 }
+    })
+  })
+
+  const expectedStates = [
+    { maze: 'entrance', cell: { x: 1, y: 1 } },
+    { maze: 'entrance', cell: { x: 1, y: 0 } },
+    { maze: 'chamber-1', cell: { x: 2, y: 17 } },
+    { maze: 'chamber-1', cell: { x: 2, y: 16 } }
+  ]
+
+  for (const expectedState of expectedStates) {
+    await page.keyboard.press('KeyW')
+    try {
+      await page.waitForFunction(
+        (state) => {
+          const lifecycle = window.__levelsjamDebug?.getMazeLifecycleState?.()
+          const player = window.__levelsjamDebug?.getTurnStateSummary?.()?.player
+
+          return lifecycle?.instantiatedMazeId === state.maze &&
+            player?.cell?.x === state.cell.x &&
+            player?.cell?.y === state.cell.y
+        },
+        expectedState,
+        { timeout: 10_000 }
+      )
+    } catch (error) {
+      const observedState = await page.evaluate(() => ({
+        lifecycle: window.__levelsjamDebug?.getMazeLifecycleState?.() ?? null,
+        pendingLevelTransitionId: document.body.dataset.pendingLevelTransitionId ?? null,
+        turn: window.__levelsjamDebug?.getTurnStateSummary?.() ?? null
+      }))
+
+      throw new Error(
+        `Timed out waiting for ${JSON.stringify(expectedState)}; observed ${JSON.stringify(observedState)}; ${error}`
+      )
+    }
+    await page.waitForTimeout(100)
+  }
+
+  const readyState = await page.evaluate(() => ({
+    lifecycle: window.__levelsjamDebug?.getMazeLifecycleState?.() ?? null,
+    lighting: window.__levelsjamDebug?.getLevelLightingState?.() ?? [],
+    turn: window.__levelsjamDebug?.getTurnStateSummary?.() ?? null
+  }))
+
+  expect(readyState.lifecycle.instantiatedMazeId).toBe('chamber-1')
+  expect(readyState.turn.player.cell).toEqual({ x: 2, y: 16 })
+  expect(readyState.lighting).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        mazeId: 'chamber-1',
+        ready: true,
+        reflectionReady: true,
+        surfaceLightmapReady: true
+      })
+    ])
+  )
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
 })

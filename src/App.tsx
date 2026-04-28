@@ -14359,6 +14359,8 @@ function TorchLensFlare({
 }
 
 function FlightRig({
+  inputEnabled,
+  isLevelLightingReady,
   layout,
   levelTransform,
   movementSettings,
@@ -14371,6 +14373,8 @@ function FlightRig({
   turnState,
   wallBounds
 }: {
+  inputEnabled: boolean
+  isLevelLightingReady: (mazeId: string) => boolean
   layout: MazeLayout
   levelTransform: LevelWorldTransform
   movementSettings: MovementSettings
@@ -14412,6 +14416,9 @@ function FlightRig({
   const replayActive = useRef(false)
   const lastHandledReplayRequestId = useRef(0)
   const turnStateRef = useRef(turnState)
+  const inputEnabledRef = useRef(inputEnabled)
+  const inputEnabledAt = useRef(inputEnabled ? performance.now() : Number.POSITIVE_INFINITY)
+  const isLevelLightingReadyRef = useRef(isLevelLightingReady)
   const hasInitializedPose = useRef(false)
   const cameraShake = useRef({ amplitude: 0, endsAt: 0 })
   const playerAnimation = useRef<{
@@ -14451,6 +14458,19 @@ function FlightRig({
 
     turnStateRef.current = turnState
   }, [turnState])
+
+  useEffect(() => {
+    inputEnabledRef.current = inputEnabled
+    inputEnabledAt.current = inputEnabled
+      ? performance.now()
+      : Number.POSITIVE_INFINITY
+    inputQueue.current = []
+    keys.current = {}
+  }, [inputEnabled])
+
+  useEffect(() => {
+    isLevelLightingReadyRef.current = isLevelLightingReady
+  }, [isLevelLightingReady])
 
   useEffect(() => {
     if (
@@ -14583,8 +14603,13 @@ function FlightRig({
   }, [camera, canvas])
 
   useEffect(() => {
-    const queueTurnAction = (queuedAction: TurnAction) => {
+    const queueTurnAction = (
+      queuedAction: TurnAction,
+      eventTimeStamp = performance.now()
+    ) => {
       if (
+        !inputEnabledRef.current ||
+        eventTimeStamp < inputEnabledAt.current ||
         freeCamera.current ||
         replayActive.current ||
         inputQueue.current.length >= MAX_BUFFERED_TURN_COMMANDS
@@ -14606,7 +14631,7 @@ function FlightRig({
         action === 'rotate-left' ||
         action === 'rotate-right'
       ) {
-        queueTurnAction(action)
+        queueTurnAction(action, event.timeStamp)
       }
     }
 
@@ -14656,8 +14681,15 @@ function FlightRig({
 
         if (queuedAction) {
           event.preventDefault()
+          if (
+            !inputEnabledRef.current ||
+            event.timeStamp < inputEnabledAt.current
+          ) {
+            keys.current[event.code] = false
+            return
+          }
           if (!keys.current[event.code]) {
-            queueTurnAction(queuedAction)
+            queueTurnAction(queuedAction, event.timeStamp)
           }
           keys.current[event.code] = true
           return
@@ -15355,6 +15387,9 @@ function FlightRig({
       getReplayControllerState: () => ({
         animationSpeedMultiplier: globalAnimationSpeedMultiplier,
         freeCamera: freeCamera.current,
+        inputEnabled: inputEnabledRef.current,
+        inputEnabledAt: inputEnabledAt.current,
+        inputQueueLength: inputQueue.current.length,
         playerAnimationAction: playerAnimation.current?.action ?? null,
         replayActive: replayActive.current,
         replayQueueLength: replayQueue.current.length
@@ -15463,8 +15498,12 @@ function FlightRig({
     try {
       if (!freeCamera.current) {
       if (!playerAnimation.current) {
-        const replayAction = replayQueue.current.shift()
-        const action = replayAction ?? inputQueue.current.shift()
+        const replayAction = inputEnabledRef.current
+          ? replayQueue.current.shift()
+          : undefined
+        const action = inputEnabledRef.current
+          ? replayAction ?? inputQueue.current.shift()
+          : undefined
 
         if (action) {
           if (!replayAction) {
@@ -15546,64 +15585,78 @@ function FlightRig({
         displayState = activeAnimation.to
 
         if (animationAlpha >= 1) {
+          let waitingForLevelLighting = false
+
           if (activeAnimation.levelTransition) {
+            const targetLevelId = activeAnimation.levelTransition.targetLevelId
+
+            if (!isLevelLightingReadyRef.current(targetLevelId)) {
+              waitingForLevelLighting = true
+              document.body.dataset.pendingLevelTransitionId = targetLevelId
+              document.body.dataset.pendingLevelTransitionSince ??= performance.now().toFixed(1)
+            } else {
+              delete document.body.dataset.pendingLevelTransitionId
+              delete document.body.dataset.pendingLevelTransitionSince
+              playerAnimation.current = null
+              turnStateRef.current = activeAnimation.to
+              inputQueue.current = []
+              replayQueue.current = []
+              if (replayActive.current) {
+                replayActive.current = false
+                onReplayActiveChange(false)
+              }
+              onLevelTransition({
+                sourceLevelId: layout.maze.id,
+                sourcePreviousState: activeAnimation.from,
+                sourceState: activeAnimation.to,
+                targetLevelId
+              })
+              return
+            }
+          }
+
+          if (!waitingForLevelLighting) {
+            const finalState = activeAnimation.killed
+              ? resetTurnStateToCheckpoint(layout.maze, activeAnimation.to)
+              : activeAnimation.to
+
+            turnStateRef.current = finalState
+            setTurnState(finalState)
             playerAnimation.current = null
-            turnStateRef.current = activeAnimation.to
-            inputQueue.current = []
-            replayQueue.current = []
-            if (replayActive.current) {
+            setDisplayedOpenGateIds(getOpenGateIds(layout.maze, finalState))
+
+            if (
+              activeAnimation.playerEffect === 'death' ||
+              activeAnimation.playerEffect === 'sword-strike'
+            ) {
+              if (playerEffectClearTimeout.current !== null) {
+                window.clearTimeout(playerEffectClearTimeout.current)
+                playerEffectClearTimeout.current = null
+              }
+
+              if (activeAnimation.playerEffect === 'sword-strike') {
+                document.body.dataset.playerEffect = 'sword-strike-out'
+                playerEffectClearTimeout.current = window.setTimeout(() => {
+                  if (document.body.dataset.playerEffect === 'sword-strike-out') {
+                    delete document.body.dataset.playerEffect
+                  }
+                  playerEffectClearTimeout.current = null
+                }, 375)
+              } else {
+                document.body.dataset.playerEffect = 'death-out'
+                playerEffectClearTimeout.current = window.setTimeout(() => {
+                  if (document.body.dataset.playerEffect === 'death-out') {
+                    delete document.body.dataset.playerEffect
+                  }
+                  playerEffectClearTimeout.current = null
+                }, 1000)
+              }
+            }
+
+            if (replayActive.current && replayQueue.current.length === 0) {
               replayActive.current = false
               onReplayActiveChange(false)
             }
-            onLevelTransition({
-              sourceLevelId: layout.maze.id,
-              sourcePreviousState: activeAnimation.from,
-              sourceState: activeAnimation.to,
-              targetLevelId: activeAnimation.levelTransition.targetLevelId
-            })
-            return
-          }
-
-          const finalState = activeAnimation.killed
-            ? resetTurnStateToCheckpoint(layout.maze, activeAnimation.to)
-            : activeAnimation.to
-
-          turnStateRef.current = finalState
-          setTurnState(finalState)
-          playerAnimation.current = null
-          setDisplayedOpenGateIds(getOpenGateIds(layout.maze, finalState))
-
-          if (
-            activeAnimation.playerEffect === 'death' ||
-            activeAnimation.playerEffect === 'sword-strike'
-          ) {
-            if (playerEffectClearTimeout.current !== null) {
-              window.clearTimeout(playerEffectClearTimeout.current)
-              playerEffectClearTimeout.current = null
-            }
-
-            if (activeAnimation.playerEffect === 'sword-strike') {
-              document.body.dataset.playerEffect = 'sword-strike-out'
-              playerEffectClearTimeout.current = window.setTimeout(() => {
-                if (document.body.dataset.playerEffect === 'sword-strike-out') {
-                  delete document.body.dataset.playerEffect
-                }
-                playerEffectClearTimeout.current = null
-              }, 375)
-            } else {
-              document.body.dataset.playerEffect = 'death-out'
-              playerEffectClearTimeout.current = window.setTimeout(() => {
-                if (document.body.dataset.playerEffect === 'death-out') {
-                  delete document.body.dataset.playerEffect
-                }
-                playerEffectClearTimeout.current = null
-              }, 1000)
-            }
-          }
-
-          if (replayActive.current && replayQueue.current.length === 0) {
-            replayActive.current = false
-            onReplayActiveChange(false)
           }
         }
       }
@@ -15717,6 +15770,8 @@ function FlightRig({
       ) {
         delete document.body.dataset.playerEffect
       }
+      delete document.body.dataset.pendingLevelTransitionId
+      delete document.body.dataset.pendingLevelTransitionSince
       onReplayActiveChange(false)
       setDisplayedOpenGateIds([])
     }
@@ -16010,6 +16065,17 @@ function Scene({
       return next
     })
   }, [])
+  const isLevelLightingReadyForTransition = useCallback(
+    (mazeId: string) => {
+      const resources = levelLightingResources.get(mazeId)
+
+      return Boolean(
+        resources?.surfaceLightmap.ready &&
+        resources.reflectionProbeState.ready
+      )
+    },
+    [levelLightingResources]
+  )
   const worldLightingRegistry = useMemo<WorldLightingRegistryEntry[]>(
     () => runtimeRenderedLayouts
       .map((renderedLayout) => {
@@ -17257,6 +17323,8 @@ function Scene({
       </EffectComposer>
         ) : null}
           <FlightRig
+            inputEnabled={startupSceneReady}
+            isLevelLightingReady={isLevelLightingReadyForTransition}
             layout={layout}
             levelTransform={levelTransform}
             movementSettings={visualSettings.movement}

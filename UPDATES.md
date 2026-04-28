@@ -128,3 +128,4 @@
 - Shared texture readiness flags should be owned by the shared asset, not by individual level component lifetimes. If multiple rendered levels mount the same atlas, one level unmounting must not clear the global "loaded" marker while the shared texture remains resident.
 - Do not put whole-scene `WebGLRenderer.compileAsync` on the loading-overlay critical path unless current trace data proves it is actually asynchronous. In this project it produced a multi-second Chromium/ANGLE main-thread stall during startup.
 - When taking screenshots to test baked lighting or material lighting in this project, disable postprocess passes unless the postprocess pass itself is the subject of the test.
+- When a graphical bug has a legitimate non-repro, continue with an analytical timing/lifecycle failure model and add a delayed-resource or otherwise adversarial test for the plausible race instead of treating the non-repro as closure.
