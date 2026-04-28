@@ -1884,8 +1884,9 @@ test('default postprocessing survives the Entrance to Chamber 1 transition', asy
   expect(state.fog?.trackedMazeIds ?? []).toEqual(
     expect.arrayContaining(['entrance', 'chamber-1', 'maze-001', 'maze-002', 'maze-003', 'maze-005'])
   )
-  expect(state.fog?.maxAtlasCount).toBe(1)
-  expect(state.fog?.selectedAtlasCount).toBe(1)
+  expect(state.fog?.maxAtlasCount).toBe(4)
+  expect(state.fog?.selectedAtlasCount).toBeGreaterThanOrEqual(1)
+  expect(state.fog?.selectedAtlasCount).toBeLessThanOrEqual(4)
   expect(state.worldLighting).toMatchObject({
     activeMazeId: 'chamber-1',
     ready: true

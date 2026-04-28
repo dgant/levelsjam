@@ -101,21 +101,6 @@ function openRoomEdges(width, height) {
   return edges
 }
 
-function withoutEdges(edges, blockedEdges) {
-  const blocked = new Set(blockedEdges.map(({ from, to }) => {
-    const a = `${from.x},${from.y}`
-    const b = `${to.x},${to.y}`
-    return a < b ? `${a}|${b}` : `${b}|${a}`
-  }))
-
-  return edges.filter(({ from, to }) => {
-    const a = `${from.x},${from.y}`
-    const b = `${to.x},${to.y}`
-    const key = a < b ? `${a}|${b}` : `${b}|${a}`
-    return !blocked.has(key)
-  })
-}
-
 function createAuthoredMazeDefinition(id) {
   if (id === 'entrance') {
     return {
@@ -139,8 +124,8 @@ function createAuthoredMazeDefinition(id) {
       monsters: [],
       openEdges: openRoomEdges(3, 3),
       opening: {
-        cell: { x: 1, y: 2 },
-        side: 'south'
+        cell: { x: 1, y: 0 },
+        side: 'north'
       },
       playerStart: {
         cell: { x: 1, y: 2 },
@@ -154,11 +139,13 @@ function createAuthoredMazeDefinition(id) {
 
   if (id === 'chamber-1') {
     return {
-      exitRequiresTrophy: false,
-      exteriorOpenings: [
-        { cell: { x: 1, y: 17 }, side: 'south' },
-        { cell: { x: 3, y: 17 }, side: 'south' }
+      altars: [
+        { cell: { x: 0, y: 2 }, targetLevelId: 'maze-001' },
+        { cell: { x: 0, y: 11 }, targetLevelId: 'maze-002' },
+        { cell: { x: 4, y: 2 }, targetLevelId: 'maze-003' },
+        { cell: { x: 4, y: 11 }, targetLevelId: 'maze-005' }
       ],
+      exitRequiresTrophy: false,
       gates: [],
       height: 18,
       id,
@@ -182,13 +169,7 @@ function createAuthoredMazeDefinition(id) {
         { cell: { x: 4, y: 13 }, side: 'east' }
       ],
       monsters: [],
-      openEdges: withoutEdges(
-        openRoomEdges(5, 18),
-        [
-          { from: { x: 1, y: 17 }, to: { x: 2, y: 17 } },
-          { from: { x: 2, y: 17 }, to: { x: 3, y: 17 } }
-        ]
-      ),
+      openEdges: openRoomEdges(5, 18),
       opening: {
         cell: { x: 2, y: 17 },
         side: 'south'

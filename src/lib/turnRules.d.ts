@@ -97,6 +97,7 @@ export declare function getExitForMove(
   side: CardinalDirection
   targetLevelId?: string
 } | null
+export declare function getOpenDoorIds(maze: unknown, state: TurnState): string[]
 export declare function getOpenGateIds(maze: unknown, state: TurnState): string[]
 export declare function getVisibleCells(maze: unknown, state: TurnState): Set<string>
 export declare function normalizeEdge(from: MazeCell, to: MazeCell): string

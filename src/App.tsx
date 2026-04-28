@@ -160,6 +160,7 @@ import {
   applyTurnAction,
   cellKey,
   createInitialTurnState,
+  getOpenDoorIds,
   getOpenGateIds,
   resetTurnStateToCheckpoint,
   type CardinalDirection,
@@ -197,6 +198,7 @@ const MONSTER_MODEL_URLS = {
 const GATE_MODEL_URL = `${assetBase}models/metal_gate_runtime/scene.gltf`
 const SWORD_MODEL_URL = `${assetBase}models/bronze_sword_mycean/scene.gltf`
 const TROPHY_MODEL_URL = `${assetBase}models/head_of_a_bull_runtime/scene.gltf`
+const DROOP_CUP_MODEL_URL = `${assetBase}models/droop_cup_4th_century_bc/scene.gltf`
 const PUDDLE_TEXTURE_URLS = {
   color: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_Diffuse.jpg`,
   gloss: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_Gloss.jpg`,
@@ -244,7 +246,8 @@ const POINTER_UNLOCK_CODES = new Set([
 const PUDDLE_TEXTURE_REPEAT = 60
 const WALL_TEXTURE_REPEAT = 2
 const METAL_TEXTURE_REPEAT = 1
-const DOOR_TEXTURE_REPEAT = WALL_TEXTURE_REPEAT
+const DOOR_HEIGHT = 1.8
+const DOOR_TEXTURE_REPEAT = WALL_TEXTURE_REPEAT * (DOOR_HEIGHT / WALL_HEIGHT)
 const LOADING_FADE_DURATION_MS = 2000
 const FIRE_FLIPBOOK_GRID = 6
 const FIRE_FLIPBOOK_FRAME_COUNT = FIRE_FLIPBOOK_GRID * FIRE_FLIPBOOK_GRID
@@ -968,11 +971,11 @@ const REFLECTION_PROBE_RENDER_SIZE = 32
 const REFLECTION_PROBE_AMBIENT_RENDER_SIZE = 24
 const REFLECTION_PROBE_FAR = 48
 const REFLECTION_PROBE_LOAD_CONCURRENCY = 8
-const REFLECTION_PROBE_BACKGROUND_LOAD_CONCURRENCY = 1
+const REFLECTION_PROBE_BACKGROUND_LOAD_CONCURRENCY = 4
 const REFLECTION_PROBE_PUBLISH_INTERVAL_MS = 250
-const REFLECTION_PROBE_RUNTIME_RESIDENT_LIMIT = 64
+const REFLECTION_PROBE_RUNTIME_RESIDENT_LIMIT = 32
 const REFLECTION_PROBE_RUNTIME_TEXTURE_MEMORY_BUDGET_BYTES = 768 * 1024 * 1024
-const REFLECTION_PROBE_STARTUP_DELAY_MS = 60000
+const REFLECTION_PROBE_STARTUP_DELAY_MS = 0
 const REFLECTION_PROBE_STARTUP_CAPTURE_DELAY_MS = 250
 const REFLECTION_PROBE_BACKGROUND_CAPTURE_DELAY_MS = 1000
 const REFLECTION_PROBE_EMISSIVE_RADIUS = 0.16
@@ -980,7 +983,7 @@ const REFLECTION_PROBE_EMISSIVE_SCALE = 2
 const STARTUP_VOLUMETRIC_PROBE_READY_RADIUS = 12
 const FOG_VOLUME_HEIGHT = 6
 const FOG_EXTINCTION_SCALE = 1
-const MAX_ACTIVE_FOG_VLM_ATLASES = 1
+const MAX_ACTIVE_FOG_VLM_ATLASES = 4
 const DEFAULT_VOLUMETRIC_AMBIENT_HEX = '#2c2c68'
 const DEFAULT_VOLUMETRIC_FOG_DISTANCE = 12
 const EFFECT_EPSILON = 0.0001
@@ -1121,19 +1124,24 @@ uniform float noiseFrequency;
 uniform float noisePeriod;
 uniform float noiseStrength;
 uniform sampler3D fogNoiseTexture;
-uniform vec4 probeAmbientBounds;
-uniform vec2 probeAmbientGrid;
-uniform vec2 probeWorldOrigin;
-uniform vec2 probeWorldRotation;
-uniform sampler2D probeCoeffTextureL0;
-uniform sampler2D probeConnectivityTexture;
+uniform float activeProbeAtlasCount;
+uniform vec4 probeAmbientBounds[${MAX_ACTIVE_FOG_VLM_ATLASES}];
+uniform vec2 probeAmbientGrid[${MAX_ACTIVE_FOG_VLM_ATLASES}];
+uniform vec2 probeWorldOrigin[${MAX_ACTIVE_FOG_VLM_ATLASES}];
+uniform vec2 probeWorldRotation[${MAX_ACTIVE_FOG_VLM_ATLASES}];
+uniform sampler2D probeCoeffTextureL0_0;
+uniform sampler2D probeCoeffTextureL0_1;
+uniform sampler2D probeCoeffTextureL0_2;
+uniform sampler2D probeCoeffTextureL0_3;
+uniform sampler2D probeConnectivityTexture_0;
+uniform sampler2D probeConnectivityTexture_1;
+uniform sampler2D probeConnectivityTexture_2;
+uniform sampler2D probeConnectivityTexture_3;
 uniform float probeHeight;
-uniform sampler2D probeAmbientTexture;
 uniform float rayStepCount;
 uniform float time;
 uniform float useProbeCoefficientTexture;
 uniform float useProbeConnectivity;
-uniform float useProbeAmbientTexture;
 uniform float volumeHeight;
 
 float hash(vec3 p) {
@@ -1150,25 +1158,62 @@ float fogProbeCellSize(float span, float gridCount) {
   return gridCount > 1.5 ? span / (gridCount - 1.0) : ${MAZE_CELL_SIZE.toFixed(1)};
 }
 
-vec2 fogClampProbeGridCell(vec2 cell) {
-  return clamp(cell, vec2(0.0), max(probeAmbientGrid - vec2(1.0), vec2(0.0)));
+vec4 fogAtlasBounds(int atlasIndex) {
+  if (atlasIndex == 0) { return probeAmbientBounds[0]; }
+  if (atlasIndex == 1) { return probeAmbientBounds[1]; }
+  if (atlasIndex == 2) { return probeAmbientBounds[2]; }
+  return probeAmbientBounds[3];
 }
 
-vec2 fogProbeGridCellToUv(vec2 cell) {
-  return (fogClampProbeGridCell(cell) + vec2(0.5)) / max(probeAmbientGrid, vec2(1.0));
+vec2 fogAtlasGrid(int atlasIndex) {
+  if (atlasIndex == 0) { return probeAmbientGrid[0]; }
+  if (atlasIndex == 1) { return probeAmbientGrid[1]; }
+  if (atlasIndex == 2) { return probeAmbientGrid[2]; }
+  return probeAmbientGrid[3];
 }
 
-vec2 fogProbeGridCellToWorld(vec2 cell) {
-  return vec2(
-    probeAmbientBounds.x + (cell.x * fogProbeCellSize(probeAmbientBounds.z, probeAmbientGrid.x)),
-    probeAmbientBounds.y + (cell.y * fogProbeCellSize(probeAmbientBounds.w, probeAmbientGrid.y))
-  );
+vec2 fogAtlasWorldOrigin(int atlasIndex) {
+  if (atlasIndex == 0) { return probeWorldOrigin[0]; }
+  if (atlasIndex == 1) { return probeWorldOrigin[1]; }
+  if (atlasIndex == 2) { return probeWorldOrigin[2]; }
+  return probeWorldOrigin[3];
 }
 
-vec2 fogWorldToProbeLocal(vec3 worldPosition) {
-  vec2 delta = vec2(worldPosition.x, worldPosition.z) - probeWorldOrigin;
-  float c = probeWorldRotation.x;
-  float s = probeWorldRotation.y;
+vec2 fogAtlasWorldRotation(int atlasIndex) {
+  if (atlasIndex == 0) { return probeWorldRotation[0]; }
+  if (atlasIndex == 1) { return probeWorldRotation[1]; }
+  if (atlasIndex == 2) { return probeWorldRotation[2]; }
+  return probeWorldRotation[3];
+}
+
+vec4 fogSampleProbeCoeff(int atlasIndex, vec2 uv) {
+  if (atlasIndex == 0) { return texture2D(probeCoeffTextureL0_0, uv); }
+  if (atlasIndex == 1) { return texture2D(probeCoeffTextureL0_1, uv); }
+  if (atlasIndex == 2) { return texture2D(probeCoeffTextureL0_2, uv); }
+  return texture2D(probeCoeffTextureL0_3, uv);
+}
+
+vec4 fogSampleProbeConnectivity(int atlasIndex, vec2 uv) {
+  if (atlasIndex == 0) { return texture2D(probeConnectivityTexture_0, uv); }
+  if (atlasIndex == 1) { return texture2D(probeConnectivityTexture_1, uv); }
+  if (atlasIndex == 2) { return texture2D(probeConnectivityTexture_2, uv); }
+  return texture2D(probeConnectivityTexture_3, uv);
+}
+
+vec2 fogClampProbeGridCell(int atlasIndex, vec2 cell) {
+  vec2 grid = fogAtlasGrid(atlasIndex);
+  return clamp(cell, vec2(0.0), max(grid - vec2(1.0), vec2(0.0)));
+}
+
+vec2 fogProbeGridCellToUv(int atlasIndex, vec2 cell) {
+  return (fogClampProbeGridCell(atlasIndex, cell) + vec2(0.5)) / max(fogAtlasGrid(atlasIndex), vec2(1.0));
+}
+
+vec2 fogWorldToProbeLocal(int atlasIndex, vec3 worldPosition) {
+  vec2 delta = vec2(worldPosition.x, worldPosition.z) - fogAtlasWorldOrigin(atlasIndex);
+  vec2 rotation = fogAtlasWorldRotation(atlasIndex);
+  float c = rotation.x;
+  float s = rotation.y;
 
   return vec2(
     (delta.x * c) - (delta.y * s),
@@ -1176,31 +1221,35 @@ vec2 fogWorldToProbeLocal(vec3 worldPosition) {
   );
 }
 
-vec2 fogWorldToProbeGrid(vec3 worldPosition) {
-  vec2 localPosition = fogWorldToProbeLocal(worldPosition);
+vec2 fogWorldToProbeGrid(int atlasIndex, vec3 worldPosition) {
+  vec4 bounds = fogAtlasBounds(atlasIndex);
+  vec2 grid = fogAtlasGrid(atlasIndex);
+  vec2 localPosition = fogWorldToProbeLocal(atlasIndex, worldPosition);
 
   return vec2(
-    (localPosition.x - probeAmbientBounds.x) / max(fogProbeCellSize(probeAmbientBounds.z, probeAmbientGrid.x), 0.0001),
-    (localPosition.y - probeAmbientBounds.y) / max(fogProbeCellSize(probeAmbientBounds.w, probeAmbientGrid.y), 0.0001)
+    (localPosition.x - bounds.x) / max(fogProbeCellSize(bounds.z, grid.x), 0.0001),
+    (localPosition.y - bounds.y) / max(fogProbeCellSize(bounds.w, grid.y), 0.0001)
   );
 }
 
-bool fogIsInsideProbeGrid(vec2 gridPosition) {
+bool fogIsInsideProbeGrid(int atlasIndex, vec2 gridPosition) {
+  vec2 grid = fogAtlasGrid(atlasIndex);
+
   return (
     gridPosition.x >= -0.5 &&
     gridPosition.y >= -0.5 &&
-    gridPosition.x <= probeAmbientGrid.x - 0.5 &&
-    gridPosition.y <= probeAmbientGrid.y - 0.5
+    gridPosition.x <= grid.x - 0.5 &&
+    gridPosition.y <= grid.y - 0.5
   );
 }
 
-float sampleFogProbeConnectivity(vec2 originCell, vec2 candidateCell) {
+float sampleFogProbeConnectivity(int atlasIndex, vec2 originCell, vec2 candidateCell) {
   if (useProbeConnectivity < 0.5) {
     return 1.0;
   }
 
-  vec2 fromCell = fogClampProbeGridCell(originCell);
-  vec2 toCell = fogClampProbeGridCell(candidateCell);
+  vec2 fromCell = fogClampProbeGridCell(atlasIndex, originCell);
+  vec2 toCell = fogClampProbeGridCell(atlasIndex, candidateCell);
   vec2 delta = toCell - fromCell;
   float manhattan = abs(delta.x) + abs(delta.y);
 
@@ -1212,7 +1261,7 @@ float sampleFogProbeConnectivity(vec2 originCell, vec2 candidateCell) {
     return 0.0;
   }
 
-  vec4 connectivity = texture2D(probeConnectivityTexture, fogProbeGridCellToUv(fromCell));
+  vec4 connectivity = fogSampleProbeConnectivity(atlasIndex, fogProbeGridCellToUv(atlasIndex, fromCell));
 
   if (delta.y < -0.5) {
     return connectivity.r;
@@ -1240,7 +1289,7 @@ float fogProbeKernelWeight(vec2 gridPosition, vec2 cell) {
   return axisWeight.x * axisWeight.y;
 }
 
-float sampleFogProbeConnectivityBlended(vec2 gridPosition, vec2 candidateCell) {
+float sampleFogProbeConnectivityBlended(int atlasIndex, vec2 gridPosition, vec2 candidateCell) {
   if (useProbeConnectivity < 0.5) {
     return 1.0;
   }
@@ -1258,7 +1307,7 @@ float sampleFogProbeConnectivityBlended(vec2 gridPosition, vec2 candidateCell) {
         continue;
       }
 
-      accumulatedVisibility += sampleFogProbeConnectivity(originCell, candidateCell) * weight;
+      accumulatedVisibility += sampleFogProbeConnectivity(atlasIndex, originCell, candidateCell) * weight;
       accumulatedWeight += weight;
     }
   }
@@ -1270,16 +1319,16 @@ float sampleFogProbeConnectivityBlended(vec2 gridPosition, vec2 candidateCell) {
   return accumulatedVisibility / accumulatedWeight;
 }
 
-vec4 sampleFogAmbientCandidate(vec3 worldPosition, vec2 gridPosition, vec2 cell) {
-  vec2 clampedCell = fogClampProbeGridCell(cell);
-  vec2 uv = fogProbeGridCellToUv(clampedCell);
-  vec4 coeff0 = texture2D(probeCoeffTextureL0, uv);
+vec4 sampleFogAmbientCandidate(int atlasIndex, vec3 worldPosition, vec2 gridPosition, vec2 cell) {
+  vec2 clampedCell = fogClampProbeGridCell(atlasIndex, cell);
+  vec2 uv = fogProbeGridCellToUv(atlasIndex, clampedCell);
+  vec4 coeff0 = fogSampleProbeCoeff(atlasIndex, uv);
 
   if (coeff0.a <= 0.0) {
     return vec4(0.0);
   }
 
-  float visibility = sampleFogProbeConnectivityBlended(gridPosition, clampedCell);
+  float visibility = sampleFogProbeConnectivityBlended(atlasIndex, gridPosition, clampedCell);
 
   if (visibility <= 0.0001) {
     return vec4(0.0);
@@ -1296,29 +1345,41 @@ vec3 sampleFogAmbientColor(vec3 worldPosition) {
     return vec3(0.0);
   }
 
-  vec2 worldGridPosition = fogWorldToProbeGrid(worldPosition);
+  vec4 atlasAccumulated = vec4(0.0);
 
-  if (!fogIsInsideProbeGrid(worldGridPosition)) {
-    return vec3(0.0);
-  }
+  for (int atlasIndex = 0; atlasIndex < ${MAX_ACTIVE_FOG_VLM_ATLASES}; atlasIndex += 1) {
+    if (float(atlasIndex) >= activeProbeAtlasCount) {
+      break;
+    }
 
-  vec2 nearestCell = floor(worldGridPosition + vec2(0.5));
-  vec4 accumulated = vec4(0.0);
+    vec2 worldGridPosition = fogWorldToProbeGrid(atlasIndex, worldPosition);
 
-  for (int x = -1; x <= 1; x += 1) {
-    for (int y = -1; y <= 1; y += 1) {
-      vec2 cell = nearestCell + vec2(float(x), float(y));
-      float spatialWeight = fogProbeKernelWeight(worldGridPosition, cell);
+    if (!fogIsInsideProbeGrid(atlasIndex, worldGridPosition)) {
+      continue;
+    }
 
-      if (spatialWeight <= 0.0001) {
-        continue;
+    vec2 nearestCell = floor(worldGridPosition + vec2(0.5));
+    vec4 accumulated = vec4(0.0);
+
+    for (int x = -1; x <= 1; x += 1) {
+      for (int y = -1; y <= 1; y += 1) {
+        vec2 cell = nearestCell + vec2(float(x), float(y));
+        float spatialWeight = fogProbeKernelWeight(worldGridPosition, cell);
+
+        if (spatialWeight <= 0.0001) {
+          continue;
+        }
+
+        accumulated += sampleFogAmbientCandidate(atlasIndex, worldPosition, worldGridPosition, cell) * spatialWeight;
       }
+    }
 
-      accumulated += sampleFogAmbientCandidate(worldPosition, worldGridPosition, cell) * spatialWeight;
+    if (accumulated.a > 0.0001) {
+      atlasAccumulated += accumulated;
     }
   }
-  vec3 color = accumulated.rgb;
-  float weight = accumulated.a;
+  vec3 color = atlasAccumulated.rgb;
+  float weight = atlasAccumulated.a;
 
   if (weight <= 0.0001) {
     return vec3(0.0);
@@ -1372,7 +1433,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
   vec3 nearSamplePosition = rayOrigin + (rayDirection * (tNear + (pathLength * 0.25)));
   vec3 farSamplePosition = rayOrigin + (rayDirection * (tNear + (pathLength * 0.75)));
 
-  if (lightingScale > 0.0001 && useProbeCoefficientTexture > 0.5) {
+  if (lightingScale > 0.0001 && useProbeCoefficientTexture > 0.5 && activeProbeAtlasCount > 0.5) {
     nearAmbientColor = sampleFogAmbientColor(nearSamplePosition) * environmentFogColor * lightingScale;
     farAmbientColor = sampleFogAmbientColor(farSamplePosition) * environmentFogColor * lightingScale;
   }
@@ -1387,10 +1448,6 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
     float sampleHeight = samplePosition.y - groundHeight;
 
     if (sampleHeight < 0.0 || sampleHeight > volumeHeight) {
-      continue;
-    }
-
-    if (!fogIsInsideProbeGrid(fogWorldToProbeGrid(samplePosition))) {
       continue;
     }
 
@@ -2287,19 +2344,24 @@ class FogVolumeEffectImpl extends Effect {
         ['noisePeriod', new Uniform(DEFAULT_VOLUMETRIC_NOISE_PERIOD)],
         ['noiseStrength', new Uniform(DEFAULT_VOLUMETRIC_NOISE_STRENGTH)],
         ['fogNoiseTexture', new Uniform(FOG_NOISE_TEXTURE)],
-        ['probeAmbientBounds', new Uniform(new Vector4())],
-        ['probeAmbientGrid', new Uniform(new Vector2())],
-        ['probeWorldOrigin', new Uniform(new Vector2())],
-        ['probeWorldRotation', new Uniform(new Vector2(1, 0))],
-        ['probeCoeffTextureL0', new Uniform<Texture | null>(null)],
-        ['probeConnectivityTexture', new Uniform<Texture | null>(null)],
+        ['activeProbeAtlasCount', new Uniform(0)],
+        ['probeAmbientBounds', new Uniform(Array.from({ length: MAX_ACTIVE_FOG_VLM_ATLASES }, () => new Vector4()))],
+        ['probeAmbientGrid', new Uniform(Array.from({ length: MAX_ACTIVE_FOG_VLM_ATLASES }, () => new Vector2(1, 1)))],
+        ['probeWorldOrigin', new Uniform(Array.from({ length: MAX_ACTIVE_FOG_VLM_ATLASES }, () => new Vector2()))],
+        ['probeWorldRotation', new Uniform(Array.from({ length: MAX_ACTIVE_FOG_VLM_ATLASES }, () => new Vector2(1, 0)))],
+        ['probeCoeffTextureL0_0', new Uniform<Texture | null>(null)],
+        ['probeCoeffTextureL0_1', new Uniform<Texture | null>(null)],
+        ['probeCoeffTextureL0_2', new Uniform<Texture | null>(null)],
+        ['probeCoeffTextureL0_3', new Uniform<Texture | null>(null)],
+        ['probeConnectivityTexture_0', new Uniform<Texture | null>(null)],
+        ['probeConnectivityTexture_1', new Uniform<Texture | null>(null)],
+        ['probeConnectivityTexture_2', new Uniform<Texture | null>(null)],
+        ['probeConnectivityTexture_3', new Uniform<Texture | null>(null)],
         ['probeHeight', new Uniform(1.25)],
-        ['probeAmbientTexture', new Uniform<Texture | null>(null)],
         ['rayStepCount', new Uniform(DEFAULT_VOLUMETRIC_STEP_COUNT)],
         ['time', new Uniform(0)],
         ['useProbeCoefficientTexture', new Uniform(0)],
         ['useProbeConnectivity', new Uniform(0)],
-        ['useProbeAmbientTexture', new Uniform(0)],
         ['volumeHeight', new Uniform(FOG_VOLUME_HEIGHT)]
       ])
     })
@@ -2357,36 +2419,52 @@ class FogVolumeEffectImpl extends Effect {
     this.uniforms.get('fogNoiseTexture').value = value ?? FOG_NOISE_TEXTURE
   }
 
-  set probeAmbientBounds(value: Vector4) {
-    this.uniforms.get('probeAmbientBounds').value.copy(value)
+  set activeProbeAtlasCount(value: number) {
+    this.uniforms.get('activeProbeAtlasCount').value = value
   }
 
-  set probeAmbientGrid(value: Vector2) {
-    this.uniforms.get('probeAmbientGrid').value.copy(value)
+  set probeAmbientBounds(value: Vector4[]) {
+    const targets = this.uniforms.get('probeAmbientBounds').value as Vector4[]
+    for (let index = 0; index < MAX_ACTIVE_FOG_VLM_ATLASES; index += 1) {
+      targets[index].copy(value[index] ?? new Vector4())
+    }
   }
 
-  set probeWorldOrigin(value: Vector2) {
-    this.uniforms.get('probeWorldOrigin').value.copy(value)
+  set probeAmbientGrid(value: Vector2[]) {
+    const targets = this.uniforms.get('probeAmbientGrid').value as Vector2[]
+    for (let index = 0; index < MAX_ACTIVE_FOG_VLM_ATLASES; index += 1) {
+      targets[index].copy(value[index] ?? new Vector2(1, 1))
+    }
   }
 
-  set probeWorldRotation(value: Vector2) {
-    this.uniforms.get('probeWorldRotation').value.copy(value)
+  set probeWorldOrigin(value: Vector2[]) {
+    const targets = this.uniforms.get('probeWorldOrigin').value as Vector2[]
+    for (let index = 0; index < MAX_ACTIVE_FOG_VLM_ATLASES; index += 1) {
+      targets[index].copy(value[index] ?? new Vector2())
+    }
   }
 
-  set probeCoeffTextureL0(value: Texture | null) {
-    this.uniforms.get('probeCoeffTextureL0').value = value
+  set probeWorldRotation(value: Vector2[]) {
+    const targets = this.uniforms.get('probeWorldRotation').value as Vector2[]
+    for (let index = 0; index < MAX_ACTIVE_FOG_VLM_ATLASES; index += 1) {
+      targets[index].copy(value[index] ?? new Vector2(1, 0))
+    }
   }
 
-  set probeConnectivityTexture(value: Texture | null) {
-    this.uniforms.get('probeConnectivityTexture').value = value
+  set probeCoeffTextureL0(value: Array<Texture | null>) {
+    for (let index = 0; index < MAX_ACTIVE_FOG_VLM_ATLASES; index += 1) {
+      this.uniforms.get(`probeCoeffTextureL0_${index}`).value = value[index] ?? null
+    }
+  }
+
+  set probeConnectivityTexture(value: Array<Texture | null>) {
+    for (let index = 0; index < MAX_ACTIVE_FOG_VLM_ATLASES; index += 1) {
+      this.uniforms.get(`probeConnectivityTexture_${index}`).value = value[index] ?? null
+    }
   }
 
   set probeHeight(value: number) {
     this.uniforms.get('probeHeight').value = value
-  }
-
-  set probeAmbientTexture(value: Texture | null) {
-    this.uniforms.get('probeAmbientTexture').value = value
   }
 
   set rayStepCount(value: number) {
@@ -2403,10 +2481,6 @@ class FogVolumeEffectImpl extends Effect {
 
   set useProbeConnectivity(value: number) {
     this.uniforms.get('useProbeConnectivity').value = value
-  }
-
-  set useProbeAmbientTexture(value: number) {
-    this.uniforms.get('useProbeAmbientTexture').value = value
   }
 
   set volumeHeight(value: number) {
@@ -4829,36 +4903,29 @@ function compareFogLightingCandidates(
   return a.entry.mazeId.localeCompare(b.entry.mazeId)
 }
 
-function chooseFogLightingEntry(
+function chooseFogLightingEntries(
   cameraWorldPosition: Vector3,
   candidates: FogLightingCandidate[],
-  localPosition: Vector3
+  localPosition: Vector3,
+  maxCount: number
 ) {
-  let bestCandidate: FogLightingCandidate | null = null
-  let bestDistanceSquared = Number.POSITIVE_INFINITY
-
-  for (const candidate of candidates) {
-    const distanceSquared = getFogLightingCandidateDistanceSquared(
-      cameraWorldPosition,
+  return candidates
+    .map((candidate) => ({
       candidate,
-      localPosition
-    )
-
-    if (
-      !bestCandidate ||
-      compareFogLightingCandidates(
+      distanceSquared: getFogLightingCandidateDistanceSquared(
+        cameraWorldPosition,
         candidate,
-        distanceSquared,
-        bestCandidate,
-        bestDistanceSquared
-      ) < 0
-    ) {
-      bestCandidate = candidate
-      bestDistanceSquared = distanceSquared
-    }
-  }
-
-  return bestCandidate?.entry ?? null
+        localPosition
+      )
+    }))
+    .sort((a, b) => compareFogLightingCandidates(
+      a.candidate,
+      a.distanceSquared,
+      b.candidate,
+      b.distanceSquared
+    ))
+    .slice(0, Math.max(0, maxCount))
+    .map(({ candidate }) => candidate.entry)
 }
 
 function getCubeTextureFaceSize(texture: Texture | null | undefined) {
@@ -5873,7 +5940,7 @@ function getProbeBlendEnvMap(probeBlend: ProbeBlendConfig) {
     : null
 }
 
-type RuntimePropModelKind = 'gate' | 'monster' | 'sword' | 'trophy'
+type RuntimePropModelKind = 'cup' | 'gate' | 'monster' | 'sword' | 'trophy'
 
 function createLitCloneMaterial(
   sourceMaterial: Material,
@@ -7146,7 +7213,7 @@ function useRuntimeLevelLightingResources(
       disposeProbeTargets(previousTargets)
       reflectionProbeTargets.current = []
     }
-  }, [layout, scene])
+  }, [layout, priorityPosition.x, priorityPosition.z, scene])
 
   return useMemo(() => ({
     environmentTexture: null,
@@ -8906,6 +8973,7 @@ function Ground({
   reflectionProbeCoefficients,
   reflectionProbeDepthTextures,
   reflectionProbeTextures,
+  turnState,
   visibilityState
 }: {
   environmentTexture: Texture | null
@@ -8922,6 +8990,7 @@ function Ground({
   reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
   reflectionProbeDepthTextures: CubeTexture[]
   reflectionProbeTextures: Texture[]
+  turnState: TurnState
   visibilityState: PrecomputedVisibilityState
 }) {
   const puddle = usePuddleTextures(PUDDLE_TEXTURE_REPEAT)
@@ -9001,12 +9070,16 @@ function Ground({
 }
 
 function TorchBillboard({
+  color = FIRE_COLOR,
   position,
   seed,
+  size = TORCH_BILLBOARD_SIZE,
   texture
 }: {
+  color?: Color
   position: [number, number, number]
   seed: number
+  size?: number
   texture: Texture | null
 }) {
   const camera = useThree((state) => state.camera)
@@ -9058,7 +9131,7 @@ function TorchBillboard({
         color: Color
       }
 
-      billboardMaterial.color.copy(FIRE_COLOR).multiplyScalar(
+      billboardMaterial.color.copy(color).multiplyScalar(
         TORCH_BASE_CANDELA * FIRE_BILLBOARD_INTENSITY_SCALE
       )
     }
@@ -9088,7 +9161,7 @@ function TorchBillboard({
           lensflare: 'ignore-occlusion'
         }}
       >
-        <planeGeometry args={[TORCH_BILLBOARD_SIZE, TORCH_BILLBOARD_SIZE]} />
+        <planeGeometry args={[size, size]} />
         <meshBasicMaterial
           alphaTest={0.03}
           color={new Color(1, 1, 1)}
@@ -9552,32 +9625,35 @@ function FogVolume({
   )
   const lightingEntriesRef = useRef(lightingEntries)
   const fogLightingCandidatesRef = useRef(fogLightingCandidates)
-  const selectedEntryRef = useRef<WorldLightingRegistryEntry | null>(null)
+  const selectedEntriesRef = useRef<WorldLightingRegistryEntry[]>([])
   const cameraWorldPositionRef = useRef(new Vector3())
   const fogSelectionLocalPositionRef = useRef(new Vector3())
 
-  const applySelectedEntry = useCallback((entry: WorldLightingRegistryEntry | null) => {
+  const applySelectedEntries = useCallback((entries: WorldLightingRegistryEntry[]) => {
     const readyEntryCount = fogLightingCandidatesRef.current.length
-    const probeBounds = entry ? getFogProbeBounds(entry.layout) : null
-    const probeGrid = entry
-      ? new Vector2(entry.layout.maze.width, entry.layout.maze.height)
-      : null
-    const probeWorldOrigin = entry
-      ? new Vector2(entry.transform.x, entry.transform.z)
-      : null
-    const probeWorldRotation = entry
-      ? new Vector2(
+    const selectedEntries = entries.slice(0, MAX_ACTIVE_FOG_VLM_ATLASES)
+    const probeBounds = selectedEntries.map((entry) => getFogProbeBounds(entry.layout))
+    const probeGrids = selectedEntries.map(
+      (entry) => new Vector2(entry.layout.maze.width, entry.layout.maze.height)
+    )
+    const probeWorldOrigins = selectedEntries.map(
+      (entry) => new Vector2(entry.transform.x, entry.transform.z)
+    )
+    const probeWorldRotations = selectedEntries.map(
+      (entry) => new Vector2(
         Math.cos(entry.transform.rotationY),
         Math.sin(entry.transform.rotationY)
       )
-      : null
-    const probeConnectivityTexture = entry
-      ? getProbeConnectivityTexture(entry.layout)
-      : null
-    const probeCoeffTextureL0 = entry?.resources.probeCoefficientTextures[0] ?? null
-    const useProbeCoefficientTexture = probeCoeffTextureL0 ? 1 : 0
+    )
+    const probeConnectivityTextures = selectedEntries.map(
+      (entry) => getProbeConnectivityTexture(entry.layout)
+    )
+    const probeCoeffTextureL0s = selectedEntries.map(
+      (entry) => entry.resources.probeCoefficientTextures[0] ?? null
+    )
+    const useProbeCoefficientTexture = probeCoeffTextureL0s.some(Boolean) ? 1 : 0
     const useProbeConnectivity =
-      entry && volumetricShadowsEnabled && probeConnectivityTexture ? 1 : 0
+      volumetricShadowsEnabled && probeConnectivityTextures.some(Boolean) ? 1 : 0
     const appliedDensity = visible && useProbeCoefficientTexture
       ? volumeIntensity * FOG_EXTINCTION_SCALE
       : 0
@@ -9592,18 +9668,17 @@ function FogVolume({
     effect.noisePeriod = noisePeriod
     effect.noiseStrength = noiseStrength
     effect.fogNoiseTexture = fogNoiseTexture
-    effect.probeAmbientBounds = probeBounds ?? new Vector4()
-    effect.probeAmbientGrid = probeGrid ?? new Vector2(1, 1)
-    effect.probeWorldOrigin = probeWorldOrigin ?? new Vector2()
-    effect.probeWorldRotation = probeWorldRotation ?? new Vector2(1, 0)
-    effect.probeCoeffTextureL0 = probeCoeffTextureL0
-    effect.probeConnectivityTexture = probeConnectivityTexture
-    effect.probeHeight = entry?.layout.reflectionProbes[0]?.position.y ?? 1.25
-    effect.probeAmbientTexture = null
+    effect.activeProbeAtlasCount = selectedEntries.length
+    effect.probeAmbientBounds = probeBounds
+    effect.probeAmbientGrid = probeGrids
+    effect.probeWorldOrigin = probeWorldOrigins
+    effect.probeWorldRotation = probeWorldRotations
+    effect.probeCoeffTextureL0 = probeCoeffTextureL0s
+    effect.probeConnectivityTexture = probeConnectivityTextures
+    effect.probeHeight = selectedEntries[0]?.layout.reflectionProbes[0]?.position.y ?? 1.25
     effect.rayStepCount = rayStepCount
     effect.useProbeCoefficientTexture = useProbeCoefficientTexture
     effect.useProbeConnectivity = useProbeConnectivity
-    effect.useProbeAmbientTexture = 0
     effect.volumeHeight = FOG_VOLUME_HEIGHT
     scene.userData.fogEffectState = {
       availableAtlasCount: readyEntryCount,
@@ -9622,27 +9697,27 @@ function FogVolume({
       noiseFrequency,
       noisePeriod,
       noiseStrength,
-      probeAmbientBounds: probeBounds ? [
-        probeBounds.x,
-        probeBounds.y,
-        probeBounds.z,
-        probeBounds.w
+      probeAmbientBounds: probeBounds[0] ? [
+        probeBounds[0].x,
+        probeBounds[0].y,
+        probeBounds[0].z,
+        probeBounds[0].w
       ] : null,
-      probeAmbientGrid: probeGrid ? [
-        probeGrid.x,
-        probeGrid.y
+      probeAmbientGrid: probeGrids[0] ? [
+        probeGrids[0].x,
+        probeGrids[0].y
       ] : null,
-      probeWorldOrigin: probeWorldOrigin ? [
-        probeWorldOrigin.x,
-        probeWorldOrigin.y
+      probeWorldOrigin: probeWorldOrigins[0] ? [
+        probeWorldOrigins[0].x,
+        probeWorldOrigins[0].y
       ] : null,
-      probeWorldRotation: probeWorldRotation ? [
-        probeWorldRotation.x,
-        probeWorldRotation.y
+      probeWorldRotation: probeWorldRotations[0] ? [
+        probeWorldRotations[0].x,
+        probeWorldRotations[0].y
       ] : null,
       rayStepCount,
-      selectedAtlasCount: entry ? 1 : 0,
-      selectedMazeIds: entry ? [entry.mazeId] : [],
+      selectedAtlasCount: selectedEntries.length,
+      selectedMazeIds: selectedEntries.map((entry) => entry.mazeId),
       trackedMazeIds: lightingEntriesRef.current.map((candidate) => candidate.mazeId).sort(),
       useProbeAmbientTexture: 0,
       useProbeCoefficientTexture,
@@ -9668,15 +9743,16 @@ function FogVolume({
   useEffect(() => {
     lightingEntriesRef.current = lightingEntries
     fogLightingCandidatesRef.current = fogLightingCandidates
-    const nextEntry = chooseFogLightingEntry(
+    const nextEntries = chooseFogLightingEntries(
       camera.getWorldPosition(cameraWorldPositionRef.current),
       fogLightingCandidates,
-      fogSelectionLocalPositionRef.current
+      fogSelectionLocalPositionRef.current,
+      MAX_ACTIVE_FOG_VLM_ATLASES
     )
 
-    selectedEntryRef.current = nextEntry
-    applySelectedEntry(nextEntry)
-  }, [applySelectedEntry, camera, fogLightingCandidates, lightingEntries])
+    selectedEntriesRef.current = nextEntries
+    applySelectedEntries(nextEntries)
+  }, [applySelectedEntries, camera, fogLightingCandidates, lightingEntries])
 
   useEffect(() => {
     return () => {
@@ -9689,15 +9765,18 @@ function FogVolume({
 
     try {
       const cameraWorldPosition = camera.getWorldPosition(cameraWorldPositionRef.current)
-      const nextEntry = chooseFogLightingEntry(
+      const nextEntries = chooseFogLightingEntries(
         cameraWorldPosition,
         fogLightingCandidatesRef.current,
-        fogSelectionLocalPositionRef.current
+        fogSelectionLocalPositionRef.current,
+        MAX_ACTIVE_FOG_VLM_ATLASES
       )
+      const previousIds = selectedEntriesRef.current.map((entry) => entry.mazeId).join('|')
+      const nextIds = nextEntries.map((entry) => entry.mazeId).join('|')
 
-      if (selectedEntryRef.current?.mazeId !== nextEntry?.mazeId) {
-        selectedEntryRef.current = nextEntry
-        applySelectedEntry(nextEntry)
+      if (previousIds !== nextIds) {
+        selectedEntriesRef.current = nextEntries
+        applySelectedEntries(nextEntries)
       }
       effect.cameraProjectionMatrixInverse = camera.projectionMatrixInverse
       effect.cameraWorldMatrix = camera.matrixWorld
@@ -11374,6 +11453,7 @@ function MazeWallMesh({
 }
 
 function SceneGeometry({
+  activatedAltarIds,
   environmentTexture,
   environmentIntensity,
   iblContributionIntensity,
@@ -11395,6 +11475,7 @@ function SceneGeometry({
   turnState,
   visibilityState = DISABLED_PRECOMPUTED_VISIBILITY
 }: {
+  activatedAltarIds: Set<string>
   environmentTexture: Texture | null
   environmentIntensity: number
   iblContributionIntensity: number
@@ -11474,6 +11555,21 @@ function SceneGeometry({
             visibilityState={visibilityState}
           />
           <MazeDoors
+            iblContributionIntensity={iblContributionIntensity}
+            isActive={isActive}
+            layout={layout}
+            lightmapContributionIntensity={lightmapContributionIntensity}
+            probeDepthAtlasTextures={probeDepthAtlasTextures}
+            probeCoefficientTextures={probeCoefficientTextures}
+            reflectionContributionIntensity={reflectionContributionIntensity}
+            reflectionProbeCoefficients={reflectionProbeCoefficients}
+            reflectionProbeDepthTextures={reflectionProbeDepthTextures}
+            reflectionProbeTextures={reflectionProbeTextures}
+            turnState={turnState}
+            visibilityState={visibilityState}
+          />
+          <MazeAltars
+            activatedAltarIds={activatedAltarIds}
             iblContributionIntensity={iblContributionIntensity}
             layout={layout}
             lightmapContributionIntensity={lightmapContributionIntensity}
@@ -11744,6 +11840,7 @@ function MazeGates({
   reflectionProbeCoefficients,
   reflectionProbeDepthTextures,
   reflectionProbeTextures,
+  turnState,
   visibilityState
 }: {
   environmentIntensity: number
@@ -11757,6 +11854,7 @@ function MazeGates({
   reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
   reflectionProbeDepthTextures: CubeTexture[]
   reflectionProbeTextures: Texture[]
+  turnState: TurnState
   visibilityState: PrecomputedVisibilityState
 }) {
   return (
@@ -11832,6 +11930,14 @@ function getDoorBoundaryNormal(side: CardinalDirection) {
   return { x: 0, z: -1 }
 }
 
+function isDoorOpenForTurnState(
+  door: NonNullable<ReturnType<typeof getMazeEntranceDoor>>,
+  maze: MazeLayout['maze'],
+  turnState: TurnState
+) {
+  return getOpenDoorIds(maze, turnState).includes(door.id)
+}
+
 function DoorLeafMaterial({
   maps,
   materialKey,
@@ -11904,7 +12010,7 @@ function MazeDoorActor({
   const rightLeaf = useRef<Mesh>(null)
   const doorMaps = useStandardPbrTextures(DOOR_TEXTURE_URLS, DOOR_TEXTURE_REPEAT)
   const doorGeometry = useMemo(() => {
-    const geometry = new BoxGeometry(1, WALL_HEIGHT, WALL_WIDTH * 0.5)
+    const geometry = new BoxGeometry(1, DOOR_HEIGHT, WALL_WIDTH * 0.5)
     const uv = geometry.getAttribute('uv')
 
     if (uv) {
@@ -12018,7 +12124,7 @@ function MazeDoorActor({
   return (
     <group
       ref={group}
-      position={[door.center.x, GROUND_Y + (WALL_HEIGHT / 2), door.center.z]}
+      position={[door.center.x, GROUND_Y + (DOOR_HEIGHT / 2), door.center.z]}
       rotation-y={door.yaw}
       userData={{
         debugRole: 'maze-door',
@@ -12060,6 +12166,7 @@ function MazeDoorActor({
 
 function MazeDoors({
   iblContributionIntensity,
+  isActive,
   layout,
   lightmapContributionIntensity,
   probeDepthAtlasTextures,
@@ -12068,9 +12175,11 @@ function MazeDoors({
   reflectionProbeCoefficients,
   reflectionProbeDepthTextures,
   reflectionProbeTextures,
+  turnState,
   visibilityState
 }: {
   iblContributionIntensity: number
+  isActive: boolean
   layout: MazeLayout
   lightmapContributionIntensity: number
   probeDepthAtlasTextures: ProbeDepthAtlasTextures
@@ -12079,6 +12188,7 @@ function MazeDoors({
   reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
   reflectionProbeDepthTextures: CubeTexture[]
   reflectionProbeTextures: Texture[]
+  turnState: TurnState
   visibilityState: PrecomputedVisibilityState
 }) {
   const door = useMemo(() => getMazeEntranceDoor(layout), [layout])
@@ -12091,7 +12201,7 @@ function MazeDoors({
     <MazeDoorActor
       door={door}
       iblContributionIntensity={iblContributionIntensity}
-      isOpen={false}
+      isOpen={isActive && isDoorOpenForTurnState(door, layout.maze, turnState)}
       layout={layout}
       lightmapContributionIntensity={lightmapContributionIntensity}
       probeDepthAtlasTextures={probeDepthAtlasTextures}
@@ -12102,6 +12212,293 @@ function MazeDoors({
       reflectionProbeTextures={reflectionProbeTextures}
       visible={isCellVisible(visibilityState, door.cell)}
     />
+  )
+}
+
+function AltarBlockMaterial({
+  maps,
+  materialKey,
+  probeBlend
+}: {
+  maps: PbrMaps
+  materialKey: string
+  probeBlend: ProbeBlendConfig
+}) {
+  const [material, setMaterial] = useState<ThreeMeshStandardMaterial | null>(null)
+  const probeBlendMaterialProps = useProbeBlendMaterialShader(
+    material,
+    probeBlend,
+    {},
+    materialKey
+  )
+
+  return (
+    <meshStandardMaterial
+      aoMap={maps.aoMap}
+      color="white"
+      customProgramCacheKey={probeBlendMaterialProps.customProgramCacheKey}
+      envMap={getProbeBlendEnvMap(probeBlend)}
+      envMapIntensity={0}
+      key={materialKey}
+      map={maps.map}
+      metalness={0}
+      metalnessMap={maps.metalnessMap}
+      normalMap={maps.normalMap}
+      onBeforeCompile={probeBlendMaterialProps.onBeforeCompile}
+      onBeforeRender={probeBlendMaterialProps.onBeforeRender}
+      ref={setMaterial}
+      roughness={0.9}
+      roughnessMap={maps.roughnessMap}
+    />
+  )
+}
+
+function MazeAltarActor({
+  activated,
+  altar,
+  altarIndex,
+  iblContributionIntensity,
+  layout,
+  lightmapContributionIntensity,
+  probeDepthAtlasTextures,
+  probeCoefficientTextures,
+  reflectionContributionIntensity,
+  reflectionProbeCoefficients,
+  reflectionProbeDepthTextures,
+  reflectionProbeTextures,
+  torchTexture,
+  visible
+}: {
+  activated: boolean
+  altar: MazeLayout['altars'][number]
+  altarIndex: number
+  iblContributionIntensity: number
+  layout: MazeLayout
+  lightmapContributionIntensity: number
+  probeDepthAtlasTextures: ProbeDepthAtlasTextures
+  probeCoefficientTextures: [Texture, Texture, Texture, Texture]
+  reflectionContributionIntensity: number
+  reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
+  reflectionProbeDepthTextures: CubeTexture[]
+  reflectionProbeTextures: Texture[]
+  torchTexture: Texture | null
+  visible: boolean
+}) {
+  const levelWorldTransform = useContext(LevelRenderTransformContext)
+  const volumetricShadowsEnabled = useContext(VolumetricShadowContext)
+  const blockGeometry = useMemo(() => new BoxGeometry(1, 1, 1), [])
+  const wallMaps = useStandardPbrTextures(WALL_TEXTURE_URLS, WALL_TEXTURE_REPEAT * 0.5)
+  const cupModel = useClonedRuntimeModel(
+    DROOP_CUP_MODEL_URL,
+    'cup',
+    'altar-cup',
+    0
+  )
+  const reflectionProbeBlend = useMemo(
+    () =>
+      getReflectionProbeBlendForPosition(layout, {
+        x: altar.position.x,
+        z: altar.position.z
+      }),
+    [altar.position.x, altar.position.z, layout]
+  )
+  const probeTextures = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeTextures[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeTextures]
+  )
+  const probeDepthTextures = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeDepthTextures[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeDepthTextures]
+  )
+  const probeCoefficients = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeCoefficients[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeCoefficients]
+  )
+  const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
+  const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
+  const diffuseProbeIntensity =
+    iblContributionIntensity + lightmapContributionIntensity
+  const probeBlend = useMemo(
+    () =>
+      buildProbeBlendConfig(
+        layout,
+        reflectionProbeBlend.probeIndices,
+        probeTextures,
+        probeDepthTextures,
+        probeDepthAtlasTextures,
+        probeCoefficients,
+        'disabled',
+        {
+          diffuseIntensity: diffuseProbeIntensity,
+          probeCoefficientTextures,
+          radianceIntensity: reflectionContributionIntensity,
+          radianceMode: hasProbeTextures ? 'constant' : 'disabled',
+          useProbeConnectivity: volumetricShadowsEnabled,
+          vlmMode: hasProbeCoefficients ? 'cell5' : 'disabled',
+          worldTransform: levelWorldTransform
+        }
+      ),
+    [
+      diffuseProbeIntensity,
+      hasProbeCoefficients,
+      hasProbeTextures,
+      layout,
+      levelWorldTransform,
+      probeCoefficientTextures,
+      probeCoefficients,
+      probeDepthAtlasTextures,
+      probeDepthTextures,
+      probeTextures,
+      reflectionContributionIntensity,
+      reflectionProbeBlend.probeIndices,
+      volumetricShadowsEnabled
+    ]
+  )
+  const materialKey = useMemo(
+    () => getProbeBlendMaterialKey('maze-altar', probeBlend, {}),
+    [probeBlend]
+  )
+  const cupTransform = useMemo(() => {
+    if (!cupModel) {
+      return null
+    }
+
+    cupModel.updateMatrixWorld(true)
+    const bounds = new Box3().setFromObject(cupModel, true)
+    const center = new Vector3()
+    const size = new Vector3()
+
+    bounds.getCenter(center)
+    bounds.getSize(size)
+
+    const scale = 0.65 / Math.max(size.x, size.z, 0.0001)
+
+    return {
+      modelOffset: new Vector3(
+        -center.x * scale,
+        -bounds.min.y * scale,
+        -center.z * scale
+      ),
+      scale
+    }
+  }, [cupModel])
+
+  useAttachProbeBlendToModel(cupModel, probeBlend)
+
+  useEffect(() => () => {
+    blockGeometry.dispose()
+  }, [blockGeometry])
+
+  return (
+    <group
+      position={[altar.position.x, GROUND_Y, altar.position.z]}
+      userData={{
+        altarId: altar.id,
+        debugRole: 'maze-altar'
+      }}
+      visible={visible}
+    >
+      <mesh
+        castShadow
+        geometry={blockGeometry}
+        position-y={0.5}
+        receiveShadow
+        userData={{ debugRole: 'maze-altar-block' }}
+      >
+        <AltarBlockMaterial
+          maps={wallMaps}
+          materialKey={materialKey}
+          probeBlend={probeBlend}
+        />
+      </mesh>
+      {cupModel && cupTransform ? (
+        <primitive
+          object={cupModel}
+          position={[
+            cupTransform.modelOffset.x,
+            1 + cupTransform.modelOffset.y,
+            cupTransform.modelOffset.z
+          ]}
+          scale={cupTransform.scale}
+          userData={{ debugRole: 'altar-cup' }}
+        />
+      ) : null}
+      {activated ? (
+        <TorchBillboard
+          color={new Color(FIRE_COLOR.b, FIRE_COLOR.r, FIRE_COLOR.g)}
+          position={[0, 1.62, 0]}
+          seed={10_000 + altarIndex}
+          size={TORCH_BILLBOARD_SIZE * 2}
+          texture={torchTexture}
+        />
+      ) : null}
+    </group>
+  )
+}
+
+function MazeAltars({
+  activatedAltarIds,
+  iblContributionIntensity,
+  layout,
+  lightmapContributionIntensity,
+  probeDepthAtlasTextures,
+  probeCoefficientTextures,
+  reflectionContributionIntensity,
+  reflectionProbeCoefficients,
+  reflectionProbeDepthTextures,
+  reflectionProbeTextures,
+  visibilityState
+}: {
+  activatedAltarIds: Set<string>
+  iblContributionIntensity: number
+  layout: MazeLayout
+  lightmapContributionIntensity: number
+  probeDepthAtlasTextures: ProbeDepthAtlasTextures
+  probeCoefficientTextures: [Texture, Texture, Texture, Texture]
+  reflectionContributionIntensity: number
+  reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
+  reflectionProbeDepthTextures: CubeTexture[]
+  reflectionProbeTextures: Texture[]
+  visibilityState: PrecomputedVisibilityState
+}) {
+  const altars = layout.altars ?? []
+  const torchTexture = useFireFlipbookTexture()
+
+  if (altars.length === 0) {
+    return null
+  }
+
+  return (
+    <>
+      {altars.map((altar, altarIndex) => (
+        <MazeAltarActor
+          activated={activatedAltarIds.has(altar.id)}
+          altar={altar}
+          altarIndex={altarIndex}
+          iblContributionIntensity={iblContributionIntensity}
+          key={altar.id}
+          layout={layout}
+          lightmapContributionIntensity={lightmapContributionIntensity}
+          probeDepthAtlasTextures={probeDepthAtlasTextures}
+          probeCoefficientTextures={probeCoefficientTextures}
+          reflectionContributionIntensity={reflectionContributionIntensity}
+          reflectionProbeCoefficients={reflectionProbeCoefficients}
+          reflectionProbeDepthTextures={reflectionProbeDepthTextures}
+          reflectionProbeTextures={reflectionProbeTextures}
+          torchTexture={torchTexture}
+          visible={isCellVisible(visibilityState, altar.cell)}
+        />
+      ))}
+    </>
   )
 }
 
@@ -12473,11 +12870,11 @@ function HeldItemView({
 
       if (itemType === 'sword') {
         heldWorldPosition.current
-          .set(0.34, -0.42, -0.50)
+          .set(0.53, -0.57, -0.07)
           .applyQuaternion(cameraQuaternion)
           .add(camera.position)
         heldWorldTarget.current
-          .set(0.04, -0.18, -1.18)
+          .set(0.23, -0.33, -0.75)
           .applyQuaternion(cameraQuaternion)
           .add(camera.position)
         heldWorldObject.current.position.copy(heldWorldPosition.current)
@@ -14930,7 +15327,10 @@ function FlightRig({
 
     lastSyncedLayoutId.current = layout.maze.id
     turnStateRef.current = turnState
-  }, [layout.maze.id, turnState])
+    if (layoutChanged) {
+      setDisplayedOpenGateIds(getOpenGateIds(layout.maze, turnState))
+    }
+  }, [layout.maze, layout.maze.id, setDisplayedOpenGateIds, turnState])
 
   useEffect(() => {
     inputEnabledRef.current = inputEnabled
@@ -15991,8 +16391,6 @@ function FlightRig({
 
           if (action === 'move-forward' || action === 'move-backward') {
             setDisplayedOpenGateIds(getOpenGateIds(layout.maze, turnStateRef.current))
-          } else {
-            setDisplayedOpenGateIds(getOpenGateIds(layout.maze, turnStateRef.current))
           }
 
           const result = applyTurnAction(layout.maze, turnStateRef.current, action)
@@ -16099,7 +16497,12 @@ function FlightRig({
             turnStateRef.current = finalState
             setTurnState(finalState)
             playerAnimation.current = null
-            setDisplayedOpenGateIds(getOpenGateIds(layout.maze, finalState))
+            if (
+              activeAnimation.action === 'move-forward' ||
+              activeAnimation.action === 'move-backward'
+            ) {
+              setDisplayedOpenGateIds(getOpenGateIds(layout.maze, finalState))
+            }
 
             if (
               activeAnimation.playerEffect === 'death' ||
@@ -16258,6 +16661,7 @@ function FlightRig({
 }
 
 function RuntimeLevelGeometry({
+  activatedAltarIds,
   environmentIntensity,
   iblContributionIntensity,
   isActive,
@@ -16277,6 +16681,7 @@ function RuntimeLevelGeometry({
   turnState,
   visibilityState
 }: {
+  activatedAltarIds: Set<string>
   environmentIntensity: number
   iblContributionIntensity: number
   isActive: boolean
@@ -16385,8 +16790,9 @@ function RuntimeLevelGeometry({
         }}
         visible={stableLightingResourcesReady}
       >
-        <SceneGeometry
-          environmentTexture={stableLightingResources.environmentTexture}
+          <SceneGeometry
+            activatedAltarIds={activatedAltarIds}
+            environmentTexture={stableLightingResources.environmentTexture}
           environmentIntensity={environmentIntensity}
           iblContributionIntensity={iblContributionIntensity}
           isActive={isActive}
@@ -16432,8 +16838,10 @@ function RuntimeLevelGeometry({
 }
 
 function Scene({
+  activatedAltarIds,
   composerEnabled,
   controlsOpen,
+  cutsceneActive,
   layout,
   levelTransform,
   renderedLayouts,
@@ -16447,8 +16855,10 @@ function Scene({
   replayRequestMazeId,
   visualSettings
 }: {
+  activatedAltarIds: Set<string>
   composerEnabled: boolean
   controlsOpen: boolean
+  cutsceneActive: boolean
   layout: MazeLayout
   levelTransform: LevelWorldTransform
   renderedLayouts: MazeLayout[]
@@ -17711,6 +18121,7 @@ function Scene({
 
           return (
             <RuntimeLevelGeometry
+              activatedAltarIds={activatedAltarIds}
               environmentIntensity={environmentIntensity}
               iblContributionIntensity={runtimeDynamicVolumetricIntensity}
               isActive={isActive}
@@ -17829,7 +18240,7 @@ function Scene({
       </EffectComposer>
         ) : null}
           <FlightRig
-            inputEnabled={startupSceneReady}
+            inputEnabled={startupSceneReady && !cutsceneActive}
             isLevelLightingReady={isLevelLightingReadyForTransition}
             layout={layout}
             levelTransform={levelTransform}
@@ -19752,6 +20163,9 @@ function CreditsModal({
           "Priest's Throne" (<a href="https://skfb.ly/QH8R">https://skfb.ly/QH8R</a>) by cachgill is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
         </p>
         <p>
+          "Droop cup 4th century BC" (<a href="https://skfb.ly/oyB9X">https://skfb.ly/oyB9X</a>) by The Hunt Museum is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
+        </p>
+        <p>
           "Metal Rust" texture pack (<a href="https://www.sharetextures.com/textures/metal/metal-rust">https://www.sharetextures.com/textures/metal/metal-rust</a>) by ShareTextures is used under the ShareTextures license.
         </p>
         <small>Press any key to close.</small>
@@ -19854,6 +20268,26 @@ function MobileTouchControls({
   )
 }
 
+function areCellsCardinallyAdjacent(
+  left: { x: number; y: number },
+  right: { x: number; y: number }
+) {
+  return Math.abs(left.x - right.x) + Math.abs(left.y - right.y) === 1
+}
+
+function AltarCutsceneOverlay({
+  active
+}: {
+  active: boolean
+}) {
+  return (
+    <div className={`altar-cutscene${active ? ' altar-cutscene-active' : ''}`}>
+      <div className="altar-cutscene-bar altar-cutscene-bar-top" />
+      <div className="altar-cutscene-bar altar-cutscene-bar-bottom" />
+    </div>
+  )
+}
+
 export default function App() {
   const [controlsOpen, setControlsOpen] = useState(false)
   const [creditsOpen, setCreditsOpen] = useState(false)
@@ -19885,6 +20319,11 @@ export default function App() {
   const [mazeSceneKey, setMazeSceneKey] = useState(0)
   const [sceneLoaded, setSceneLoaded] = useState(false)
   const [visualSettings, setVisualSettings] = useState(createDefaultVisualSettings)
+  const [activatedAltarIds, setActivatedAltarIds] = useState<Set<string>>(() => new Set())
+  const [altarCutscene, setAltarCutscene] = useState<{
+    altarId: string
+    levelId: string
+  } | null>(null)
   const composerEnabled = true
   const authoredLevels = useMemo(() => parseLevelSpec(levelsMarkdown), [])
 
@@ -20994,6 +21433,7 @@ export default function App() {
   const activeTurnState = mazeLayout && globalTurnState
     ? getGlobalTurnStateForLevel(globalTurnState, mazeLayout.maze.id, mazeLayout.maze)
     : null
+  const activeAltarCutscene = Boolean(altarCutscene)
   const activeLevelTransform = useMemo(
     () => mazeLayout
       ? getRuntimeLevelWorldTransform(mazeLayout.maze.id)
@@ -21009,6 +21449,84 @@ export default function App() {
       query: window.location.search
     })
   }, [])
+
+  useEffect(() => {
+    if (
+      !mazeLayout ||
+      !activeTurnState?.player.hasTrophy ||
+      altarCutscene ||
+      (mazeLayout.altars ?? []).length === 0
+    ) {
+      return
+    }
+
+    const altar = mazeLayout.altars.find((candidate) =>
+      !activatedAltarIds.has(candidate.id) &&
+      areCellsCardinallyAdjacent(activeTurnState.player.cell, candidate.cell)
+    )
+
+    if (!altar) {
+      return
+    }
+
+    document.body.dataset.altarCutsceneActive = 'true'
+    setAltarCutscene({
+      altarId: altar.id,
+      levelId: mazeLayout.maze.id
+    })
+  }, [
+    activatedAltarIds,
+    activeTurnState?.player.cell.x,
+    activeTurnState?.player.cell.y,
+    activeTurnState?.player.hasTrophy,
+    altarCutscene,
+    mazeLayout
+  ])
+
+  useEffect(() => {
+    if (!altarCutscene) {
+      delete document.body.dataset.altarCutsceneActive
+      return undefined
+    }
+
+    const handle = window.setTimeout(() => {
+      const levelId = altarCutscene.levelId
+      const layoutForCutscene = loadedMazeLayoutsRef.current.get(levelId)
+
+      setActivatedAltarIds((current) => {
+        const next = new Set(current)
+
+        next.add(altarCutscene.altarId)
+        return next
+      })
+      if (layoutForCutscene) {
+        setGlobalTurnState((current) => {
+          if (!current) {
+            return current
+          }
+
+          const levelTurnState = getGlobalTurnStateForLevel(
+            current,
+            levelId,
+            layoutForCutscene.maze
+          )
+
+          return replaceGlobalTurnStateForLevel(current, levelId, {
+            ...levelTurnState,
+            player: {
+              ...levelTurnState.player,
+              hasTrophy: false
+            },
+            trophyState: 'consumed'
+          })
+        })
+      }
+      setAltarCutscene(null)
+      delete document.body.dataset.altarCutsceneActive
+    }, 4000)
+
+    return () => window.clearTimeout(handle)
+  }, [altarCutscene, setGlobalTurnState])
 
   useEffect(() => {
     if (!analyticsLevelId) {
@@ -21071,6 +21589,7 @@ export default function App() {
         </div>
       ) : null}
       <LoadingOverlay complete={sceneLoaded} />
+      <AltarCutsceneOverlay active={activeAltarCutscene} />
       <CreditsModal open={creditsOpen} />
       <LevelMenuModal
         levels={authoredLevels}
@@ -21162,8 +21681,10 @@ export default function App() {
             />
             <Suspense fallback={null}>
               <Scene
+                activatedAltarIds={activatedAltarIds}
                 composerEnabled={composerEnabled}
                 controlsOpen={controlsOpen}
+                cutsceneActive={activeAltarCutscene}
                 key={`scene:${mazeSceneKey}`}
                 layout={mazeLayout}
                 levelTransform={activeLevelTransform}

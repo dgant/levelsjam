@@ -545,6 +545,18 @@ function getOpenGateIds(maze, state) {
     .map(getGateId)
 }
 
+function getDoorId(maze) {
+  return `${maze.id}:entrance-door`
+}
+
+function getOpenDoorIds(maze, state) {
+  if (!maze.opening || cellKey(maze.opening.cell) !== cellKey(state.player.cell)) {
+    return []
+  }
+
+  return [getDoorId(maze)]
+}
+
 function createPlayerMoveEdgeSet(maze, state) {
   const openEdges = createMonsterMoveEdgeSet(maze)
   const openGateIds = new Set(getOpenGateIds(maze, state))
@@ -623,7 +635,9 @@ function resolveMonsterTurn(maze, openEdges, visibilityEdges, monster, playerCel
       return nextMonster
     }
   } else if (monster.type === 'spider') {
-    moveDirection = chooseSpiderDirection(maze, openEdges, monster)
+    moveDirection = canMove(maze, openEdges, monster.cell, monster.direction)
+      ? monster.direction
+      : chooseSpiderDirection(maze, openEdges, monster)
   } else if (monster.type === 'werewolf') {
     if (monster.movedPreviousTurn) {
       nextMonster.movedPreviousTurn = false
@@ -825,6 +839,7 @@ export {
   createMonsterMoveEdgeSet,
   createPlayerMoveEdgeSet,
   getNeighbor,
+  getOpenDoorIds,
   getOpenGateIds,
   getVisibleCells,
   normalizeEdge,

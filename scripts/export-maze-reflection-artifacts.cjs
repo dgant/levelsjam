@@ -3,6 +3,7 @@ const net = require('node:net')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
 const { chromium } = require('@playwright/test')
+const { PNG } = require('pngjs')
 
 const rootDir = path.resolve(__dirname, '..')
 const servePort = Number(process.env.LEVELSJAM_REFLECTION_ARTIFACT_PORT ?? '42735')
@@ -44,6 +45,39 @@ function writeDataUrlPng(filePath, dataUrl) {
   )
 }
 
+function readDataUrlPng(dataUrl) {
+  return PNG.sync.read(
+    Buffer.from(
+      dataUrl.replace(/^data:image\/png;base64,/, ''),
+      'base64'
+    )
+  )
+}
+
+function computeVolumetricCoefficientsFromCapture(rawRgbEAtlas, computeFromPixels) {
+  const faces = rawRgbEAtlas.map((dataUrl) => readDataUrlPng(dataUrl))
+
+  return computeFromPixels(faces, (face, x, y) => {
+    const offset = ((y * face.width) + x) * 4
+    const r = face.data[offset]
+    const g = face.data[offset + 1]
+    const b = face.data[offset + 2]
+    const e = face.data[offset + 3]
+
+    if (e <= 0) {
+      return [0, 0, 0]
+    }
+
+    const scale = 2 ** (e - 128)
+
+    return [
+      (r / 255) * scale,
+      (g / 255) * scale,
+      (b / 255) * scale
+    ]
+  })
+}
+
 function waitForPort(port, timeoutMs) {
   return new Promise((resolve, reject) => {
     const deadline = Date.now() + timeoutMs
@@ -83,7 +117,8 @@ async function captureMazeReflectionArtifacts(
   artifactRoot,
   getMazeSceneLayout,
   sconceRadius,
-  computeMazeVolumetricLightmapCoefficients
+  computeMazeVolumetricLightmapCoefficients,
+  computeVolumetricLightmapCoefficientsFromPixels
 ) {
   const outputDirectory = path.join(
     artifactRoot,
@@ -129,19 +164,19 @@ async function captureMazeReflectionArtifacts(
     probes: []
   }
 
-  const summary = {
-    faceSize,
-    generatedAt: new Date().toISOString(),
-    mazeId: maze.id,
-    probeCount,
-    probeState: compactProbeState,
-    probes: []
+  const writeRuntimeManifest = (manifest) => {
+    for (const runtimeDirectory of runtimeMazeDataDirectories) {
+      const manifestPath = path.join(runtimeDirectory, maze.id, 'probe-assets.json')
+
+      fs.mkdirSync(path.dirname(manifestPath), { recursive: true })
+      fs.writeFileSync(
+        manifestPath,
+        JSON.stringify(manifest, null, 2)
+      )
+    }
   }
 
-  for (let probeIndex = 0; probeIndex < probeCount; probeIndex += 1) {
-    console.log(
-      `[export:maze-probes] ${maze.id} probe ${probeIndex + 1}/${probeCount}`
-    )
+  const captureProbe = async (probeIndex) => {
     const capture = await page.evaluate(
       async ({ probeIndex, size }) =>
         await window.__levelsjamDebug?.bakeReflectionProbeAssets?.(
@@ -173,20 +208,10 @@ async function captureMazeReflectionArtifacts(
       )
     }
 
-    const probeDirectory = path.join(
-      outputDirectory,
-      `probe-${String(probeIndex).padStart(3, '0')}`
-    )
+    return capture
+  }
 
-    writeAtlasArtifacts(probeDirectory, 'raw', capture.rawAtlas)
-    writeAtlasArtifacts(probeDirectory, 'raw-rgbe', capture.rawRgbEAtlas)
-    writeAtlasArtifacts(probeDirectory, 'processed', capture.processedAtlas)
-    writeAtlasArtifacts(probeDirectory, 'geometry', capture.geometryAtlas)
-    writeDataUrlPng(
-      path.join(probeDirectory, 'processed-cubeuv-rgbe.png'),
-      capture.processedCubeUvRgbE.dataUrl
-    )
-
+  const appendRuntimeProbe = (manifest, probeIndex, capture) => {
     const runtimeProbeDirectoryRelative = path.posix.join(
       maze.id,
       'reflection-probes'
@@ -203,12 +228,17 @@ async function captureMazeReflectionArtifacts(
       )
     }
 
-    runtimeManifest.probes.push({
-      coefficients: computeMazeVolumetricLightmapCoefficients(
-        maze,
-        mazeLayout.reflectionProbes[probeIndex].position,
-        sconceRadius
-      ),
+    manifest.probes.push({
+      coefficients: Array.isArray(capture.rawRgbEAtlas)
+        ? computeVolumetricCoefficientsFromCapture(
+            capture.rawRgbEAtlas,
+            computeVolumetricLightmapCoefficientsFromPixels
+          )
+        : computeMazeVolumetricLightmapCoefficients(
+            maze,
+            mazeLayout.reflectionProbes[probeIndex].position,
+            sconceRadius
+          ),
       index: probeIndex,
       processedCubeUvRgbE: path.posix.join(
         runtimeProbeDirectoryRelative,
@@ -217,6 +247,64 @@ async function captureMazeReflectionArtifacts(
       textureHeight: capture.processedCubeUvRgbE.height,
       textureWidth: capture.processedCubeUvRgbE.width
     })
+  }
+
+  if (process.env.LEVELSJAM_REFLECTION_TWO_PASS !== '0') {
+    const firstPassManifest = {
+      ...runtimeManifest,
+      generatedAt: new Date().toISOString(),
+      probes: []
+    }
+
+    for (let probeIndex = 0; probeIndex < probeCount; probeIndex += 1) {
+      console.log(
+        `[export:maze-probes] ${maze.id} first-pass probe ${probeIndex + 1}/${probeCount}`
+      )
+      appendRuntimeProbe(firstPassManifest, probeIndex, await captureProbe(probeIndex))
+    }
+
+    writeRuntimeManifest(firstPassManifest)
+    await page.goto(`http://127.0.0.1:${servePort}/?maze=${maze.id}`, {
+      timeout: 60_000,
+      waitUntil: 'domcontentloaded'
+    })
+    await page.waitForFunction(
+      () => window.__levelsjamDebug?.getReflectionCaptureSceneState?.()?.ready === true,
+      undefined,
+      { timeout: 600_000 }
+    )
+  }
+
+  const summary = {
+    faceSize,
+    generatedAt: new Date().toISOString(),
+    mazeId: maze.id,
+    probeCount,
+    probeState: compactProbeState,
+    probes: []
+  }
+
+  for (let probeIndex = 0; probeIndex < probeCount; probeIndex += 1) {
+    console.log(
+      `[export:maze-probes] ${maze.id} probe ${probeIndex + 1}/${probeCount}`
+    )
+    const capture = await captureProbe(probeIndex)
+
+    const probeDirectory = path.join(
+      outputDirectory,
+      `probe-${String(probeIndex).padStart(3, '0')}`
+    )
+
+    writeAtlasArtifacts(probeDirectory, 'raw', capture.rawAtlas)
+    writeAtlasArtifacts(probeDirectory, 'raw-rgbe', capture.rawRgbEAtlas)
+    writeAtlasArtifacts(probeDirectory, 'processed', capture.processedAtlas)
+    writeAtlasArtifacts(probeDirectory, 'geometry', capture.geometryAtlas)
+    writeDataUrlPng(
+      path.join(probeDirectory, 'processed-cubeuv-rgbe.png'),
+      capture.processedCubeUvRgbE.dataUrl
+    )
+
+    appendRuntimeProbe(runtimeManifest, probeIndex, capture)
     summary.probes.push({
       geometryFaceCount: capture.geometryAtlas.length,
       index: probeIndex,
@@ -230,15 +318,7 @@ async function captureMazeReflectionArtifacts(
     JSON.stringify(summary, null, 2)
   )
 
-  for (const runtimeDirectory of runtimeMazeDataDirectories) {
-    const manifestPath = path.join(runtimeDirectory, maze.id, 'probe-assets.json')
-
-    fs.mkdirSync(path.dirname(manifestPath), { recursive: true })
-    fs.writeFileSync(
-      manifestPath,
-      JSON.stringify(runtimeManifest, null, 2)
-    )
-  }
+  writeRuntimeManifest(runtimeManifest)
 }
 
 async function main() {
@@ -253,6 +333,9 @@ async function main() {
     computeMazeVolumetricLightmapCoefficients,
     getMazeSceneLayout
   } = await import('../src/lib/maze.js')
+  const {
+    computeVolumetricLightmapCoefficientsFromPixels
+  } = await import('../src/lib/probeSphericalHarmonics.js')
   const {
     SCONCE_RADIUS
   } = await import('../src/lib/sceneConstants.js')
@@ -298,7 +381,8 @@ async function main() {
         DEFAULT_LIGHTMAP_ARTIFACT_DIRECTORY,
         getMazeSceneLayout,
         SCONCE_RADIUS,
-        computeMazeVolumetricLightmapCoefficients
+        computeMazeVolumetricLightmapCoefficients,
+        computeVolumetricLightmapCoefficientsFromPixels
       )
     }
 

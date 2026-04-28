@@ -150,6 +150,36 @@ body {
   pointer-events: none;
 }
 
+.altar-cutscene {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.altar-cutscene-bar {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 18vh;
+  background: #020204;
+  transition: transform 1s ease;
+}
+
+.altar-cutscene-bar-top {
+  top: 0;
+  transform: translateY(-100%);
+}
+
+.altar-cutscene-bar-bottom {
+  bottom: 0;
+  transform: translateY(100%);
+}
+
+.altar-cutscene-active .altar-cutscene-bar {
+  transform: translateY(0);
+}
+
 .credits-modal {
   position: fixed;
   inset: 0;

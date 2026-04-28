@@ -3178,6 +3178,23 @@ export function getMazeItemPlacements(maze) {
   return items
 }
 
+export function getMazeAltarPlacements(maze) {
+  return (maze.altars ?? []).map((altar, index) => {
+    const center = getCellCenter(maze, altar.cell)
+
+    return {
+      cell: { ...altar.cell },
+      id: altar.id ?? `altar-${index}`,
+      position: {
+        x: center.x,
+        y: GROUND_Y,
+        z: center.z
+      },
+      targetLevelId: altar.targetLevelId ?? null
+    }
+  })
+}
+
 function getMazeReflectionProbePlacements(maze) {
   const probes = []
 
@@ -3209,6 +3226,7 @@ export function getMazeSceneLayout(maze, sconceRadius) {
       }
 
   return {
+    altars: getMazeAltarPlacements(mazeWithVisibility),
     cornerFillers: getMazeCornerFillers(mazeWithVisibility),
     decals: getMazeDecalPlacements(mazeWithVisibility),
     gates: getMazeGatePlacements(mazeWithVisibility),

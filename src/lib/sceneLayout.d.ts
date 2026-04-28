@@ -15,6 +15,12 @@ export type WallBounds = {
 }
 
 export type MazeLayout = {
+  altars: Array<{
+    cell: { x: number; y: number }
+    id: string
+    position: Vector3Like
+    targetLevelId: string | null
+  }>
   cornerFillers: Array<{
     bounds: WallBounds
     center: { x: number; z: number }
@@ -91,6 +97,11 @@ export type MazeLayout = {
       from: { x: number; y: number }
       id?: string
       to: { x: number; y: number }
+    }>
+    altars?: Array<{
+      cell: { x: number; y: number }
+      id?: string
+      targetLevelId?: string
     }>
     height: number
     id: string

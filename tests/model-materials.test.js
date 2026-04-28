@@ -147,8 +147,13 @@ test('doors use runtime metal-rust ORM and baked dynamic lighting', () => {
   )
   assert.match(
     appSource,
-    /isOpen=\{false\}/,
-    'maze entrance doors should start visually closed'
+    /isOpen=\{isActive && isDoorOpenForTurnState\(door, layout\.maze, turnState\)\}/,
+    'maze entrance doors should be driven by active adjacent player state'
+  )
+  assert.match(
+    appSource,
+    /const DOOR_HEIGHT = 1\.8/,
+    'door leaves should be 1.8m high'
   )
 })
 

@@ -31,7 +31,7 @@
 - Volumetric fog is level-agnostic at runtime and samples the currently resident world-space volumetric-lightmap resources.
 - Runtime volumetric fog renders through one global full-screen pass rather than duplicating one fog pass per rendered level.
 - The runtime volumetric-fog pass stays within the browser's fragment texture-sampler budget by binding only a capped set of nearby ready volumetric-lightmap atlases selected from the world lighting registry by camera position.
-- The current runtime volumetric-fog atlas cap is one selected atlas per frame, chosen from the nearest ready rendered level probe bounds; expanding the cap requires explicit shader support for additional atlas samplers.
+- The current runtime volumetric-fog atlas cap is four selected atlases per frame, chosen from the nearest ready rendered level probe bounds so fog remains continuous at level boundaries without exceeding the WebGL sampler budget.
 - Lens flares are level-agnostic at runtime and choose from the currently rendered visible torch billboards/lights, regardless of the level that authored them.
 - Reflection and volumetric probe debug visualization shows all currently loaded/rendered probes rather than only the active level's probes.
 - Walking across a level boundary updates only the active debug/resource-priority focus and any rules context needed to interpret the player's current world cell.
@@ -74,6 +74,8 @@
 - Level floor meshes are emitted as one 2m by 2m patch per maze cell, centered on that cell, so floor mesh boundaries align with the gameplay grid.
 - Once a level's gameplay-rule state has been loaded, the runtime keeps that state available for the rest of the session instead of unloading or resetting it during ordinary level traversal.
 - Player movement between connected levels is a level transition, not an escape state.
+- One-cell passages that connect levels are outside the rectangular gameplay layout of each connected level; authored level room rectangles contain only the room proper, not the connector passage.
+- The authored Entrance level has a closed outer wall wherever it does not connect to Chamber 1.
 
 ## Current Scope
 - The scene uses image-based lighting from the Poly Haven `overcast_soil` environment.
@@ -167,12 +169,13 @@
 - The current scene does not include realtime torch flicker.
 - The current scene does not include realtime torch point lights.
 - Reflection probe captures include temporary shadow-casting torch point lights that match the authored torch-light characteristics except for flicker.
+- Offline reflection-probe export performs an initial capture pass, binds the resulting local probes to the static scene, then performs a second capture pass that is shipped as the runtime probe set so metallic static surfaces appear in reflections with one level of local-reflection feedback.
 - Reflection probe captures wait until every expected opaque maze wall, baked floor patch, and sconce is present with its capture-ready material state before baking.
 - Reflection probe captures include the visible static maze geometry and its baked lighting instead of collapsing to only the HDRI and temporary torch emitters.
 - Reflection probes are captured during the offline maze-lighting pipeline and are not recaptured during ordinary runtime page load or debug-slider interaction.
 - Each persisted maze ships runtime-loadable reflection-probe assets derived from the offline bake rather than generating those assets in the browser from the live scene.
 - Each persisted maze ships runtime-loadable volumetric-lightmap probe assets derived from the offline bake rather than generating those assets in the browser from the live scene.
-- Runtime reflection-probe asset loading keeps a bounded resident working set prioritized around the player's current position instead of exceeding the authored resident budget.
+- Runtime reflection-probe asset loading keeps a bounded resident working set prioritized around the player's current world position and updates that resident set as the player moves instead of using only the position where a level first mounted.
 - The current resident reflection-probe budget is large enough for every probe in a current `7x7` maze, so probe-debug visualization can show all active maze probes while still enforcing the texture-memory ceiling.
 - Runtime reflection-probe asset loading must not continue in the background beyond the resident budget if doing so would create avoidable GPU memory pressure or frame-time collapse.
 - Runtime probe residency must be exposed through debug state so automated tests can assert that the loaded probe count stays within the authored resident budget.
@@ -184,7 +187,7 @@
 - Each offline reflection probe stores an HDR processed runtime reflection texture derived from that raw cubemap.
 - Each offline reflection probe stores raw and processed HDR reflection captures for runtime local reflections and debug inspection.
 - Each offline volumetric-lightmap probe stores HDR directional lighting data that is separate from the reflection texture and is intended for diffuse probe lighting rather than specular reflections.
-- Offline volumetric-lightmap coefficients are generated from the baked maze lighting model directly, including occluded torch point-light contribution and occluded skylight, rather than inferred only from reflection beauty captures.
+- Offline volumetric-lightmap coefficients are generated through the GPU lightmapping path by sampling directional incident radiance at each probe and projecting it to spherical harmonics, including occluded torch point-light contribution, moonlight, and occluded skylight.
 - A volumetric-lightmap probe in a cell with a same-cell visible torch receives directional warm torch energy unless maze geometry occludes the torch from the probe.
 - Reflection probes and volumetric-lightmap probes share the same probe positions, local areas of influence, and capture-time occluders.
 - Gates, monsters, ground pickup items, and held pickup items are omitted from offline lightmap, volumetric-lightmap, and reflection-probe baking.
@@ -249,13 +252,19 @@
 - Gate animations run in parallel with player and monster movement animations rather than teleporting or disappearing between turns.
 - The runtime uses offline-resized `512x512` gate textures instead of the oversized source textures.
 - Each maze entrance edge has a door that follows the same blocking and opening rules as gates.
-- Each door is rendered as two metal cubes using the `textures/metal_rust-1K` PBR texture pack at the same world texel density as walls.
+- Each door is rendered as two cuboid leaves using an ancient Minoan heavy wooden door PBR material with rusty bronze reinforcements and a bronze ring opener.
+- Each door leaf uses a side-specific texture layout, mirrored between leaves so the opener sits toward the middle of the doorway, at the same world texel density as walls.
 - Each door uses a runtime-prepared ORM texture for occlusion, roughness, and metalness instead of binding the source specular texture as roughness.
 - Each door receives local volumetric-lightmap illumination and local reflection-probe response so it renders visibly under the baked lighting stack rather than as black unlit metal.
 - Doors start visually closed like gates and do not open merely because the player begins in or steps onto the entrance cell.
-- Each closed door fills its `2m x 2m` entrance edge using two `1m` long, `2m` tall leaves, each with half the wall thickness.
+- Whenever the player moves into a new cell, every door adjacent to the new player cell opens when safe, and all other doors close, in both the rules state and the rendered animation state.
+- Each closed door fills its entrance edge using two `1m` long, `1.8m` tall leaves, each with half the wall thickness.
 - Each open door slides its two leaves `0.75m` apart along the doorway edge, leaving a `1.5m` opening.
 - Door open and close animations last `250ms` and participate in the same queued-animation speed scaling as player, monster, and gate animations.
+- Chamber 1 contains one altar near each maze entrance, positioned one cell north of the chamber cell in front of that entrance so the altar sits beside the player when they return from the maze without blocking the exit line.
+- Each altar is a non-colliding static prop consisting of a `1m` cube block centered on the cell floor using the wall texture texel density, with the `Droop cup 4th century BC` model scaled to `0.65m` wide and resting on top.
+- Altar and cup materials participate in the same baked/probe lighting stack as other static maze props.
+- If the player enters a cell adjacent to an altar while holding a trophy, the runtime plays an uninterruptible trophy-placement cutscene: black letterbox bars slide in for `1s`, the player turns toward the altar for `1s`, the trophy is placed into the bowl for `1s`, the trophy is replaced by a double-size blue flame billboard using BRG-swizzled torch colors, then the letterbox bars slide out for `1s` before player control is restored.
 - Each cell may contain any number of items and at most one character.
 - Each maze contains one sword on a random unoccupied cell.
 - Each maze contains one trophy on the unoccupied cell with the greatest path distance from the entrance.
@@ -269,6 +278,7 @@
 - When the player enters the trophy cell without already holding the trophy, the trophy is picked up and attached to the first-person camera rig in the left hand.
 - Held sword and trophy meshes remain visible in first person at their authored hand positions after pickup until they are consumed, dropped, or the maze resets.
 - The held sword is positioned in the player's right hand within the camera frustum and points forward from the player perspective.
+- The held sword is shifted `0.5m` backward along its own axis from the prior forward pose so it stays inside the player's cell and avoids clipping through nearby walls.
 - The held trophy is positioned in the player's left hand within the camera frustum and points upward from the player perspective.
 - If the player would die by intersecting a monster while holding the sword, the monster dies instead, the sword is consumed, and the strike fade plays to dark red before restoring gameplay.
 - The sword-strike fade animates to linear RGB `(0.5, 0, 0)` over `125ms`, then fades back to the camera view over `375ms`, without flashing or transitioning through black.
@@ -614,6 +624,7 @@
 - The credits modal includes `"Metal Gate" (https://skfb.ly/oK7QR) by i bull your wife is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
 - The credits modal includes `"Bronze Sword Mycean" (https://skfb.ly/6RZxG) by Ryoce is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
 - The credits modal includes `"Priest's Throne" (https://skfb.ly/QH8R) by cachgill is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
+- The credits modal includes `"Droop cup 4th century BC" (https://skfb.ly/oyB9X) by The Hunt Museum is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
 - The credits modal includes the ShareTextures `metal-rust` texture pack credit for `https://www.sharetextures.com/textures/metal/metal-rust`.
 
 ## Debug Controls
@@ -669,6 +680,7 @@
 - The Vite development server starts without regenerating maze runtime data; maze runtime data is generated by the offline maze, build, or asset-preparation paths.
 - The loading overlay remains visible until general scene assets, surface lightmaps, and all volumetric-lightmap coefficient/depth probe data within 12 meters of the player's starting position are loaded.
 - Startup probe loading keeps specular reflection textures bounded to the authored resident-probe limit even when more nearby volumetric-lightmap probes are loaded for diffuse lighting and fog occlusion.
+- The current runtime specular reflection-probe resident cap is `32` processed probe textures per rendered level, selected around that level's current priority/player position.
 - Startup volumetric-lightmap readiness may load probe coefficient data for nearby diffuse/fog lighting without uploading those probes' specular reflection textures unless the probe is part of the immediate reflection startup set.
 - The runtime warms scene textures before the loading overlay becomes eligible to fade out and avoids startup-time whole-scene shader compilation when the browser implements that compilation as a visible main-thread stall.
 - Runtime readiness waits for renderer geometry and texture counts to stabilize before scene texture/program warmup, so late model commits do not upload geometry or compile shaders on the first visible gameplay frames.
