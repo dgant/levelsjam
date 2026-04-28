@@ -18,6 +18,7 @@ import {
   CubeCamera,
   CubeTexture,
   CubeUVReflectionMapping,
+  Data3DTexture,
   DataTexture,
   DataUtils,
   DepthTexture,
@@ -52,6 +53,7 @@ import {
   PMREMGenerator,
   PlaneGeometry,
   Quaternion,
+  RedFormat,
   RGBAFormat,
   RGBFormat,
   RGBADepthPacking,
@@ -251,7 +253,7 @@ const TURN_ANIMATION_DURATION_MS = 250
 let globalAnimationSpeedMultiplier = 1
 
 const MONSTER_EYE_COLOR = new Color(4, 0, 0)
-const MONSTER_EYE_RADIUS = 0.03
+const MONSTER_EYE_RADIUS = 0.0075
 const MONSTER_EYE_TYPES = ['minotaur', 'spider', 'werewolf'] as const
 
 function getScaledAnimationDuration(baseDurationMs: number) {
@@ -1108,7 +1110,7 @@ uniform float lightingStrength;
 uniform float noiseFrequency;
 uniform float noisePeriod;
 uniform float noiseStrength;
-uniform sampler2D fogNoiseTexture;
+uniform sampler3D fogNoiseTexture;
 uniform vec4 probeAmbientBounds;
 uniform vec2 probeAmbientGrid;
 uniform vec2 probeWorldOrigin;
@@ -1131,8 +1133,7 @@ float hash(vec3 p) {
 }
 
 float noise(vec3 p) {
-  vec2 uv = p.xz + vec2(p.y * 0.173, p.y * 0.317);
-  return texture2D(fogNoiseTexture, uv).r;
+  return texture(fogNoiseTexture, p).r;
 }
 
 float fogProbeCellSize(float span, float gridCount) {
@@ -1379,6 +1380,10 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
       continue;
     }
 
+    if (!fogIsInsideProbeGrid(fogWorldToProbeGrid(samplePosition))) {
+      continue;
+    }
+
     float lightingT = clamp((float(stepIndex) + rayJitter) / clampedStepCount, 0.0, 1.0);
     vec3 ambientColor = mix(nearAmbientColor, farAmbientColor, lightingT);
     float heightDensity = exp2(
@@ -1589,7 +1594,8 @@ const DEFAULT_VOLUMETRIC_NOISE_STRENGTH = 1
 const DEFAULT_VOLUMETRIC_HEIGHT_FALLOFF = 0.4
 const DEFAULT_VOLUMETRIC_LIGHTING_STRENGTH = 1
 const DEFAULT_VOLUMETRIC_STEP_COUNT = 6
-const FOG_NOISE_TEXTURE_SIZE = 128
+const FOG_NOISE_TEXTURE_SIZE = 32
+const FOG_NOISE_VOLUME_URL = `${assetBase}textures/runtime/fog/noise-volume-32-r8.bin`
 const MAX_SIMULTANEOUS_LENS_FLARES = 5
 const MAX_BUFFERED_TURN_COMMANDS = 10
 const DEFAULT_MONSTER_EYES: MonsterEyeSettings = {
@@ -1598,8 +1604,8 @@ const DEFAULT_MONSTER_EYES: MonsterEyeSettings = {
     right: { x: -0.16, y: 1.68, z: -0.54 }
   },
   spider: {
-    left: { x: 0.1, y: 0.36, z: -0.64 },
-    right: { x: -0.1, y: 0.36, z: -0.64 }
+    left: { x: -0.18, y: 0.35, z: -0.29 },
+    right: { x: -0.27, y: 0.26, z: -0.29 }
   },
   werewolf: {
     left: { x: 0.11, y: 1.32, z: -0.36 },
@@ -1609,66 +1615,17 @@ const DEFAULT_MONSTER_EYES: MonsterEyeSettings = {
 const GIT_REVISION = `${__GIT_BRANCH__}@${__GIT_REVISION__}`
 const GIT_REVISION_TIMESTAMP = __GIT_REVISION_TIMESTAMP__
 
-function hashFogNoiseCell(x: number, y: number, period: number) {
-  let value = ((x % period) + period) % period
-  value = Math.imul(value ^ 0x2c1b3c6d, 0x297a2d39)
-  value ^= ((y % period) + period) % period
-  value = Math.imul(value ^ (value >>> 15), 0x1b873593)
-  value ^= value >>> 13
-
-  return ((value >>> 0) & 0xffff) / 0xffff
-}
-
-function sampleTileableFogNoise(x: number, y: number, period: number) {
-  const x0 = Math.floor(x)
-  const y0 = Math.floor(y)
-  const fx = x - x0
-  const fy = y - y0
-  const sx = fx * fx * (3 - (2 * fx))
-  const sy = fy * fy * (3 - (2 * fy))
-  const n00 = hashFogNoiseCell(x0, y0, period)
-  const n10 = hashFogNoiseCell(x0 + 1, y0, period)
-  const n01 = hashFogNoiseCell(x0, y0 + 1, period)
-  const n11 = hashFogNoiseCell(x0 + 1, y0 + 1, period)
-  const nx0 = MathUtils.lerp(n00, n10, sx)
-  const nx1 = MathUtils.lerp(n01, n11, sx)
-
-  return MathUtils.lerp(nx0, nx1, sy)
-}
-
-function createFogNoiseTexture() {
+function createFogNoiseTexture(data?: Uint8Array) {
   const size = FOG_NOISE_TEXTURE_SIZE
-  const data = new Uint8Array(size * size * 4)
-
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      let amplitude = 0.5
-      let value = 0
-      let weight = 0
-
-      for (let octave = 0; octave < 4; octave += 1) {
-        const frequency = 2 ** octave
-        const period = size / frequency
-        value += sampleTileableFogNoise((x / size) * period, (y / size) * period, period) * amplitude
-        weight += amplitude
-        amplitude *= 0.5
-      }
-
-      const byteValue = MathUtils.clamp(Math.round((value / weight) * 255), 0, 255)
-      const offset = ((y * size) + x) * 4
-      data[offset] = byteValue
-      data[offset + 1] = byteValue
-      data[offset + 2] = byteValue
-      data[offset + 3] = 255
-    }
-  }
-
-  const texture = new DataTexture(data, size, size, RGBAFormat, UnsignedByteType)
+  const texture = new Data3DTexture(data ?? new Uint8Array(size * size * size).fill(128), size, size, size)
   texture.wrapS = RepeatWrapping
   texture.wrapT = RepeatWrapping
+  texture.wrapR = RepeatWrapping
   texture.minFilter = LinearFilter
   texture.magFilter = LinearFilter
   texture.generateMipmaps = false
+  texture.format = RedFormat
+  texture.type = UnsignedByteType
   texture.colorSpace = NoColorSpace
   texture.needsUpdate = true
 
@@ -1676,6 +1633,43 @@ function createFogNoiseTexture() {
 }
 
 const FOG_NOISE_TEXTURE = createFogNoiseTexture()
+let fogNoiseTextureLoadPromise: Promise<Texture> | null = null
+
+function useFogNoiseTexture() {
+  const [texture, setTexture] = useState<Texture>(FOG_NOISE_TEXTURE)
+
+  useEffect(() => {
+    let cancelled = false
+
+    fogNoiseTextureLoadPromise ??= fetch(FOG_NOISE_VOLUME_URL)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Failed to load fog noise volume: ${response.status} ${response.statusText}`)
+        }
+
+        return response.arrayBuffer()
+      })
+      .then((buffer) => createFogNoiseTexture(new Uint8Array(buffer)))
+
+    void fogNoiseTextureLoadPromise
+      .then((loadedTexture) => {
+        if (cancelled) {
+          return
+        }
+
+        setTexture(loadedTexture)
+      })
+      .catch((error) => {
+        console.error(error)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  return texture
+}
 
 const PROBE_DEBUG_MODE_OPTIONS: Array<{ key: ProbeDebugMode, label: string }> = [
   { key: 'none', label: 'None' },
@@ -2321,6 +2315,10 @@ class FogVolumeEffectImpl extends Effect {
     this.uniforms.get('noiseStrength').value = value
   }
 
+  set fogNoiseTexture(value: Texture | null) {
+    this.uniforms.get('fogNoiseTexture').value = value ?? FOG_NOISE_TEXTURE
+  }
+
   set probeAmbientBounds(value: Vector4) {
     this.uniforms.get('probeAmbientBounds').value.copy(value)
   }
@@ -2405,18 +2403,18 @@ function createDefaultVisualSettings(): VisualSettings {
       aditionalStreaks: false,
       animated: false,
       anamorphic: true,
-      enabled: false,
+      enabled: true,
       flareShape: 0.03,
-      flareSize: 0.01,
+      flareSize: 0.0015,
       flareSpeed: 0.01,
       ghostScale: 0,
       glareSize: 0,
       haloScale: 0.16,
-      intensity: 0.1,
-      opacity: 0.1,
-      secondaryGhosts: false,
+      intensity: 0.002,
+      opacity: 0.01,
+      secondaryGhosts: true,
       starBurst: false,
-      starPoints: 6
+      starPoints: 3
     },
     probeDebugMode: 'none',
     reflectionContribution: {
@@ -2428,7 +2426,7 @@ function createDefaultVisualSettings(): VisualSettings {
       intensity: DEFAULT_PROBE_IBL_INTENSITY
     },
     unlitMode: false,
-    toneMapping: 'agx',
+    toneMapping: 'neutral',
     bloom: {
       enabled: false,
       intensity: 0.65,
@@ -9310,6 +9308,7 @@ function FogVolume({
   const scene = useThree((state) => state.scene)
   const volumetricShadowsEnabled = useContext(VolumetricShadowContext)
   const effect = useMemo(() => new FogVolumeEffectImpl(), [])
+  const fogNoiseTexture = useFogNoiseTexture()
   const probeBounds = useMemo(() => {
     const firstProbe = layout.reflectionProbes[0]?.position
     const lastXProbe = layout.reflectionProbes[layout.maze.width - 1]?.position
@@ -9347,6 +9346,7 @@ function FogVolume({
     effect.noiseFrequency = noiseFrequency
     effect.noisePeriod = noisePeriod
     effect.noiseStrength = noiseStrength
+    effect.fogNoiseTexture = fogNoiseTexture
     effect.probeAmbientBounds = probeBounds
     effect.probeAmbientGrid = probeGrid
     effect.probeWorldOrigin = probeWorldOrigin
@@ -9416,6 +9416,7 @@ function FogVolume({
     noiseFrequency,
     noisePeriod,
     noiseStrength,
+    fogNoiseTexture,
     probeCoefficientTextures,
     probeConnectivityTexture,
     probeBounds,
@@ -11331,6 +11332,7 @@ function GateActor({
   )
   const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
   const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
+  const openProgress = useRef(isOpen ? 1 : 0)
   const probeBlend = useMemo(
     () =>
       buildProbeBlendConfig(
@@ -11415,13 +11417,14 @@ function GateActor({
       return
     }
 
-    group.current.position.set(
-      gate.center.x,
-      transform.closedY,
-      gate.center.z
-    )
+      openProgress.current = isOpen ? 1 : 0
+      group.current.position.set(
+        gate.center.x,
+        MathUtils.lerp(transform.closedY, transform.openY, openProgress.current),
+        gate.center.z
+      )
     group.current.userData.initialized = true
-  }, [gate.center.x, gate.center.z, transform])
+  }, [gate.center.x, gate.center.z, isOpen, transform])
 
   useFrame((_, delta) => {
     const profileStartedAt = beginFrameProfileStep()
@@ -11431,11 +11434,17 @@ function GateActor({
         return
       }
 
-      group.current.position.y = MathUtils.damp(
-        group.current.position.y,
-        isOpen ? transform.openY : transform.closedY,
-        18,
-        delta
+      const target = isOpen ? 1 : 0
+      const durationSeconds = getScaledAnimationDuration(TURN_ANIMATION_DURATION_MS) / 1000
+      const step = durationSeconds > 0 ? delta / durationSeconds : 1
+
+      openProgress.current = target > openProgress.current
+        ? Math.min(target, openProgress.current + step)
+        : Math.max(target, openProgress.current - step)
+      group.current.position.y = MathUtils.lerp(
+        transform.closedY,
+        transform.openY,
+        openProgress.current
       )
     } finally {
       endFrameProfileStep('gate animation', profileStartedAt)
@@ -11617,7 +11626,6 @@ function MazeDoorActor({
         userData={{ debugRole: 'maze-door-leaf' }}
       >
         <meshStandardMaterial
-          aoMap={doorMaps.aoMap}
           map={doorMaps.map}
           metalness={0.65}
           normalMap={doorMaps.normalMap}
@@ -11633,7 +11641,6 @@ function MazeDoorActor({
         userData={{ debugRole: 'maze-door-leaf' }}
       >
         <meshStandardMaterial
-          aoMap={doorMaps.aoMap}
           map={doorMaps.map}
           metalness={0.65}
           normalMap={doorMaps.normalMap}
@@ -12338,7 +12345,7 @@ function MonsterModel({
         ? 2.7
         : monster.type === 'spider'
           ? 2.1
-          : 1.8
+          : 3.6
     const maxHorizontalDimension = Math.max(size.x, size.z, 0.0001)
     const maxDimension = Math.max(size.x, size.y, size.z, 0.0001)
     const scale = monster.type === 'werewolf'
@@ -12347,11 +12354,12 @@ function MonsterModel({
 
     return {
       modelOffset: new Vector3(
-        -center.x * scale,
+        (-center.x * scale) + (monster.type === 'spider' ? 0.1 : 0),
         (-bounds.min.y * scale) +
           (monster.type === 'minotaur' ? -0.25 : 0),
-        -center.z * scale
+        (-center.z * scale) + (monster.type === 'spider' ? 0.5 : 0)
       ),
+      modelRotationY: monster.type === 'werewolf' ? Math.PI : 0,
       modelRotationZ:
         monster.type === 'spider'
           ? (monster.hand === 'left' ? Math.PI / 4 : -Math.PI / 4)
@@ -12392,6 +12400,7 @@ function MonsterModel({
         transform.modelOffset.z
       ]}
       rotation-z={transform.modelRotationZ}
+      rotation-y={transform.modelRotationY}
       scale={transform.scale}
     />
   )
@@ -12400,11 +12409,13 @@ function MonsterModel({
 function MonsterEyes({
   awake,
   monsterId,
+  monsterHand,
   monsterType,
   settings
 }: {
   awake: boolean
   monsterId: string
+  monsterHand?: 'left' | 'right'
   monsterType: MonsterType
   settings: MonsterEyeSettings
 }) {
@@ -12416,7 +12427,21 @@ function MonsterEyes({
     }),
     []
   )
-  const offsets = settings[monsterType]
+  const authoredOffsets = settings[monsterType]
+  const offsets = monsterType === 'spider' && monsterHand === 'right'
+    ? {
+        left: {
+          x: -authoredOffsets.right.x,
+          y: authoredOffsets.right.y,
+          z: authoredOffsets.right.z
+        },
+        right: {
+          x: -authoredOffsets.left.x,
+          y: authoredOffsets.left.y,
+          z: authoredOffsets.left.z
+        }
+      }
+    : authoredOffsets
 
   useEffect(() => () => {
     sphereGeometry.dispose()
@@ -12498,6 +12523,7 @@ function MonsterActor({
         }
       | {
           from: Vector3
+          settle?: Vector3
           to: Vector3
           type: 'move'
         }
@@ -12551,6 +12577,33 @@ function MonsterActor({
           type: 'move'
         })
         yawAfterMoveTurn = moveYaw
+      } else if (monster.failedMoveDirection) {
+        const failedOffset = directionToWorldOffset(monster.failedMoveDirection)
+        const failedTargetPosition = currentPosition.clone().add(
+          new Vector3(
+            failedOffset.x * BLOCKED_MOVE_FRACTION,
+            0,
+            failedOffset.z * BLOCKED_MOVE_FRACTION
+          )
+        )
+        const failedYaw = directionToYaw(monster.failedMoveDirection)
+        const turnDelta = normalizeAngleRadians(failedYaw - currentYaw)
+
+        if (Math.abs(turnDelta) > 0.001) {
+          phases.push({
+            fromYaw: currentYaw,
+            toYaw: currentYaw + turnDelta,
+            type: 'turn'
+          })
+        }
+
+        phases.push({
+          from: currentPosition,
+          settle: targetPosition.clone(),
+          to: failedTargetPosition,
+          type: 'move'
+        })
+        yawAfterMoveTurn = failedYaw
       }
 
       if (monster.awake || !moved) {
@@ -12617,14 +12670,19 @@ function MonsterActor({
           const completedPhase = activeSequenceAnimation.phases[index]
 
           if (completedPhase.type === 'move') {
-            group.current.position.copy(completedPhase.to)
+            group.current.position.copy(completedPhase.settle ?? completedPhase.to)
           } else {
             group.current.rotation.y = completedPhase.toYaw
           }
         }
 
         if (phase.type === 'move') {
-          group.current.position.lerpVectors(phase.from, phase.to, phaseAlpha)
+          if (phase.settle) {
+            const bumpAlpha = Math.sin(phaseAlpha * Math.PI)
+            group.current.position.lerpVectors(phase.from, phase.to, bumpAlpha)
+          } else {
+            group.current.position.lerpVectors(phase.from, phase.to, phaseAlpha)
+          }
         } else {
           group.current.rotation.y = phase.fromYaw + ((phase.toYaw - phase.fromYaw) * phaseAlpha)
         }
@@ -12670,6 +12728,7 @@ function MonsterActor({
       />
       <MonsterEyes
         awake={monster.awake}
+        monsterHand={monster.hand}
         monsterId={monster.id}
         monsterType={monster.type}
         settings={monsterEyes}
@@ -13944,7 +14003,7 @@ function AnimatedVignette({ settings }: { settings: VignetteSettings }) {
 
     try {
       const period = Math.max(settings.noisePeriod, 0.0001)
-      const noise = sampleContinuousUnitNoise(state.clock.getElapsedTime() / period)
+      const noise = (sampleContinuousUnitNoise(state.clock.getElapsedTime() / period) * 2) - 1
       const nextDarkness = settings.noiseIntensity > 0
         ? settings.intensity + (noise * settings.noiseIntensity)
         : settings.intensity
@@ -14326,7 +14385,7 @@ function FlightRig({
   )
 
   useEffect(() => {
-    if (replayActive.current) {
+    if (replayActive.current || playerAnimation.current) {
       return
     }
 
@@ -16974,25 +17033,33 @@ function Scene({
             samples={48}
           />
         ) : null}
-        {visualSettings.volumetricLighting.enabled && activeLightingResources?.reflectionProbeState.ready ? (
-          <FogVolume
-            ambientColor={fogAmbientColor}
-            fogDistance={visualSettings.volumetricDistance}
-            heightFalloff={visualSettings.volumetricHeightFalloff}
-            key={`fog-volume-${layout.maze.id}`}
-            layout={layout}
-            lightingStrength={visualSettings.volumetricLightingStrength}
-            noiseFrequency={visualSettings.volumetricNoiseFrequency}
-            noisePeriod={visualSettings.volumetricNoisePeriod}
-            noiseStrength={visualSettings.volumetricNoiseStrength}
-            probeCoefficientTextures={activeLightingResources.probeCoefficientTextures}
-            probeDepthAtlasTextures={activeLightingResources.probeDepthAtlasTextures}
-            rayStepCount={visualSettings.volumetricStepCount}
-            transform={getRuntimeLevelWorldTransform(layout.maze.id)}
-            visible={visualSettings.volumetricLighting.enabled}
-            volumeIntensity={visualSettings.volumetricLighting.intensity}
-          />
-        ) : null}
+        {visualSettings.volumetricLighting.enabled ? runtimeRenderedLayouts.map((renderedLayout) => {
+          const resources = levelLightingResources.get(renderedLayout.maze.id)
+
+          if (!resources?.reflectionProbeState.ready) {
+            return null
+          }
+
+          return (
+            <FogVolume
+              ambientColor={fogAmbientColor}
+              fogDistance={visualSettings.volumetricDistance}
+              heightFalloff={visualSettings.volumetricHeightFalloff}
+              key={`fog-volume-${renderedLayout.maze.id}`}
+              layout={renderedLayout}
+              lightingStrength={visualSettings.volumetricLightingStrength}
+              noiseFrequency={visualSettings.volumetricNoiseFrequency}
+              noisePeriod={visualSettings.volumetricNoisePeriod}
+              noiseStrength={visualSettings.volumetricNoiseStrength}
+              probeCoefficientTextures={resources.probeCoefficientTextures}
+              probeDepthAtlasTextures={resources.probeDepthAtlasTextures}
+              rayStepCount={visualSettings.volumetricStepCount}
+              transform={getRuntimeLevelWorldTransform(renderedLayout.maze.id)}
+              visible={visualSettings.volumetricLighting.enabled}
+              volumeIntensity={visualSettings.volumetricLighting.intensity}
+            />
+          )
+        }) : null}
         <BillboardCompositePass />
         {depthOfFieldActive ? (
           <DepthOfField
@@ -18128,7 +18195,7 @@ function VisualControls({
             })
           }}
           step={0.0005}
-          type="range"
+          type="number"
           value={visualSettings.lensFlare.intensity}
         />
           </div>
@@ -18834,13 +18901,11 @@ function VisualControls({
                     </ResettableLabel>
                     <input
                       aria-label={label}
-                      max={2}
-                      min={-2}
                       onChange={(event) => {
                         onMonsterEyeOffsetChange(monsterType, eye, axis, Number(event.target.value))
                       }}
                       step={0.01}
-                      type="range"
+                      type="number"
                       value={value}
                     />
                   </label>

@@ -288,22 +288,26 @@
 - The minotaur records the cardinal direction toward the player on each turn where it can see the player.
 - An awake minotaur attempts to move one cell in its last recorded player direction.
 - A minotaur that sees the player after the player rounds a corner keeps tracking the player and does not go dormant merely because the previous movement direction is obsolete.
-- A minotaur that cannot move because of a wall or gate goes to sleep.
+- A minotaur that cannot move because of a wall or gate goes to sleep only when it does not currently have line of sight to the player.
+- A minotaur that has line of sight to the player through a closed gate stays awake, faces the blocked gate, and records a failed move for the same bump-style failed-move animation used by blocked player movement.
 - Each spider is either a left-wall-following spider or a right-wall-following spider.
 - An awake spider moves one cell according to its configured wall-following rule.
 - An awake left-wall-following spider chooses its move by testing left, straight, right, then backwards relative to its current facing direction.
 - An awake right-wall-following spider chooses its move by testing right, straight, left, then backwards relative to its current facing direction.
+- Before moving, an awake spider turns to face the direction it is about to move; after moving, it turns to face the next direction it would choose from its new cell.
 - An awake werewolf that did not move on the previous monster turn moves one step along a shortest legal path toward the player.
 - If multiple shortest werewolf path steps are tied, the werewolf prefers the next step from its previous path, then a step continuing its previous movement direction, then any remaining tied step.
 - Monster models rotate to face their upcoming move before moving when a rotation is required.
 - After moving, monster models rotate to face the direction they would move if their next turn were resolved immediately.
 - Each minotaur move triggers a mild screen shake whose amplitude falls off with maze distance from the player and whose duration is `1s`.
 - Each awake monster renders two glowing red eye spheres that rotate with the monster and disappear while the monster is asleep.
-- Monster eye spheres are `3cm` radius HDR red emitters with color `(4, 0, 0)` where `(1, 1, 1)` is white, so they can trigger bloom.
+- Monster eye spheres are `0.75cm` radius HDR red emitters with color `(4, 0, 0)` where `(1, 1, 1)` is white, so they can trigger bloom.
 - Monster eyes are lens-flare sources when visible and unoccluded.
-- The debug controls include monster-eye position controls for each monster type, allowing each eye offset axis to be adjusted across a `0m` to `2m` range.
-- The werewolf model loads from `public/models/leowolf.zip`, scales proportionally to `1.8m` wide across its horizontal footprint, and places the bottoms of its feet on the floor at the tile bottom-center.
+- The debug controls include editable numeric monster-eye position controls for each monster type and eye axis.
+- The werewolf model loads from `public/models/leowolf.zip`, scales proportionally to `3.6m` wide across its horizontal footprint, is flipped `180` degrees around the vertical axis, and places the bottoms of its feet on the floor at the tile bottom-center.
 - The spider model loads from `public/models/pbr_jumping_spider_monster.zip`, scales proportionally to fit a `1.4m` cube, and is placed as a wall-walking spider with its base oriented along the configured wall and floor.
+- The spider model origin is offset by `(0.1m, 0m, 0.5m)` relative to the fitted model center.
+- The left-wall spider eye defaults are left `(-0.18, 0.35, -0.29)` and right `(-0.27, 0.26, -0.29)` in local model space; right-wall spiders use the corresponding mirrored and swapped asymmetric offsets.
 - The minotaur runtime model loads from an offline-simplified asset derived from `public/models/minotaur.zip`, reduces the source mesh to roughly ten thousand triangles, scales proportionally to fit a `2.7m` cube, and places its bottom `0.25m` below the tile bottom-center.
 - The minotaur model's base tint is `#2b2130`.
 - The werewolf runtime model loads from the extracted `public/models/leowolf/scene.gltf` asset and preserves the authored texture set.
@@ -358,12 +362,14 @@
 - The volumetric fog uses smooth local-lighting interpolation rather than hard per-cell probe steps.
 - The volumetric fog avoids obvious vertical or horizontal raymarch banding under ordinary gameplay viewpoints.
 - The volumetric fog behaves consistently at maze edges instead of changing to a visibly different non-volumetric look outside interior cells.
+- The volumetric fog uses one shared 3D noise volume texture loaded from disk and samples it in world space, so fog noise varies in all three spatial dimensions instead of using a 2D atlas or procedural per-fragment hash.
+- The volumetric fog samples the resident lighting resources for each rendered world-space level volume rather than rebinding to only the active level when the player crosses a level boundary.
 - The scene does not use God Rays.
 - The debug controls include an anamorphic tab backed by a live WebGL post effect derived from the official three.js anamorphic implementation.
 - Bloom defaults to enabled with intensity `1.0`, kernel `Huge`, threshold `0.7`, smoothing `0.5`, and resolution scale `0.25x`.
 - Bloom preserves the same effective scene color precision when enabled at zero or near-zero contribution and must not introduce visible color banding merely by being enabled.
 - Depth of Field defaults to disabled.
-- Lens Flares default to enabled with intensity `0.1`, opacity `1.0`, flare size `0.05`, glare size `0`, ghost scale `0`, flare shape `0.05`, animated mode off, anamorphic mode on, extra streaks off, secondary ghosts off, and star burst off.
+- Lens Flares default to enabled with intensity `0.002`, opacity `0.01`, flare size `0.0015`, glare size `0`, ghost scale `0`, flare shape `0.03`, animated mode off, anamorphic mode on, extra streaks off, secondary ghosts on, star points `3`, and star burst off.
 - SSR defaults to disabled.
 - Ambient Occlusion defaults to `N8AO` with a radius of `1m`.
 - Vignette defaults to enabled with intensity `0.6`.
@@ -603,14 +609,15 @@
 - Bloom starts disabled by default.
 - The depth-of-field tab exposes enabled state and all useful depth-of-field parameters, including `focusDistance`, `focalLength`, `bokehScale`, and resolution scale.
 - The lens-flare tab exposes enabled state and all useful flare parameters needed to tune visibility and opacity, including flare size, glare size, ghost scale, halo scale, star-point count, and the wrapped effect's animated and anamorphic toggles.
-- Lens flares start disabled by default.
+- Lens flares start enabled by default with intensity `0.002`, flare opacity `0.01`, flare size `0.0015`, three star points, and secondary ghosts enabled.
+- The lens-flare intensity debug control is an editable numeric input so very small values can be typed exactly.
 - The SSR tab exposes enabled state and the core canonical tuning parameters needed to tune its documented implementation, including opacity, distance, thickness, resolution scale, and pass output mode.
 - The volumetric-fog tab exposes enabled state and the core fog parameters needed to tune its probe-lit volume implementation, including amount and noise frequency.
 - The volumetric-fog tab also exposes the high-impact density-shaping parameters needed to tune the current implementation, including noise strength, height falloff, lighting strength, and ray-march step count; the default ray-march count is `6`.
 - Volumetric fog keeps the configured density ray-march step count while treating local-probe lighting as low-frequency data that may be sampled fewer times per pixel and interpolated along the ray for performance.
 - The vignette tab exposes enabled state, vignette intensity, vignette noise period, vignette noise intensity, and exposure noise intensity, with both noise intensities defaulting to zero.
 - Vignette and exposure noise controls apply immediately and can produce a nervous flicker effect when set above zero.
-- Vignette noise is sampled every frame from a continuous noise function, and noise contribution is additive as `base intensity + [0, 1] * noise intensity`.
+- Vignette noise is sampled every frame from a continuous noise function, and noise contribution is additive as `base intensity + [-1, 1] * noise intensity` before final valid-range clamping.
 - The anamorphic tab exposes enabled state and the core anamorphic parameters needed to tune the live effect, including intensity, threshold, scale, and sample count.
 - The debug controls panel exposes a toggle for reflection-probe visualization.
 - The debug controls panel lays out each control row on one line in value-label-control order.
@@ -619,6 +626,7 @@
 - The debug controls panel does not expose controls for removed effects or removed atmosphere systems.
 - The `Replay solution` action is edge-triggered by a new user request. Re-entering a level after a replay completes does not restart the previous replay request.
 - The debug controls panel exposes a monster-eyes tab or section with live controls for per-monster-type eye offsets.
+- Monster-eye offset controls are editable numeric inputs rather than sliders.
 
 ## Performance Requirements
 - The page becomes interactive quickly on load.

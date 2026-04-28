@@ -212,6 +212,18 @@ async function setSlider(page, label, value) {
   }, value)
 }
 
+async function setNumberInput(page, label, value) {
+  await page.getByRole('spinbutton', { exact: true, name: label }).evaluate((element, nextValue) => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value'
+    )
+    descriptor.set.call(element, String(nextValue))
+    element.dispatchEvent(new Event('input', { bubbles: true }))
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+  }, value)
+}
+
 async function setCheckbox(page, label, enabled) {
   await page.getByRole('checkbox', { exact: true, name: label }).evaluate((element, nextEnabled) => {
     if (element.checked !== Boolean(nextEnabled)) {
@@ -334,9 +346,9 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByRole('slider', { name: 'Bloom Resolution' })).toHaveValue('0.25')
 
     await page.getByRole('button', { name: '5. Flares' }).click()
-    await expect(page.getByRole('slider', { name: 'Lens Flares Intensity' })).toHaveValue('0.1')
-    await expect(page.getByRole('slider', { name: 'Flare Opacity' })).toHaveValue('0.1')
-    await expect(page.getByRole('slider', { name: 'Flare Size' })).toHaveValue('0.01')
+    await expect(page.getByRole('spinbutton', { name: 'Lens Flares Intensity' })).toHaveValue('0.002')
+    await expect(page.getByRole('slider', { name: 'Flare Opacity' })).toHaveValue('0.01')
+    await expect(page.getByRole('slider', { name: 'Flare Size' })).toHaveValue('0.0015')
     await expect(page.getByRole('slider', { name: 'Glare Size' })).toHaveValue('0')
     await expect(page.getByRole('slider', { name: 'Ghost Scale' })).toHaveValue('0')
     await expect(page.getByRole('slider', { name: 'Flare Shape' })).toHaveValue('0.03')
@@ -361,7 +373,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByRole('dialog', { name: 'Credits' })).toBeVisible()
     await expect(page.getByRole('dialog', { name: 'Credits' })).toContainText('Minotaur')
     await expect(page.getByRole('dialog', { name: 'Credits' })).toContainText('PBR Jumping Spider Monster')
-    await expect(page.getByRole('dialog', { name: 'Credits' })).toContainText('AWIL Werewolf')
+    await expect(page.getByRole('dialog', { name: 'Credits' })).toContainText('leowolf')
     await page.keyboard.press('KeyX')
     await expect(page.getByRole('dialog', { name: 'Credits' })).toBeHidden()
     await page.keyboard.press('Backquote')
@@ -797,7 +809,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     })
     await page.waitForTimeout(200)
     await setCheckbox(page, 'Lens Flares', true)
-    await setSlider(page, 'Lens Flares Intensity', 0)
+    await setNumberInput(page, 'Lens Flares Intensity', 0)
     await setSlider(page, 'Flare Opacity', 1)
     await setSlider(page, 'Flare Size', 0.05)
     await setSlider(page, 'Glare Size', 0.1)
@@ -814,7 +826,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     )
     await page.keyboard.press('Backquote')
     await page.getByRole('button', { name: '5. Flares' }).click()
-    await setSlider(page, 'Lens Flares Intensity', 1)
+    await setNumberInput(page, 'Lens Flares Intensity', 1)
     await page.keyboard.press('Backquote')
     await page.waitForTimeout(500)
     const lensFlareOnFrame = await screenshotCanvasRegion(

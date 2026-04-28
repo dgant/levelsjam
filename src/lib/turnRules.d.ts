@@ -11,6 +11,7 @@ export type TurnMonster = {
   awake: boolean
   cell: MazeCell
   direction: CardinalDirection
+  failedMoveDirection: CardinalDirection | null
   hand: 'left' | 'right' | null
   id: string
   lastMoveDirection: CardinalDirection | null

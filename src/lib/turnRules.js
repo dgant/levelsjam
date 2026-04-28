@@ -325,6 +325,7 @@ export function createInitialTurnState(maze) {
       direction: chooseInitialMonsterDirection(maze, monsterMoveEdges, monster),
       hand: monster.hand ?? null,
       id: `${monster.type}-${index}`,
+      failedMoveDirection: null,
       lastMoveDirection: null,
       lastPath: [],
       lastSeenDirection: null,
@@ -613,8 +614,12 @@ function resolveMonsterTurn(maze, openEdges, visibilityEdges, monster, playerCel
       : monster.lastSeenDirection
 
     if (!moveDirection || !canMove(maze, openEdges, monster.cell, moveDirection)) {
-      nextMonster.awake = false
+      nextMonster.awake = sawPlayer
       nextMonster.movedPreviousTurn = false
+      nextMonster.failedMoveDirection = moveDirection
+      if (moveDirection) {
+        nextMonster.direction = moveDirection
+      }
       return nextMonster
     }
   } else if (monster.type === 'spider') {
@@ -632,13 +637,22 @@ function resolveMonsterTurn(maze, openEdges, visibilityEdges, monster, playerCel
 
   if (!moveDirection || !canMove(maze, openEdges, monster.cell, moveDirection)) {
     nextMonster.movedPreviousTurn = false
+    nextMonster.failedMoveDirection = moveDirection
     return nextMonster
   }
 
   nextMonster.cell = getNeighbor(monster.cell, moveDirection)
   nextMonster.direction = moveDirection
+  nextMonster.failedMoveDirection = null
   nextMonster.lastMoveDirection = moveDirection
   nextMonster.movedPreviousTurn = true
+
+  if (monster.type === 'spider') {
+    const nextSpiderDirection = chooseSpiderDirection(maze, openEdges, nextMonster)
+    if (nextSpiderDirection) {
+      nextMonster.direction = nextSpiderDirection
+    }
+  }
 
   updateMinotaurSight(maze, visibilityEdges, nextMonster, playerCell)
 

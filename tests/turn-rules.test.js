@@ -109,24 +109,31 @@ test('initial turn state does not treat an absent trophy as held', () => {
 
 test('left-wall spiders prefer left, straight, right, then backwards', () => {
   assert.deepEqual(resolveAwakeSpiderMove('left', ['west', 'north', 'east', 'south']).cell, { x: 1, y: 2 })
-  assert.equal(resolveAwakeSpiderMove('left', ['west', 'north', 'east', 'south']).direction, 'west')
+  assert.equal(resolveAwakeSpiderMove('left', ['west', 'north', 'east', 'south']).lastMoveDirection, 'west')
   assert.deepEqual(resolveAwakeSpiderMove('left', ['north', 'east', 'south']).cell, { x: 2, y: 1 })
-  assert.equal(resolveAwakeSpiderMove('left', ['north', 'east', 'south']).direction, 'north')
+  assert.equal(resolveAwakeSpiderMove('left', ['north', 'east', 'south']).lastMoveDirection, 'north')
   assert.deepEqual(resolveAwakeSpiderMove('left', ['east', 'south']).cell, { x: 3, y: 2 })
-  assert.equal(resolveAwakeSpiderMove('left', ['east', 'south']).direction, 'east')
+  assert.equal(resolveAwakeSpiderMove('left', ['east', 'south']).lastMoveDirection, 'east')
   assert.deepEqual(resolveAwakeSpiderMove('left', ['south']).cell, { x: 2, y: 3 })
-  assert.equal(resolveAwakeSpiderMove('left', ['south']).direction, 'south')
+  assert.equal(resolveAwakeSpiderMove('left', ['south']).lastMoveDirection, 'south')
 })
 
 test('right-wall spiders prefer right, straight, left, then backwards', () => {
   assert.deepEqual(resolveAwakeSpiderMove('right', ['west', 'north', 'east', 'south']).cell, { x: 3, y: 2 })
-  assert.equal(resolveAwakeSpiderMove('right', ['west', 'north', 'east', 'south']).direction, 'east')
+  assert.equal(resolveAwakeSpiderMove('right', ['west', 'north', 'east', 'south']).lastMoveDirection, 'east')
   assert.deepEqual(resolveAwakeSpiderMove('right', ['west', 'north', 'south']).cell, { x: 2, y: 1 })
-  assert.equal(resolveAwakeSpiderMove('right', ['west', 'north', 'south']).direction, 'north')
+  assert.equal(resolveAwakeSpiderMove('right', ['west', 'north', 'south']).lastMoveDirection, 'north')
   assert.deepEqual(resolveAwakeSpiderMove('right', ['west', 'south']).cell, { x: 1, y: 2 })
-  assert.equal(resolveAwakeSpiderMove('right', ['west', 'south']).direction, 'west')
+  assert.equal(resolveAwakeSpiderMove('right', ['west', 'south']).lastMoveDirection, 'west')
   assert.deepEqual(resolveAwakeSpiderMove('right', ['south']).cell, { x: 2, y: 3 })
-  assert.equal(resolveAwakeSpiderMove('right', ['south']).direction, 'south')
+  assert.equal(resolveAwakeSpiderMove('right', ['south']).lastMoveDirection, 'south')
+})
+
+test('spiders face the next wall-following direction after moving', () => {
+  const spider = resolveAwakeSpiderMove('left', ['west', 'north', 'east', 'south'])
+
+  assert.equal(spider.lastMoveDirection, 'west')
+  assert.equal(spider.direction, 'east')
 })
 
 test('rotation changes player direction without advancing monster turns', () => {
@@ -191,6 +198,42 @@ test('minotaurs refresh line of sight after moving', () => {
   assert.equal(minotaur.awake, true)
   assert.equal(minotaur.lastSeenDirection, 'west')
   assert.equal(minotaur.direction, 'west')
+})
+
+test('minotaurs stay awake and record a failed move when a gate blocks line of sight', () => {
+  const maze = testMaze({
+    gates: [
+      {
+        from: { x: 1, y: 1 },
+        to: { x: 2, y: 1 }
+      }
+    ],
+    monsters: [
+      { cell: { x: 2, y: 1 }, type: 'minotaur' }
+    ],
+    openEdges: [
+      { from: { x: 0, y: 1 }, to: { x: 1, y: 1 } },
+      { from: { x: 1, y: 1 }, to: { x: 2, y: 1 } }
+    ],
+    sword: null,
+    trophy: null
+  })
+  const state = createInitialTurnState(maze)
+
+  state.player.cell = { x: 1, y: 1 }
+  state.monsters[0] = {
+    ...state.monsters[0],
+    awake: true,
+    direction: 'west',
+    lastSeenDirection: 'west'
+  }
+
+  const result = applyTurnAction(maze, state, 'move-backward').state.monsters[0]
+
+  assert.deepEqual(result.cell, { x: 2, y: 1 })
+  assert.equal(result.awake, true)
+  assert.equal(result.direction, 'west')
+  assert.equal(result.failedMoveDirection, 'west')
 })
 
 test('walls block line of sight for monster wakeups', () => {

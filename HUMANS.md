@@ -104,7 +104,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - For debug-sphere binding checks, set `Probe Debug` to `Reflection` and call `window.__levelsjamDebug.getReflectionProbeVisualizationState(probeIndex)` to confirm the overlay sphere is using the same processed probe texture UUID.
 - Verify moving the camera between maze cells does not change `window.__levelsjamDebug.getReflectionProbeState().activeProbeId` from `null` or make the scene lighting flicker.
 - Verify the fire flipbook runs at the updated faster rate.
-- Verify the tone mapper is `AgX` by default.
+- Verify the tone mapper is `Neutral` by default.
 - Verify the visual controls panel exposes `Exposure`, `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, `Reflection Intensity`, `Ambient Occlusion`, `AO Intensity`, the tone mapper, and the enabled/intensity controls for Bloom, Depth Of Field, Lens Flares, SSR, and Vignette.
 - Verify the visual controls panel also exposes `Probe Debug`.
 - Verify the visual controls panel also exposes `Bloom Kernel`, `AO Radius`, `DOF Focus Distance`, `DOF Focal Length`, `Depth Of Field Bokeh Scale`, and the volumetric fog controls.
@@ -113,7 +113,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify the `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, and `Reflection Intensity` controls each produce a visible material change when enabled.
 - Verify the `Volumetric Occlusion` checkbox changes surface and fog volumetric-lightmap wall blocking while preserving smooth probe blending.
 - Verify the Vignette tab exposes Vignette Intensity, Vignette Noise Period, Vignette Noise Intensity, and Exposure Noise Intensity, with the two noise intensities defaulting to zero.
-- Verify Bloom, Depth Of Field, Lens Flares, and SSR start disabled.
+- Verify Bloom, Depth Of Field, and SSR start disabled, while Lens Flares start enabled with the authored subtle defaults.
 - Verify the default `Exposure` value is `0`.
 - Verify each sconce, billboard, and torch light sits one sconce radius outside the wall face rather than intersecting the wall.
 - After `npm run test:smoke`, inspect any saved rendering artifacts if the smoke checks fail.
