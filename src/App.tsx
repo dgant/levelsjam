@@ -980,6 +980,7 @@ const REFLECTION_PROBE_EMISSIVE_SCALE = 2
 const STARTUP_VOLUMETRIC_PROBE_READY_RADIUS = 12
 const FOG_VOLUME_HEIGHT = 6
 const FOG_EXTINCTION_SCALE = 1
+const MAX_ACTIVE_FOG_VLM_ATLASES = 1
 const DEFAULT_VOLUMETRIC_AMBIENT_HEX = '#2c2c68'
 const DEFAULT_VOLUMETRIC_FOG_DISTANCE = 12
 const EFFECT_EPSILON = 0.0001
@@ -2016,6 +2017,7 @@ type RuntimeReflectionProbeState = {
 
 type WorldLightingRegistryEntry = {
   isActive: boolean
+  layout: MazeLayout
   mazeId: string
   resources: RuntimeLevelLightingResources
   transform: LevelWorldTransform
@@ -4746,6 +4748,117 @@ function getProbeConnectivityTexture(layout: MazeLayout) {
   texture.needsUpdate = true
   probeConnectivityTextureCache.set(layout, texture)
   return texture
+}
+
+type FogLightingCandidate = {
+  bounds: Vector4
+  entry: WorldLightingRegistryEntry
+}
+
+function getFogProbeBounds(layout: MazeLayout) {
+  const firstProbe = layout.reflectionProbes[0]?.position
+  const lastXProbe = layout.reflectionProbes[layout.maze.width - 1]?.position
+  const lastZProbe =
+    layout.reflectionProbes[((layout.maze.height - 1) * layout.maze.width)]?.position
+
+  return new Vector4(
+    firstProbe?.x ?? 0,
+    firstProbe?.z ?? 0,
+    (lastXProbe?.x ?? firstProbe?.x ?? 0) - (firstProbe?.x ?? 0),
+    (lastZProbe?.z ?? firstProbe?.z ?? 0) - (firstProbe?.z ?? 0)
+  )
+}
+
+function isFogLightingEntryReady(entry: WorldLightingRegistryEntry) {
+  return Boolean(
+    entry.resources.reflectionProbeState.ready &&
+    entry.resources.probeCoefficientTextures[0]
+  )
+}
+
+function createFogLightingCandidates(entries: WorldLightingRegistryEntry[]) {
+  return entries
+    .filter(isFogLightingEntryReady)
+    .map((entry) => ({
+      bounds: getFogProbeBounds(entry.layout),
+      entry
+    }))
+}
+
+function getFogLightingCandidateDistanceSquared(
+  cameraWorldPosition: Vector3,
+  candidate: FogLightingCandidate,
+  localPosition: Vector3
+) {
+  const { bounds, entry } = candidate
+
+  transformWorldPositionToLevelLocal(cameraWorldPosition, entry.transform, localPosition)
+
+  const minX = bounds.x - (MAZE_CELL_SIZE / 2)
+  const maxX = bounds.x + bounds.z + (MAZE_CELL_SIZE / 2)
+  const minZ = bounds.y - (MAZE_CELL_SIZE / 2)
+  const maxZ = bounds.y + bounds.w + (MAZE_CELL_SIZE / 2)
+  const dx = localPosition.x < minX
+    ? minX - localPosition.x
+    : localPosition.x > maxX
+      ? localPosition.x - maxX
+      : 0
+  const dz = localPosition.z < minZ
+    ? minZ - localPosition.z
+    : localPosition.z > maxZ
+      ? localPosition.z - maxZ
+      : 0
+
+  return (dx * dx) + (dz * dz)
+}
+
+function compareFogLightingCandidates(
+  a: FogLightingCandidate,
+  aDistanceSquared: number,
+  b: FogLightingCandidate,
+  bDistanceSquared: number
+) {
+  if (aDistanceSquared !== bDistanceSquared) {
+    return aDistanceSquared - bDistanceSquared
+  }
+
+  if (a.entry.isActive !== b.entry.isActive) {
+    return a.entry.isActive ? -1 : 1
+  }
+
+  return a.entry.mazeId.localeCompare(b.entry.mazeId)
+}
+
+function chooseFogLightingEntry(
+  cameraWorldPosition: Vector3,
+  candidates: FogLightingCandidate[],
+  localPosition: Vector3
+) {
+  let bestCandidate: FogLightingCandidate | null = null
+  let bestDistanceSquared = Number.POSITIVE_INFINITY
+
+  for (const candidate of candidates) {
+    const distanceSquared = getFogLightingCandidateDistanceSquared(
+      cameraWorldPosition,
+      candidate,
+      localPosition
+    )
+
+    if (
+      !bestCandidate ||
+      compareFogLightingCandidates(
+        candidate,
+        distanceSquared,
+        bestCandidate,
+        bestDistanceSquared
+      ) < 0
+    ) {
+      bestCandidate = candidate
+      bestDistanceSquared = distanceSquared
+    }
+  }
+
+  return bestCandidate?.entry ?? null
 }
 
 function getCubeTextureFaceSize(texture: Texture | null | undefined) {
@@ -9406,30 +9519,24 @@ function FogVolume({
   ambientColor,
   fogDistance,
   heightFalloff,
-  layout,
   lightingStrength,
+  lightingEntries,
   noiseFrequency,
   noisePeriod,
   noiseStrength,
-  probeCoefficientTextures,
-  probeDepthAtlasTextures,
   rayStepCount,
-  transform,
   visible,
   volumeIntensity
 }: {
   ambientColor: Color
   fogDistance: number
   heightFalloff: number
-  layout: MazeLayout
   lightingStrength: number
+  lightingEntries: WorldLightingRegistryEntry[]
   noiseFrequency: number
   noisePeriod: number
   noiseStrength: number
-  probeCoefficientTextures: [Texture, Texture, Texture, Texture]
-  probeDepthAtlasTextures: ProbeDepthAtlasTextures
   rayStepCount: number
-  transform: LevelWorldTransform
   visible: boolean
   volumeIntensity: number
 }) {
@@ -9439,35 +9546,43 @@ function FogVolume({
   const effect = useMemo(() => new FogVolumeEffectImpl(), [])
   const pass = useMemo(() => new EffectPass(camera, effect as unknown as Effect), [camera, effect])
   const fogNoiseTexture = useFogNoiseTexture()
-  const probeBounds = useMemo(() => {
-    const firstProbe = layout.reflectionProbes[0]?.position
-    const lastXProbe = layout.reflectionProbes[layout.maze.width - 1]?.position
-    const lastZProbe =
-      layout.reflectionProbes[((layout.maze.height - 1) * layout.maze.width)]?.position
+  const fogLightingCandidates = useMemo(
+    () => createFogLightingCandidates(lightingEntries),
+    [lightingEntries]
+  )
+  const lightingEntriesRef = useRef(lightingEntries)
+  const fogLightingCandidatesRef = useRef(fogLightingCandidates)
+  const selectedEntryRef = useRef<WorldLightingRegistryEntry | null>(null)
+  const cameraWorldPositionRef = useRef(new Vector3())
+  const fogSelectionLocalPositionRef = useRef(new Vector3())
 
-    return new Vector4(
-      firstProbe?.x ?? 0,
-      firstProbe?.z ?? 0,
-      (lastXProbe?.x ?? firstProbe?.x ?? 0) - (firstProbe?.x ?? 0),
-      (lastZProbe?.z ?? firstProbe?.z ?? 0) - (firstProbe?.z ?? 0)
-    )
-  }, [layout])
-  const probeGrid = useMemo(
-    () => new Vector2(layout.maze.width, layout.maze.height),
-    [layout.maze.height, layout.maze.width]
-  )
-  const probeWorldOrigin = useMemo(
-    () => new Vector2(transform.x, transform.z),
-    [transform.x, transform.z]
-  )
-  const probeWorldRotation = useMemo(
-    () => new Vector2(Math.cos(transform.rotationY), Math.sin(transform.rotationY)),
-    [transform.rotationY]
-  )
-  const probeConnectivityTexture = getProbeConnectivityTexture(layout)
+  const applySelectedEntry = useCallback((entry: WorldLightingRegistryEntry | null) => {
+    const readyEntryCount = fogLightingCandidatesRef.current.length
+    const probeBounds = entry ? getFogProbeBounds(entry.layout) : null
+    const probeGrid = entry
+      ? new Vector2(entry.layout.maze.width, entry.layout.maze.height)
+      : null
+    const probeWorldOrigin = entry
+      ? new Vector2(entry.transform.x, entry.transform.z)
+      : null
+    const probeWorldRotation = entry
+      ? new Vector2(
+        Math.cos(entry.transform.rotationY),
+        Math.sin(entry.transform.rotationY)
+      )
+      : null
+    const probeConnectivityTexture = entry
+      ? getProbeConnectivityTexture(entry.layout)
+      : null
+    const probeCoeffTextureL0 = entry?.resources.probeCoefficientTextures[0] ?? null
+    const useProbeCoefficientTexture = probeCoeffTextureL0 ? 1 : 0
+    const useProbeConnectivity =
+      entry && volumetricShadowsEnabled && probeConnectivityTexture ? 1 : 0
+    const appliedDensity = visible && useProbeCoefficientTexture
+      ? volumeIntensity * FOG_EXTINCTION_SCALE
+      : 0
 
-  useEffect(() => {
-    effect.density = visible ? volumeIntensity * FOG_EXTINCTION_SCALE : 0
+    effect.density = appliedDensity
     effect.environmentFogColor = ambientColor
     effect.fogDistance = fogDistance
     effect.groundHeight = GROUND_Y
@@ -9477,22 +9592,22 @@ function FogVolume({
     effect.noisePeriod = noisePeriod
     effect.noiseStrength = noiseStrength
     effect.fogNoiseTexture = fogNoiseTexture
-    effect.probeAmbientBounds = probeBounds
-    effect.probeAmbientGrid = probeGrid
-    effect.probeWorldOrigin = probeWorldOrigin
-    effect.probeWorldRotation = probeWorldRotation
-    effect.probeCoeffTextureL0 = probeCoefficientTextures[0]
+    effect.probeAmbientBounds = probeBounds ?? new Vector4()
+    effect.probeAmbientGrid = probeGrid ?? new Vector2(1, 1)
+    effect.probeWorldOrigin = probeWorldOrigin ?? new Vector2()
+    effect.probeWorldRotation = probeWorldRotation ?? new Vector2(1, 0)
+    effect.probeCoeffTextureL0 = probeCoeffTextureL0
     effect.probeConnectivityTexture = probeConnectivityTexture
-    effect.probeHeight = layout.reflectionProbes[0]?.position.y ?? 1.25
+    effect.probeHeight = entry?.layout.reflectionProbes[0]?.position.y ?? 1.25
     effect.probeAmbientTexture = null
     effect.rayStepCount = rayStepCount
-    effect.useProbeCoefficientTexture = probeCoefficientTextures[0] ? 1 : 0
-    effect.useProbeConnectivity =
-      volumetricShadowsEnabled && probeConnectivityTexture ? 1 : 0
+    effect.useProbeCoefficientTexture = useProbeCoefficientTexture
+    effect.useProbeConnectivity = useProbeConnectivity
     effect.useProbeAmbientTexture = 0
     effect.volumeHeight = FOG_VOLUME_HEIGHT
-    const nextFogState = {
-      density: visible ? volumeIntensity : 0,
+    scene.userData.fogEffectState = {
+      availableAtlasCount: readyEntryCount,
+      density: appliedDensity / FOG_EXTINCTION_SCALE,
       fogDistance,
       environmentFogColor: [
         ambientColor.r,
@@ -9503,39 +9618,35 @@ function FogVolume({
       heightFalloff,
       lightingStrength,
       meshCount: visible ? 1 : 0,
+      maxAtlasCount: MAX_ACTIVE_FOG_VLM_ATLASES,
       noiseFrequency,
       noisePeriod,
       noiseStrength,
-      probeAmbientBounds: [
+      probeAmbientBounds: probeBounds ? [
         probeBounds.x,
         probeBounds.y,
         probeBounds.z,
         probeBounds.w
-      ],
-      probeAmbientGrid: [
+      ] : null,
+      probeAmbientGrid: probeGrid ? [
         probeGrid.x,
         probeGrid.y
-      ],
-      probeWorldOrigin: [
+      ] : null,
+      probeWorldOrigin: probeWorldOrigin ? [
         probeWorldOrigin.x,
         probeWorldOrigin.y
-      ],
-      probeWorldRotation: [
+      ] : null,
+      probeWorldRotation: probeWorldRotation ? [
         probeWorldRotation.x,
         probeWorldRotation.y
-      ],
+      ] : null,
       rayStepCount,
+      selectedAtlasCount: entry ? 1 : 0,
+      selectedMazeIds: entry ? [entry.mazeId] : [],
+      trackedMazeIds: lightingEntriesRef.current.map((candidate) => candidate.mazeId).sort(),
       useProbeAmbientTexture: 0,
-      useProbeCoefficientTexture: probeCoefficientTextures[0] ? 1 : 0,
-      useProbeConnectivity:
-        volumetricShadowsEnabled && probeConnectivityTexture ? 1 : 0
-    }
-
-    scene.userData.fogEffectStatesByLevel ??= {}
-    scene.userData.fogEffectStatesByLevel[layout.maze.id] = nextFogState
-    scene.userData.fogEffectState = {
-      ...nextFogState,
-      byLevel: scene.userData.fogEffectStatesByLevel
+      useProbeCoefficientTexture,
+      useProbeConnectivity
     }
   }, [
     ambientColor,
@@ -9547,12 +9658,6 @@ function FogVolume({
     noisePeriod,
     noiseStrength,
     fogNoiseTexture,
-    probeCoefficientTextures,
-    probeConnectivityTexture,
-    probeBounds,
-    probeGrid,
-    probeWorldOrigin,
-    probeWorldRotation,
     rayStepCount,
     scene,
     visible,
@@ -9561,32 +9666,42 @@ function FogVolume({
   ])
 
   useEffect(() => {
-    return () => {
-      if (scene.userData.fogEffectStatesByLevel) {
-        delete scene.userData.fogEffectStatesByLevel[layout.maze.id]
-      }
-      const remainingStates = scene.userData.fogEffectStatesByLevel ?? {}
-      const firstRemainingState = Object.values(remainingStates)[0]
+    lightingEntriesRef.current = lightingEntries
+    fogLightingCandidatesRef.current = fogLightingCandidates
+    const nextEntry = chooseFogLightingEntry(
+      camera.getWorldPosition(cameraWorldPositionRef.current),
+      fogLightingCandidates,
+      fogSelectionLocalPositionRef.current
+    )
 
-      if (firstRemainingState) {
-        scene.userData.fogEffectState = {
-          ...(firstRemainingState as object),
-          byLevel: remainingStates
-        }
-      } else {
-        delete scene.userData.fogEffectState
-        delete scene.userData.fogEffectStatesByLevel
-      }
+    selectedEntryRef.current = nextEntry
+    applySelectedEntry(nextEntry)
+  }, [applySelectedEntry, camera, fogLightingCandidates, lightingEntries])
+
+  useEffect(() => {
+    return () => {
+      delete scene.userData.fogEffectState
     }
-  }, [layout.maze.id, scene])
+  }, [scene])
 
   useFrame((state) => {
     const profileStartedAt = beginFrameProfileStep()
 
     try {
+      const cameraWorldPosition = camera.getWorldPosition(cameraWorldPositionRef.current)
+      const nextEntry = chooseFogLightingEntry(
+        cameraWorldPosition,
+        fogLightingCandidatesRef.current,
+        fogSelectionLocalPositionRef.current
+      )
+
+      if (selectedEntryRef.current?.mazeId !== nextEntry?.mazeId) {
+        selectedEntryRef.current = nextEntry
+        applySelectedEntry(nextEntry)
+      }
       effect.cameraProjectionMatrixInverse = camera.projectionMatrixInverse
       effect.cameraWorldMatrix = camera.matrixWorld
-      effect.cameraWorldPosition = camera.getWorldPosition(new Vector3())
+      effect.cameraWorldPosition = cameraWorldPosition
       effect.time = state.clock.getElapsedTime()
     } finally {
       endFrameProfileStep('volumetric fog uniforms', profileStartedAt)
@@ -16475,6 +16590,7 @@ function Scene({
 
         return {
           isActive: renderedLayout.maze.id === layout.maze.id,
+          layout: renderedLayout,
           mazeId: renderedLayout.maze.id,
           resources,
           transform: getRuntimeLevelWorldTransform(renderedLayout.maze.id)
@@ -16611,12 +16727,14 @@ function Scene({
       __levelsjamDebug?: {
         clearDebugIsolation?: () => void
         getFogState?: () => {
+          availableAtlasCount?: number
           density: number | null
           environmentFogColor: [number, number, number] | null
           fogDistance: number | null
           hasProbeAmbientTexture: boolean
           heightFalloff: number | null
           lightingStrength: number | null
+          maxAtlasCount?: number
           meshCount: number
           noiseFrequency: number | null
           noiseStrength: number | null
@@ -16625,6 +16743,9 @@ function Scene({
           probeWorldOrigin?: [number, number] | null
           probeWorldRotation?: [number, number] | null
           rayStepCount: number | null
+          selectedAtlasCount?: number
+          selectedMazeIds?: string[]
+          trackedMazeIds?: string[]
           useProbeAmbientTexture: number | null
           useProbeCoefficientTexture?: number | null
           useProbeConnectivity?: number | null
@@ -16771,12 +16892,14 @@ function Scene({
 
     const getFogState = () => {
       return scene.userData.fogEffectState ?? {
+        availableAtlasCount: 0,
         density: null,
         environmentFogColor: null,
         fogDistance: null,
         hasProbeAmbientTexture: false,
         heightFalloff: null,
         lightingStrength: null,
+        maxAtlasCount: MAX_ACTIVE_FOG_VLM_ATLASES,
         meshCount: 0,
         noiseFrequency: null,
         noisePeriod: null,
@@ -16784,6 +16907,9 @@ function Scene({
         probeAmbientBounds: null,
         probeAmbientGrid: null,
         rayStepCount: null,
+        selectedAtlasCount: 0,
+        selectedMazeIds: [],
+        trackedMazeIds: [],
         useProbeAmbientTexture: null,
         useProbeCoefficientTexture: null,
         useProbeConnectivity: null
@@ -17650,33 +17776,21 @@ function Scene({
             samples={48}
           />
         ) : null}
-        {visualSettings.volumetricLighting.enabled ? runtimeRenderedLayouts.map((renderedLayout) => {
-          const resources = levelLightingResources.get(renderedLayout.maze.id)
-
-          if (!resources?.reflectionProbeState.ready) {
-            return null
-          }
-
-          return (
-            <FogVolume
-              ambientColor={fogAmbientColor}
-              fogDistance={visualSettings.volumetricDistance}
-              heightFalloff={visualSettings.volumetricHeightFalloff}
-              key={`fog-volume-${renderedLayout.maze.id}`}
-              layout={renderedLayout}
-              lightingStrength={visualSettings.volumetricLightingStrength}
-              noiseFrequency={visualSettings.volumetricNoiseFrequency}
-              noisePeriod={visualSettings.volumetricNoisePeriod}
-              noiseStrength={visualSettings.volumetricNoiseStrength}
-              probeCoefficientTextures={resources.probeCoefficientTextures}
-              probeDepthAtlasTextures={resources.probeDepthAtlasTextures}
-              rayStepCount={visualSettings.volumetricStepCount}
-              transform={getRuntimeLevelWorldTransform(renderedLayout.maze.id)}
-              visible={visualSettings.volumetricLighting.enabled}
-              volumeIntensity={visualSettings.volumetricLighting.intensity}
-            />
-          )
-        }) : null}
+        {visualSettings.volumetricLighting.enabled ? (
+          <FogVolume
+            ambientColor={fogAmbientColor}
+            fogDistance={visualSettings.volumetricDistance}
+            heightFalloff={visualSettings.volumetricHeightFalloff}
+            lightingEntries={worldLightingRegistry}
+            lightingStrength={visualSettings.volumetricLightingStrength}
+            noiseFrequency={visualSettings.volumetricNoiseFrequency}
+            noisePeriod={visualSettings.volumetricNoisePeriod}
+            noiseStrength={visualSettings.volumetricNoiseStrength}
+            rayStepCount={visualSettings.volumetricStepCount}
+            visible={visualSettings.volumetricLighting.enabled}
+            volumeIntensity={visualSettings.volumetricLighting.intensity}
+          />
+        ) : null}
         <BillboardCompositePass />
         {depthOfFieldActive ? (
           <DepthOfField

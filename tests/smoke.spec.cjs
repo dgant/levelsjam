@@ -1863,7 +1863,7 @@ test('default postprocessing survives the Entrance to Chamber 1 transition', asy
   }
 
   await page.waitForFunction(
-    () => Object.keys(window.__levelsjamDebug?.getFogState?.()?.byLevel ?? {}).length >= 6,
+    () => (window.__levelsjamDebug?.getFogState?.()?.availableAtlasCount ?? 0) >= 6,
     undefined,
     { timeout: 10_000 }
   )
@@ -1881,9 +1881,11 @@ test('default postprocessing survives the Entrance to Chamber 1 transition', asy
   expect(state.lifecycle.instantiatedMazeId).toBe('chamber-1')
   expect(state.turn.player.cell).toEqual({ x: 2, y: 16 })
   expect(state.settings.volumetricLighting.enabled).toBe(true)
-  expect(Object.keys(state.fog?.byLevel ?? {})).toEqual(
+  expect(state.fog?.trackedMazeIds ?? []).toEqual(
     expect.arrayContaining(['entrance', 'chamber-1', 'maze-001', 'maze-002', 'maze-003', 'maze-005'])
   )
+  expect(state.fog?.maxAtlasCount).toBe(1)
+  expect(state.fog?.selectedAtlasCount).toBe(1)
   expect(state.worldLighting).toMatchObject({
     activeMazeId: 'chamber-1',
     ready: true

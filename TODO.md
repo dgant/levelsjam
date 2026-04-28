@@ -385,3 +385,4 @@ Regenerate the mazes, and give each one randomly placed minotaur, wolf, spider (
 [x] Remove the LENS_FLARE_COLOR_GAIN and LENS_FLARE_INTENSITY_SCALE multipliers
 [x] Collapse the redundant Lens Flares adjuster with the Flare Opacity slider into a single slider control
 [x] Introduce a controllable Star Burst intensity and debug slider (default to 1.0)
+[x] Fog should render with a single volume, but with a limited number of volumetric lightmap atlases to reduce sampling costs and avoid overrunning the sampler limit, chosen smartly by camera location. I would imagine constructing an AABB of all the cells we use and flood-filling from each level area to figure out each cell's distance to each level and thereby being able to pick for any camera location, the closest cell and which are the closest levels to it and use the top-N volumetric lightmap atlases. Use your judgment.

@@ -5,6 +5,7 @@ playwright-report/
 test-results/
 logs/
 test-artifacts/
+PERFORMANCE.md
 models/**/*.zip
 public/models/**/*.zip
 preview-server*.log

@@ -29,7 +29,9 @@
 - Rendered level groups are resource and visibility groups only; changing the player's current level focus must not remount the scene, reset startup readiness, replace global rules state, or change camera-attached held-item rendering.
 - Full-screen effects and global render passes sample currently resident world resources rather than a single active level's resources.
 - Volumetric fog is level-agnostic at runtime and samples the currently resident world-space volumetric-lightmap resources.
-- Runtime volumetric-fog passes must stay within the browser's fragment texture-sampler budget when multiple rendered levels are resident; per-level fog resources are isolated into pass-safe shader programs or packed into a shared resource rather than merged into one over-budget effect shader.
+- Runtime volumetric fog renders through one global full-screen pass rather than duplicating one fog pass per rendered level.
+- The runtime volumetric-fog pass stays within the browser's fragment texture-sampler budget by binding only a capped set of nearby ready volumetric-lightmap atlases selected from the world lighting registry by camera position.
+- The current runtime volumetric-fog atlas cap is one selected atlas per frame, chosen from the nearest ready rendered level probe bounds; expanding the cap requires explicit shader support for additional atlas samplers.
 - Lens flares are level-agnostic at runtime and choose from the currently rendered visible torch billboards/lights, regardless of the level that authored them.
 - Reflection and volumetric probe debug visualization shows all currently loaded/rendered probes rather than only the active level's probes.
 - Walking across a level boundary updates only the active debug/resource-priority focus and any rules context needed to interpret the player's current world cell.
@@ -379,7 +381,7 @@
 - The volumetric fog avoids obvious vertical or horizontal raymarch banding under ordinary gameplay viewpoints.
 - The volumetric fog behaves consistently at maze edges instead of changing to a visibly different non-volumetric look outside interior cells.
 - The volumetric fog uses one shared 3D noise volume texture loaded from disk and samples it in world space, so fog noise varies in all three spatial dimensions instead of using a 2D atlas or procedural per-fragment hash.
-- The volumetric fog samples the resident lighting resources for each rendered world-space level volume rather than rebinding to only the active level when the player crosses a level boundary.
+- The volumetric fog chooses its bound volumetric-lightmap atlas from currently resident world-space lighting resources by camera location rather than by the active level id.
 - The scene does not use God Rays.
 - The debug controls include an anamorphic tab backed by a live WebGL post effect derived from the official three.js anamorphic implementation.
 - Bloom defaults to enabled with intensity `1.0`, kernel `Huge`, threshold `0.7`, smoothing `0.5`, and resolution scale `0.25x`.
