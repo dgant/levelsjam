@@ -53,6 +53,7 @@
 - The loading overlay remains up until every level rendered in the initial current-level neighborhood has its own surface lightmap and startup probe resources ready, so the first ordinary boundary crossing cannot reveal unlit destination-level geometry.
 - When a destination level is already in the rendered neighborhood, walking into it must preserve its existing lighting resource bindings rather than remounting, clearing, or reprioritizing them in a way that changes visible lighting.
 - Runtime global lighting state is a world-space registry of all currently rendered levels' lighting resources; the active level is only a gameplay/debug focus and is not the source of truth for whether world lighting exists.
+- Runtime global probe readiness and aggregate probe counts include only rendered levels whose own lighting resources are ready; mounted adjacent levels that are still loading remain tracked but must not contribute black placeholder probes or make the visible world report that lighting is unavailable.
 - Surface lightmap sampling is mesh-owner-local: each level-owned wall and floor mesh samples only its owning level's surface-lightmap atlas through that mesh's authored lightmap UVs.
 - Volumetric, fog, reflection, and debug consumers use the world lighting registry or their owning rendered level's resource entry rather than reading an implicit active-level singleton.
 - Debug reflection-probe readiness reports aggregate world lighting readiness across all rendered levels, while per-level readiness remains inspectable separately.

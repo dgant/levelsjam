@@ -6473,50 +6473,50 @@ function createInitialRuntimeReflectionProbeState(
 function createWorldReflectionProbeState(
   entries: WorldLightingRegistryEntry[]
 ): RuntimeReflectionProbeState {
-  const loadedEntries = entries.filter((entry) => entry.resources)
-  const readyEntries = loadedEntries.filter(
+  const trackedEntries = entries.filter((entry) => entry.resources)
+  const readyEntries = trackedEntries.filter(
     (entry) =>
       entry.resources.surfaceLightmap.ready &&
       entry.resources.reflectionProbeState.ready
   )
-  const activeEntry = loadedEntries.find((entry) => entry.isActive) ?? loadedEntries[0] ?? null
+  const activeEntry = readyEntries.find((entry) => entry.isActive) ?? readyEntries[0] ?? null
 
   return {
     activeProbeId: activeEntry?.mazeId ?? null,
-    complete: loadedEntries.length > 0 &&
-      loadedEntries.every((entry) => entry.resources.reflectionProbeState.complete !== false),
-    loadedProbeCount: loadedEntries.reduce(
+    complete: readyEntries.length > 0 &&
+      readyEntries.every((entry) => entry.resources.reflectionProbeState.complete !== false),
+    loadedProbeCount: readyEntries.reduce(
       (count, entry) => count + (entry.resources.reflectionProbeState.loadedProbeCount ?? 0),
       0
     ),
-    loadedVolumetricProbeCount: loadedEntries.reduce(
+    loadedVolumetricProbeCount: readyEntries.reduce(
       (count, entry) =>
         count + (entry.resources.reflectionProbeState.loadedVolumetricProbeCount ?? 0),
       0
     ),
     priorityProbeIndices: activeEntry?.resources.reflectionProbeState.priorityProbeIndices ?? [],
-    probeCount: loadedEntries.reduce(
+    probeCount: readyEntries.reduce(
       (count, entry) => count + entry.resources.reflectionProbeState.probeCount,
       0
     ),
-    probeTextureUUIDs: loadedEntries.flatMap(
+    probeTextureUUIDs: readyEntries.flatMap(
       (entry) => entry.resources.reflectionProbeState.probeTextureUUIDs ?? []
     ),
-    ready: loadedEntries.length > 0 && readyEntries.length === loadedEntries.length,
+    ready: readyEntries.length > 0 && Boolean(activeEntry),
     requestedResidentProbeIndices:
       activeEntry?.resources.reflectionProbeState.requestedResidentProbeIndices ?? [],
-    residentProbeLimit: loadedEntries.reduce(
+    residentProbeLimit: readyEntries.reduce(
       (count, entry) => count + (entry.resources.reflectionProbeState.residentProbeLimit ?? 0),
       0
     ),
-    startupVolumetricProbeCount: loadedEntries.reduce(
+    startupVolumetricProbeCount: readyEntries.reduce(
       (count, entry) =>
         count + (entry.resources.reflectionProbeState.startupVolumetricProbeCount ?? 0),
       0
     ),
     startupVolumetricProbeIndices:
       activeEntry?.resources.reflectionProbeState.startupVolumetricProbeIndices ?? [],
-    textureMemoryBudgetBytes: loadedEntries.reduce(
+    textureMemoryBudgetBytes: readyEntries.reduce(
       (count, entry) =>
         count + (entry.resources.reflectionProbeState.textureMemoryBudgetBytes ?? 0),
       0

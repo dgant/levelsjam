@@ -1407,8 +1407,10 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
     lifecycle: window.__levelsjamDebug?.getMazeLifecycleState?.() ?? null,
     camera: window.__levelsjamDebug?.getCameraState?.() ?? null,
     lighting: window.__levelsjamDebug?.getLevelLightingState?.() ?? [],
+    probeState: window.__levelsjamDebug?.getReflectionProbeState?.() ?? null,
     sceneMountCount: document.body.dataset.sceneMountCount ?? null,
-    turn: window.__levelsjamDebug?.getTurnStateSummary?.() ?? null
+    turn: window.__levelsjamDebug?.getTurnStateSummary?.() ?? null,
+    worldLighting: window.__levelsjamDebug?.getWorldLightingState?.() ?? null
   }))
 
   expect(transitionedState.lifecycle.loadedMazeIds).toEqual(
@@ -1463,6 +1465,17 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
     hasActiveResources: true,
     reflectionReady: true,
     surfaceLightmapReady: true
+  })
+  expect(transitionedState.probeState).toMatchObject({
+    activeProbeId: 'chamber-1',
+    ready: true
+  })
+  expect(transitionedState.probeState.probeCount).toBe(99)
+  expect(transitionedState.worldLighting).toMatchObject({
+    activeMazeId: 'chamber-1',
+    ready: true,
+    totalProbeCount: 99,
+    visibleRenderedMazeIds: expect.arrayContaining(['entrance', 'chamber-1'])
   })
   expect(transitionedState.activeLighting.trackedMazeIds).toEqual(
     expect.arrayContaining(['entrance', 'chamber-1'])
