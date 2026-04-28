@@ -1628,6 +1628,103 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
   expect(pageErrors).toEqual([])
 })
 
+test('four forward moves keep Chamber 1 surfaces lit with postprocessing disabled', async ({ page }) => {
+  const consoleErrors = []
+  const pageErrors = []
+  const canvas = page.locator('canvas')
+
+  page.on('console', (message) => {
+    if (message.type() === 'error') {
+      consoleErrors.push(message.text())
+    }
+  })
+
+  page.on('pageerror', (error) => {
+    pageErrors.push(String(error))
+  })
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await page.waitForFunction(
+    () => document.querySelector('canvas')?.dataset.sceneReady === 'true',
+    undefined,
+    { timeout: 30_000 }
+  )
+  await page.evaluate(() => {
+    window.__levelsjamDebug?.setVisualSettings?.({
+      ambientOcclusionMode: 'off',
+      anamorphic: { enabled: false, intensity: 0 },
+      bloom: { enabled: false },
+      depthOfField: { enabled: false, bokehScale: 0 },
+      lensFlare: { enabled: false, intensity: 0 },
+      ssr: { enabled: false, intensity: 0 },
+      vignette: { enabled: false, intensity: 0 },
+      volumetricLighting: { enabled: false, intensity: 0 }
+    })
+  })
+
+  const expectedStates = [
+    { maze: 'entrance', cell: { x: 1, y: 1 } },
+    { maze: 'entrance', cell: { x: 1, y: 0 } },
+    { maze: 'chamber-1', cell: { x: 2, y: 17 } },
+    { maze: 'chamber-1', cell: { x: 2, y: 16 } }
+  ]
+
+  for (const expectedState of expectedStates) {
+    await page.keyboard.press('KeyW')
+    await page.waitForFunction(
+      (state) => {
+        const lifecycle = window.__levelsjamDebug?.getMazeLifecycleState?.()
+        const player = window.__levelsjamDebug?.getTurnStateSummary?.()?.player
+
+        return lifecycle?.instantiatedMazeId === state.maze &&
+          player?.cell?.x === state.cell.x &&
+          player?.cell?.y === state.cell.y
+      },
+      expectedState,
+      { timeout: 10_000 }
+    )
+    await page.waitForTimeout(100)
+  }
+
+  const state = await page.evaluate(() => ({
+    lighting: window.__levelsjamDebug?.getLevelLightingState?.() ?? [],
+    lifecycle: window.__levelsjamDebug?.getMazeLifecycleState?.() ?? null,
+    turn: window.__levelsjamDebug?.getTurnStateSummary?.() ?? null,
+    worldLighting: window.__levelsjamDebug?.getWorldLightingState?.() ?? null
+  }))
+
+  expect(state.lifecycle.instantiatedMazeId).toBe('chamber-1')
+  expect(state.turn.player.cell).toEqual({ x: 2, y: 16 })
+  expect(state.worldLighting).toMatchObject({
+    activeMazeId: 'chamber-1',
+    ready: true
+  })
+  expect(state.lighting).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        mazeId: 'chamber-1',
+        ready: true,
+        reflectionReady: true,
+        surfaceLightmapReady: true
+      })
+    ])
+  )
+
+  const centerFrame = measureBrightness(
+    await screenshotCanvasRegion(page, canvas, 180, 120, 0.5, 0.5)
+  )
+  const floorFrame = measureBrightness(
+    await screenshotCanvasRegion(page, canvas, 180, 120, 0.5, 0.72)
+  )
+
+  expect(centerFrame.average).toBeGreaterThan(15)
+  expect(centerFrame.max).toBeGreaterThan(120)
+  expect(floorFrame.average).toBeGreaterThan(7)
+  expect(floorFrame.max).toBeGreaterThan(25)
+  expect(consoleErrors).toEqual([])
+  expect(pageErrors).toEqual([])
+})
+
 test('loads the maze scene and exposes working debug/render controls', async ({ page }) => {
   const consoleErrors = []
   const pageErrors = []

@@ -1,7 +1,7 @@
 const fs = require('node:fs')
 const http = require('node:http')
 const path = require('node:path')
-const { spawn } = require('node:child_process')
+const { execFileSync, spawn } = require('node:child_process')
 
 const rootDir = path.resolve(__dirname, '..')
 const logsDir = path.join(rootDir, 'logs')
@@ -46,6 +46,65 @@ function isProcessRunning(pid) {
     return true
   } catch {
     return false
+  }
+}
+
+function getWindowsPortOwner() {
+  if (process.platform !== 'win32') {
+    return null
+  }
+
+  try {
+    const script = [
+      `$connection = Get-NetTCPConnection -LocalAddress ${host} -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1`,
+      'if (-not $connection) { exit 0 }',
+      '$ownerProcessId = $connection.OwningProcess',
+      '$processInfo = Get-CimInstance Win32_Process -Filter "ProcessId=$ownerProcessId"',
+      '[Console]::WriteLine(($processInfo.ProcessId.ToString() + "`t" + $processInfo.CommandLine))'
+    ].join('; ')
+    const output = execFileSync(
+      'powershell.exe',
+      ['-NoProfile', '-Command', script],
+      { encoding: 'utf8', windowsHide: true }
+    ).trim()
+
+    if (!output) {
+      return null
+    }
+
+    const [pidText, ...commandParts] = output.split('\t')
+    const pid = Number(pidText)
+
+    return Number.isFinite(pid)
+      ? { commandLine: commandParts.join('\t'), pid }
+      : null
+  } catch {
+    return null
+  }
+}
+
+async function assertNoUnmanagedServer() {
+  const owner = getWindowsPortOwner()
+
+  if (owner) {
+    throw new Error(
+      [
+        `Port ${port} is already owned by an unmanaged process.`,
+        `pid: ${owner.pid}`,
+        `command: ${owner.commandLine}`,
+        'Stop that process before starting the managed headless dev server.'
+      ].join('\n')
+    )
+  }
+
+  const responding = await requestServer()
+    .then(() => true)
+    .catch(() => false)
+
+  if (responding) {
+    throw new Error(
+      `${url} is already serving a page, but ${path.basename(statePath)} does not track a managed server. Stop the unmanaged server before continuing.`
+    )
   }
 }
 
@@ -106,6 +165,8 @@ async function startServer() {
     return
   }
 
+  await assertNoUnmanagedServer()
+
   fs.mkdirSync(logsDir, { recursive: true })
   fs.appendFileSync(
     logPath,
@@ -147,6 +208,10 @@ async function startServer() {
 
   writeState(state)
   await waitForServer()
+  if (!isProcessRunning(child.pid)) {
+    removeState()
+    throw new Error(`Vite process exited before ${url} became a verified managed server. See ${logPath}.`)
+  }
   console.log(`Started headless Vite dev server at ${url} (pid ${child.pid})`)
   console.log(`Log: ${state.logPath}`)
 }
@@ -155,6 +220,15 @@ async function stopServer() {
   const state = cleanStaleState()
 
   if (!state) {
+    const owner = getWindowsPortOwner()
+
+    if (owner) {
+      console.log(`Vite dev server is not running, but port ${port} is occupied by an unmanaged process.`)
+      console.log(`pid: ${owner.pid}`)
+      console.log(`command: ${owner.commandLine}`)
+      return
+    }
+
     console.log('Vite dev server is not running')
     return
   }
