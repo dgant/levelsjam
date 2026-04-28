@@ -596,7 +596,8 @@
 - The debug controls panel exposes the camera field of view as a live slider with a maximum of `120` degrees.
 - The debug controls panel camera field-of-view slider defaults to `80` degrees.
 - Free-camera inspection mode is toggled with `F1`, where `WASD` and arrow keys move freely with mouselook detached from the turn-based player.
-- The debug controls panel exposes numbered tabs selectable by keyboard shortcuts `1` through `9`, with `0` selecting the Solution tab.
+- The debug controls panel exposes tab buttons selected by clicking or tapping their labels, without category numbers or category hotkeys.
+- Typing in debug text fields or numeric inputs never changes the active debug tab.
 - Opening the debug controls panel does not globally swallow gameplay keyboard or mouse input; gameplay controls and the `F1` free-camera toggle remain usable while the panel is open.
 - The default debug tab exposes the core scene-lighting controls, including the active tone mapper, `Probe Debug`, `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, and `Reflection Intensity`.
 - The default debug tab exposes a `Precomputed Visibility` checkbox that toggles runtime use of baked per-cell visibility culling.

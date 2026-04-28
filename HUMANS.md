@@ -108,6 +108,8 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify the visual controls panel exposes `Exposure`, `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, `Reflection Intensity`, `Ambient Occlusion`, `AO Intensity`, the tone mapper, and the enabled/intensity controls for Bloom, Depth Of Field, Lens Flares, SSR, and Vignette.
 - Verify the visual controls panel also exposes `Probe Debug`.
 - Verify the visual controls panel also exposes `Bloom Kernel`, `AO Radius`, `DOF Focus Distance`, `DOF Focal Length`, `Depth Of Field Bokeh Scale`, and the volumetric fog controls.
+- Verify debug-panel tabs are selected by clicking their labels and are not prefixed with category hotkey numbers.
+- Verify typing numbers or letters into debug-panel text and numeric inputs does not change the active debug tab.
 - Verify the `DOF Focus Distance` slider reaches 8 meters.
 - Verify double-clicking a debug label resets only the associated control.
 - Verify the `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, and `Reflection Intensity` controls each produce a visible material change when enabled.

@@ -1568,22 +1568,21 @@ const BLOOM_KERNEL_OPTIONS: Array<{
 ]
 
 const VISUAL_CONTROL_TABS: Array<{
-  hotkey: string
   key: VisualControlTabKey
   label: string
 }> = [
-  { hotkey: '1', key: 'core', label: 'Core' },
-  { hotkey: '2', key: 'ao', label: 'AO' },
-  { hotkey: '3', key: 'bloom', label: 'Bloom' },
-  { hotkey: '4', key: 'dof', label: 'DOF' },
-  { hotkey: '5', key: 'flares', label: 'Flares' },
-  { hotkey: '6', key: 'ssr', label: 'SSR' },
-  { hotkey: '7', key: 'fog', label: 'Fog' },
-  { hotkey: '8', key: 'vignette', label: 'Vignette' },
-  { hotkey: '9', key: 'anamorphic', label: 'Anamorphic' },
-  { hotkey: 'E', key: 'eyes', label: 'Eyes' },
-  { hotkey: 'P', key: 'performance', label: 'Performance' },
-  { hotkey: '0', key: 'solution', label: 'Solution' }
+  { key: 'core', label: 'Core' },
+  { key: 'ao', label: 'AO' },
+  { key: 'bloom', label: 'Bloom' },
+  { key: 'dof', label: 'DOF' },
+  { key: 'flares', label: 'Flares' },
+  { key: 'ssr', label: 'SSR' },
+  { key: 'fog', label: 'Fog' },
+  { key: 'vignette', label: 'Vignette' },
+  { key: 'anamorphic', label: 'Anamorphic' },
+  { key: 'eyes', label: 'Eyes' },
+  { key: 'performance', label: 'Performance' },
+  { key: 'solution', label: 'Solution' }
 ]
 
 const DEFAULT_AO_RADIUS_METERS = 1
@@ -15691,7 +15690,11 @@ function RuntimeLevelGeometry({
   lightmapContributionIntensity: number
   monsterEyes: MonsterEyeSettings
   mountAllGeometry?: boolean
-  onLightingResourcesChange: (mazeId: string, resources: RuntimeLevelLightingResources | null) => void
+  onLightingResourcesChange: (
+    mazeId: string,
+    resources: RuntimeLevelLightingResources | null,
+    previousResources?: RuntimeLevelLightingResources | null
+  ) => void
   openGateIdsOverride?: Set<string> | null
   probeDebugMode: ProbeDebugMode
   priorityPosition: { x: number; z: number }
@@ -15715,6 +15718,7 @@ function RuntimeLevelGeometry({
       levelLightingStatesByLevel?: Record<string, {
         ready: boolean
         reflectionProbeState: RuntimeReflectionProbeState
+        resources: RuntimeLevelLightingResources
         surfaceLightmapReady: boolean
       }>
     }
@@ -15723,6 +15727,7 @@ function RuntimeLevelGeometry({
     userData.levelLightingStatesByLevel[layout.maze.id] = {
       ready: lightingResources.surfaceLightmap.ready && lightingResources.reflectionProbeState.ready,
       reflectionProbeState: lightingResources.reflectionProbeState,
+      resources: lightingResources,
       surfaceLightmapReady: lightingResources.surfaceLightmap.ready
     }
 
@@ -15747,13 +15752,19 @@ function RuntimeLevelGeometry({
       const userData = scene.userData as typeof scene.userData & {
         levelLightingStatesByLevel?: Record<string, unknown>
       }
+      const existingState = userData.levelLightingStatesByLevel?.[layout.maze.id] as
+        | { resources?: RuntimeLevelLightingResources }
+        | undefined
 
-      if (userData.levelLightingStatesByLevel) {
+      if (
+        userData.levelLightingStatesByLevel &&
+        existingState?.resources === lightingResources
+      ) {
         delete userData.levelLightingStatesByLevel[layout.maze.id]
       }
-      onLightingResourcesChange(layout.maze.id, null)
+      onLightingResourcesChange(layout.maze.id, null, lightingResources)
     }
-  }, [layout.maze.id, onLightingResourcesChange, scene])
+  }, [layout.maze.id, lightingResources, onLightingResourcesChange, scene])
 
   return (
     <LevelRenderTransformContext.Provider value={transform}>
@@ -15922,13 +15933,17 @@ function Scene({
   )
   const handleLevelLightingResourcesChange = useCallback((
     mazeId: string,
-    resources: RuntimeLevelLightingResources | null
+    resources: RuntimeLevelLightingResources | null,
+    previousResources: RuntimeLevelLightingResources | null = null
   ) => {
     setLevelLightingResources((current) => {
       const existing = current.get(mazeId)
 
       if (resources === null) {
         if (!current.has(mazeId)) {
+          return current
+        }
+        if (previousResources !== null && existing !== previousResources) {
           return current
         }
         const next = new Map(current)
@@ -17310,28 +17325,6 @@ function VisualControls({
     }
   }, [])
 
-  useEffect(() => {
-    if (!controlsOpen) {
-      return undefined
-    }
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      const eventKey = event.key.toLowerCase()
-      const tab = VISUAL_CONTROL_TABS.find((option) => option.hotkey.toLowerCase() === eventKey)
-
-      if (!tab) {
-        return
-      }
-
-      setActiveTab(tab.key)
-    }
-
-    window.addEventListener('keydown', onKeyDown)
-    return () => {
-      window.removeEventListener('keydown', onKeyDown)
-    }
-  }, [controlsOpen])
-
   if (!controlsOpen) {
     return null
   }
@@ -17407,7 +17400,7 @@ function VisualControls({
             }}
             type="button"
           >
-            {tab.hotkey}. {tab.label}
+            {tab.label}
           </button>
         ))}
       </div>

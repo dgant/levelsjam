@@ -334,18 +334,18 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeChecked()
     await expect(page.getByRole('slider', { name: 'Reflection Intensity' })).toHaveValue('1')
 
-    await page.getByRole('button', { name: '2. AO' }).click()
+    await page.getByRole('button', { name: 'AO' }).click()
     await expect(page.getByLabel('Ambient Occlusion', { exact: true })).toHaveValue('n8ao')
     await expect(page.getByRole('slider', { name: 'AO Radius' })).toHaveValue('1')
 
-    await page.getByRole('button', { name: '3. Bloom' }).click()
+    await page.getByRole('button', { name: 'Bloom' }).click()
     await expect(page.getByRole('slider', { name: 'Bloom Intensity' })).toHaveValue('0.65')
     await expect(page.getByLabel('Bloom Kernel', { exact: true })).toHaveValue('huge')
     await expect(page.getByRole('slider', { name: 'Bloom Threshold' })).toHaveValue('0.5')
     await expect(page.getByRole('slider', { name: 'Bloom Smoothing' })).toHaveValue('0.5')
     await expect(page.getByRole('slider', { name: 'Bloom Resolution' })).toHaveValue('0.25')
 
-    await page.getByRole('button', { name: '5. Flares' }).click()
+    await page.getByRole('button', { name: 'Flares' }).click()
     await expect(page.getByRole('spinbutton', { name: 'Lens Flares Intensity' })).toHaveValue('0.002')
     await expect(page.getByRole('slider', { name: 'Flare Opacity' })).toHaveValue('0.01')
     await expect(page.getByRole('slider', { name: 'Flare Size' })).toHaveValue('0.0015')
@@ -353,12 +353,12 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByRole('slider', { name: 'Ghost Scale' })).toHaveValue('0')
     await expect(page.getByRole('slider', { name: 'Flare Shape' })).toHaveValue('0.03')
 
-    await page.getByRole('button', { name: '8. Vignette' }).click()
+    await page.getByRole('button', { name: 'Vignette' }).click()
     await expect(page.getByRole('slider', { name: 'Vignette Intensity' })).toHaveValue('0.6')
     await expect(page.getByRole('slider', { name: 'Vignette Noise Period' })).toHaveValue('5')
     await expect(page.getByRole('slider', { name: 'Vignette Noise Intensity' })).toHaveValue('0')
     await expect(page.getByRole('slider', { name: 'Exposure Noise Intensity' })).toHaveValue('0')
-    await page.getByRole('button', { name: '1. Core' }).click()
+    await page.getByRole('button', { name: 'Core' }).click()
 
     await setSlider(page, 'Exposure', 1.25)
     await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveValue('1.25')
@@ -527,7 +527,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     })
     await page.waitForTimeout(250)
 
-    await page.getByRole('button', { name: '1. Core' }).click()
+    await page.getByRole('button', { name: 'Core' }).click()
     await page.getByLabel('Probe Debug', { exact: true }).selectOption('none')
     await page.waitForTimeout(250)
     await expect
@@ -655,7 +655,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     })
     await page.waitForTimeout(250)
 
-    await page.getByRole('button', { name: '6. SSR' }).click()
+    await page.getByRole('button', { name: 'SSR' }).click()
     await setCheckbox(page, 'SSR', false)
     await page.waitForTimeout(250)
     const ssrOffFrame = await screenshotCanvasRegion(
@@ -697,7 +697,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   })
 
   await timedStep(timingProfile, 'volumetric-fog', async () => {
-    await page.getByRole('button', { name: '7. Fog' }).click()
+    await page.getByRole('button', { name: 'Fog' }).click()
     const volumetricFogIntensitySlider = page.getByRole('slider', {
       name: 'Volumetric Fog Intensity'
     })
@@ -775,7 +775,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       timingProfile
     )
     await page.keyboard.press('Backquote')
-    await page.getByRole('button', { name: '7. Fog' }).click()
+    await page.getByRole('button', { name: 'Fog' }).click()
     await setSlider(page, 'Volumetric Fog Intensity', 1)
     await page.keyboard.press('Backquote')
     await page.waitForTimeout(250)
@@ -795,12 +795,12 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     expect(fogDiff.maxCombinedDifference).toBeGreaterThan(10)
 
     await page.keyboard.press('Backquote')
-    await page.getByRole('button', { name: '7. Fog' }).click()
+    await page.getByRole('button', { name: 'Fog' }).click()
     await setCheckbox(page, 'Volumetric Fog', false)
   })
 
   await timedStep(timingProfile, 'lens-flares', async () => {
-    await page.getByRole('button', { name: '5. Flares' }).click()
+    await page.getByRole('button', { name: 'Flares' }).click()
     await page.evaluate(() => {
       window.__levelsjamDebug.setView(
         [0, 1.55, 3.95],
@@ -825,7 +825,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
       timingProfile
     )
     await page.keyboard.press('Backquote')
-    await page.getByRole('button', { name: '5. Flares' }).click()
+    await page.getByRole('button', { name: 'Flares' }).click()
     await setNumberInput(page, 'Lens Flares Intensity', 1)
     await page.keyboard.press('Backquote')
     await page.waitForTimeout(500)
@@ -848,7 +848,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     expect(lensFlareDiff.maxCombinedDifference).toBeGreaterThan(25)
 
     await page.keyboard.press('Backquote')
-    await page.getByRole('button', { name: '5. Flares' }).click()
+    await page.getByRole('button', { name: 'Flares' }).click()
     await setCheckbox(page, 'Lens Flares', false)
   })
 

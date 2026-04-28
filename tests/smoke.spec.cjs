@@ -1416,6 +1416,34 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
         expect.objectContaining({ mazeId: 'maze-003', ready: true })
       ])
     )
+  const postTransitionLighting = await page.evaluate(() => ({
+    activeLighting: window.__levelsjamDebug?.getActiveLightingResourceState?.() ?? null,
+    levelLighting: window.__levelsjamDebug?.getLevelLightingState?.() ?? [],
+    probeState: window.__levelsjamDebug?.getReflectionProbeState?.() ?? null
+  }))
+  expect(postTransitionLighting.activeLighting).toMatchObject({
+    activeMazeId: 'chamber-1',
+    hasActiveResources: true,
+    reflectionReady: true,
+    surfaceLightmapReady: true
+  })
+  expect(postTransitionLighting.activeLighting.trackedMazeIds).toEqual(
+    expect.arrayContaining(['entrance', 'chamber-1'])
+  )
+  expect(postTransitionLighting.probeState).toMatchObject({
+    ready: true
+  })
+  expect(postTransitionLighting.probeState.loadedProbeCount).toBeGreaterThan(0)
+  expect(postTransitionLighting.levelLighting).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        mazeId: 'chamber-1',
+        ready: true,
+        reflectionReady: true,
+        surfaceLightmapReady: true
+      })
+    ])
+  )
   expect(transitionedState.turn.escaped).toBe(false)
   expect(transitionedState.activeLighting).toMatchObject({
     activeMazeId: 'chamber-1',
@@ -1709,7 +1737,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByLabel('Reflection Intensity Enabled')).toBeChecked()
     await expect(page.getByRole('slider', { name: 'Reflection Intensity' })).toHaveValue('1')
     await expect(page.getByLabel('Probe Debug', { exact: true })).toBeVisible()
-    await page.keyboard.press('Digit7')
+    await page.getByRole('button', { name: 'Fog' }).click()
     await expect(page.getByRole('slider', { name: 'Volumetric Fog Intensity' })).toBeVisible()
     await expect(page.getByRole('slider', { name: 'Volumetric Fog Intensity' })).toHaveValue('0.75')
     await expect(page.getByLabel('Fog Ambient Color Hex')).toHaveValue('#2c2c68')
@@ -1718,8 +1746,12 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByRole('slider', { name: 'Fog Noise Frequency' })).toHaveValue('0.25')
     await expect(page.getByRole('slider', { name: 'Fog Noise Period' })).toHaveValue('0.75')
     await expect(page.getByRole('slider', { name: 'Fog Height 50%' })).toHaveValue('0.4')
-    await page.keyboard.press('Digit1')
+    await page.getByRole('button', { name: 'Core' }).click()
     await expect(page.getByRole('slider', { name: 'Exposure' })).toBeVisible()
+    await page.getByRole('button', { name: 'Eyes' }).click()
+    await page.getByRole('spinbutton', { name: 'minotaur left eye X' }).fill('1')
+    await expect(page.getByRole('spinbutton', { name: 'minotaur left eye X' })).toBeVisible()
+    await expect(page.getByRole('slider', { name: 'Exposure' })).not.toBeVisible()
 
     const swordStrikeFadeState = await page.evaluate(async () => {
       document.body.dataset.playerEffect = 'sword-strike'
