@@ -132,7 +132,7 @@ async function loadPersistedMaze(id: string) {
   if (!response.ok) {
     if (response.status === 404) {
       if (isAuthoredRuntimeLevelId(id)) {
-        return createAuthoredRuntimeMaze(id) as PersistedMaze | null
+        return (await createAuthoredRuntimeMaze(id)) as PersistedMaze | null
       }
 
       return null

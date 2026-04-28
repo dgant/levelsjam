@@ -190,7 +190,7 @@ const FIRE_FLIPBOOK_URL =
 const MONSTER_MODEL_URLS = {
   minotaur: `${assetBase}models/minotaur-runtime/scene.gltf`,
   spider: `${assetBase}models/pbr_jumping_spider_monster/scene.gltf`,
-  werewolf: `${assetBase}models/awil_werewolf_runtime/scene.gltf`
+  werewolf: `${assetBase}models/leowolf/scene.gltf`
 } as const
 const GATE_MODEL_URL = `${assetBase}models/metal_gate_runtime/scene.gltf`
 const SWORD_MODEL_URL = `${assetBase}models/bronze_sword_mycean/scene.gltf`
@@ -209,6 +209,12 @@ const METAL_TEXTURE_URLS = {
   color: `${assetBase}textures/runtime/metal-13/metal_13_basecolor-1K.png`,
   normal: `${assetBase}textures/runtime/metal-13/metal_13_normal-1K.png`,
   orm: `${assetBase}textures/runtime/metal-13/metal_13_orm-1K.png`
+}
+const DOOR_TEXTURE_URLS = {
+  ao: `${assetBase}textures/metal_rust-1K/1K-metal_rust-ao.jpg`,
+  color: `${assetBase}textures/metal_rust-1K/1K-metal_rust-diffuse.jpg`,
+  normal: `${assetBase}textures/metal_rust-1K/1K-metal_rust-normal.jpg`,
+  roughness: `${assetBase}textures/metal_rust-1K/1K-metal_rust-specular.jpg`
 }
 const FRESCO_DECAL_URLS = [
   `${assetBase}textures/decals/minoan-labyrinth-toss.png`,
@@ -236,6 +242,7 @@ const POINTER_UNLOCK_CODES = new Set([
 const PUDDLE_TEXTURE_REPEAT = 60
 const WALL_TEXTURE_REPEAT = 2
 const METAL_TEXTURE_REPEAT = 1
+const DOOR_TEXTURE_REPEAT = WALL_TEXTURE_REPEAT
 const LOADING_FADE_DURATION_MS = 2000
 const FIRE_FLIPBOOK_GRID = 6
 const FIRE_FLIPBOOK_FRAME_COUNT = FIRE_FLIPBOOK_GRID * FIRE_FLIPBOOK_GRID
@@ -243,8 +250,33 @@ const FIRE_FLIPBOOK_DURATION_SECONDS = 0.5
 const TURN_ANIMATION_DURATION_MS = 250
 let globalAnimationSpeedMultiplier = 1
 
+const MONSTER_EYE_COLOR = new Color(4, 0, 0)
+const MONSTER_EYE_RADIUS = 0.03
+const MONSTER_EYE_TYPES = ['minotaur', 'spider', 'werewolf'] as const
+
 function getScaledAnimationDuration(baseDurationMs: number) {
   return baseDurationMs / MathUtils.clamp(globalAnimationSpeedMultiplier, 0.01, 100)
+}
+
+function trackAnalyticsEvent(name: string, payload: Record<string, unknown> = {}) {
+  const root = window as Window & {
+    MINOTAUR_ANALYTICS_QUEUE?: Array<[string, Record<string, unknown>]>
+    umami?: {
+      track?: (name: string, payload?: Record<string, unknown>) => void
+    }
+  }
+  const nextPayload = {
+    game: 'minotaur',
+    revision: GIT_REVISION,
+    ...payload
+  }
+
+  root.MINOTAUR_ANALYTICS_QUEUE ??= []
+  root.MINOTAUR_ANALYTICS_QUEUE.push([name, nextPayload])
+
+  if (typeof root.umami?.track === 'function') {
+    root.umami.track(name, nextPayload)
+  }
 }
 
 function normalizeAngleRadians(value: number) {
@@ -849,7 +881,8 @@ async function warmScenePrograms(
   gl: WebGLRenderer,
   scene: ThreeScene,
   camera: ThreeCamera,
-  isCancelled: () => boolean
+  isCancelled: () => boolean,
+  allowSyncFallback = true
 ) {
   const hiddenObjects: Object3D[] = []
 
@@ -865,7 +898,26 @@ async function warmScenePrograms(
       return
     }
 
-    gl.compile(scene, camera)
+    const asyncCompiler = (
+      gl as WebGLRenderer & {
+        compileAsync?: (
+          scene: ThreeScene,
+          camera: ThreeCamera
+        ) => Promise<unknown>
+      }
+    ).compileAsync
+
+    if (asyncCompiler) {
+      try {
+        await asyncCompiler.call(gl, scene, camera)
+      } catch {
+        if (allowSyncFallback) {
+          gl.compile(scene, camera)
+        }
+      }
+    } else if (allowSyncFallback) {
+      gl.compile(scene, camera)
+    }
   } finally {
     for (const object of hiddenObjects) {
       object.visible = false
@@ -873,6 +925,39 @@ async function warmScenePrograms(
   }
 
   await waitForNextAnimationFrame()
+}
+
+async function waitForRendererResourceStability(
+  gl: WebGLRenderer,
+  isCancelled: () => boolean,
+  stableFrameTarget = 2,
+  maxFrames = 45
+) {
+  let previousGeometries = -1
+  let previousTextures = -1
+  let stableFrames = 0
+
+  for (let frame = 0; frame < maxFrames; frame += 1) {
+    if (isCancelled()) {
+      return
+    }
+
+    await waitForNextAnimationFrame()
+
+    const geometries = gl.info.memory.geometries
+    const textures = gl.info.memory.textures
+
+    if (geometries === previousGeometries && textures === previousTextures) {
+      stableFrames += 1
+      if (stableFrames >= stableFrameTarget) {
+        return
+      }
+    } else {
+      stableFrames = 0
+      previousGeometries = geometries
+      previousTextures = textures
+    }
+  }
 }
 
 const MAZE_GROUND_PATCH_OFFSET_Y = 0.002
@@ -1023,6 +1108,7 @@ uniform float lightingStrength;
 uniform float noiseFrequency;
 uniform float noisePeriod;
 uniform float noiseStrength;
+uniform sampler2D fogNoiseTexture;
 uniform vec4 probeAmbientBounds;
 uniform vec2 probeAmbientGrid;
 uniform vec2 probeWorldOrigin;
@@ -1039,31 +1125,14 @@ uniform float useProbeAmbientTexture;
 uniform float volumeHeight;
 
 float hash(vec3 p) {
-  return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
+  p = fract(p * 0.1031);
+  p += dot(p, p.yzx + 33.33);
+  return fract((p.x + p.y) * p.z);
 }
 
 float noise(vec3 p) {
-  vec3 i = floor(p);
-  vec3 f = fract(p);
-  f = f * f * (3.0 - 2.0 * f);
-
-  float n000 = hash(i + vec3(0.0, 0.0, 0.0));
-  float n100 = hash(i + vec3(1.0, 0.0, 0.0));
-  float n010 = hash(i + vec3(0.0, 1.0, 0.0));
-  float n110 = hash(i + vec3(1.0, 1.0, 0.0));
-  float n001 = hash(i + vec3(0.0, 0.0, 1.0));
-  float n101 = hash(i + vec3(1.0, 0.0, 1.0));
-  float n011 = hash(i + vec3(0.0, 1.0, 1.0));
-  float n111 = hash(i + vec3(1.0, 1.0, 1.0));
-
-  float n00 = mix(n000, n100, f.x);
-  float n10 = mix(n010, n110, f.x);
-  float n01 = mix(n001, n101, f.x);
-  float n11 = mix(n011, n111, f.x);
-  float n0 = mix(n00, n10, f.y);
-  float n1 = mix(n01, n11, f.y);
-
-  return mix(n0, n1, f.z);
+  vec2 uv = p.xz + vec2(p.y * 0.173, p.y * 0.317);
+  return texture2D(fogNoiseTexture, uv).r;
 }
 
 float fogProbeCellSize(float span, float gridCount) {
@@ -1286,6 +1355,16 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
   float transmittance = 1.0;
   vec3 accumulatedScattering = vec3(0.0);
   float rayJitter = hash(vec3((uv * vec2(171.0, 137.0)) + 0.123, 0.37));
+  float lightingScale = max(0.0, lightingStrength);
+  vec3 nearAmbientColor = vec3(0.0);
+  vec3 farAmbientColor = vec3(0.0);
+  vec3 nearSamplePosition = rayOrigin + (rayDirection * (tNear + (pathLength * 0.25)));
+  vec3 farSamplePosition = rayOrigin + (rayDirection * (tNear + (pathLength * 0.75)));
+
+  if (lightingScale > 0.0001 && useProbeCoefficientTexture > 0.5) {
+    nearAmbientColor = sampleFogAmbientColor(nearSamplePosition) * environmentFogColor * lightingScale;
+    farAmbientColor = sampleFogAmbientColor(farSamplePosition) * environmentFogColor * lightingScale;
+  }
 
   for (int stepIndex = 0; stepIndex < 24; stepIndex += 1) {
     if (float(stepIndex) >= clampedStepCount) {
@@ -1300,14 +1379,8 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
       continue;
     }
 
-    if (!fogIsInsideProbeGrid(fogWorldToProbeGrid(samplePosition))) {
-      continue;
-    }
-
-    vec3 ambientColor =
-      sampleFogAmbientColor(samplePosition) *
-      environmentFogColor *
-      max(0.0, lightingStrength);
+    float lightingT = clamp((float(stepIndex) + rayJitter) / clampedStepCount, 0.0, 1.0);
+    vec3 ambientColor = mix(nearAmbientColor, farAmbientColor, lightingT);
     float heightDensity = exp2(
       -sampleHeight / max(heightFalloff, 0.0001)
     );
@@ -1361,6 +1434,7 @@ type VisualControlTabKey =
   | 'ao'
   | 'bloom'
   | 'dof'
+  | 'eyes'
   | 'flares'
   | 'ssr'
   | 'fog'
@@ -1373,6 +1447,13 @@ type LightingContributionSettings = {
   enabled: boolean
   intensity: number
 }
+
+type MonsterType = (typeof MONSTER_EYE_TYPES)[number]
+type MonsterEyeOffset = { x: number; y: number; z: number }
+type MonsterEyeSettings = Record<MonsterType, {
+  left: MonsterEyeOffset
+  right: MonsterEyeOffset
+}>
 
 type ProbeDebugMode =
   | 'none'
@@ -1495,6 +1576,7 @@ const VISUAL_CONTROL_TABS: Array<{
   { hotkey: '7', key: 'fog', label: 'Fog' },
   { hotkey: '8', key: 'vignette', label: 'Vignette' },
   { hotkey: '9', key: 'anamorphic', label: 'Anamorphic' },
+  { hotkey: 'E', key: 'eyes', label: 'Eyes' },
   { hotkey: 'P', key: 'performance', label: 'Performance' },
   { hotkey: '0', key: 'solution', label: 'Solution' }
 ]
@@ -1506,11 +1588,95 @@ const DEFAULT_VOLUMETRIC_NOISE_PERIOD = 0.75
 const DEFAULT_VOLUMETRIC_NOISE_STRENGTH = 1
 const DEFAULT_VOLUMETRIC_HEIGHT_FALLOFF = 0.4
 const DEFAULT_VOLUMETRIC_LIGHTING_STRENGTH = 1
-const DEFAULT_VOLUMETRIC_STEP_COUNT = 12
+const DEFAULT_VOLUMETRIC_STEP_COUNT = 6
+const FOG_NOISE_TEXTURE_SIZE = 128
 const MAX_SIMULTANEOUS_LENS_FLARES = 5
 const MAX_BUFFERED_TURN_COMMANDS = 10
+const DEFAULT_MONSTER_EYES: MonsterEyeSettings = {
+  minotaur: {
+    left: { x: 0.16, y: 1.68, z: -0.54 },
+    right: { x: -0.16, y: 1.68, z: -0.54 }
+  },
+  spider: {
+    left: { x: 0.1, y: 0.36, z: -0.64 },
+    right: { x: -0.1, y: 0.36, z: -0.64 }
+  },
+  werewolf: {
+    left: { x: 0.11, y: 1.32, z: -0.36 },
+    right: { x: -0.11, y: 1.32, z: -0.36 }
+  }
+}
 const GIT_REVISION = `${__GIT_BRANCH__}@${__GIT_REVISION__}`
 const GIT_REVISION_TIMESTAMP = __GIT_REVISION_TIMESTAMP__
+
+function hashFogNoiseCell(x: number, y: number, period: number) {
+  let value = ((x % period) + period) % period
+  value = Math.imul(value ^ 0x2c1b3c6d, 0x297a2d39)
+  value ^= ((y % period) + period) % period
+  value = Math.imul(value ^ (value >>> 15), 0x1b873593)
+  value ^= value >>> 13
+
+  return ((value >>> 0) & 0xffff) / 0xffff
+}
+
+function sampleTileableFogNoise(x: number, y: number, period: number) {
+  const x0 = Math.floor(x)
+  const y0 = Math.floor(y)
+  const fx = x - x0
+  const fy = y - y0
+  const sx = fx * fx * (3 - (2 * fx))
+  const sy = fy * fy * (3 - (2 * fy))
+  const n00 = hashFogNoiseCell(x0, y0, period)
+  const n10 = hashFogNoiseCell(x0 + 1, y0, period)
+  const n01 = hashFogNoiseCell(x0, y0 + 1, period)
+  const n11 = hashFogNoiseCell(x0 + 1, y0 + 1, period)
+  const nx0 = MathUtils.lerp(n00, n10, sx)
+  const nx1 = MathUtils.lerp(n01, n11, sx)
+
+  return MathUtils.lerp(nx0, nx1, sy)
+}
+
+function createFogNoiseTexture() {
+  const size = FOG_NOISE_TEXTURE_SIZE
+  const data = new Uint8Array(size * size * 4)
+
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      let amplitude = 0.5
+      let value = 0
+      let weight = 0
+
+      for (let octave = 0; octave < 4; octave += 1) {
+        const frequency = 2 ** octave
+        const period = size / frequency
+        value += sampleTileableFogNoise((x / size) * period, (y / size) * period, period) * amplitude
+        weight += amplitude
+        amplitude *= 0.5
+      }
+
+      const byteValue = MathUtils.clamp(Math.round((value / weight) * 255), 0, 255)
+      const offset = ((y * size) + x) * 4
+      data[offset] = byteValue
+      data[offset + 1] = byteValue
+      data[offset + 2] = byteValue
+      data[offset + 3] = 255
+    }
+  }
+
+  const texture = new DataTexture(data, size, size, RGBAFormat, UnsignedByteType)
+  texture.wrapS = RepeatWrapping
+  texture.wrapT = RepeatWrapping
+  texture.minFilter = LinearFilter
+  texture.magFilter = LinearFilter
+  texture.generateMipmaps = false
+  texture.colorSpace = NoColorSpace
+  texture.needsUpdate = true
+
+  return texture
+}
+
+const FOG_NOISE_TEXTURE = createFogNoiseTexture()
+
 const PROBE_DEBUG_MODE_OPTIONS: Array<{ key: ProbeDebugMode, label: string }> = [
   { key: 'none', label: 'None' },
   { key: 'reflection', label: 'Reflection' },
@@ -1542,6 +1708,7 @@ type VisualSettings = {
   bloom: BloomSettings
   depthOfField: DepthOfFieldSettings
   movement: MovementSettings
+  monsterEyes: MonsterEyeSettings
   precomputedVisibilityEnabled: boolean
   ssr: SSRSettings
   volumetricAmbientHex: string
@@ -1571,6 +1738,10 @@ type VisualSettingsPatch = Partial<{
   lensFlare: Partial<LensFlareSettings>
   lightmapContribution: Partial<LightingContributionSettings>
   movement: Partial<MovementSettings>
+  monsterEyes: Partial<Record<MonsterType, Partial<{
+    left: Partial<MonsterEyeOffset>
+    right: Partial<MonsterEyeOffset>
+  }>>>
   precomputedVisibilityEnabled: boolean
   probeDebugMode: ProbeDebugMode
   reflectionContribution: Partial<LightingContributionSettings>
@@ -2083,6 +2254,7 @@ class FogVolumeEffectImpl extends Effect {
         ['noiseFrequency', new Uniform(DEFAULT_VOLUMETRIC_NOISE_FREQUENCY)],
         ['noisePeriod', new Uniform(DEFAULT_VOLUMETRIC_NOISE_PERIOD)],
         ['noiseStrength', new Uniform(DEFAULT_VOLUMETRIC_NOISE_STRENGTH)],
+        ['fogNoiseTexture', new Uniform(FOG_NOISE_TEXTURE)],
         ['probeAmbientBounds', new Uniform(new Vector4())],
         ['probeAmbientGrid', new Uniform(new Vector2())],
         ['probeWorldOrigin', new Uniform(new Vector2())],
@@ -2279,6 +2451,7 @@ function createDefaultVisualSettings(): VisualSettings {
         DEFAULT_MOVEMENT_SETTINGS.horizontalDecelerationDistance,
       maxHorizontalSpeedMph: DEFAULT_MOVEMENT_SETTINGS.maxHorizontalSpeedMph
     },
+    monsterEyes: structuredClone(DEFAULT_MONSTER_EYES),
     precomputedVisibilityEnabled: true,
     ssr: {
       blur: true,
@@ -2420,6 +2593,40 @@ function applyVisualSettingsPatch(
           ...patch.movement
         }
       : settings.movement,
+    monsterEyes: patch.monsterEyes
+      ? {
+          minotaur: {
+            left: {
+              ...settings.monsterEyes.minotaur.left,
+              ...patch.monsterEyes.minotaur?.left
+            },
+            right: {
+              ...settings.monsterEyes.minotaur.right,
+              ...patch.monsterEyes.minotaur?.right
+            }
+          },
+          spider: {
+            left: {
+              ...settings.monsterEyes.spider.left,
+              ...patch.monsterEyes.spider?.left
+            },
+            right: {
+              ...settings.monsterEyes.spider.right,
+              ...patch.monsterEyes.spider?.right
+            }
+          },
+          werewolf: {
+            left: {
+              ...settings.monsterEyes.werewolf.left,
+              ...patch.monsterEyes.werewolf?.left
+            },
+            right: {
+              ...settings.monsterEyes.werewolf.right,
+              ...patch.monsterEyes.werewolf?.right
+            }
+          }
+        }
+      : settings.monsterEyes,
     reflectionContribution: patch.reflectionContribution
       ? {
           ...settings.reflectionContribution,
@@ -3706,7 +3913,7 @@ function getProbeBlendMaterialKey(
   probeBlend: ProbeBlendConfig,
   patchConfig: MaterialShaderPatchConfig
 ) {
-  return `${role}:${getProbeBlendUpdateKey(probeBlend, patchConfig)}`
+  return `${role}:${getProbeBlendProgramKey(probeBlend, patchConfig)}`
 }
 
 function getProbeBlendProgramKey(
@@ -5312,6 +5519,7 @@ function useStandardPbrTextures(urls: StandardPbrTextureUrls, repeat: number) {
     () =>
       [
         ['color', urls.color],
+        ['ao', urls.ao],
         ['metallic', urls.metallic],
         ['normal', urls.normal],
         ['orm', urls.orm],
@@ -5336,6 +5544,7 @@ function useStandardPbrTextures(urls: StandardPbrTextureUrls, repeat: number) {
   }, [keyedTextures, maxAnisotropy, repeat])
 
   return {
+    aoMap: keyedTextures.ao,
     map: keyedTextures.color!,
     metalnessMap: keyedTextures.orm ?? keyedTextures.metallic,
     normalMap: keyedTextures.normal,
@@ -5970,14 +6179,14 @@ function getRuntimeSurfaceLightmapAtlasUrl(lightmap: MazeLightmap) {
     lightmap.encoding === 'rgb16f' &&
     lightmap.atlasUrl.endsWith('/surface-lightmap.bin')
   ) {
-    return lightmap.atlasUrl.replace(/surface-lightmap\.bin$/, 'surface-lightmap-rgbe.png')
+    return lightmap.atlasUrl.replace(/surface-lightmap\.bin$/, 'surface-lightmap-rgbe.rgbe')
   }
 
   if (
     lightmap.encoding === 'rgb16f' &&
     lightmap.atlasUrl.endsWith('surface-lightmap.bin')
   ) {
-    return lightmap.atlasUrl.replace(/surface-lightmap\.bin$/, 'surface-lightmap-rgbe.png')
+    return lightmap.atlasUrl.replace(/surface-lightmap\.bin$/, 'surface-lightmap-rgbe.rgbe')
   }
 
   return lightmap.atlasUrl
@@ -5986,7 +6195,9 @@ function getRuntimeSurfaceLightmapAtlasUrl(lightmap: MazeLightmap) {
 function getRuntimeSurfaceLightmapEncoding(lightmap: MazeLightmap) {
   const imageUrl = getRuntimeSurfaceLightmapAtlasUrl(lightmap)
 
-  return imageUrl?.endsWith('surface-lightmap-rgbe.png') || lightmap.encoding === 'rgbe8'
+  return imageUrl?.endsWith('surface-lightmap-rgbe.png') ||
+    imageUrl?.endsWith('surface-lightmap-rgbe.rgbe') ||
+    lightmap.encoding === 'rgbe8'
     ? 'rgbe8'
     : 'linear'
 }
@@ -6005,23 +6216,51 @@ function configureLightmapTexture(texture: Texture) {
 }
 
 async function loadRgbEImageDataTexture(url: string) {
+  recordStartupMarker('surfaceLightmapFetchStartedAt')
   const response = await fetch(url)
 
   if (!response.ok) {
     throw new Error(`Failed to load surface lightmap texture: ${response.status}`)
   }
 
+  recordStartupMarker('surfaceLightmapFetchCompleteAt')
   const blob = await response.blob()
+  recordStartupMarker('surfaceLightmapBlobCompleteAt')
   const image = await createImageBitmap(blob, {
     colorSpaceConversion: 'none',
     imageOrientation: 'none',
     premultiplyAlpha: 'none'
   })
+  recordStartupMarker('surfaceLightmapBitmapCompleteAt')
   const texture = new Texture(image)
 
   texture.addEventListener('dispose', () => {
     image.close()
   })
+
+  return configureLightmapTexture(texture)
+}
+
+async function loadRgbEByteDataTexture(url: string, width: number, height: number) {
+  recordStartupMarker('surfaceLightmapFetchStartedAt')
+  const response = await fetch(url)
+
+  if (!response.ok) {
+    throw new Error(`Failed to load surface lightmap texture: ${response.status}`)
+  }
+
+  recordStartupMarker('surfaceLightmapFetchCompleteAt')
+  const bytes = new Uint8Array(await response.arrayBuffer())
+  recordStartupMarker('surfaceLightmapBytePayloadCompleteAt')
+  const expectedByteLength = width * height * 4
+
+  if (bytes.byteLength !== expectedByteLength) {
+    throw new Error(
+      `Invalid RGBE surface lightmap payload ${url}: expected ${expectedByteLength} bytes, got ${bytes.byteLength}`
+    )
+  }
+
+  const texture = new DataTexture(bytes, width, height, RGBAFormat, UnsignedByteType)
 
   return configureLightmapTexture(texture)
 }
@@ -6059,6 +6298,20 @@ function useSurfaceLightmapAtlasTexture(lightmap: MazeLightmap) {
               lightmap.atlasWidth,
               lightmap.atlasHeight,
               lightmap.encoding ?? 'rgbe8'
+            )
+          }
+        }
+
+        if (
+          imageUrl &&
+          imageUrl.endsWith('surface-lightmap-rgbe.rgbe')
+        ) {
+          return {
+            encoding: 'rgbe8' as const,
+            texture: await loadRgbEByteDataTexture(
+              resolveMazeDataUrl(imageUrl),
+              lightmap.atlasWidth,
+              lightmap.atlasHeight
             )
           }
         }
@@ -7248,7 +7501,6 @@ function EnvironmentLighting({
   onReflectionProbeTexturesChange: (textures: Texture[]) => void
 }) {
   const gl = useThree((state) => state.gl)
-  const camera = useThree((state) => state.camera)
   const scene = useThree((state) => state.scene)
   const hdrTexture = useLoader(HDRLoader, ENVIRONMENT_URL)
   const pmremGenerator = useMemo(() => new PMREMGenerator(gl), [gl])
@@ -8326,6 +8578,7 @@ function GroundPatchMesh({
   lightmap,
   lightmapTextureEncoding,
   lightmapContributionIntensity,
+  monsterEyes,
   maps,
   probeBlend,
   rect,
@@ -8339,6 +8592,7 @@ function GroundPatchMesh({
   lightmap: MazeLightmap
   lightmapTextureEncoding: LightmapTextureEncoding
   lightmapContributionIntensity: number
+  monsterEyes: MonsterEyeSettings
   maps: PbrMaps
   probeBlend: ProbeBlendConfig
   rect: GroundPatchRect
@@ -8383,7 +8637,7 @@ function GroundPatchMesh({
       <GroundSurfaceMaterial
         globalEnvMap={environmentTexture}
         globalEnvMapIntensity={environmentIntensity}
-        lightMap={surfaceLightmapsEnabled ? groundLightmapTexture : undefined}
+        lightMap={groundLightmapTexture}
         lightMapIntensity={
           surfaceLightmapsEnabled
             ? lightmapContributionIntensity * FLOOR_LIGHTMAP_INTENSITY_SCALE
@@ -8458,12 +8712,8 @@ function Ground({
           const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
           const surfaceLightmapsEnabled =
             lightmapContributionIntensity > EFFECT_EPSILON
-          const probeIblActive =
-            iblContributionIntensity > EFFECT_EPSILON &&
-            hasProbeCoefficients
-          const reflectionActive =
-            reflectionContributionIntensity > EFFECT_EPSILON &&
-            hasProbeTextures
+          const probeIblAvailable = hasProbeCoefficients
+          const reflectionAvailable = hasProbeTextures
 
           return (
             <GroundPatchMesh
@@ -8488,14 +8738,14 @@ function Ground({
           diffuseIntensity: iblContributionIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: probeIblActive
+          radianceMode: probeIblAvailable
             ? 'disabled'
-            : reflectionActive
+            : reflectionAvailable
               ? 'world'
               : 'disabled',
                   region: rect.region,
                   useProbeConnectivity: volumetricShadowsEnabled,
-                  vlmMode: probeIblActive ? 'cell5' : 'disabled',
+                  vlmMode: probeIblAvailable ? 'cell5' : 'disabled',
                   worldTransform: levelWorldTransform
                 }
               )}
@@ -8700,12 +8950,8 @@ function WallSconce({
   const hasProbeTextures = Boolean(monsterRadianceProbeTextures[0])
   const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
   const diffuseProbeIntensity = iblContributionIntensity
-  const diffuseProbeActive =
-    diffuseProbeIntensity > EFFECT_EPSILON &&
-    hasProbeCoefficients
-  const reflectionActive =
-    reflectionContributionIntensity > EFFECT_EPSILON &&
-    hasProbeTextures
+  const diffuseProbeAvailable = hasProbeCoefficients
+  const reflectionAvailable = hasProbeTextures
   const probeBlend = useMemo(
     () => ({
       ...buildProbeBlendConfig(
@@ -8720,9 +8966,9 @@ function WallSconce({
           diffuseIntensity: diffuseProbeIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: diffuseProbeActive
+          radianceMode: diffuseProbeAvailable
             ? 'disabled'
-            : reflectionActive
+            : reflectionAvailable
               ? 'constant'
               : 'disabled',
           useProbeConnectivity: volumetricShadowsEnabled,
@@ -8734,14 +8980,13 @@ function WallSconce({
                 : mazeLight.side === 'south'
                   ? { x: 0, z: 1 }
                   : { x: 0, z: -1 },
-          vlmMode: diffuseProbeActive ? 'boundary8' : 'disabled',
+          vlmMode: diffuseProbeAvailable ? 'boundary8' : 'disabled',
           weights: reflectionProbeBlend.weights as [number, number, number, number],
           worldTransform: levelWorldTransform
         }
       )
     }),
     [
-      diffuseProbeActive,
       diffuseProbeIntensity,
       hasProbeTextures,
       iblContributionIntensity,
@@ -8752,7 +8997,8 @@ function WallSconce({
       probeDepthTextures,
       probeTextures,
       reflectionContributionIntensity,
-      reflectionActive,
+      diffuseProbeAvailable,
+      reflectionAvailable,
       reflectionProbeBlend.probeIndices,
       reflectionProbeBlend.weights,
       volumetricShadowsEnabled
@@ -10387,16 +10633,9 @@ function WallDetailMesh({
           diffuseIntensity: iblContributionIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode:
-            reflectionContributionIntensity > EFFECT_EPSILON &&
-            hasProbeTextures
-              ? 'constant'
-              : 'disabled',
+          radianceMode: hasProbeTextures ? 'constant' : 'disabled',
           useProbeConnectivity: volumetricShadowsEnabled,
-          vlmMode:
-            iblContributionIntensity > EFFECT_EPSILON && hasProbeCoefficients
-              ? 'cell5'
-              : 'disabled',
+          vlmMode: hasProbeCoefficients ? 'cell5' : 'disabled',
           worldTransform: levelWorldTransform
         }
       ),
@@ -10609,9 +10848,7 @@ function MazeWallDecal({
   const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
   const surfaceLightmapsEnabled =
     lightmapContributionIntensity > EFFECT_EPSILON
-  const probeIblActive =
-    iblContributionIntensity > EFFECT_EPSILON &&
-    hasProbeCoefficients
+  const probeIblAvailable = hasProbeCoefficients
   const lightMapIntensity =
     surfaceLightmapsEnabled
       ? lightmapContributionIntensity * WALL_LIGHTMAP_INTENSITY_SCALE
@@ -10647,7 +10884,7 @@ function MazeWallDecal({
             Math.abs(decal.normal.x) > Math.abs(decal.normal.z)
               ? { x: 1, z: 0 }
               : { x: 0, z: 1 },
-          vlmMode: probeIblActive ? 'boundary8' : 'disabled',
+          vlmMode: probeIblAvailable ? 'boundary8' : 'disabled',
           weights: reflectionProbeBlend.weights as [number, number, number, number],
           worldTransform: levelWorldTransform
         }
@@ -10661,7 +10898,7 @@ function MazeWallDecal({
       probeCoefficients,
       probeCoefficientTextures,
       probeDepthAtlasTextures,
-      probeIblActive,
+      probeIblAvailable,
       reflectionProbeBlend.probeIndices,
       reflectionProbeBlend.weights,
       volumetricShadowsEnabled
@@ -10696,7 +10933,7 @@ function MazeWallDecal({
       <primitive attach="geometry" object={geometry} />
       <LitDecalMaterial
         alphaMap={decalTexture}
-        lightMap={surfaceLightmapsEnabled ? lightmapTexture : undefined}
+        lightMap={lightmapTexture}
         lightMapIntensity={lightMapIntensity}
         materialKey={materialKey}
         patchConfig={patchConfig}
@@ -10784,12 +11021,7 @@ function MazeWallMesh({
   const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
   const surfaceLightmapsEnabled =
     lightmapContributionIntensity > EFFECT_EPSILON
-  const probeIblActive =
-    iblContributionIntensity > EFFECT_EPSILON &&
-    hasProbeCoefficients
-  const reflectionActive =
-    reflectionContributionIntensity > EFFECT_EPSILON &&
-    hasProbeTextures
+  const probeIblAvailable = hasProbeCoefficients
   const lightMapIntensity =
     surfaceLightmapsEnabled
       ? lightmapContributionIntensity * WALL_LIGHTMAP_INTENSITY_SCALE
@@ -10825,7 +11057,7 @@ function MazeWallMesh({
             mazeWall.axis === 'z'
               ? { x: 1, z: 0 }
               : { x: 0, z: 1 },
-          vlmMode: probeIblActive ? 'boundary8' : 'disabled',
+          vlmMode: probeIblAvailable ? 'boundary8' : 'disabled',
           weights: reflectionProbeBlend.weights as [number, number, number, number],
           worldTransform: levelWorldTransform
         }
@@ -10839,8 +11071,7 @@ function MazeWallMesh({
       probeDepthAtlasTextures,
       probeDepthTextures,
       probeTextures,
-      probeIblActive,
-      reflectionActive,
+      probeIblAvailable,
       reflectionContributionIntensity,
       reflectionProbeBlend.probeIndices,
       reflectionProbeBlend.weights,
@@ -10885,7 +11116,7 @@ function MazeWallMesh({
         attach="material"
         environmentIntensity={envMapIntensity}
         environmentTexture={environmentTexture}
-        lightMap={surfaceLightmapsEnabled ? lightmapTexture : undefined}
+        lightMap={lightmapTexture}
         lightMapIntensity={lightMapIntensity}
         materialKey={wallFaceMaterialBaseKey}
         maps={wallMaterialMaps}
@@ -10994,6 +11225,11 @@ function SceneGeometry({
             reflectionProbeCoefficients={reflectionProbeCoefficients}
             reflectionProbeDepthTextures={reflectionProbeDepthTextures}
             reflectionProbeTextures={reflectionProbeTextures}
+            visibilityState={visibilityState}
+          />
+          <MazeDoors
+            layout={layout}
+            turnState={turnState}
             visibilityState={visibilityState}
           />
           <MazeItems
@@ -11109,20 +11345,13 @@ function GateActor({
           diffuseIntensity: iblContributionIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode:
-            reflectionContributionIntensity > EFFECT_EPSILON &&
-            hasProbeTextures
-              ? 'constant'
-              : 'disabled',
+          radianceMode: hasProbeTextures ? 'constant' : 'disabled',
           useProbeConnectivity: volumetricShadowsEnabled,
           vlmBoundaryNormal:
             gate.axis === 'z'
               ? { x: 1, z: 0 }
               : { x: 0, z: 1 },
-          vlmMode:
-            iblContributionIntensity > EFFECT_EPSILON && hasProbeCoefficients
-              ? 'boundary8'
-              : 'disabled',
+          vlmMode: hasProbeCoefficients ? 'boundary8' : 'disabled',
           weights: reflectionProbeBlend.weights as [number, number, number, number],
           worldTransform: levelWorldTransform
         }
@@ -11294,6 +11523,156 @@ function MazeGates({
   )
 }
 
+function getMazeEntranceDoor(layout: MazeLayout) {
+  const opening = layout.maze.opening
+
+  if (!opening) {
+    return null
+  }
+
+  const cellCenter = getMazeCellWorldPosition(layout.maze, opening.cell, GROUND_Y)
+  const center = {
+    x: cellCenter.x,
+    z: cellCenter.z
+  }
+
+  if (opening.side === 'north') {
+    center.z -= MAZE_CELL_SIZE / 2
+  } else if (opening.side === 'south') {
+    center.z += MAZE_CELL_SIZE / 2
+  } else if (opening.side === 'east') {
+    center.x += MAZE_CELL_SIZE / 2
+  } else {
+    center.x -= MAZE_CELL_SIZE / 2
+  }
+
+  return {
+    cell: opening.cell,
+    center,
+    id: `${layout.maze.id}:entrance-door`,
+    yaw: opening.side === 'east' || opening.side === 'west'
+      ? Math.PI / 2
+      : 0
+  }
+}
+
+function MazeDoorActor({
+  door,
+  isOpen,
+  visible
+}: {
+  door: NonNullable<ReturnType<typeof getMazeEntranceDoor>>
+  isOpen: boolean
+  visible: boolean
+}) {
+  const group = useRef<Group>(null)
+  const leftLeaf = useRef<Mesh>(null)
+  const rightLeaf = useRef<Mesh>(null)
+  const doorMaps = useStandardPbrTextures(DOOR_TEXTURE_URLS, DOOR_TEXTURE_REPEAT)
+  const doorGeometry = useMemo(
+    () => new BoxGeometry(1, WALL_HEIGHT, WALL_WIDTH * 0.5),
+    []
+  )
+  const openProgress = useRef(isOpen ? 1 : 0)
+
+  useEffect(() => () => {
+    doorGeometry.dispose()
+  }, [doorGeometry])
+
+  useFrame((_, delta) => {
+    const target = isOpen ? 1 : 0
+    const durationSeconds = getScaledAnimationDuration(TURN_ANIMATION_DURATION_MS) / 1000
+    const step = durationSeconds > 0 ? delta / durationSeconds : 1
+
+    openProgress.current = target > openProgress.current
+      ? Math.min(target, openProgress.current + step)
+      : Math.max(target, openProgress.current - step)
+
+    const openOffset = openProgress.current * 0.75
+
+    if (leftLeaf.current) {
+      leftLeaf.current.position.x = -0.5 - openOffset
+    }
+    if (rightLeaf.current) {
+      rightLeaf.current.position.x = 0.5 + openOffset
+    }
+  })
+
+  return (
+    <group
+      ref={group}
+      position={[door.center.x, GROUND_Y + (WALL_HEIGHT / 2), door.center.z]}
+      rotation-y={door.yaw}
+      userData={{
+        debugRole: 'maze-door',
+        doorId: door.id
+      }}
+      visible={visible}
+    >
+      <mesh
+        castShadow
+        geometry={doorGeometry}
+        receiveShadow
+        ref={leftLeaf}
+        userData={{ debugRole: 'maze-door-leaf' }}
+      >
+        <meshStandardMaterial
+          aoMap={doorMaps.aoMap}
+          map={doorMaps.map}
+          metalness={0.65}
+          normalMap={doorMaps.normalMap}
+          roughness={0.55}
+          roughnessMap={doorMaps.roughnessMap}
+        />
+      </mesh>
+      <mesh
+        castShadow
+        geometry={doorGeometry}
+        receiveShadow
+        ref={rightLeaf}
+        userData={{ debugRole: 'maze-door-leaf' }}
+      >
+        <meshStandardMaterial
+          aoMap={doorMaps.aoMap}
+          map={doorMaps.map}
+          metalness={0.65}
+          normalMap={doorMaps.normalMap}
+          roughness={0.55}
+          roughnessMap={doorMaps.roughnessMap}
+        />
+      </mesh>
+    </group>
+  )
+}
+
+function MazeDoors({
+  layout,
+  turnState,
+  visibilityState
+}: {
+  layout: MazeLayout
+  turnState: TurnState
+  visibilityState: PrecomputedVisibilityState
+}) {
+  const door = useMemo(() => getMazeEntranceDoor(layout), [layout])
+
+  if (!door) {
+    return null
+  }
+
+  const playerAtDoorCell =
+    turnState.player.cell.x === door.cell.x &&
+    turnState.player.cell.y === door.cell.y
+
+  return (
+    <MazeDoorActor
+      door={door}
+      isOpen={playerAtDoorCell}
+      visible={isCellVisible(visibilityState, door.cell)}
+    />
+  )
+}
+
 function MazeItemGroundActor({
   debugIndex,
   environmentIntensity,
@@ -11376,16 +11755,9 @@ function MazeItemGroundActor({
           diffuseIntensity: iblContributionIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode:
-            reflectionContributionIntensity > EFFECT_EPSILON &&
-            hasProbeTextures
-              ? 'constant'
-              : 'disabled',
+          radianceMode: hasProbeTextures ? 'constant' : 'disabled',
           useProbeConnectivity: volumetricShadowsEnabled,
-          vlmMode:
-            iblContributionIntensity > EFFECT_EPSILON && hasProbeCoefficients
-              ? 'cell5'
-              : 'disabled',
+          vlmMode: hasProbeCoefficients ? 'cell5' : 'disabled',
           worldTransform: levelWorldTransform
         }
       ),
@@ -11576,16 +11948,11 @@ function HeldItemView({
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
           radianceMode:
-            diffuseIntensity <= EFFECT_EPSILON &&
-            reflectionContributionIntensity > EFFECT_EPSILON &&
-            hasProbeTextures
+            hasProbeTextures && !hasProbeCoefficients
               ? 'constant'
               : 'disabled',
           useProbeConnectivity: volumetricShadowsEnabled,
-          vlmMode:
-            diffuseIntensity > EFFECT_EPSILON && hasProbeCoefficients
-              ? 'cell5'
-              : 'disabled',
+          vlmMode: hasProbeCoefficients ? 'cell5' : 'disabled',
           worldTransform: levelWorldTransform
         }
       ),
@@ -11917,9 +12284,7 @@ function MonsterModel({
   const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
   const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
   const diffuseProbeIntensity = iblContributionIntensity
-  const diffuseProbeActive =
-    diffuseProbeIntensity > EFFECT_EPSILON &&
-    hasProbeCoefficients
+  const diffuseProbeAvailable = hasProbeCoefficients
   const probeBlend = useMemo(
     () =>
       buildProbeBlendConfig(
@@ -11934,14 +12299,14 @@ function MonsterModel({
           diffuseIntensity: diffuseProbeIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: diffuseProbeActive ? 'disabled' : 'none',
+          radianceMode: diffuseProbeAvailable ? 'disabled' : 'none',
           useProbeConnectivity: volumetricShadowsEnabled,
-          vlmMode: diffuseProbeActive ? 'cell5' : 'disabled',
+          vlmMode: diffuseProbeAvailable ? 'cell5' : 'disabled',
           worldTransform: levelWorldTransform
         }
       ),
     [
-      diffuseProbeActive,
+      diffuseProbeAvailable,
       diffuseProbeIntensity,
       layout,
       levelWorldTransform,
@@ -11973,15 +12338,18 @@ function MonsterModel({
         ? 2.7
         : monster.type === 'spider'
           ? 2.1
-          : 1.6
+          : 1.8
+    const maxHorizontalDimension = Math.max(size.x, size.z, 0.0001)
     const maxDimension = Math.max(size.x, size.y, size.z, 0.0001)
-    const scale = targetSize / maxDimension
+    const scale = monster.type === 'werewolf'
+      ? targetSize / maxHorizontalDimension
+      : targetSize / maxDimension
 
     return {
       modelOffset: new Vector3(
         -center.x * scale,
         (-bounds.min.y * scale) +
-          (monster.type === 'minotaur' ? -0.25 : monster.type === 'werewolf' ? 0.02 : 0),
+          (monster.type === 'minotaur' ? -0.25 : 0),
         -center.z * scale
       ),
       modelRotationZ:
@@ -12006,6 +12374,7 @@ function MonsterModel({
 
   model.userData.debugIndex = debugIndex
   model.userData.debugRole = 'monster'
+  model.userData.monsterId = monster.id
   model.userData.monsterScaledSize = [
     transform.scaledSize.x,
     transform.scaledSize.y,
@@ -12028,6 +12397,62 @@ function MonsterModel({
   )
 }
 
+function MonsterEyes({
+  awake,
+  monsterId,
+  monsterType,
+  settings
+}: {
+  awake: boolean
+  monsterId: string
+  monsterType: MonsterType
+  settings: MonsterEyeSettings
+}) {
+  const sphereGeometry = useMemo(() => new SphereGeometry(MONSTER_EYE_RADIUS, 12, 8), [])
+  const material = useMemo(
+    () => new MeshBasicMaterial({
+      color: MONSTER_EYE_COLOR,
+      toneMapped: false
+    }),
+    []
+  )
+  const offsets = settings[monsterType]
+
+  useEffect(() => () => {
+    sphereGeometry.dispose()
+    material.dispose()
+  }, [material, sphereGeometry])
+
+  return (
+    <>
+      <mesh
+        geometry={sphereGeometry}
+        material={material}
+        position={[offsets.left.x, offsets.left.y, offsets.left.z]}
+        userData={{
+          debugRole: 'monster-eye',
+          lensFlareSource: true,
+          monsterId,
+          monsterType
+        }}
+        visible={awake}
+      />
+      <mesh
+        geometry={sphereGeometry}
+        material={material}
+        position={[offsets.right.x, offsets.right.y, offsets.right.z]}
+        userData={{
+          debugRole: 'monster-eye',
+          lensFlareSource: true,
+          monsterId,
+          monsterType
+        }}
+        visible={awake}
+      />
+    </>
+  )
+}
+
 function MonsterActor({
   debugIndex,
   environmentIntensity,
@@ -12036,6 +12461,7 @@ function MonsterActor({
   layout,
   lightmapContributionIntensity,
   monster,
+  monsterEyes,
   playerCell,
   probeDepthAtlasTextures,
   probeCoefficientTextures,
@@ -12052,6 +12478,7 @@ function MonsterActor({
   layout: MazeLayout
   lightmapContributionIntensity: number
   monster: TurnMonster
+  monsterEyes: MonsterEyeSettings
   playerCell: { x: number; y: number }
   probeDepthAtlasTextures: ProbeDepthAtlasTextures
   probeCoefficientTextures: [Texture, Texture, Texture, Texture]
@@ -12241,6 +12668,12 @@ function MonsterActor({
         reflectionProbeDepthTextures={reflectionProbeDepthTextures}
         reflectionProbeTextures={reflectionProbeTextures}
       />
+      <MonsterEyes
+        awake={monster.awake}
+        monsterId={monster.id}
+        monsterType={monster.type}
+        settings={monsterEyes}
+      />
     </group>
   )
 }
@@ -12258,6 +12691,7 @@ function MonsterActors({
   reflectionProbeDepthTextures,
   reflectionProbeTextures,
   turnState,
+  monsterEyes,
   visibilityState = DISABLED_PRECOMPUTED_VISIBILITY
 }: {
   environmentIntensity: number
@@ -12272,6 +12706,7 @@ function MonsterActors({
   reflectionProbeDepthTextures: CubeTexture[]
   reflectionProbeTextures: Texture[]
   turnState: TurnState
+  monsterEyes: MonsterEyeSettings
   visibilityState?: PrecomputedVisibilityState
 }) {
   return (
@@ -12294,6 +12729,7 @@ function MonsterActors({
             layout={layout}
             lightmapContributionIntensity={lightmapContributionIntensity}
             monster={monster}
+            monsterEyes={monsterEyes}
             playerCell={turnState.player.cell}
             probeDepthAtlasTextures={probeDepthAtlasTextures}
             probeCoefficientTextures={probeCoefficientTextures}
@@ -12683,9 +13119,9 @@ function TunedN8AO({
   return (
     <N8AO
       aoRadius={aoRadius}
-      aoSamples={4}
+      aoSamples={2}
       color="#000000"
-      denoiseSamples={2}
+      denoiseSamples={1}
       denoiseRadius={6}
       distanceFalloff={1}
       halfRes
@@ -13546,7 +13982,7 @@ function TorchLensFlare({
   const raycasterPosition = useMemo(() => new Vector2(), [])
   const scratchWorldPosition = useMemo(() => new Vector3(), [])
   const occlusionMeshes = useRef<Mesh[]>([])
-  const lensPositions = useRef<Vector3[]>([])
+  const lensPositions = useRef<Array<{ monsterId?: string; position: Vector3 }>>([])
   const flareSlots = useMemo(
     () =>
       Array.from({ length: MAX_SIMULTANEOUS_LENS_FLARES }, (_, index) => {
@@ -13636,7 +14072,7 @@ function TorchLensFlare({
 
     try {
       const nextOcclusionMeshes: Mesh[] = []
-      const nextLensPositions: Vector3[] = []
+      const nextLensPositions: Array<{ monsterId?: string; position: Vector3 }> = []
 
     scene.traverse((object) => {
       if (!(object instanceof Mesh)) {
@@ -13656,9 +14092,17 @@ function TorchLensFlare({
         nextOcclusionMeshes.push(object)
       }
 
-      if (object.userData?.debugRole === 'torch-billboard') {
+      if (
+        object.userData?.debugRole === 'torch-billboard' ||
+        object.userData?.debugRole === 'monster-eye'
+      ) {
         object.getWorldPosition(scratchWorldPosition)
-        nextLensPositions.push(scratchWorldPosition.clone())
+        nextLensPositions.push({
+          monsterId: typeof object.userData?.monsterId === 'string'
+            ? object.userData.monsterId
+            : undefined,
+          position: scratchWorldPosition.clone()
+        })
       }
     })
 
@@ -13669,7 +14113,8 @@ function TorchLensFlare({
       score: number
     }> = []
 
-    for (const lensPosition of lensPositions.current) {
+    for (const lensSource of lensPositions.current) {
+      const lensPosition = lensSource.position
       projectedPosition.copy(lensPosition).project(camera)
 
       if (
@@ -13693,6 +14138,13 @@ function TorchLensFlare({
       let occluded = false
 
       for (const intersection of intersections) {
+        if (
+          lensSource.monsterId &&
+          intersection.object.userData?.monsterId === lensSource.monsterId
+        ) {
+          continue
+        }
+
         if (intersection.distance >= distanceToLight - LENS_FLARE_OCCLUSION_MARGIN) {
           break
         }
@@ -14012,6 +14464,33 @@ function FlightRig({
   }, [camera, canvas])
 
   useEffect(() => {
+    const queueTurnAction = (queuedAction: TurnAction) => {
+      if (
+        freeCamera.current ||
+        replayActive.current ||
+        inputQueue.current.length >= MAX_BUFFERED_TURN_COMMANDS
+      ) {
+        return false
+      }
+
+      inputQueue.current.push(queuedAction)
+      document.body.dataset.playerMovedRecently = 'true'
+      return true
+    }
+
+    const onTouchTurnAction = (event: Event) => {
+      const action = (event as CustomEvent<TurnAction>).detail
+
+      if (
+        action === 'move-forward' ||
+        action === 'move-backward' ||
+        action === 'rotate-left' ||
+        action === 'rotate-right'
+      ) {
+        queueTurnAction(action)
+      }
+    }
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (document.body.dataset.levelMenuOpen === 'true') {
         keys.current[event.code] = false
@@ -14058,8 +14537,8 @@ function FlightRig({
 
         if (queuedAction) {
           event.preventDefault()
-          if (!keys.current[event.code] && inputQueue.current.length < MAX_BUFFERED_TURN_COMMANDS) {
-            inputQueue.current.push(queuedAction)
+          if (!keys.current[event.code]) {
+            queueTurnAction(queuedAction)
           }
           keys.current[event.code] = true
           return
@@ -14096,11 +14575,13 @@ function FlightRig({
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
     window.addEventListener('blur', onBlur)
+    window.addEventListener('levelsjam:turn-action', onTouchTurnAction)
 
     return () => {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
       window.removeEventListener('blur', onBlur)
+      window.removeEventListener('levelsjam:turn-action', onTouchTurnAction)
     }
   }, [canvas])
 
@@ -14475,7 +14956,10 @@ function FlightRig({
                   : null,
               hasEmissiveMap: materials.some((candidate) => Boolean(candidate.emissiveMap)),
               hasEnvMap: materials.some((candidate) => Boolean(candidate.envMap)),
-              hasLightMap: materials.some((candidate) => Boolean(candidate.lightMap)),
+              hasLightMap: materials.some((candidate) =>
+                Boolean(candidate.lightMap) &&
+                (candidate.lightMapIntensity ?? 1) > EFFECT_EPSILON
+              ),
               hasMap: materials.some((candidate) => Boolean(candidate.map)),
               hasUv1: Boolean(object.geometry?.getAttribute?.('uv1')),
               hasUv2: Boolean(object.geometry?.getAttribute?.('uv2')),
@@ -14860,9 +15344,18 @@ function FlightRig({
     try {
       if (!freeCamera.current) {
       if (!playerAnimation.current) {
-        const action = replayQueue.current.shift() ?? inputQueue.current.shift()
+        const replayAction = replayQueue.current.shift()
+        const action = replayAction ?? inputQueue.current.shift()
 
         if (action) {
+          if (!replayAction) {
+            globalAnimationSpeedMultiplier = MathUtils.clamp(
+              1 + (inputQueue.current.length * 0.5),
+              1,
+              100
+            )
+          }
+
           if (action === 'move-forward' || action === 'move-backward') {
             setDisplayedOpenGateIds(getOpenGateIds(layout.maze, turnStateRef.current))
           } else {
@@ -15119,6 +15612,7 @@ function RuntimeLevelGeometry({
   isActive,
   layout,
   lightmapContributionIntensity,
+  monsterEyes,
   mountAllGeometry = false,
   onLightingResourcesChange,
   openGateIdsOverride = null,
@@ -15136,6 +15630,7 @@ function RuntimeLevelGeometry({
   isActive: boolean
   layout: MazeLayout
   lightmapContributionIntensity: number
+  monsterEyes: MonsterEyeSettings
   mountAllGeometry?: boolean
   onLightingResourcesChange: (mazeId: string, resources: RuntimeLevelLightingResources | null) => void
   openGateIdsOverride?: Set<string> | null
@@ -15240,6 +15735,7 @@ function RuntimeLevelGeometry({
             iblContributionIntensity={iblContributionIntensity}
             layout={layout}
             lightmapContributionIntensity={lightmapContributionIntensity}
+            monsterEyes={monsterEyes}
             probeDepthAtlasTextures={lightingResources.probeDepthAtlasTextures}
             probeCoefficientTextures={lightingResources.probeCoefficientTextures}
             reflectionContributionIntensity={reflectionContributionIntensity}
@@ -15317,12 +15813,16 @@ function Scene({
       return
     }
 
+    if (!hasReportedBasicAssetsReady.current) {
+      return
+    }
+
     const handle = window.setTimeout(() => {
       setStartupAdjacentLevelsMounted(true)
     }, 250)
 
     return () => window.clearTimeout(handle)
-  }, [startupAdjacentLevelsMounted])
+  }, [startupAdjacentLevelsMounted, startupSceneReady])
   useEffect(() => {
     recordStartupMarker('sceneMountedAt')
     document.body.dataset.sceneMountCount = String(
@@ -15393,9 +15893,16 @@ function Scene({
     let cancelled = false
     let rafId = 0
     let geometryContractHandle = 0
-    let sceneProgramWarmHandle = 0
 
     const compileScene = async () => {
+      recordStartupMarker('sceneResourceStabilityStartedAt')
+      await waitForRendererResourceStability(gl, () => cancelled)
+
+      if (cancelled) {
+        return
+      }
+
+      recordStartupMarker('sceneResourceStabilityCompleteAt')
       recordStartupMarker('sceneTextureWarmStartedAt')
       await warmSceneTextures(gl, scene, () => cancelled)
 
@@ -15412,42 +15919,22 @@ function Scene({
         hasReportedBasicAssetsReady.current = true
         setStartupSceneReady(true)
         onAssetsReady()
+        recordStartupMarker('sceneProgramWarmSkippedAt')
+        document.body.dataset.sceneProgramsReady = 'true'
+        void (async () => {
+          recordStartupMarker('scenePostWarmStartedAt')
+          await warmEffectComposer(composerRef.current, () => cancelled)
+
+          if (!cancelled) {
+            recordStartupMarker('scenePostWarmCompleteAt')
+          }
+        })()
         geometryContractHandle = window.setTimeout(() => {
           if (!cancelled) {
             setStartupGeometryExpandedState(false)
           }
         }, 0)
       }
-
-      delete document.body.dataset.sceneProgramsReady
-      sceneProgramWarmHandle = window.setTimeout(() => {
-        if (cancelled) {
-          return
-        }
-
-        recordStartupMarker('sceneProgramWarmStartedAt')
-        void warmScenePrograms(gl, scene, camera, () => cancelled)
-          .then(() => {
-            if (!cancelled) {
-              recordStartupMarker('sceneProgramWarmCompleteAt')
-              document.body.dataset.sceneProgramsReady = 'true'
-            }
-          })
-      }, 6000)
-
-      window.setTimeout(() => {
-        if (cancelled) {
-          return
-        }
-
-        recordStartupMarker('scenePostWarmStartedAt')
-        void warmEffectComposer(composerRef.current, () => cancelled)
-          .then(() => {
-            if (!cancelled) {
-              recordStartupMarker('scenePostWarmCompleteAt')
-            }
-          })
-      }, 1500)
     }
 
     const waitForSceneObjects = () => {
@@ -15458,16 +15945,15 @@ function Scene({
       const levelLightingStates = scene.userData.levelLightingStatesByLevel as
         | Record<string, { ready?: boolean; surfaceLightmapReady?: boolean }>
         | undefined
-      const renderedLightingReady = stagedRenderedLayouts.every((renderedLayout) => {
-        const state = levelLightingStates?.[renderedLayout.maze.id]
-
-        return Boolean(state?.ready && state.surfaceLightmapReady)
-      })
+      const activeLightingState = levelLightingStates?.[layout.maze.id]
+      const activeLightingReady = Boolean(
+        activeLightingState?.ready &&
+        activeLightingState.surfaceLightmapReady
+      )
 
       if (
-        !startupAdjacentLevelsMounted ||
         !getReflectionCaptureSceneState(scene, layout).ready ||
-        !renderedLightingReady
+        !activeLightingReady
       ) {
         rafId = window.requestAnimationFrame(waitForSceneObjects)
         return
@@ -15491,18 +15977,14 @@ function Scene({
       }
       window.cancelAnimationFrame(rafId)
       window.clearTimeout(geometryContractHandle)
-      window.clearTimeout(sceneProgramWarmHandle)
       if (!hasReportedBasicAssetsReady.current) {
         delete document.body.dataset.sceneProgramsReady
       }
     }
   }, [
-    camera,
     gl,
     layout,
     onAssetsReady,
-    stagedRenderedLayouts,
-    startupAdjacentLevelsMounted,
     scene,
     setRuntimeModelsEnabledState,
     setStartupGeometryExpandedState
@@ -16434,6 +16916,7 @@ function Scene({
               key={`runtime-level-${renderedLayout.maze.id}`}
               layout={renderedLayout}
               lightmapContributionIntensity={runtimeLightmapIntensity}
+              monsterEyes={visualSettings.monsterEyes}
               mountAllGeometry={startupGeometryExpanded}
               onLightingResourcesChange={handleLevelLightingResourcesChange}
               openGateIdsOverride={isActive ? activeOpenGateIds : closedGateIds}
@@ -16491,35 +16974,25 @@ function Scene({
             samples={48}
           />
         ) : null}
-        {visualSettings.volumetricLighting.enabled
-          ? runtimeRenderedLayouts.map((fogLayout) => {
-              const resources = levelLightingResources.get(fogLayout.maze.id)
-
-              if (!resources?.reflectionProbeState.ready) {
-                return null
-              }
-
-              return (
-                <FogVolume
-                  ambientColor={fogAmbientColor}
-                  fogDistance={visualSettings.volumetricDistance}
-                  heightFalloff={visualSettings.volumetricHeightFalloff}
-                  key={`fog-volume-${fogLayout.maze.id}`}
-                  layout={fogLayout}
-                  lightingStrength={visualSettings.volumetricLightingStrength}
-                  noiseFrequency={visualSettings.volumetricNoiseFrequency}
-                  noisePeriod={visualSettings.volumetricNoisePeriod}
-                  noiseStrength={visualSettings.volumetricNoiseStrength}
-                  probeCoefficientTextures={resources.probeCoefficientTextures}
-                  probeDepthAtlasTextures={resources.probeDepthAtlasTextures}
-                  rayStepCount={visualSettings.volumetricStepCount}
-                  transform={getRuntimeLevelWorldTransform(fogLayout.maze.id)}
-                  visible={visualSettings.volumetricLighting.enabled}
-                  volumeIntensity={visualSettings.volumetricLighting.intensity}
-                />
-              )
-            })
-          : null}
+        {visualSettings.volumetricLighting.enabled && activeLightingResources?.reflectionProbeState.ready ? (
+          <FogVolume
+            ambientColor={fogAmbientColor}
+            fogDistance={visualSettings.volumetricDistance}
+            heightFalloff={visualSettings.volumetricHeightFalloff}
+            key={`fog-volume-${layout.maze.id}`}
+            layout={layout}
+            lightingStrength={visualSettings.volumetricLightingStrength}
+            noiseFrequency={visualSettings.volumetricNoiseFrequency}
+            noisePeriod={visualSettings.volumetricNoisePeriod}
+            noiseStrength={visualSettings.volumetricNoiseStrength}
+            probeCoefficientTextures={activeLightingResources.probeCoefficientTextures}
+            probeDepthAtlasTextures={activeLightingResources.probeDepthAtlasTextures}
+            rayStepCount={visualSettings.volumetricStepCount}
+            transform={getRuntimeLevelWorldTransform(layout.maze.id)}
+            visible={visualSettings.volumetricLighting.enabled}
+            volumeIntensity={visualSettings.volumetricLighting.intensity}
+          />
+        ) : null}
         <BillboardCompositePass />
         {depthOfFieldActive ? (
           <DepthOfField
@@ -16669,6 +17142,7 @@ function VisualControls({
   onEffectSettingChange,
   onFogAmbientHexChange,
   onLensFlareSettingChange,
+  onMonsterEyeOffsetChange,
   onProbeDebugModeChange,
   onResetAnamorphicSettings,
   onResetAmbientOcclusionMode,
@@ -16705,6 +17179,12 @@ function VisualControls({
   ) => void
   onFogAmbientHexChange: (value: string) => void
   onLensFlareSettingChange: (patch: Partial<LensFlareSettings>) => void
+  onMonsterEyeOffsetChange: (
+    monsterType: MonsterType,
+    eye: 'left' | 'right',
+    axis: keyof MonsterEyeOffset,
+    value: number
+  ) => void
   onProbeDebugModeChange: (value: ProbeDebugMode) => void
   onResetAnamorphicSettings: () => void
   onResetAmbientOcclusionMode: () => void
@@ -18331,6 +18811,46 @@ function VisualControls({
         </>
       ) : null}
 
+      {activeTab === 'eyes' ? (
+        <>
+          {MONSTER_EYE_TYPES.flatMap((monsterType) =>
+            (['left', 'right'] as const).flatMap((eye) =>
+              (['x', 'y', 'z'] as const).map((axis) => {
+                const value = visualSettings.monsterEyes[monsterType][eye][axis]
+                const label = `${monsterType} ${eye} eye ${axis.toUpperCase()}`
+
+                return (
+                  <label className="visual-control-row" key={label}>
+                    <output>{value.toFixed(2)}m</output>
+                    <ResettableLabel onReset={() => {
+                      onMonsterEyeOffsetChange(
+                        monsterType,
+                        eye,
+                        axis,
+                        DEFAULT_MONSTER_EYES[monsterType][eye][axis]
+                      )
+                    }}>
+                      {label}
+                    </ResettableLabel>
+                    <input
+                      aria-label={label}
+                      max={2}
+                      min={-2}
+                      onChange={(event) => {
+                        onMonsterEyeOffsetChange(monsterType, eye, axis, Number(event.target.value))
+                      }}
+                      step={0.01}
+                      type="range"
+                      value={value}
+                    />
+                  </label>
+                )
+              })
+            )
+          )}
+        </>
+      ) : null}
+
       {activeTab === 'performance' ? (
         <>
           <div className="visual-control-row">
@@ -18387,7 +18907,7 @@ function CreditsModal({
           "PBR Jumping Spider Monster" (<a href="https://skfb.ly/6QVNq">https://skfb.ly/6QVNq</a>) by Toast is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
         </p>
         <p>
-          "AWIL Werewolf" (<a href="https://skfb.ly/orBtB">https://skfb.ly/orBtB</a>) by Spinnee is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
+          "leowolf" (<a href="https://skfb.ly/pqPJx">https://skfb.ly/pqPJx</a>) by MUSHIDO_SKARSGARD is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
         </p>
         <p>
           "Head of a Bull" (<a href="https://skfb.ly/6TOXX">https://skfb.ly/6TOXX</a>) by Kirk Hiatt is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
@@ -18397,6 +18917,9 @@ function CreditsModal({
         </p>
         <p>
           "Bronze Sword Mycean" (<a href="https://skfb.ly/6RZxG">https://skfb.ly/6RZxG</a>) by Ryoce is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
+        </p>
+        <p>
+          "Metal Rust" texture pack (<a href="https://www.sharetextures.com/textures/metal/metal-rust">https://www.sharetextures.com/textures/metal/metal-rust</a>) by ShareTextures is used under the ShareTextures license.
         </p>
         <small>Press any key to close.</small>
       </div>
@@ -18436,6 +18959,64 @@ function LevelMenuModal({
         </div>
         <small>Press Escape to close.</small>
       </div>
+    </div>
+  )
+}
+
+function MobileTouchControls({
+  onOpenMenu
+}: {
+  onOpenMenu: () => void
+}) {
+  const dispatchAction = (action: TurnAction) => {
+    window.dispatchEvent(new CustomEvent<TurnAction>('levelsjam:turn-action', {
+      detail: action
+    }))
+  }
+
+  return (
+    <div className="mobile-touch-controls" aria-label="Touch Controls">
+      <button
+        aria-label="Open Menu"
+        className="mobile-menu-button"
+        onClick={onOpenMenu}
+        type="button"
+      >
+        Menu
+      </button>
+      <button
+        aria-label="Turn Left"
+        className="mobile-touch-zone mobile-touch-left"
+        onPointerDown={(event) => {
+          event.preventDefault()
+          dispatchAction('rotate-left')
+        }}
+        type="button"
+      >
+        &#8592;
+      </button>
+      <button
+        aria-label="Move Forward"
+        className="mobile-touch-zone mobile-touch-forward"
+        onPointerDown={(event) => {
+          event.preventDefault()
+          dispatchAction('move-forward')
+        }}
+        type="button"
+      >
+        &#8593;
+      </button>
+      <button
+        aria-label="Turn Right"
+        className="mobile-touch-zone mobile-touch-right"
+        onPointerDown={(event) => {
+          event.preventDefault()
+          dispatchAction('rotate-right')
+        }}
+        type="button"
+      >
+        &#8594;
+      </button>
     </div>
   )
 }
@@ -18664,6 +19245,12 @@ export default function App() {
   const handleLevelTransition = useCallback(async (request: SeamlessLevelTransitionRequest) => {
     setReplayActive(false)
     setMazeLoadError(null)
+    if (request.sourceState.player.hasTrophy) {
+      trackAnalyticsEvent('maze_completed', {
+        source_level_id: request.sourceLevelId,
+        target_level_id: request.targetLevelId
+      })
+    }
 
     try {
       await loadLevelNeighborhood(request.targetLevelId, { updateRendered: false })
@@ -19212,6 +19799,27 @@ export default function App() {
     }))
   }
 
+  const onMonsterEyeOffsetChange = (
+    monsterType: MonsterType,
+    eye: 'left' | 'right',
+    axis: keyof MonsterEyeOffset,
+    value: number
+  ) => {
+    setVisualSettings((current) => ({
+      ...current,
+      monsterEyes: {
+        ...current.monsterEyes,
+        [monsterType]: {
+          ...current.monsterEyes[monsterType],
+          [eye]: {
+            ...current.monsterEyes[monsterType][eye],
+            [axis]: MathUtils.clamp(value, -2, 2)
+          }
+        }
+      }
+    }))
+  }
+
   const onFogAmbientHexChange = (value: string) => {
     setVisualSettings((current) => ({
       ...current,
@@ -19555,6 +20163,43 @@ export default function App() {
       : IDENTITY_LEVEL_WORLD_TRANSFORM,
     [mazeLayout?.maze.id]
   )
+  const analyticsLevelId = mazeLayout?.maze.id ?? null
+  const analyticsLevelName = mazeLayout?.maze.levelName ?? analyticsLevelId
+
+  useEffect(() => {
+    trackAnalyticsEvent('page_view', {
+      path: window.location.pathname,
+      query: window.location.search
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!analyticsLevelId) {
+      return
+    }
+
+    trackAnalyticsEvent('level_visit', {
+      level_id: analyticsLevelId,
+      level_name: analyticsLevelName
+    })
+  }, [analyticsLevelId, analyticsLevelName])
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      if (document.body.dataset.playerMovedRecently !== 'true') {
+        return
+      }
+
+      document.body.dataset.playerMovedRecently = 'false'
+      trackAnalyticsEvent('time_spent_in_game', {
+        seconds: 60,
+        level_id: analyticsLevelId,
+        level_name: analyticsLevelName
+      })
+    }, 60000)
+
+    return () => window.clearInterval(interval)
+  }, [analyticsLevelId, analyticsLevelName])
 
   if (!mazeLayout || !activeTurnState) {
     return (
@@ -19597,6 +20242,11 @@ export default function App() {
         }}
         open={levelMenuOpen}
       />
+      <MobileTouchControls
+        onOpenMenu={() => {
+          setLevelMenuOpen(true)
+        }}
+      />
       <VisualControls
         controlsOpen={controlsOpen}
         onAnamorphicSettingChange={onAnamorphicSettingChange}
@@ -19607,6 +20257,7 @@ export default function App() {
         onEffectSettingChange={onEffectSettingChange}
         onFogAmbientHexChange={onFogAmbientHexChange}
         onLensFlareSettingChange={onLensFlareSettingChange}
+        onMonsterEyeOffsetChange={onMonsterEyeOffsetChange}
         onProbeDebugModeChange={onProbeDebugModeChange}
         onResetAnamorphicSettings={onResetAnamorphicSettings}
         onResetAmbientOcclusionMode={onResetAmbientOcclusionMode}
@@ -19649,7 +20300,7 @@ export default function App() {
                 PLAYER_SPAWN_POSITION.z
               ]
             }}
-            dpr={[1, 2]}
+            dpr={1}
             frameloop="always"
             gl={{ antialias: true }}
             onCreated={({ gl }) => {

@@ -77,6 +77,28 @@ function luminance(color) {
   return (0.2126 * color[0]) + (0.7152 * color[1]) + (0.0722 * color[2])
 }
 
+const lightmapBakeCache = new Map()
+
+function getLightmapBakeCacheKey(maze) {
+  const { id, ...cacheableMaze } = maze
+  return JSON.stringify(cacheableMaze)
+}
+
+function bakeCachedMazeLightmap(maze) {
+  const cacheKey = getLightmapBakeCacheKey(maze)
+
+  if (!lightmapBakeCache.has(cacheKey)) {
+    lightmapBakeCache.set(
+      cacheKey,
+      bakeMazeLightmap(maze, undefined, {
+        bakeModes: [{ key: 'default', mode: 2 }]
+      })
+    )
+  }
+
+  return lightmapBakeCache.get(cacheKey)
+}
+
 test('generates valid mazes under 100ms', () => {
   const maze = generateMaze(123456, { bakeLightmap: false })
   const validation = validateMaze(maze, { requireLightmap: false })
@@ -329,7 +351,7 @@ test('maps runtime floor lightmap UVs to the same world-space orientation used b
   }
 })
 
-test('keeps baked lighting continuous across an open coplanar wall run', () => {
+test('keeps baked lighting continuous across an open coplanar wall run', async () => {
   const seamMaze = {
     height: 1,
     id: 'seam-test',
@@ -341,7 +363,7 @@ test('keeps baked lighting continuous across an open coplanar wall run', () => {
     opening: { cell: { x: 0, y: 0 }, side: 'south' },
     width: 3
   }
-  const lightmap = bakeMazeLightmap(seamMaze)
+  const lightmap = await bakeCachedMazeLightmap(seamMaze)
   const bytes = Buffer.from(lightmap.dataBase64, 'base64')
   const centerRect = lightmap.wallRects['1,0:north:exterior'].pz
   const rightRect = lightmap.wallRects['2,0:north:exterior'].pz
@@ -369,7 +391,7 @@ test('keeps baked lighting continuous across an open coplanar wall run', () => {
   )
 })
 
-test('bakes local sconce occlusion into the attached wall face', () => {
+test('bakes local sconce occlusion into the attached wall face', async () => {
   const shadowMaze = {
     height: 1,
     id: 'shadow-test',
@@ -378,7 +400,7 @@ test('bakes local sconce occlusion into the attached wall face', () => {
     opening: { cell: { x: 0, y: 0 }, side: 'south' },
     width: 1
   }
-  const lightmap = bakeMazeLightmap(shadowMaze)
+  const lightmap = await bakeCachedMazeLightmap(shadowMaze)
   const bytes = Buffer.from(lightmap.dataBase64, 'base64')
   const rect = lightmap.wallRects['0,0:north:exterior'].pz
   const sample = (column, row) => {
@@ -457,7 +479,7 @@ test('bakes same-cell torch energy into volumetric lightmap coefficients', () =>
   )
 })
 
-test('keeps mid-wall torch lighting visible below the sconce top', () => {
+test('keeps mid-wall torch lighting visible below the sconce top', async () => {
   const wallMaze = {
     height: 1,
     id: 'wall-gradient-test',
@@ -466,7 +488,7 @@ test('keeps mid-wall torch lighting visible below the sconce top', () => {
     opening: { cell: { x: 0, y: 0 }, side: 'south' },
     width: 1
   }
-  const lightmap = bakeMazeLightmap(wallMaze)
+  const lightmap = await bakeCachedMazeLightmap(wallMaze)
   const bytes = Buffer.from(lightmap.dataBase64, 'base64')
   const rect = lightmap.wallRects['0,0:north:exterior'].pz
   const sampleRowAverage = (row) => {
@@ -486,7 +508,7 @@ test('keeps mid-wall torch lighting visible below the sconce top', () => {
   )
 })
 
-test('stores baked wall skylight in the HDR lightmap', () => {
+test('stores baked wall skylight in the HDR lightmap', async () => {
   const wallMaze = {
     height: 1,
     id: 'wall-ambient-test',
@@ -495,7 +517,7 @@ test('stores baked wall skylight in the HDR lightmap', () => {
     opening: { cell: { x: 0, y: 0 }, side: 'south' },
     width: 1
   }
-  const lightmap = bakeMazeLightmap(wallMaze)
+  const lightmap = await bakeCachedMazeLightmap(wallMaze)
   const bytes = Buffer.from(lightmap.dataBase64, 'base64')
   const rect = lightmap.wallRects['0,0:north:exterior'].pz
   let sum = 0
@@ -512,7 +534,7 @@ test('stores baked wall skylight in the HDR lightmap', () => {
   )
 })
 
-test('bakes lightmap rectangles for maze wall short end faces', () => {
+test('bakes lightmap rectangles for maze wall short end faces', async () => {
   const wallMaze = {
     height: 1,
     id: 'wall-short-side-lightmap-test',
@@ -521,7 +543,7 @@ test('bakes lightmap rectangles for maze wall short end faces', () => {
     opening: { cell: { x: 0, y: 0 }, side: 'south' },
     width: 1
   }
-  const lightmap = bakeMazeLightmap(wallMaze)
+  const lightmap = await bakeCachedMazeLightmap(wallMaze)
   const rects = lightmap.wallRects['0,0:north:exterior']
 
   assert.equal(rects.nx.width, rects.nx.height)
@@ -530,7 +552,7 @@ test('bakes lightmap rectangles for maze wall short end faces', () => {
   assert.ok(rects.px.width > 1)
 })
 
-test('omits baked lightmap rectangles for exterior-facing long wall faces', () => {
+test('omits baked lightmap rectangles for exterior-facing long wall faces', async () => {
   const wallMaze = {
     height: 1,
     id: 'wall-outer-face-lightmap-test',
@@ -539,7 +561,7 @@ test('omits baked lightmap rectangles for exterior-facing long wall faces', () =
     opening: { cell: { x: 0, y: 0 }, side: 'south' },
     width: 1
   }
-  const lightmap = bakeMazeLightmap(wallMaze)
+  const lightmap = await bakeCachedMazeLightmap(wallMaze)
 
   assert.equal(lightmap.wallRects['0,0:north:exterior'].nz, undefined)
   assert.ok(lightmap.wallRects['0,0:north:exterior'].pz)
@@ -586,7 +608,7 @@ test('three box geometry mirrors local -Z face UVs relative to +Z', () => {
   assert.ok(nzLeftUv > nzRightUv, `expected -Z face UVs to be mirrored in local X, got ${nzLeftUv}..${nzRightUv}`)
 })
 
-test('assigns z-axis wall-run lightmap slices to the correct wall', () => {
+test('assigns z-axis wall-run lightmap slices to the correct wall', async () => {
   const maze = {
     height: 2,
     id: 'z-order-test',
@@ -595,7 +617,7 @@ test('assigns z-axis wall-run lightmap slices to the correct wall', () => {
     opening: { cell: { x: 0, y: 0 }, side: 'north' },
     width: 1
   }
-  const lightmap = bakeMazeLightmap(maze)
+  const lightmap = await bakeCachedMazeLightmap(maze)
   const bytes = Buffer.from(lightmap.dataBase64, 'base64')
   const getFaceAverage = (wallId, faceKey) => {
     const rect = lightmap.wallRects[wallId][faceKey]

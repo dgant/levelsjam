@@ -56,7 +56,7 @@ test('level runtime maze resolver maps numbered maze levels when possible', () =
   )
 })
 
-test('authored runtime levels are real level ids with authored payloads', () => {
+test('authored runtime levels are real level ids with authored payloads', async () => {
   assert.equal(getDefaultRuntimeLevelId(), 'entrance')
   assert.equal(
     resolveRuntimeMazeIdForLevel(
@@ -77,14 +77,14 @@ test('authored runtime levels are real level ids with authored payloads', () => 
     'maze-001'
   )
 
-  const entrance = createAuthoredRuntimeMaze('entrance')
+  const entrance = await createAuthoredRuntimeMaze('entrance')
 
   assert.equal(entrance.id, 'entrance')
   assert.equal(entrance.width, 3)
   assert.equal(entrance.height, 3)
   assert.equal(entrance.playerStart.direction, 'north')
   assert.equal(entrance.exitRequiresTrophy, false)
-  assert.ok(entrance.lightmap)
+  assert.equal(entrance.lightmap, undefined)
 })
 
 test('runtime level graph keeps authored neighbors and spatial transforms explicit', () => {

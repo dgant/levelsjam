@@ -120,7 +120,7 @@ function isAcceptableCandidate(maze, validation) {
   )
 }
 
-function generateReplacementMaze({
+async function generateReplacementMaze({
   fileName,
   mazeFactory,
   maxGenerationAttempts,
@@ -139,7 +139,7 @@ function generateReplacementMaze({
       maze.visibility = computeMazeCellVisibility(maze)
     }
     if (!maze.lightmap) {
-      maze.lightmap = bakeMazeLightmap(maze)
+      maze.lightmap = await bakeMazeLightmap(maze)
     }
     const validation = validateMaze(maze)
 
@@ -276,6 +276,45 @@ export function buildMazeLightmapArtifactBuffers(maze) {
 
     return PNG.sync.write(png)
   }
+  const buildRuntimeRgbEBytes = () => {
+    const output = Buffer.alloc(lightmap.atlasWidth * lightmap.atlasHeight * 4)
+
+    for (let row = 0; row < lightmap.atlasHeight; row += 1) {
+      for (let column = 0; column < lightmap.atlasWidth; column += 1) {
+        const pixelIndex = ((row * lightmap.atlasWidth) + column) * 4
+
+        if (lightmap.encoding === 'rgb16f') {
+          const pixelOffset = ((row * lightmap.atlasWidth) + column) * 3
+          const [r, g, b, a] = encodeRgbE8([
+            decodedPixels[pixelOffset],
+            decodedPixels[pixelOffset + 1],
+            decodedPixels[pixelOffset + 2]
+          ])
+
+          output[pixelIndex] = r
+          output[pixelIndex + 1] = g
+          output[pixelIndex + 2] = b
+          output[pixelIndex + 3] = a
+          continue
+        }
+
+        if (pixelStride === 4) {
+          output[pixelIndex] = readChannel(row, column, 0)
+          output[pixelIndex + 1] = readChannel(row, column, 1)
+          output[pixelIndex + 2] = readChannel(row, column, 2)
+          output[pixelIndex + 3] = readChannel(row, column, 3)
+          continue
+        }
+
+        output[pixelIndex] = readChannel(row, column, 0)
+        output[pixelIndex + 1] = readChannel(row, column, 1)
+        output[pixelIndex + 2] = readChannel(row, column, 2)
+        output[pixelIndex + 3] = 255
+      }
+    }
+
+    return output
+  }
 
   return {
     atlasPng: buildPngBuffer((row, column) => {
@@ -330,7 +369,8 @@ export function buildMazeLightmapArtifactBuffers(maze) {
     runtimeAtlasBytes:
       lightmap.encoding === 'rgb16f'
         ? Buffer.from(bytes)
-        : null
+        : null,
+    runtimeAtlasRgbEBytes: buildRuntimeRgbEBytes()
   }
 }
 
@@ -366,6 +406,10 @@ export function dumpMazeLightmapArtifacts({
   fs.writeFileSync(
     path.join(mazeDirectory, 'lightmap-rgbe.png'),
     buffers.runtimeAtlasPng
+  )
+  fs.writeFileSync(
+    path.join(mazeDirectory, 'lightmap-rgbe.rgbe'),
+    buffers.runtimeAtlasRgbEBytes
   )
   if (buffers.runtimeAtlasBytes) {
     fs.writeFileSync(
@@ -422,7 +466,7 @@ export async function ensureMazeFiles({
     const shouldRewrite = bakeLightmaps && needsMazeRewrite(maze)
     if (shouldRewrite) {
       maze.visibility = computeMazeCellVisibility(maze)
-      maze.lightmap = bakeMazeLightmap(maze)
+      maze.lightmap = await bakeMazeLightmap(maze)
       fs.writeFileSync(filePath, serializeMazeModule(maze))
       reportProgress({
         action: 'rewrite-lightmap',
@@ -436,7 +480,7 @@ export async function ensureMazeFiles({
     })
 
     if (!validation.valid) {
-      const replacement = generateReplacementMaze({
+      const replacement = await generateReplacementMaze({
         fileName,
         mazeFactory,
         maxGenerationAttempts,
@@ -525,7 +569,7 @@ export async function ensureMazeFiles({
       maze.visibility = computeMazeCellVisibility(maze)
     }
     if (bakeLightmaps && !maze.lightmap) {
-      maze.lightmap = bakeMazeLightmap(maze)
+      maze.lightmap = await bakeMazeLightmap(maze)
     }
     fs.writeFileSync(
       path.join(directory, fileName),

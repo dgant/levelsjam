@@ -418,3 +418,52 @@ body {
   border: 1px solid rgb(255 255 255 / 14%);
   border-radius: 10px;
 }
+
+.mobile-touch-controls {
+  display: none;
+}
+
+@media (pointer: coarse), (max-width: 760px) {
+  .mobile-touch-controls {
+    position: fixed;
+    inset: 0;
+    z-index: 2;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    pointer-events: none;
+  }
+
+  .mobile-touch-zone {
+    align-self: stretch;
+    border: 0;
+    background: transparent;
+    color: rgb(245 237 218 / 82%);
+    font: 700 clamp(2.4rem, 12vw, 5rem) / 1 ui-monospace, monospace;
+    text-shadow: 0 2px 18px rgb(0 0 0 / 80%);
+    pointer-events: auto;
+    touch-action: manipulation;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding: 0 0 max(18px, env(safe-area-inset-bottom));
+  }
+
+  .mobile-touch-zone:active {
+    background: rgb(255 255 255 / 5%);
+  }
+
+  .mobile-menu-button {
+    position: fixed;
+    top: max(12px, env(safe-area-inset-top));
+    left: max(12px, env(safe-area-inset-left));
+    z-index: 3;
+    padding: 10px 12px;
+    border: 1px solid rgb(229 198 139 / 35%);
+    border-radius: 12px;
+    background: rgb(8 11 16 / 72%);
+    color: #f5edda;
+    font: 700 13px/1 ui-monospace, monospace;
+    pointer-events: auto;
+    touch-action: manipulation;
+  }
+}

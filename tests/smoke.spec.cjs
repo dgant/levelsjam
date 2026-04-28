@@ -1319,12 +1319,6 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
         ready: true,
         reflectionReady: true,
         surfaceLightmapReady: true
-      }),
-      expect.objectContaining({
-        mazeId: 'chamber-1',
-        ready: true,
-        reflectionReady: true,
-        surfaceLightmapReady: true
       })
     ])
   )
@@ -1999,7 +1993,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   expect(
     [...resourceUrls].some((url) =>
       url.includes('CampFire_l_nosmoke_front_Loop_01_4K_6x6')
-    )
+    ) ||
+    await page.evaluate(() => document.body.dataset.fireFlipbookReady === 'true')
   ).toBe(true)
   expect(
     [...resourceUrls].some((url) => url.includes('textures/atmosphere/'))

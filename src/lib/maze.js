@@ -15,7 +15,7 @@ export const MAZE_CELL_SIZE = 2
 export const MAZE_WALL_THICKNESS = 0.25
 export const MAZE_WALL_HEIGHT = 2
 export const MAZE_TARGET_COUNT = 5
-export const MAZE_LIGHTMAP_VERSION = 25
+export const MAZE_LIGHTMAP_VERSION = 29
 export const MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS = 0.125
 
 const MAZE_LIGHTMAP_GROUND_TILE_SIZE = 256
@@ -32,6 +32,8 @@ const MAZE_LIGHTMAP_GROUND_AMBIENT_SAMPLE_GRID = 40
 const MAZE_LIGHTMAP_WALL_AMBIENT_SAMPLE_GRID = 16
 const MAZE_LIGHTMAP_SKY_RAY_DISTANCE = 24
 const MAZE_REFLECTION_PROBE_Y = 1.25
+const MAZE_LIGHTMAP_GROUND_BOUNCE_ALBEDO = [0.34, 0.32, 0.28]
+const MAZE_LIGHTMAP_WALL_BOUNCE_ALBEDO = [0.5, 0.48, 0.43]
 const MAZE_TORCH_LIGHT_COLOR = [10, 2.0863687013464577, 0]
 const MAZE_SKY_LIGHT_COLOR = [
   1.4241132301976904 * getHdrLightingIntensity(AUTHORED_LIGHTING_SOURCE_SCALE),
@@ -1153,7 +1155,9 @@ export function generateMaze(seed = Date.now(), options = {}) {
   maze.generationMs = performance.now() - startTime
   recordMazeSolution(maze)
   if (bakeLightmap) {
-    maze.lightmap = bakeMazeLightmap(maze)
+    throw new Error(
+      'generateMaze no longer performs synchronous lightmap baking; call bakeMazeLightmap(maze) from async tooling after generation'
+    )
   }
   maze.totalGenerationMs = performance.now() - startTime
 
@@ -2349,7 +2353,214 @@ export function computeMazeVolumetricLightmapCoefficients(
   return coefficients
 }
 
-export function bakeMazeLightmap(
+export async function bakeMazeLightmap(
+  maze,
+  sconceRadius = MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS,
+  options = {}
+) {
+  const bakeStart = performance.now()
+  const walls = getMazeWallSegments(maze)
+  const surfaceGroups = getWallSurfaceGroups(walls)
+  const torchPlacements = getMazeTorchPlacements(maze, sconceRadius)
+  const groundBounds = getMazeFloorLightmapBounds(maze)
+  const atlasWidth = getPreferredLightmapAtlasWidth(walls.length)
+  const packer = {
+    atlasWidth,
+    cursorX: 0,
+    cursorY: 0,
+    rowHeight: 0
+  }
+  const groundRect = allocateLightmapRect(
+    packer,
+    MAZE_LIGHTMAP_GROUND_TILE_SIZE,
+    MAZE_LIGHTMAP_GROUND_TILE_SIZE
+  )
+  const neutralRect = allocateLightmapRect(
+    packer,
+    MAZE_LIGHTMAP_NEUTRAL_TILE_SIZE,
+    MAZE_LIGHTMAP_NEUTRAL_TILE_SIZE
+  )
+  const wallRects = {}
+  const surfaceGroupRects = {}
+  const surfaces = [{
+    alignUToRectEdges: false,
+    rect: groundRect,
+    surfaceA: [
+      groundBounds.minX,
+      groundBounds.minZ,
+      groundBounds.width,
+      groundBounds.depth
+    ],
+    surfaceB: [0, 0, 0, 0],
+    supersampleGrid: MAZE_LIGHTMAP_GROUND_SUPERSAMPLE_GRID,
+    type: 0
+  }]
+
+  for (const surfaceGroup of surfaceGroups) {
+    const groupWidth = surfaceGroup.walls.length === 1
+      ? MAZE_LIGHTMAP_WALL_TILE_WIDTH
+      : (surfaceGroup.walls.length * (MAZE_LIGHTMAP_WALL_TILE_WIDTH - 1)) + 1
+    const groupRects = {}
+
+    for (const faceKey of ['nz', 'pz']) {
+      if (
+        surfaceGroup.walls.some((wall) =>
+          shouldLightmapWallLongFace(wall, faceKey)
+        )
+      ) {
+        groupRects[faceKey] = allocateLightmapRect(
+          packer,
+          groupWidth,
+          MAZE_LIGHTMAP_WALL_TILE_HEIGHT
+        )
+      }
+    }
+
+    surfaceGroupRects[surfaceGroup.id] = groupRects
+
+    for (let index = 0; index < surfaceGroup.walls.length; index += 1) {
+      const wall = surfaceGroup.walls[index]
+      const offsetX = index * (MAZE_LIGHTMAP_WALL_TILE_WIDTH - 1)
+
+      wallRects[wall.id] = {}
+
+      if (groupRects.nz && shouldLightmapWallLongFace(wall, 'nz')) {
+        wallRects[wall.id].nz = {
+          height: MAZE_LIGHTMAP_WALL_TILE_HEIGHT,
+          width: MAZE_LIGHTMAP_WALL_TILE_WIDTH,
+          x: groupRects.nz.x + offsetX,
+          y: groupRects.nz.y
+        }
+      }
+
+      if (groupRects.pz && shouldLightmapWallLongFace(wall, 'pz')) {
+        wallRects[wall.id].pz = {
+          height: MAZE_LIGHTMAP_WALL_TILE_HEIGHT,
+          width: MAZE_LIGHTMAP_WALL_TILE_WIDTH,
+          x: groupRects.pz.x + offsetX,
+          y: groupRects.pz.y
+        }
+      }
+    }
+  }
+
+  for (const surfaceGroup of surfaceGroups) {
+    for (const faceKey of ['nz', 'pz']) {
+      const rect = surfaceGroupRects[surfaceGroup.id][faceKey]
+
+      if (!rect) {
+        continue
+      }
+
+      surfaces.push({
+        alignUToRectEdges: true,
+        rect,
+        surfaceA: [
+          surfaceGroup.center.x,
+          surfaceGroup.center.z,
+          surfaceGroup.length,
+          surfaceGroup.yaw
+        ],
+        surfaceB: [faceKey === 'pz' ? 1 : -1, 0, 0, 0],
+        supersampleGrid: MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID,
+        type: 1
+      })
+    }
+  }
+
+  for (const wall of walls) {
+    const existingRects = wallRects[wall.id] ?? {}
+
+    wallRects[wall.id] = {
+      ...existingRects,
+      nx: allocateLightmapRect(
+        packer,
+        MAZE_LIGHTMAP_WALL_TILE_HEIGHT,
+        MAZE_LIGHTMAP_WALL_TILE_HEIGHT
+      ),
+      px: allocateLightmapRect(
+        packer,
+        MAZE_LIGHTMAP_WALL_TILE_HEIGHT,
+        MAZE_LIGHTMAP_WALL_TILE_HEIGHT
+      )
+    }
+
+    for (const faceKey of ['nx', 'px']) {
+      surfaces.push({
+        alignUToRectEdges: false,
+        rect: wallRects[wall.id][faceKey],
+        surfaceA: [
+          wall.center.x,
+          wall.center.z,
+          wall.yaw,
+          0
+        ],
+        surfaceB: [faceKey === 'px' ? 1 : -1, 0, 0, 0],
+        supersampleGrid: MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID,
+        type: 2
+      })
+    }
+  }
+
+  const atlasHeight = getLightmapAtlasHeight(packer)
+  const nodeLightmapperModulePath = './gpuLightmapperNode.js'
+  const { bakeGpuLightmapJob } = await import(
+    /* @vite-ignore */ nodeLightmapperModulePath
+  )
+  const result = await bakeGpuLightmapJob({
+    atlasHeight,
+    atlasWidth,
+    bakeModes: options.bakeModes,
+    constants: {
+      cellSize: MAZE_CELL_SIZE,
+      groundBounds: [
+        groundBounds.minX,
+        groundBounds.minZ,
+        groundBounds.maxX,
+        groundBounds.maxZ
+      ],
+      groundBounceAlbedo: MAZE_LIGHTMAP_GROUND_BOUNCE_ALBEDO,
+      sampleEpsilon: MAZE_LIGHTMAP_SAMPLE_EPSILON,
+      sconceRadius,
+      skyLightColor: MAZE_SKY_LIGHT_COLOR,
+      skyRayDistance: MAZE_LIGHTMAP_SKY_RAY_DISTANCE,
+      torchLightColor: MAZE_TORCH_LIGHT_COLOR,
+      torchSourceRadius: sconceRadius,
+      torchStrength: MAZE_LIGHTMAP_TORCH_STRENGTH,
+      wallBounceAlbedo: MAZE_LIGHTMAP_WALL_BOUNCE_ALBEDO,
+      wallHeight: MAZE_WALL_HEIGHT,
+      wallThickness: MAZE_WALL_THICKNESS
+    },
+    surfaces,
+    torches: torchPlacements,
+    walls: walls.map((wall) => ({
+      maxX: wall.bounds.maxX,
+      maxY: wall.bounds.maxY,
+      maxZ: wall.bounds.maxZ,
+      minX: wall.bounds.minX,
+      minY: wall.bounds.minY,
+      minZ: wall.bounds.minZ
+    }))
+  })
+
+  return {
+    atlasHeight,
+    atlasWidth,
+    bakeMs: performance.now() - bakeStart,
+    bakeRenderer: result.renderer,
+    bakeVendor: result.vendor,
+    dataBase64: result.dataBase64,
+    ...(options.bakeModes ? { debugVariantDataBase64: result.variants } : {}),
+    encoding: 'rgb16f',
+    groundBounds,
+    groundRect,
+    neutralRect,
+    version: MAZE_LIGHTMAP_VERSION,
+    wallRects
+  }
+}
+
+function bakeMazeLightmapCpu(
   maze,
   sconceRadius = MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS
 ) {

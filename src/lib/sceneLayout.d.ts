@@ -95,6 +95,10 @@ export type MazeLayout = {
     height: number
     id: string
     isAuthoredLevel?: boolean
+    opening: {
+      cell: { x: number; y: number }
+      side: 'north' | 'east' | 'south' | 'west'
+    }
     visibility?: {
       cells: Record<string, string[]>
       version: number

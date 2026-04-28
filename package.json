@@ -12,6 +12,7 @@
     "build:assets:props": "node scripts/build-runtime-props.mjs",
     "build:assets:textures": "node scripts/build-runtime-textures.cjs",
     "build:assets:decals": "node scripts/generate-fresco-decals.cjs",
+    "build:assets:lightmap-debug": "node scripts/generate-lightmap-debug-variants.cjs",
     "build:assets:minotaur": "node scripts/simplify-minotaur.mjs",
     "ensure:mazes": "node scripts/ensure-mazes.cjs",
     "export:maze-probes": "node scripts/export-maze-reflection-artifacts.cjs",

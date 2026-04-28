@@ -206,7 +206,7 @@
 - The spider model is scaled to `1.5x` its previous runtime size while keeping its floor contact point on the floor and its wall-following legs oriented against the followed wall.
 - The minotaur runtime model is an offline-simplified derivative of the authored source model and stays far below the authored source triangle count while preserving the silhouette expected in gameplay views.
 - The minotaur runtime model simplification preserves continuous visible surfaces and must not introduce see-through topology holes.
-- The werewolf model scales proportionally to fit the required `1.6m` cube and sits on the floor without clipping below it.
+- The werewolf model loads from the `leowolf` asset, scales proportionally to `1.8m` wide across its horizontal footprint, and sits with the bottoms of its feet on the floor.
 - Screen-space ambient occlusion controls visibly affect the scene when enabled.
 - Lens flares, SSR, and volumetric fog remain visually stable as their intensity controls increase and must not black out the scene.
 - Lens flares do not appear for fully occluded lights.
@@ -230,6 +230,11 @@
 - Every gate state change published by the rules engine is animated by sliding between the underground open position and the above-ground closed position, including state changes that occur before and after player moves.
 - Gate animations run in parallel with player and monster movement animations rather than teleporting or disappearing between turns.
 - The runtime uses offline-resized `512x512` gate textures instead of the oversized source textures.
+- Each maze entrance edge has a door that follows the same blocking and opening rules as gates.
+- Each door is rendered as two metal cubes using the `textures/metal_rust-1K` PBR texture pack at the same world texel density as walls.
+- Each closed door fills its `2m x 2m` entrance edge using two `1m` long, `2m` tall leaves, each with half the wall thickness.
+- Each open door slides its two leaves `0.75m` apart along the doorway edge, leaving a `1.5m` opening.
+- Door open and close animations last `250ms` and participate in the same queued-animation speed scaling as player, monster, and gate animations.
 - Each cell may contain any number of items and at most one character.
 - Each maze contains one sword on a random unoccupied cell.
 - Each maze contains one trophy on the unoccupied cell with the greatest path distance from the entrance.
@@ -262,6 +267,8 @@
 - Player inputs are buffered and consumed in order when the rules engine is ready for the next player action.
 - Held movement keys enqueue at most one action until that key is released and pressed again.
 - The player input queue stores at most ten pending commands.
+- Runtime animation speed scales with queued command backlog: no backlog plays at `1x`, one queued command at `1.5x`, two queued commands at `2x`, three queued commands at `2.5x`, and so on.
+- The dynamic backlog speed multiplier applies consistently to player movement, player turns, monster turns, gate animations, door animations, and other turn-linked world animations.
 - Player move commands and player turn commands execute as separate queued commands; a queued turn does not execute during the animation of a preceding move command.
 - Camera rotation during and after movement is derived from one continuous displayed yaw target and never jumps back to the pre-move direction or applies the same queued turn twice.
 - Pressing `W` or `ArrowUp` queues a one-cell forward move in the current camera direction.
@@ -291,11 +298,15 @@
 - Monster models rotate to face their upcoming move before moving when a rotation is required.
 - After moving, monster models rotate to face the direction they would move if their next turn were resolved immediately.
 - Each minotaur move triggers a mild screen shake whose amplitude falls off with maze distance from the player and whose duration is `1s`.
-- The werewolf model loads from `public/models/awil_werewolf.zip`, scales proportionally to fit a `1.6m` cube, and places its bottom center at the tile bottom-center.
+- Each awake monster renders two glowing red eye spheres that rotate with the monster and disappear while the monster is asleep.
+- Monster eye spheres are `3cm` radius HDR red emitters with color `(4, 0, 0)` where `(1, 1, 1)` is white, so they can trigger bloom.
+- Monster eyes are lens-flare sources when visible and unoccluded.
+- The debug controls include monster-eye position controls for each monster type, allowing each eye offset axis to be adjusted across a `0m` to `2m` range.
+- The werewolf model loads from `public/models/leowolf.zip`, scales proportionally to `1.8m` wide across its horizontal footprint, and places the bottoms of its feet on the floor at the tile bottom-center.
 - The spider model loads from `public/models/pbr_jumping_spider_monster.zip`, scales proportionally to fit a `1.4m` cube, and is placed as a wall-walking spider with its base oriented along the configured wall and floor.
 - The minotaur runtime model loads from an offline-simplified asset derived from `public/models/minotaur.zip`, reduces the source mesh to roughly ten thousand triangles, scales proportionally to fit a `2.7m` cube, and places its bottom `0.25m` below the tile bottom-center.
 - The minotaur model's base tint is `#2b2130`.
-- The werewolf runtime model loads from an offline-joined asset derived from `public/models/awil_werewolf.zip`, preserves the authored PBR texture set, and reduces the source asset's static over-split skinned meshes to a single regular mesh.
+- The werewolf runtime model loads from the extracted `public/models/leowolf/scene.gltf` asset and preserves the authored texture set.
 - Monster GLTF materials preserve their authored PBR texture and material inputs where those inputs load successfully.
 - Monster GLTF materials participate in the local volumetric-lightmap diffuse path and the local reflection-probe specular path.
 - Maze generation initializes each monster facing a legal neighboring cell when one exists.
@@ -311,6 +322,9 @@
 - Pressing `Escape` closes the level menu modal when it is open.
 - The level menu lists the levels parsed from `LEVELS.md` in their authored order.
 - Clicking a level name closes the level menu, loads the corresponding authored level or numbered runtime maze, resets its state, and teleports the player to that level's entrance.
+- On touch/mobile layouts, the bottom of the screen displays left-turn, forward, and right-turn controls.
+- Mobile turn controls have large click/touch hit regions that divide the full screen into playable control areas while their visible labels remain along the bottom.
+- Mobile layouts include a top-left menu button that opens the level menu.
 - The first-person held sword is oriented with the blade pointing forward and is pulled back far enough to remain inside the player's current cell.
 - The first-person held trophy appears lower and farther left on screen than the held sword.
 - The character collision volume is a capsule that is 1.75 meters tall and 0.25 meters in radius.
@@ -399,7 +413,9 @@
 
 ## Performance And Testing
 - With post-processing disabled, the interactive scene meets a 144 FPS performance target on the project's benchmark hardware unless a checked-in profiling report proves that the target is not currently achievable.
+- The WebGL canvas renders at a capped device-pixel ratio of `1` so a `2560x1440` performance test exercises a `2560x1440` backing buffer rather than a hidden 5K-class buffer.
 - Enabling one supported post-processing effect must not silently regress the scene below the enforced performance target without either a compensating fix or a checked-in profiling report explaining the bottleneck.
+- The default N8AO configuration uses the lowest sample counts that preserve the intended contact-shadow look while staying inside the 144 FPS budget.
 - Lens flares must not collapse performance by an order of magnitude when a visible torch enters frame.
 - Automated performance coverage remains enabled for the supported render path and fails when the enforced performance target is missed.
 - Performance investigations record where frame time is spent instead of inferring the cause from FPS alone.
@@ -531,10 +547,13 @@
 - Lens-flare bokeh and ghosts remain translucent and additive rather than appearing as opaque black or opaque solid sprites.
 - Lens-flare controls expose the actual high-impact flare parameters with ranges that allow meaningful adjustment near zero as well as visibly strong flares at the top of the range.
 - Increasing or decreasing volumetric fog or smoke parameters produces a visible corresponding change in the full-scene fog volume.
+- Volumetric fog is implemented with one runtime fog effect over the rendered world instead of one expensive full-screen fog pass per rendered level.
 - Enabling volumetric fog with an intensity of `0` behaves as a visual no-op.
 - Increasing volumetric fog intensity toward `1.0` with a dark fog color and fog distance shorter than the visible scene depth can strongly attenuate distant scene color rather than remaining barely perceptible.
 - Volumetric fog samples its lighting only from the nearest available local volumetric-lightmap probes and otherwise falls back to black.
 - Volumetric fog samples its procedural noise field across space and time, with a configurable noise period from `0s` to `10s` and a default of `0.75s`.
+- Volumetric fog uses a small reusable noise texture for per-step density modulation instead of evaluating expensive procedural value noise in the fragment shader.
+- Volumetric fog density raymarching is independent of local-probe-grid containment; probe-grid sampling controls fog lighting, not whether fog exists along a ray.
 - The `Fog Noise Period` control changes visible fog motion over time when fog noise strength is nonzero.
 - Volumetric fog follows the structure of the official three.js volumetric-lighting example while remaining adapted to the current WebGL render stack and local probe-lighting inputs.
 - Disabling local probe-driven diffuse lighting on scene materials does not disable volumetric fog's probe-fed lighting path.
@@ -558,11 +577,12 @@
 ## Credits
 - The credits modal header is `Credits`.
 - The credits modal includes `"Minotaur" (https://skfb.ly/6TK77) by yanbelmont is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
-- The credits modal includes `"AWIL Werewolf" (https://skfb.ly/orBtB) by Spinnee is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
+- The credits modal includes `"leowolf" (https://skfb.ly/pqPJx) by MUSHIDO_SKARSGARD is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
 - The credits modal includes `"PBR Jumping Spider Monster" (https://skfb.ly/6QVNq) by Toast is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
 - The credits modal includes `"Head of a Bull" (https://skfb.ly/6TOXX) by Kirk Hiatt is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
 - The credits modal includes `"Metal Gate" (https://skfb.ly/oK7QR) by i bull your wife is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
 - The credits modal includes `"Bronze Sword Mycean" (https://skfb.ly/6RZxG) by Ryoce is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
+- The credits modal includes the ShareTextures `metal-rust` texture pack credit for `https://www.sharetextures.com/textures/metal/metal-rust`.
 
 ## Debug Controls
 - The debug controls panel can be opened and closed with backquote.
@@ -586,7 +606,8 @@
 - Lens flares start disabled by default.
 - The SSR tab exposes enabled state and the core canonical tuning parameters needed to tune its documented implementation, including opacity, distance, thickness, resolution scale, and pass output mode.
 - The volumetric-fog tab exposes enabled state and the core fog parameters needed to tune its probe-lit volume implementation, including amount and noise frequency.
-- The volumetric-fog tab also exposes the high-impact density-shaping parameters needed to tune the current implementation, including noise strength, height falloff, lighting strength, and ray-march step count.
+- The volumetric-fog tab also exposes the high-impact density-shaping parameters needed to tune the current implementation, including noise strength, height falloff, lighting strength, and ray-march step count; the default ray-march count is `6`.
+- Volumetric fog keeps the configured density ray-march step count while treating local-probe lighting as low-frequency data that may be sampled fewer times per pixel and interpolated along the ray for performance.
 - The vignette tab exposes enabled state, vignette intensity, vignette noise period, vignette noise intensity, and exposure noise intensity, with both noise intensities defaulting to zero.
 - Vignette and exposure noise controls apply immediately and can produce a nervous flicker effect when set above zero.
 - Vignette noise is sampled every frame from a continuous noise function, and noise contribution is additive as `base intensity + [0, 1] * noise intensity`.
@@ -597,6 +618,7 @@
 - Double-clicking a debug control label resets only that specific setting to its authored default and does not reset the whole tab.
 - The debug controls panel does not expose controls for removed effects or removed atmosphere systems.
 - The `Replay solution` action is edge-triggered by a new user request. Re-entering a level after a replay completes does not restart the previous replay request.
+- The debug controls panel exposes a monster-eyes tab or section with live controls for per-monster-type eye offsets.
 
 ## Performance Requirements
 - The page becomes interactive quickly on load.
@@ -610,9 +632,15 @@
 - The loading overlay remains visible until general scene assets, surface lightmaps, and all volumetric-lightmap coefficient/depth probe data within 12 meters of the player's starting position are loaded.
 - Startup probe loading keeps specular reflection textures bounded to the authored resident-probe limit even when more nearby volumetric-lightmap probes are loaded for diffuse lighting and fog occlusion.
 - Startup volumetric-lightmap readiness may load probe coefficient data for nearby diffuse/fog lighting without uploading those probes' specular reflection textures unless the probe is part of the immediate reflection startup set.
-- The runtime warms scene textures and compiles visible mesh programs before the loading overlay becomes eligible to fade out, then continues lower-priority render/composer warmup in small yielded chunks so startup remains responsive.
-- Runtime surface lightmaps are loaded from the inspectable RGBE PNG payload for browser startup, while the raw binary HDR lightmap remains an artifact for tooling and debugging.
+- The runtime warms scene textures before the loading overlay becomes eligible to fade out and avoids startup-time whole-scene shader compilation when the browser implements that compilation as a visible main-thread stall.
+- Runtime readiness waits for renderer geometry and texture counts to stabilize before scene texture/program warmup, so late model commits do not upload geometry or compile shaders on the first visible gameplay frames.
+- Runtime startup readiness is scoped to the active level's required lighting, reflection, texture, and shader resources. Adjacent streamed levels continue loading after the first fade without blocking the initial overlay completion.
+- Runtime visual contribution controls that only change intensity preserve the compiled material shape and update shader uniforms rather than remounting materials or changing shader defines.
+- Runtime surface lightmaps are loaded from a raw RGBE byte payload for browser startup so PNG decode does not stall the loading overlay. Inspectable RGBE PNG and preview PNG files remain emitted as artifacts for tooling and debugging.
 - The frame rate remains stable during ordinary movement and camera motion.
+- `PERFORMANCE.md` records a hierarchical frame-time breakdown for the default post-startup gameplay scene and continues breaking down any measured branch at or above `0.1ms/frame` when the code can reasonably instrument it.
+- The runtime avoids per-level duplication of full-screen postprocessing effects when one global effect can represent the visible world.
+- N8AO CPU overhead is measured from live app-owned scopes and Chrome trace data before any optimization is accepted.
 - The automated browser performance test covers the default user-visible scene after runtime probe residency has stabilized, not only an early startup state with optional effects disabled.
 - The automated browser performance test fails when runtime probe loading exceeds the resident-probe budget or grows estimated runtime texture memory beyond the authored ceiling.
 - Automated performance coverage replays a recorded solution through a maze and checks render cost throughout the replay rather than only benchmarking a static camera.

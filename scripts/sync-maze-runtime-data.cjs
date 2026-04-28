@@ -3,6 +3,7 @@ const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 
 const rootDir = path.resolve(__dirname, '..')
+const authoredMazeDirectory = path.join(rootDir, 'maze-data')
 const sourceDirectory = path.join(rootDir, 'src', 'data', 'mazes')
 const outputDirectory = path.join(rootDir, 'public', 'maze-data')
 const mazeFilePattern = /^maze-\d{3}\.js$/
@@ -11,6 +12,16 @@ async function importMazeModule(filePath) {
   const moduleUrl = `${pathToFileURL(filePath).href}?cacheBust=${Date.now()}-${Math.random()}`
   const imported = await import(moduleUrl)
   return imported.default
+}
+
+function loadPersistedAuthoredMaze(id) {
+  const filePath = path.join(authoredMazeDirectory, `${id}.json`)
+
+  if (!fs.existsSync(filePath)) {
+    return null
+  }
+
+  return JSON.parse(fs.readFileSync(filePath, 'utf8'))
 }
 
 function replaceMazeLightmapWithRuntimeAssetUrls(maze) {
@@ -24,7 +35,7 @@ function replaceMazeLightmapWithRuntimeAssetUrls(maze) {
       ...maze.lightmap,
       atlasUrl:
         maze.lightmap.encoding === 'rgb16f'
-          ? `${maze.id}/surface-lightmap-rgbe.png`
+          ? `${maze.id}/surface-lightmap-rgbe.rgbe`
           : `${maze.id}/surface-lightmap.png`,
       dataBase64: undefined
     }
@@ -81,6 +92,10 @@ async function main() {
           path.join(mazeOutputDirectory, 'surface-lightmap-rgbe.png'),
           lightmapBuffers.runtimeAtlasPng
         )
+        fs.writeFileSync(
+          path.join(mazeOutputDirectory, 'surface-lightmap-rgbe.rgbe'),
+          lightmapBuffers.runtimeAtlasRgbEBytes
+        )
       } else {
         fs.rmSync(
           path.join(mazeOutputDirectory, 'surface-lightmap.bin'),
@@ -92,6 +107,10 @@ async function main() {
         )
         fs.rmSync(
           path.join(mazeOutputDirectory, 'surface-lightmap-rgbe.png'),
+          { force: true }
+        )
+        fs.rmSync(
+          path.join(mazeOutputDirectory, 'surface-lightmap-rgbe.rgbe'),
           { force: true }
         )
       }
@@ -111,7 +130,9 @@ async function main() {
 
   for (let index = 0; index < authoredLevelIds.length; index += 1) {
     const authoredLevelId = authoredLevelIds[index]
-    const maze = createAuthoredRuntimeMaze(authoredLevelId)
+    const maze =
+      loadPersistedAuthoredMaze(authoredLevelId) ??
+      (await createAuthoredRuntimeMaze(authoredLevelId))
 
     if (!maze) {
       throw new Error(`Failed to create authored runtime level ${authoredLevelId}`)
