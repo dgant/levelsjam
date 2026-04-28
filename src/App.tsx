@@ -13641,9 +13641,9 @@ function TunedN8AO({
   return (
     <N8AO
       aoRadius={aoRadius}
-      aoSamples={2}
+      aoSamples={4}
       color="#000000"
-      denoiseSamples={1}
+      denoiseSamples={2}
       denoiseRadius={6}
       distanceFalloff={1}
       halfRes

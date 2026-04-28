@@ -442,7 +442,7 @@
 - With post-processing disabled, the interactive scene meets a 144 FPS performance target on the project's benchmark hardware unless a checked-in profiling report proves that the target is not currently achievable.
 - The WebGL canvas renders at a capped device-pixel ratio of `1` so a `2560x1440` performance test exercises a `2560x1440` backing buffer rather than a hidden 5K-class buffer.
 - Enabling one supported post-processing effect must not silently regress the scene below the enforced performance target without either a compensating fix or a checked-in profiling report explaining the bottleneck.
-- The default N8AO configuration uses the lowest sample counts that preserve the intended contact-shadow look while staying inside the 144 FPS budget.
+- The default N8AO configuration preserves the intended contact-shadow look without visible screen-space mottling while staying inside the 144 FPS budget.
 - Lens flares must not collapse performance by an order of magnitude when a visible torch enters frame.
 - Automated performance coverage remains enabled for the supported render path and fails when the enforced performance target is missed.
 - Performance investigations record where frame time is spent instead of inferring the cause from FPS alone.
@@ -559,6 +559,7 @@
 - Enabling SSR does not brighten the visible HDRI skybox independently of the reflected surfaces.
 - Enabling SSR with an intensity of `0` behaves as a visual no-op.
 - Selecting `N8AO` or `SSAO` produces a visible ambient-occlusion change around contact areas.
+- Selecting `N8AO` uses at least `4` AO samples and `2` denoise samples by default, matching the pre-ablation quality level that avoided visible screen-space mottling.
 - Selecting `SSAO` produces a visible ambient-occlusion change around contact areas rather than appearing inert.
 - Adjusting `SSAO` intensity or radius produces a visible corresponding change instead of leaving the image effectively unchanged.
 - `SSAO` remains visually stable enough that noisy grain does not dominate the rendered image at the default debug ranges.
