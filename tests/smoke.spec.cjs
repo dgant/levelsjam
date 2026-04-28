@@ -1721,6 +1721,8 @@ test('four forward moves keep Chamber 1 surfaces lit with postprocessing disable
   const state = await page.evaluate(() => ({
     lighting: window.__levelsjamDebug?.getLevelLightingState?.() ?? [],
     lifecycle: window.__levelsjamDebug?.getMazeLifecycleState?.() ?? null,
+    wall: window.__levelsjamDebug?.getDebugMeshState?.('maze-wall', 0) ?? null,
+    ground: window.__levelsjamDebug?.getDebugMeshState?.('maze-ground-lightmap', 0) ?? null,
     turn: window.__levelsjamDebug?.getTurnStateSummary?.() ?? null,
     worldLighting: window.__levelsjamDebug?.getWorldLightingState?.() ?? null
   }))
@@ -1741,6 +1743,55 @@ test('four forward moves keep Chamber 1 surfaces lit with postprocessing disable
       })
     ])
   )
+  expect(state.wall).toMatchObject({
+    hasLightMap: true,
+    lightMapIntensity: expect.any(Number),
+    visible: true
+  })
+  expect(state.wall.lightMapIntensity).toBeGreaterThan(0)
+  expect(state.ground).toMatchObject({
+    hasLightMap: true,
+    lightMapIntensity: expect.any(Number),
+    visible: true
+  })
+  expect(state.ground.lightMapIntensity).toBeGreaterThan(0)
+
+  await page.waitForTimeout(2000)
+  const delayedState = await page.evaluate(() => ({
+    lighting: window.__levelsjamDebug?.getLevelLightingState?.() ?? [],
+    lifecycle: window.__levelsjamDebug?.getMazeLifecycleState?.() ?? null,
+    wall: window.__levelsjamDebug?.getDebugMeshState?.('maze-wall', 0) ?? null,
+    ground: window.__levelsjamDebug?.getDebugMeshState?.('maze-ground-lightmap', 0) ?? null,
+    worldLighting: window.__levelsjamDebug?.getWorldLightingState?.() ?? null
+  }))
+
+  expect(delayedState.lifecycle.instantiatedMazeId).toBe('chamber-1')
+  expect(delayedState.worldLighting).toMatchObject({
+    activeMazeId: 'chamber-1',
+    ready: true
+  })
+  expect(delayedState.lighting).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        mazeId: 'chamber-1',
+        ready: true,
+        reflectionReady: true,
+        surfaceLightmapReady: true
+      })
+    ])
+  )
+  expect(delayedState.wall).toMatchObject({
+    hasLightMap: true,
+    lightMapIntensity: expect.any(Number),
+    visible: true
+  })
+  expect(delayedState.wall.lightMapIntensity).toBeGreaterThan(0)
+  expect(delayedState.ground).toMatchObject({
+    hasLightMap: true,
+    lightMapIntensity: expect.any(Number),
+    visible: true
+  })
+  expect(delayedState.ground.lightMapIntensity).toBeGreaterThan(0)
 
   const centerFrame = measureBrightness(
     await screenshotCanvasRegion(page, canvas, 180, 120, 0.5, 0.5)

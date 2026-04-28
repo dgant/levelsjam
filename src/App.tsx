@@ -15855,6 +15855,16 @@ function RuntimeLevelGeometry({
   const lightingResourcesReady =
     lightingResources.surfaceLightmap.ready &&
     lightingResources.reflectionProbeState.ready
+  const lastReadyLightingResources = useRef<RuntimeLevelLightingResources | null>(null)
+
+  if (lightingResourcesReady) {
+    lastReadyLightingResources.current = lightingResources
+  }
+
+  const stableLightingResources = lastReadyLightingResources.current ?? lightingResources
+  const stableLightingResourcesReady =
+    stableLightingResources.surfaceLightmap.ready &&
+    stableLightingResources.reflectionProbeState.ready
   const computedOpenGateIds = useMemo(
     () => new Set(getOpenGateIds(layout.maze, turnState)),
     [layout.maze, turnState]
@@ -15873,20 +15883,22 @@ function RuntimeLevelGeometry({
 
     userData.levelLightingStatesByLevel ??= {}
     userData.levelLightingStatesByLevel[layout.maze.id] = {
-      ready: lightingResources.surfaceLightmap.ready && lightingResources.reflectionProbeState.ready,
-      reflectionProbeState: lightingResources.reflectionProbeState,
-      resources: lightingResources,
-      surfaceLightmapReady: lightingResources.surfaceLightmap.ready
+      ready:
+        stableLightingResources.surfaceLightmap.ready &&
+        stableLightingResources.reflectionProbeState.ready,
+      reflectionProbeState: stableLightingResources.reflectionProbeState,
+      resources: stableLightingResources,
+      surfaceLightmapReady: stableLightingResources.surfaceLightmap.ready
     }
 
-    onLightingResourcesChange(layout.maze.id, lightingResources)
+    onLightingResourcesChange(layout.maze.id, stableLightingResources)
   }, [
     layout.maze.id,
-    lightingResources,
-    lightingResources.reflectionProbeState,
-    lightingResources.surfaceLightmap.ready,
     onLightingResourcesChange,
-    scene
+    scene,
+    stableLightingResources,
+    stableLightingResources.reflectionProbeState,
+    stableLightingResources.surfaceLightmap.ready
   ])
 
   useEffect(() => {
@@ -15900,13 +15912,13 @@ function RuntimeLevelGeometry({
 
       if (
         userData.levelLightingStatesByLevel &&
-        existingState?.resources === lightingResources
+        existingState?.resources === stableLightingResources
       ) {
         delete userData.levelLightingStatesByLevel[layout.maze.id]
       }
-      onLightingResourcesChange(layout.maze.id, null, lightingResources)
+      onLightingResourcesChange(layout.maze.id, null, stableLightingResources)
     }
-  }, [layout.maze.id, lightingResources, onLightingResourcesChange, scene])
+  }, [layout.maze.id, onLightingResourcesChange, scene, stableLightingResources])
 
   return (
     <LevelRenderTransformContext.Provider value={transform}>
@@ -15917,44 +15929,44 @@ function RuntimeLevelGeometry({
           reflectionCaptureExcluded: !isActive,
           streamedLevelId: layout.maze.id
         }}
-        visible={lightingResourcesReady}
+        visible={stableLightingResourcesReady}
       >
         <SceneGeometry
-        environmentTexture={lightingResources.environmentTexture}
-        environmentIntensity={environmentIntensity}
-        iblContributionIntensity={iblContributionIntensity}
-        isActive={isActive}
-        layout={layout}
-        lightmapContributionIntensity={lightmapContributionIntensity}
-        mountAllGeometry={mountAllGeometry}
-        openGateIds={openGateIds}
-        probeDebugMode={probeDebugMode}
-        probeDepthAtlasTextures={lightingResources.probeDepthAtlasTextures}
-        probeCoefficientTextures={lightingResources.probeCoefficientTextures}
-        reflectionProbeCoefficients={lightingResources.reflectionProbeCoefficients}
-        reflectionProbeDepthTextures={lightingResources.reflectionProbeDepthTextures}
-        reflectionContributionIntensity={reflectionContributionIntensity}
-        reflectionProbeTextures={lightingResources.reflectionProbeTextures}
-        runtimeModelsEnabled={runtimeModelsEnabled}
-        staticVolumetricContributionIntensity={staticVolumetricContributionIntensity}
-        surfaceLightmap={lightingResources.surfaceLightmap}
-        turnState={turnState}
-        visibilityState={visibilityState}
+          environmentTexture={stableLightingResources.environmentTexture}
+          environmentIntensity={environmentIntensity}
+          iblContributionIntensity={iblContributionIntensity}
+          isActive={isActive}
+          layout={layout}
+          lightmapContributionIntensity={lightmapContributionIntensity}
+          mountAllGeometry={mountAllGeometry}
+          openGateIds={openGateIds}
+          probeDebugMode={probeDebugMode}
+          probeDepthAtlasTextures={stableLightingResources.probeDepthAtlasTextures}
+          probeCoefficientTextures={stableLightingResources.probeCoefficientTextures}
+          reflectionProbeCoefficients={stableLightingResources.reflectionProbeCoefficients}
+          reflectionProbeDepthTextures={stableLightingResources.reflectionProbeDepthTextures}
+          reflectionContributionIntensity={reflectionContributionIntensity}
+          reflectionProbeTextures={stableLightingResources.reflectionProbeTextures}
+          runtimeModelsEnabled={runtimeModelsEnabled}
+          staticVolumetricContributionIntensity={staticVolumetricContributionIntensity}
+          surfaceLightmap={stableLightingResources.surfaceLightmap}
+          turnState={turnState}
+          visibilityState={visibilityState}
         />
         {runtimeModelsEnabled ? (
           <MonsterActors
             environmentIntensity={environmentIntensity}
-            environmentTexture={lightingResources.environmentTexture}
+            environmentTexture={stableLightingResources.environmentTexture}
             iblContributionIntensity={iblContributionIntensity}
             layout={layout}
             lightmapContributionIntensity={lightmapContributionIntensity}
             monsterEyes={monsterEyes}
-            probeDepthAtlasTextures={lightingResources.probeDepthAtlasTextures}
-            probeCoefficientTextures={lightingResources.probeCoefficientTextures}
+            probeDepthAtlasTextures={stableLightingResources.probeDepthAtlasTextures}
+            probeCoefficientTextures={stableLightingResources.probeCoefficientTextures}
             reflectionContributionIntensity={reflectionContributionIntensity}
-            reflectionProbeCoefficients={lightingResources.reflectionProbeCoefficients}
-            reflectionProbeDepthTextures={lightingResources.reflectionProbeDepthTextures}
-            reflectionProbeTextures={lightingResources.reflectionProbeTextures}
+            reflectionProbeCoefficients={stableLightingResources.reflectionProbeCoefficients}
+            reflectionProbeDepthTextures={stableLightingResources.reflectionProbeDepthTextures}
+            reflectionProbeTextures={stableLightingResources.reflectionProbeTextures}
             turnState={turnState}
             visibilityState={visibilityState}
           />
