@@ -213,10 +213,10 @@ const METAL_TEXTURE_URLS = {
   orm: `${assetBase}textures/runtime/metal-13/metal_13_orm-1K.png`
 }
 const DOOR_TEXTURE_URLS = {
-  ao: `${assetBase}textures/metal_rust-1K/1K-metal_rust-ao.jpg`,
-  color: `${assetBase}textures/metal_rust-1K/1K-metal_rust-diffuse.jpg`,
-  normal: `${assetBase}textures/metal_rust-1K/1K-metal_rust-normal.jpg`,
-  roughness: `${assetBase}textures/metal_rust-1K/1K-metal_rust-specular.jpg`
+  ao: `${assetBase}textures/runtime/metal-rust/metal_rust_orm-1K.png`,
+  color: `${assetBase}textures/runtime/metal-rust/metal_rust_basecolor-1K.png`,
+  normal: `${assetBase}textures/runtime/metal-rust/metal_rust_normal-1K.png`,
+  orm: `${assetBase}textures/runtime/metal-rust/metal_rust_orm-1K.png`
 }
 const FRESCO_DECAL_URLS = [
   `${assetBase}textures/decals/minoan-labyrinth-toss.png`,
@@ -663,9 +663,10 @@ const LIGHTMAP_AMBIENT_TINT = new Color(1, 1, 1)
 const TORCH_LIGHTMAP_TINT = FIRE_LIGHT_COLOR.clone()
 const FIRE_BILLBOARD_INTENSITY_SCALE =
   AUTHORED_LIGHTING_SOURCE_SCALE / TORCH_BASE_CANDELA
-const LENS_FLARE_INTENSITY_SCALE = 4
-const LENS_FLARE_COLOR_GAIN = 40000
 const LENS_FLARE_OCCLUSION_MARGIN = 0.05
+const DEFAULT_HDRI_BRIGHTNESS = 1
+const DEFAULT_SATURATION = 1
+const DEFAULT_MINOTAUR_ALBEDO_HEX = '#2b2130'
 const TORCH_BILLBOARD_LAYER = 1
 const FLOOR_LIGHTMAP_INTENSITY_SCALE = 1
 const WALL_LIGHTMAP_INTENSITY_SCALE = 1
@@ -1042,6 +1043,14 @@ uniform float exposure;
 
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
   outputColor = vec4(inputColor.rgb * exposure, inputColor.a);
+}
+`
+const saturationEffectShader = `
+uniform float saturation;
+
+void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
+  float luminance = dot(inputColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+  outputColor = vec4(mix(vec3(luminance), inputColor.rgb, clamp(saturation, 0.0, 1.0)), inputColor.a);
 }
 `
 const playerFadeEffectShader = `
@@ -1528,6 +1537,7 @@ type LensFlareSettings = EffectSettings & {
   opacity: number
   secondaryGhosts: boolean
   starBurst: boolean
+  starBurstIntensity: number
   starPoints: number
 }
 
@@ -1691,11 +1701,14 @@ type VisualSettings = {
   ambientOcclusionRadius: number
   exposureStops: number
   cameraFov: number
+  hdriBrightness: number
   iblContribution: LightingContributionSettings
   lightmapContribution: LightingContributionSettings
   lensFlare: LensFlareSettings
+  minotaurAlbedoHex: string
   probeDebugMode: ProbeDebugMode
   reflectionContribution: LightingContributionSettings
+  saturation: number
   staticVolumetricContribution: LightingContributionSettings
   toneMapping: ToneMappingMode
   bloom: BloomSettings
@@ -1727,9 +1740,11 @@ type VisualSettingsPatch = Partial<{
   depthOfField: Partial<DepthOfFieldSettings>
   exposureStops: number
   cameraFov: number
+  hdriBrightness: number
   iblContribution: Partial<LightingContributionSettings>
   lensFlare: Partial<LensFlareSettings>
   lightmapContribution: Partial<LightingContributionSettings>
+  minotaurAlbedoHex: string
   movement: Partial<MovementSettings>
   monsterEyes: Partial<Record<MonsterType, Partial<{
     left: Partial<MonsterEyeOffset>
@@ -1738,6 +1753,7 @@ type VisualSettingsPatch = Partial<{
   precomputedVisibilityEnabled: boolean
   probeDebugMode: ProbeDebugMode
   reflectionContribution: Partial<LightingContributionSettings>
+  saturation: number
   staticVolumetricContribution: Partial<LightingContributionSettings>
   ssr: Partial<SSRSettings>
   toneMapping: ToneMappingMode
@@ -1771,9 +1787,11 @@ type ScalarSettingKey =
   | 'ambientOcclusionRadius'
   | 'cameraFov'
   | 'exposureStops'
+  | 'hdriBrightness'
   | 'iblContributionIntensity'
   | 'lightmapContributionIntensity'
   | 'reflectionContributionIntensity'
+  | 'saturation'
   | 'staticVolumetricContributionIntensity'
   | 'volumetricDistance'
   | 'volumetricHeightFalloff'
@@ -2173,6 +2191,18 @@ class ExposureEffectImpl extends Effect {
   }
 }
 
+class SaturationEffectImpl extends Effect {
+  constructor(saturation: number) {
+    super('SaturationEffect', saturationEffectShader, {
+      uniforms: new Map([['saturation', new Uniform(saturation)]])
+    })
+  }
+
+  set saturation(value: number) {
+    this.uniforms.get('saturation').value = MathUtils.clamp(value, 0, 1)
+  }
+}
+
 class PlayerFadeEffectImpl extends Effect {
   constructor() {
     super('PlayerFadeEffect', playerFadeEffectShader, {
@@ -2397,6 +2427,7 @@ function createDefaultVisualSettings(): VisualSettings {
     ambientOcclusionMode: 'n8ao',
     cameraFov: 80,
     exposureStops: DEFAULT_EXPOSURE_STOPS,
+    hdriBrightness: DEFAULT_HDRI_BRIGHTNESS,
     iblContribution: {
       enabled: true,
       intensity: DEFAULT_PROBE_IBL_INTENSITY
@@ -2416,17 +2447,20 @@ function createDefaultVisualSettings(): VisualSettings {
       ghostScale: 0,
       glareSize: 0,
       haloScale: 0.16,
-      intensity: 0.002,
+      intensity: 0.01,
       opacity: 0.01,
       secondaryGhosts: true,
       starBurst: false,
+      starBurstIntensity: 1,
       starPoints: 3
     },
+    minotaurAlbedoHex: DEFAULT_MINOTAUR_ALBEDO_HEX,
     probeDebugMode: 'none',
     reflectionContribution: {
       enabled: true,
       intensity: DEFAULT_REFLECTION_INTENSITY
     },
+    saturation: DEFAULT_SATURATION,
     staticVolumetricContribution: {
       enabled: false,
       intensity: DEFAULT_PROBE_IBL_INTENSITY
@@ -2498,6 +2532,24 @@ function getEnabledContributionIntensity(settings: LightingContributionSettings)
   return settings.enabled ? settings.intensity : 0
 }
 
+function applyLensFlareSettingsPatch(
+  settings: LensFlareSettings,
+  patch: Partial<LensFlareSettings>
+) {
+  const strength = patch.opacity ?? patch.intensity
+
+  return {
+    ...settings,
+    ...patch,
+    ...(strength === undefined
+      ? null
+      : {
+          intensity: strength,
+          opacity: strength
+        })
+  }
+}
+
 function applyVisualSettingsPatch(
   settings: VisualSettings,
   patch: VisualSettingsPatch
@@ -2519,6 +2571,17 @@ function applyVisualSettingsPatch(
     ...(patch.cameraFov === undefined
       ? null
       : { cameraFov: patch.cameraFov }),
+    ...(patch.hdriBrightness === undefined
+      ? null
+      : { hdriBrightness: patch.hdriBrightness }),
+    ...(patch.minotaurAlbedoHex === undefined
+      ? null
+      : {
+          minotaurAlbedoHex: normalizeHexColor(
+            patch.minotaurAlbedoHex,
+            settings.minotaurAlbedoHex
+          )
+        }),
     ...(patch.probeDebugMode === undefined
       ? null
       : { probeDebugMode: patch.probeDebugMode }),
@@ -2555,6 +2618,9 @@ function applyVisualSettingsPatch(
     ...(patch.volumetricStepCount === undefined
       ? null
       : { volumetricStepCount: patch.volumetricStepCount }),
+    ...(patch.saturation === undefined
+      ? null
+      : { saturation: patch.saturation }),
     anamorphic: patch.anamorphic
       ? {
           ...settings.anamorphic,
@@ -2580,10 +2646,7 @@ function applyVisualSettingsPatch(
         }
       : settings.iblContribution,
     lensFlare: patch.lensFlare
-      ? {
-          ...settings.lensFlare,
-          ...patch.lensFlare
-        }
+      ? applyLensFlareSettingsPatch(settings.lensFlare, patch.lensFlare)
       : settings.lensFlare,
     lightmapContribution: patch.lightmapContribution
       ? {
@@ -6411,7 +6474,11 @@ type RuntimeLevelLightingResources = {
   surfaceLightmap: SurfaceLightmapAtlasTexture
 }
 
-function SceneEnvironmentBackground() {
+function SceneEnvironmentBackground({
+  intensity
+}: {
+  intensity: number
+}) {
   const scene = useThree((state) => state.scene)
   const hdrTexture = useLoader(HDRLoader, ENVIRONMENT_URL)
 
@@ -6419,7 +6486,7 @@ function SceneEnvironmentBackground() {
     hdrTexture.mapping = EquirectangularReflectionMapping
     scene.background = hdrTexture
     scene.environment = null
-    scene.backgroundIntensity = BAKED_ENVIRONMENT_INTENSITY
+    scene.backgroundIntensity = intensity
     scene.environmentIntensity = 0
 
     return () => {
@@ -6430,12 +6497,12 @@ function SceneEnvironmentBackground() {
         scene.environment = null
       }
     }
-  }, [hdrTexture, scene])
+  }, [hdrTexture, intensity, scene])
 
   useEffect(() => {
-    scene.backgroundIntensity = BAKED_ENVIRONMENT_INTENSITY
+    scene.backgroundIntensity = intensity
     scene.environmentIntensity = 0
-  }, [scene])
+  }, [intensity, scene])
 
   return null
 }
@@ -6526,7 +6593,8 @@ function createWorldReflectionProbeState(
 
 function useRuntimeLevelLightingResources(
   layout: MazeLayout,
-  priorityPosition: { x: number; z: number }
+  priorityPosition: { x: number; z: number },
+  runtimeEnvironmentIntensity: number
 ): RuntimeLevelLightingResources {
   const scene = useThree((state) => state.scene)
   const surfaceLightmap = useSurfaceLightmapAtlasTexture(layout.maze.lightmap)
@@ -7630,7 +7698,7 @@ function EnvironmentLighting({
     environmentTarget.current = nextEnvironment
     scene.background = hdrTexture
     scene.environment = null
-    scene.backgroundIntensity = BAKED_ENVIRONMENT_INTENSITY
+    scene.backgroundIntensity = runtimeEnvironmentIntensity
     scene.environmentIntensity = 0
     onEnvironmentFogColorChange(BLACK_COLOR.clone())
     onEnvironmentTextureChange(null)
@@ -7655,12 +7723,13 @@ function EnvironmentLighting({
     onEnvironmentFogColorChange,
     onEnvironmentTextureChange,
     pmremGenerator,
+    runtimeEnvironmentIntensity,
     scene
   ])
 
   useEffect(() => {
-    scene.backgroundIntensity = BAKED_ENVIRONMENT_INTENSITY
-  }, [scene])
+    scene.backgroundIntensity = runtimeEnvironmentIntensity
+  }, [runtimeEnvironmentIntensity, scene])
 
   useEffect(() => {
     const baseEnvironment = environmentTarget.current
@@ -11290,8 +11359,15 @@ function SceneGeometry({
             visibilityState={visibilityState}
           />
           <MazeDoors
+            iblContributionIntensity={iblContributionIntensity}
             layout={layout}
-            turnState={turnState}
+            lightmapContributionIntensity={lightmapContributionIntensity}
+            probeDepthAtlasTextures={probeDepthAtlasTextures}
+            probeCoefficientTextures={probeCoefficientTextures}
+            reflectionContributionIntensity={reflectionContributionIntensity}
+            reflectionProbeCoefficients={reflectionProbeCoefficients}
+            reflectionProbeDepthTextures={reflectionProbeDepthTextures}
+            reflectionProbeTextures={reflectionProbeTextures}
             visibilityState={visibilityState}
           />
           <MazeItems
@@ -11620,28 +11696,184 @@ function getMazeEntranceDoor(layout: MazeLayout) {
     cell: opening.cell,
     center,
     id: `${layout.maze.id}:entrance-door`,
+    side: opening.side,
     yaw: opening.side === 'east' || opening.side === 'west'
       ? Math.PI / 2
       : 0
   }
 }
 
+function getDoorBoundaryNormal(side: CardinalDirection) {
+  if (side === 'east') {
+    return { x: 1, z: 0 }
+  }
+  if (side === 'west') {
+    return { x: -1, z: 0 }
+  }
+  if (side === 'south') {
+    return { x: 0, z: 1 }
+  }
+
+  return { x: 0, z: -1 }
+}
+
+function DoorLeafMaterial({
+  maps,
+  materialKey,
+  probeBlend
+}: {
+  maps: PbrMaps
+  materialKey: string
+  probeBlend: ProbeBlendConfig
+}) {
+  const [material, setMaterial] = useState<ThreeMeshStandardMaterial | null>(null)
+  const probeBlendMaterialProps = useProbeBlendMaterialShader(
+    material,
+    probeBlend,
+    {},
+    materialKey
+  )
+
+  return (
+    <meshStandardMaterial
+      aoMap={maps.aoMap}
+      color="white"
+      customProgramCacheKey={probeBlendMaterialProps.customProgramCacheKey}
+      envMap={getProbeBlendEnvMap(probeBlend)}
+      envMapIntensity={0}
+      key={materialKey}
+      map={maps.map}
+      metalness={1}
+      metalnessMap={maps.metalnessMap}
+      normalMap={maps.normalMap}
+      onBeforeCompile={probeBlendMaterialProps.onBeforeCompile}
+      onBeforeRender={probeBlendMaterialProps.onBeforeRender}
+      ref={setMaterial}
+      roughness={1}
+      roughnessMap={maps.roughnessMap}
+    />
+  )
+}
+
 function MazeDoorActor({
   door,
+  iblContributionIntensity,
   isOpen,
+  layout,
+  lightmapContributionIntensity,
+  probeDepthAtlasTextures,
+  probeCoefficientTextures,
+  reflectionContributionIntensity,
+  reflectionProbeCoefficients,
+  reflectionProbeDepthTextures,
+  reflectionProbeTextures,
   visible
 }: {
   door: NonNullable<ReturnType<typeof getMazeEntranceDoor>>
+  iblContributionIntensity: number
   isOpen: boolean
+  layout: MazeLayout
+  lightmapContributionIntensity: number
+  probeDepthAtlasTextures: ProbeDepthAtlasTextures
+  probeCoefficientTextures: [Texture, Texture, Texture, Texture]
+  reflectionContributionIntensity: number
+  reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
+  reflectionProbeDepthTextures: CubeTexture[]
+  reflectionProbeTextures: Texture[]
   visible: boolean
 }) {
+  const levelWorldTransform = useContext(LevelRenderTransformContext)
+  const volumetricShadowsEnabled = useContext(VolumetricShadowContext)
   const group = useRef<Group>(null)
   const leftLeaf = useRef<Mesh>(null)
   const rightLeaf = useRef<Mesh>(null)
   const doorMaps = useStandardPbrTextures(DOOR_TEXTURE_URLS, DOOR_TEXTURE_REPEAT)
-  const doorGeometry = useMemo(
-    () => new BoxGeometry(1, WALL_HEIGHT, WALL_WIDTH * 0.5),
-    []
+  const doorGeometry = useMemo(() => {
+    const geometry = new BoxGeometry(1, WALL_HEIGHT, WALL_WIDTH * 0.5)
+    const uv = geometry.getAttribute('uv')
+
+    if (uv) {
+      geometry.setAttribute('uv2', uv.clone())
+    }
+
+    return geometry
+  }, [])
+  const reflectionProbeBlend = useMemo(
+    () =>
+      getReflectionProbeBlendForPosition(layout, {
+        x: door.center.x,
+        z: door.center.z
+      }),
+    [door.center.x, door.center.z, layout]
+  )
+  const probeTextures = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeTextures[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeTextures]
+  )
+  const probeDepthTextures = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeDepthTextures[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeDepthTextures]
+  )
+  const probeCoefficients = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeCoefficients[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeCoefficients]
+  )
+  const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
+  const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
+  const diffuseProbeIntensity =
+    iblContributionIntensity + lightmapContributionIntensity
+  const probeBlend = useMemo(
+    () =>
+      buildProbeBlendConfig(
+        layout,
+        reflectionProbeBlend.probeIndices,
+        probeTextures,
+        probeDepthTextures,
+        probeDepthAtlasTextures,
+        probeCoefficients,
+        'disabled',
+        {
+          diffuseIntensity: diffuseProbeIntensity,
+          probeCoefficientTextures,
+          radianceIntensity: reflectionContributionIntensity,
+          radianceMode: hasProbeTextures ? 'constant' : 'disabled',
+          useProbeConnectivity: volumetricShadowsEnabled,
+          vlmBoundaryNormal: getDoorBoundaryNormal(door.side),
+          vlmMode: hasProbeCoefficients ? 'boundary8' : 'disabled',
+          weights: reflectionProbeBlend.weights as [number, number, number, number],
+          worldTransform: levelWorldTransform
+        }
+      ),
+    [
+      diffuseProbeIntensity,
+      door.side,
+      hasProbeCoefficients,
+      hasProbeTextures,
+      layout,
+      levelWorldTransform,
+      probeCoefficientTextures,
+      probeCoefficients,
+      probeDepthAtlasTextures,
+      probeDepthTextures,
+      probeTextures,
+      reflectionContributionIntensity,
+      reflectionProbeBlend.probeIndices,
+      reflectionProbeBlend.weights,
+      volumetricShadowsEnabled
+    ]
+  )
+  const materialKey = useMemo(
+    () => getProbeBlendMaterialKey('maze-door', probeBlend, {}),
+    [probeBlend]
   )
   const openProgress = useRef(isOpen ? 1 : 0)
 
@@ -11682,31 +11914,29 @@ function MazeDoorActor({
       <mesh
         castShadow
         geometry={doorGeometry}
+        position-x={-0.5}
         receiveShadow
         ref={leftLeaf}
-        userData={{ debugRole: 'maze-door-leaf' }}
+        userData={{ debugIndex: 0, debugRole: 'maze-door-leaf' }}
       >
-        <meshStandardMaterial
-          map={doorMaps.map}
-          metalness={0.65}
-          normalMap={doorMaps.normalMap}
-          roughness={0.55}
-          roughnessMap={doorMaps.roughnessMap}
+        <DoorLeafMaterial
+          maps={doorMaps}
+          materialKey={materialKey}
+          probeBlend={probeBlend}
         />
       </mesh>
       <mesh
         castShadow
         geometry={doorGeometry}
+        position-x={0.5}
         receiveShadow
         ref={rightLeaf}
-        userData={{ debugRole: 'maze-door-leaf' }}
+        userData={{ debugIndex: 1, debugRole: 'maze-door-leaf' }}
       >
-        <meshStandardMaterial
-          map={doorMaps.map}
-          metalness={0.65}
-          normalMap={doorMaps.normalMap}
-          roughness={0.55}
-          roughnessMap={doorMaps.roughnessMap}
+        <DoorLeafMaterial
+          maps={doorMaps}
+          materialKey={materialKey}
+          probeBlend={probeBlend}
         />
       </mesh>
     </group>
@@ -11714,12 +11944,26 @@ function MazeDoorActor({
 }
 
 function MazeDoors({
+  iblContributionIntensity,
   layout,
-  turnState,
+  lightmapContributionIntensity,
+  probeDepthAtlasTextures,
+  probeCoefficientTextures,
+  reflectionContributionIntensity,
+  reflectionProbeCoefficients,
+  reflectionProbeDepthTextures,
+  reflectionProbeTextures,
   visibilityState
 }: {
+  iblContributionIntensity: number
   layout: MazeLayout
-  turnState: TurnState
+  lightmapContributionIntensity: number
+  probeDepthAtlasTextures: ProbeDepthAtlasTextures
+  probeCoefficientTextures: [Texture, Texture, Texture, Texture]
+  reflectionContributionIntensity: number
+  reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
+  reflectionProbeDepthTextures: CubeTexture[]
+  reflectionProbeTextures: Texture[]
   visibilityState: PrecomputedVisibilityState
 }) {
   const door = useMemo(() => getMazeEntranceDoor(layout), [layout])
@@ -11728,14 +11972,19 @@ function MazeDoors({
     return null
   }
 
-  const playerAtDoorCell =
-    turnState.player.cell.x === door.cell.x &&
-    turnState.player.cell.y === door.cell.y
-
   return (
     <MazeDoorActor
       door={door}
-      isOpen={playerAtDoorCell}
+      iblContributionIntensity={iblContributionIntensity}
+      isOpen={false}
+      layout={layout}
+      lightmapContributionIntensity={lightmapContributionIntensity}
+      probeDepthAtlasTextures={probeDepthAtlasTextures}
+      probeCoefficientTextures={probeCoefficientTextures}
+      reflectionContributionIntensity={reflectionContributionIntensity}
+      reflectionProbeCoefficients={reflectionProbeCoefficients}
+      reflectionProbeDepthTextures={reflectionProbeDepthTextures}
+      reflectionProbeTextures={reflectionProbeTextures}
       visible={isCellVisible(visibilityState, door.cell)}
     />
   )
@@ -12285,6 +12534,7 @@ function MonsterModel({
   iblContributionIntensity,
   layout,
   lightmapContributionIntensity,
+  minotaurAlbedoHex,
   monster,
   probeDepthAtlasTextures,
   probeCoefficientTextures,
@@ -12300,6 +12550,7 @@ function MonsterModel({
   iblContributionIntensity: number
   layout: MazeLayout
   lightmapContributionIntensity: number
+  minotaurAlbedoHex: string
   monster: TurnMonster
   probeDepthAtlasTextures: ProbeDepthAtlasTextures
   probeCoefficientTextures: [Texture, Texture, Texture, Texture]
@@ -12316,6 +12567,10 @@ function MonsterModel({
     'monster',
     'monster',
     debugIndex
+  )
+  const minotaurAlbedoColor = useMemo(
+    () => colorFromHex(minotaurAlbedoHex, DEFAULT_MINOTAUR_ALBEDO_HEX),
+    [minotaurAlbedoHex]
   )
   const monsterCellPosition = useMemo(
     () => getMazeCellWorldPosition(layout.maze, monster.cell, GROUND_Y),
@@ -12437,6 +12692,32 @@ function MonsterModel({
 
   useAttachProbeBlendToModel(model, probeBlend)
 
+  useEffect(() => {
+    if (!model || monster.type !== 'minotaur') {
+      return
+    }
+
+    model.traverse((object) => {
+      if (!(object instanceof Mesh)) {
+        return
+      }
+
+      const materials = Array.isArray(object.material)
+        ? object.material
+        : [object.material]
+
+      for (const material of materials) {
+        if (
+          material instanceof ThreeMeshStandardMaterial ||
+          material instanceof ThreeMeshPhysicalMaterial
+        ) {
+          material.color.copy(minotaurAlbedoColor)
+          material.needsUpdate = true
+        }
+      }
+    })
+  }, [minotaurAlbedoColor, model, monster.type])
+
   if (!model || !transform) {
     return null
   }
@@ -12546,6 +12827,7 @@ function MonsterActor({
   iblContributionIntensity,
   layout,
   lightmapContributionIntensity,
+  minotaurAlbedoHex,
   monster,
   monsterEyes,
   playerCell,
@@ -12563,6 +12845,7 @@ function MonsterActor({
   iblContributionIntensity: number
   layout: MazeLayout
   lightmapContributionIntensity: number
+  minotaurAlbedoHex: string
   monster: TurnMonster
   monsterEyes: MonsterEyeSettings
   playerCell: { x: number; y: number }
@@ -12779,6 +13062,7 @@ function MonsterActor({
         iblContributionIntensity={iblContributionIntensity}
         layout={layout}
         lightmapContributionIntensity={lightmapContributionIntensity}
+        minotaurAlbedoHex={minotaurAlbedoHex}
         monster={monster}
         probeDepthAtlasTextures={probeDepthAtlasTextures}
         probeCoefficientTextures={probeCoefficientTextures}
@@ -12804,6 +13088,7 @@ function MonsterActors({
   iblContributionIntensity,
   layout,
   lightmapContributionIntensity,
+  minotaurAlbedoHex,
   probeDepthAtlasTextures,
   probeCoefficientTextures,
   reflectionContributionIntensity,
@@ -12819,6 +13104,7 @@ function MonsterActors({
   iblContributionIntensity: number
   layout: MazeLayout
   lightmapContributionIntensity: number
+  minotaurAlbedoHex: string
   probeDepthAtlasTextures: ProbeDepthAtlasTextures
   probeCoefficientTextures: [Texture, Texture, Texture, Texture]
   reflectionContributionIntensity: number
@@ -12848,6 +13134,7 @@ function MonsterActors({
             key={monster.id}
             layout={layout}
             lightmapContributionIntensity={lightmapContributionIntensity}
+            minotaurAlbedoHex={minotaurAlbedoHex}
             monster={monster}
             monsterEyes={monsterEyes}
             playerCell={turnState.player.cell}
@@ -13949,6 +14236,22 @@ function ExposureEffectPrimitive({
   return <primitive object={effect as unknown as Effect} />
 }
 
+function SaturationEffectPrimitive({
+  saturation
+}: {
+  saturation: number
+}) {
+  const effect = useMemo(() => new SaturationEffectImpl(saturation), [])
+
+  useEffect(() => {
+    effect.saturation = saturation
+  }, [effect, saturation])
+
+  useEffect(() => () => effect.dispose(), [effect])
+
+  return <primitive object={effect as unknown as Effect} />
+}
+
 function hashContinuousUnitNoiseSeed(seed: number) {
   const hashed = Math.sin((seed * 127.1) + 311.7) * 43758.5453123
 
@@ -14088,6 +14391,38 @@ function DitherEffectPrimitive() {
   return <primitive object={effect as unknown as Effect} />
 }
 
+type MutableLensFlareEffect = Effect & {
+  getFragmentShader: () => string
+  setFragmentShader: (fragmentShader: string) => void
+}
+
+function addLensFlareStarBurstIntensityUniform(effect: PostLensFlareEffect) {
+  const mutableEffect = effect as unknown as MutableLensFlareEffect
+  const starBurstUniform = effect.uniforms.get('starBurstIntensity')
+
+  if (starBurstUniform) {
+    return starBurstUniform as Uniform<number>
+  }
+
+  const fragmentShader = mutableEffect.getFragmentShader()
+  const uniform = new Uniform(1)
+
+  effect.uniforms.set('starBurstIntensity', uniform)
+  mutableEffect.setFragmentShader(
+    fragmentShader
+      .replace(
+        'uniform bool starBurst;',
+        'uniform bool starBurst;\nuniform float starBurstIntensity;'
+      )
+      .replace(
+        'finalColor += clamp((lensMod.rgb * getStartBurst().rgb ), 0.01, 1.0);',
+        'finalColor += clamp((lensMod.rgb * getStartBurst().rgb ), 0.01, 1.0) * starBurstIntensity;'
+      )
+  )
+
+  return uniform
+}
+
 function TorchLensFlare({
   settings
 }: {
@@ -14111,9 +14446,7 @@ function TorchLensFlare({
           animated: settings.animated,
           anamorphic: settings.anamorphic,
           blendFunction: BlendFunction.NORMAL,
-          colorGain: FIRE_COLOR.clone().multiplyScalar(
-            LENS_FLARE_COLOR_GAIN
-          ),
+          colorGain: FIRE_COLOR.clone(),
           enabled: settings.enabled,
           flareShape: settings.flareShape,
           flareSize: settings.flareSize,
@@ -14129,6 +14462,7 @@ function TorchLensFlare({
           starBurst: settings.starBurst,
           starPoints: settings.starPoints
         })
+        const starBurstIntensityUniform = addLensFlareStarBurstIntensityUniform(effect)
         const pass = new EffectPass(camera as ThreeCamera, effect)
         pass.name = 'TorchLensFlarePass'
 
@@ -14138,7 +14472,8 @@ function TorchLensFlare({
           lensPositionUniform: effect.uniforms.get('lensPosition') as Uniform<Vector3> | undefined,
           occlusionOpacityUniform: effect.uniforms.get('opacity') as Uniform<number> | undefined,
           pass,
-          screenResUniform: effect.uniforms.get('screenRes') as Uniform<Vector2> | undefined
+          screenResUniform: effect.uniforms.get('screenRes') as Uniform<Vector2> | undefined,
+          starBurstIntensityUniform
         }
       }),
     [camera]
@@ -14161,11 +14496,7 @@ function TorchLensFlare({
       const starPointsUniform = slot.effect.uniforms.get('starPoints')
       const colorGainUniform = slot.effect.uniforms.get('colorGain')
 
-      slot.effect.blendMode.opacity.value = MathUtils.clamp(
-        settings.intensity * LENS_FLARE_INTENSITY_SCALE,
-        0,
-        1
-      )
+      slot.effect.blendMode.opacity.value = MathUtils.clamp(settings.opacity, 0, 1)
       if (enabledUniform) enabledUniform.value = settings.enabled
       if (glareSizeUniform) glareSizeUniform.value = settings.glareSize
       if (flareSizeUniform) flareSizeUniform.value = settings.flareSize
@@ -14180,9 +14511,10 @@ function TorchLensFlare({
       if (starBurstUniform) starBurstUniform.value = settings.starBurst
       if (starPointsUniform) starPointsUniform.value = settings.starPoints
       if (colorGainUniform) {
-        colorGainUniform.value.copy(
-          FIRE_COLOR.clone().multiplyScalar(LENS_FLARE_COLOR_GAIN)
-        )
+        colorGainUniform.value.copy(FIRE_COLOR)
+      }
+      if (slot.starBurstIntensityUniform) {
+        slot.starBurstIntensityUniform.value = settings.starBurstIntensity
       }
     }
   }, [flareSlots, settings])
@@ -14291,7 +14623,7 @@ function TorchLensFlare({
       const slot = flareSlots[slotIndex]
       const visibleLens = visibleLensPositions[slotIndex]
       const nextHasVisibleLens = Boolean(visibleLens) && settings.enabled
-      const visibilityTarget = nextHasVisibleLens ? 1 - settings.opacity : 1
+      const visibilityTarget = nextHasVisibleLens ? 0 : 1
 
       if (visibleLens && slot.lensPositionUniform) {
         projectedPosition.copy(visibleLens.position).project(camera)
@@ -14310,7 +14642,7 @@ function TorchLensFlare({
 
     scene.userData.lensFlareState = {
       enabled: settings.enabled,
-      intensity: settings.intensity,
+      intensity: settings.opacity,
       totalLensCount: lensPositions.current.length,
       visibleLensCount: visibleLensPositions.length,
       visibleLenses: visibleLensPositions.map((lens) => ({
@@ -15816,6 +16148,7 @@ function RuntimeLevelGeometry({
   isActive,
   layout,
   lightmapContributionIntensity,
+  minotaurAlbedoHex,
   monsterEyes,
   mountAllGeometry = false,
   onLightingResourcesChange,
@@ -15834,6 +16167,7 @@ function RuntimeLevelGeometry({
   isActive: boolean
   layout: MazeLayout
   lightmapContributionIntensity: number
+  minotaurAlbedoHex: string
   monsterEyes: MonsterEyeSettings
   mountAllGeometry?: boolean
   onLightingResourcesChange: (
@@ -15852,7 +16186,11 @@ function RuntimeLevelGeometry({
   visibilityState: PrecomputedVisibilityState
 }) {
   const scene = useThree((state) => state.scene)
-  const lightingResources = useRuntimeLevelLightingResources(layout, priorityPosition)
+  const lightingResources = useRuntimeLevelLightingResources(
+    layout,
+    priorityPosition,
+    environmentIntensity
+  )
   const lightingResourcesReady =
     lightingResources.surfaceLightmap.ready &&
     lightingResources.reflectionProbeState.ready
@@ -15961,6 +16299,7 @@ function RuntimeLevelGeometry({
             iblContributionIntensity={iblContributionIntensity}
             layout={layout}
             lightmapContributionIntensity={lightmapContributionIntensity}
+            minotaurAlbedoHex={minotaurAlbedoHex}
             monsterEyes={monsterEyes}
             probeDepthAtlasTextures={stableLightingResources.probeDepthAtlasTextures}
             probeCoefficientTextures={stableLightingResources.probeCoefficientTextures}
@@ -16045,7 +16384,8 @@ function Scene({
   const scene = useThree((state) => state.scene)
   const [levelLightingResources, setLevelLightingResources] = useState<Map<string, RuntimeLevelLightingResources>>(() => new Map())
   const composerRef = useRef<PostEffectComposer | null>(null)
-  const environmentIntensity = BAKED_ENVIRONMENT_INTENSITY
+  const environmentIntensity =
+    BAKED_ENVIRONMENT_INTENSITY * visualSettings.hdriBrightness
   const fallbackProbeCoefficientTextures = useProbeCoefficientTextures(
     layout,
     []
@@ -16064,6 +16404,12 @@ function Scene({
     () => new Set(displayedOpenGateIds),
     [displayedOpenGateIds]
   )
+
+  useEffect(() => {
+    scene.backgroundIntensity = environmentIntensity
+    scene.environmentIntensity = 0
+  }, [environmentIntensity, scene])
+
   const closedGateIds = useMemo(() => new Set<string>(), [])
   const stagedRenderedLayouts = useMemo(
     () => renderedLayouts,
@@ -17146,7 +17492,9 @@ function Scene({
   const ambientOcclusionActive = isAmbientOcclusionActive(visualSettings)
   const bloomActive = isEffectActive(visualSettings.bloom)
   const depthOfFieldActive = isDepthOfFieldActive(visualSettings.depthOfField)
-  const lensFlareActive = isEffectActive(visualSettings.lensFlare)
+  const lensFlareActive =
+    visualSettings.lensFlare.enabled &&
+    visualSettings.lensFlare.opacity > EFFECT_EPSILON
   const fogAmbientColor = useMemo(
     () => colorFromHex(visualSettings.volumetricAmbientHex),
     [visualSettings.volumetricAmbientHex]
@@ -17219,7 +17567,7 @@ function Scene({
   return (
     <>
       <ambientLight intensity={visualSettings.unlitMode ? 1 : 0} />
-      <SceneEnvironmentBackground />
+      <SceneEnvironmentBackground intensity={environmentIntensity} />
       <VolumetricShadowContext.Provider value={visualSettings.volumetricShadowsEnabled}>
         {runtimeRenderedLayouts.map((renderedLayout) => {
           const isActive = renderedLayout.maze.id === layout.maze.id
@@ -17243,6 +17591,7 @@ function Scene({
               key={`runtime-level-${renderedLayout.maze.id}`}
               layout={renderedLayout}
               lightmapContributionIntensity={runtimeLightmapIntensity}
+              minotaurAlbedoHex={visualSettings.minotaurAlbedoHex}
               monsterEyes={visualSettings.monsterEyes}
               mountAllGeometry={startupGeometryExpanded}
               onLightingResourcesChange={handleLevelLightingResourcesChange}
@@ -17352,6 +17701,7 @@ function Scene({
         {vignetteActive ? (
           <AnimatedVignette settings={visualSettings.vignette} />
         ) : null}
+        <SaturationEffectPrimitive saturation={visualSettings.saturation} />
         <ExposureEffectPrimitive
           exposure={getRendererExposure(visualSettings.exposureStops)}
           noiseIntensity={visualSettings.vignette.exposureNoiseIntensity}
@@ -17479,6 +17829,7 @@ function VisualControls({
   onEffectSettingChange,
   onFogAmbientHexChange,
   onLensFlareSettingChange,
+  onMinotaurAlbedoHexChange,
   onMonsterEyeOffsetChange,
   onProbeDebugModeChange,
   onResetAnamorphicSettings,
@@ -17516,6 +17867,7 @@ function VisualControls({
   ) => void
   onFogAmbientHexChange: (value: string) => void
   onLensFlareSettingChange: (patch: Partial<LensFlareSettings>) => void
+  onMinotaurAlbedoHexChange: (value: string) => void
   onMonsterEyeOffsetChange: (
     monsterType: MonsterType,
     eye: 'left' | 'right',
@@ -17677,6 +18029,42 @@ function VisualControls({
           step={0.25}
           type="range"
           value={visualSettings.exposureStops}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.hdriBrightness.toFixed(2)}x</output>
+        <ResettableLabel onReset={() => onResetScalarSetting('hdriBrightness')}>
+          HDRI Brightness
+        </ResettableLabel>
+        <input
+          aria-label="HDRI Brightness"
+          max={4}
+          min={0}
+          onChange={(event) => {
+            onScalarSettingChange('hdriBrightness', Number(event.target.value))
+          }}
+          step={0.05}
+          type="range"
+          value={visualSettings.hdriBrightness}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.saturation.toFixed(2)}</output>
+        <ResettableLabel onReset={() => onResetScalarSetting('saturation')}>
+          Saturation
+        </ResettableLabel>
+        <input
+          aria-label="Saturation"
+          max={1}
+          min={0}
+          onChange={(event) => {
+            onScalarSettingChange('saturation', Number(event.target.value))
+          }}
+          step={0.01}
+          type="range"
+          value={visualSettings.saturation}
         />
           </label>
 
@@ -18412,7 +18800,7 @@ function VisualControls({
           <div className="visual-control-row">
         <output>
           {visualSettings.lensFlare.enabled
-            ? visualSettings.lensFlare.intensity.toFixed(3)
+            ? visualSettings.lensFlare.opacity.toFixed(4)
             : 'off'}
         </output>
         <label className="visual-effect-label">
@@ -18427,34 +18815,13 @@ function VisualControls({
           />
           <ResettableLabel onReset={() => {
             onResetLensFlareSetting('enabled')
-            onResetLensFlareSetting('intensity')
+            onResetLensFlareSetting('opacity')
           }}>
             Lens Flares
           </ResettableLabel>
         </label>
         <input
-          aria-label="Lens Flares Intensity"
-          disabled={!visualSettings.lensFlare.enabled}
-          max={1}
-          min={0}
-          onChange={(event) => {
-            onLensFlareSettingChange({
-              intensity: Number(event.target.value)
-            })
-          }}
-          step={0.0005}
-          type="number"
-          value={visualSettings.lensFlare.intensity}
-        />
-          </div>
-
-          <label className="visual-control-row">
-        <output>{visualSettings.lensFlare.opacity.toFixed(2)}</output>
-        <ResettableLabel onReset={() => onResetLensFlareSetting('opacity')}>
-          Flare Opacity
-        </ResettableLabel>
-        <input
-          aria-label="Flare Opacity"
+          aria-label="Lens Flare Strength"
           disabled={!visualSettings.lensFlare.enabled}
           max={1}
           min={0}
@@ -18463,11 +18830,11 @@ function VisualControls({
               opacity: Number(event.target.value)
             })
           }}
-          step={0.01}
-          type="range"
+          step={0.0005}
+          type="number"
           value={visualSettings.lensFlare.opacity}
         />
-          </label>
+          </div>
 
           <label className="visual-control-row">
         <output>{visualSettings.lensFlare.flareSize.toFixed(4)}</output>
@@ -18613,6 +18980,27 @@ function VisualControls({
           step={1}
           type="range"
           value={visualSettings.lensFlare.starPoints}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.lensFlare.starBurstIntensity.toFixed(2)}</output>
+        <ResettableLabel onReset={() => onResetLensFlareSetting('starBurstIntensity')}>
+          Star Burst Intensity
+        </ResettableLabel>
+        <input
+          aria-label="Star Burst Intensity"
+          disabled={!visualSettings.lensFlare.enabled}
+          max={2}
+          min={0}
+          onChange={(event) => {
+            onLensFlareSettingChange({
+              starBurstIntensity: Number(event.target.value)
+            })
+          }}
+          step={0.01}
+          type="range"
+          value={visualSettings.lensFlare.starBurstIntensity}
         />
           </label>
 
@@ -19128,6 +19516,21 @@ function VisualControls({
 
       {activeTab === 'eyes' ? (
         <>
+          <label className="visual-control-row">
+            <output aria-hidden="true">{normalizeHexColor(visualSettings.minotaurAlbedoHex, DEFAULT_MINOTAUR_ALBEDO_HEX)}</output>
+            <ResettableLabel onReset={() => onMinotaurAlbedoHexChange(DEFAULT_MINOTAUR_ALBEDO_HEX)}>
+              Minotaur Albedo
+            </ResettableLabel>
+            <input
+              aria-label="Minotaur Albedo"
+              onChange={(event) => {
+                onMinotaurAlbedoHexChange(event.target.value)
+              }}
+              type="color"
+              value={normalizeHexColor(visualSettings.minotaurAlbedoHex, DEFAULT_MINOTAUR_ALBEDO_HEX)}
+            />
+          </label>
+
           {MONSTER_EYE_TYPES.flatMap((monsterType) =>
             (['left', 'right'] as const).flatMap((eye) =>
               (['x', 'y', 'z'] as const).map((axis) => {
@@ -19230,6 +19633,9 @@ function CreditsModal({
         </p>
         <p>
           "Bronze Sword Mycean" (<a href="https://skfb.ly/6RZxG">https://skfb.ly/6RZxG</a>) by Ryoce is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
+        </p>
+        <p>
+          "Priest's Throne" (<a href="https://skfb.ly/QH8R">https://skfb.ly/QH8R</a>) by cachgill is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
         </p>
         <p>
           "Metal Rust" texture pack (<a href="https://www.sharetextures.com/textures/metal/metal-rust">https://www.sharetextures.com/textures/metal/metal-rust</a>) by ShareTextures is used under the ShareTextures license.
@@ -20105,10 +20511,14 @@ export default function App() {
   const onLensFlareSettingChange = (patch: Partial<LensFlareSettings>) => {
     setVisualSettings((current) => ({
       ...current,
-      lensFlare: {
-        ...current.lensFlare,
-        ...patch
-      }
+      lensFlare: applyLensFlareSettingsPatch(current.lensFlare, patch)
+    }))
+  }
+
+  const onMinotaurAlbedoHexChange = (value: string) => {
+    setVisualSettings((current) => ({
+      ...current,
+      minotaurAlbedoHex: normalizeHexColor(value, current.minotaurAlbedoHex)
     }))
   }
 
@@ -20570,6 +20980,7 @@ export default function App() {
         onEffectSettingChange={onEffectSettingChange}
         onFogAmbientHexChange={onFogAmbientHexChange}
         onLensFlareSettingChange={onLensFlareSettingChange}
+        onMinotaurAlbedoHexChange={onMinotaurAlbedoHexChange}
         onMonsterEyeOffsetChange={onMonsterEyeOffsetChange}
         onProbeDebugModeChange={onProbeDebugModeChange}
         onResetAnamorphicSettings={onResetAnamorphicSettings}

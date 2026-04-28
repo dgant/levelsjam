@@ -81,11 +81,17 @@ test('runtime imported model GLTFs use ORM material texture convention', () => {
 test('gate dynamic volumetric material variant stays under the WebGL sampler budget', () => {
   const webglFragmentSamplerBudget = 16
   const gateRuntimeMaterialSamplers = 4
+  const doorRuntimeMaterialSamplers = 5
   const localReflectionProbeSamplers = 4
   const dynamicVolumetricCoefficientSamplers = 4
   const dynamicVolumetricConnectivitySamplers = 1
   const estimatedGateSamplerCount =
     gateRuntimeMaterialSamplers +
+    localReflectionProbeSamplers +
+    dynamicVolumetricCoefficientSamplers +
+    dynamicVolumetricConnectivitySamplers
+  const estimatedDoorSamplerCount =
+    doorRuntimeMaterialSamplers +
     localReflectionProbeSamplers +
     dynamicVolumetricCoefficientSamplers +
     dynamicVolumetricConnectivitySamplers
@@ -106,9 +112,53 @@ test('gate dynamic volumetric material variant stays under the WebGL sampler bud
     `gate material should use no more than ${webglFragmentSamplerBudget} fragment samplers`
   )
   assert.ok(
+    estimatedDoorSamplerCount <= webglFragmentSamplerBudget,
+    `door material should use no more than ${webglFragmentSamplerBudget} fragment samplers`
+  )
+  assert.ok(
     estimatedGateSamplerCount + 6 > webglFragmentSamplerBudget,
     'the test should cover the previous six-sampler depth-atlas pressure that made gates disappear'
   )
+})
+
+test('doors use runtime metal-rust ORM and baked dynamic lighting', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(appSource, /const DOOR_TEXTURE_URLS = \{/)
+  assert.match(
+    appSource,
+    /textures\/runtime\/metal-rust\/metal_rust_orm-1K\.png/,
+    'door material should bind the runtime ORM texture'
+  )
+  assert.doesNotMatch(
+    appSource,
+    /1K-metal_rust-specular\.jpg|1K-metal_rust-roughness\.jpg/,
+    'door material should not bind source specular or roughness images directly'
+  )
+  assert.match(
+    appSource,
+    /vlmMode: hasProbeCoefficients \? 'boundary8' : 'disabled'/,
+    'doors should receive volumetric-lightmap diffuse lighting'
+  )
+  assert.match(
+    appSource,
+    /radianceMode: hasProbeTextures \? 'constant' : 'disabled'/,
+    'doors should receive local reflection-probe radiance'
+  )
+  assert.match(
+    appSource,
+    /isOpen=\{false\}/,
+    'maze entrance doors should start visually closed'
+  )
+})
+
+test('lens flare controls do not use app-side giant multipliers', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.doesNotMatch(appSource, /LENS_FLARE_COLOR_GAIN|LENS_FLARE_INTENSITY_SCALE/)
+  assert.match(appSource, /Lens Flare Strength/)
+  assert.match(appSource, /Star Burst Intensity/)
+  assert.doesNotMatch(appSource, /Flare Opacity/)
 })
 
 test('minotaur runtime materials use the authored dark base tint', () => {

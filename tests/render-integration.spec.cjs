@@ -346,12 +346,12 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByRole('slider', { name: 'Bloom Resolution' })).toHaveValue('0.25')
 
     await page.getByRole('button', { name: 'Flares' }).click()
-    await expect(page.getByRole('spinbutton', { name: 'Lens Flares Intensity' })).toHaveValue('0.002')
-    await expect(page.getByRole('slider', { name: 'Flare Opacity' })).toHaveValue('0.01')
+    await expect(page.getByRole('spinbutton', { name: 'Lens Flare Strength' })).toHaveValue('0.01')
     await expect(page.getByRole('slider', { name: 'Flare Size' })).toHaveValue('0.0015')
     await expect(page.getByRole('slider', { name: 'Glare Size' })).toHaveValue('0')
     await expect(page.getByRole('slider', { name: 'Ghost Scale' })).toHaveValue('0')
     await expect(page.getByRole('slider', { name: 'Flare Shape' })).toHaveValue('0.03')
+    await expect(page.getByRole('slider', { name: 'Star Burst Intensity' })).toHaveValue('1')
 
     await page.getByRole('button', { name: 'Vignette' }).click()
     await expect(page.getByRole('slider', { name: 'Vignette Intensity' })).toHaveValue('0.6')
@@ -809,8 +809,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     })
     await page.waitForTimeout(200)
     await setCheckbox(page, 'Lens Flares', true)
-    await setNumberInput(page, 'Lens Flares Intensity', 0)
-    await setSlider(page, 'Flare Opacity', 1)
+    await setNumberInput(page, 'Lens Flare Strength', 0)
     await setSlider(page, 'Flare Size', 0.05)
     await setSlider(page, 'Glare Size', 0.1)
     await page.keyboard.press('Backquote')
@@ -826,7 +825,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     )
     await page.keyboard.press('Backquote')
     await page.getByRole('button', { name: 'Flares' }).click()
-    await setNumberInput(page, 'Lens Flares Intensity', 1)
+    await setNumberInput(page, 'Lens Flare Strength', 1)
     await page.keyboard.press('Backquote')
     await page.waitForTimeout(500)
     const lensFlareOnFrame = await screenshotCanvasRegion(

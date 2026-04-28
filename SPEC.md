@@ -245,6 +245,9 @@
 - The runtime uses offline-resized `512x512` gate textures instead of the oversized source textures.
 - Each maze entrance edge has a door that follows the same blocking and opening rules as gates.
 - Each door is rendered as two metal cubes using the `textures/metal_rust-1K` PBR texture pack at the same world texel density as walls.
+- Each door uses a runtime-prepared ORM texture for occlusion, roughness, and metalness instead of binding the source specular texture as roughness.
+- Each door receives local volumetric-lightmap illumination and local reflection-probe response so it renders visibly under the baked lighting stack rather than as black unlit metal.
+- Doors start visually closed like gates and do not open merely because the player begins in or steps onto the entrance cell.
 - Each closed door fills its `2m x 2m` entrance edge using two `1m` long, `2m` tall leaves, each with half the wall thickness.
 - Each open door slides its two leaves `0.75m` apart along the doorway edge, leaving a `1.5m` opening.
 - Door open and close animations last `250ms` and participate in the same queued-animation speed scaling as player, monster, and gate animations.
@@ -382,7 +385,7 @@
 - Bloom defaults to enabled with intensity `1.0`, kernel `Huge`, threshold `0.7`, smoothing `0.5`, and resolution scale `0.25x`.
 - Bloom preserves the same effective scene color precision when enabled at zero or near-zero contribution and must not introduce visible color banding merely by being enabled.
 - Depth of Field defaults to disabled.
-- Lens Flares default to enabled with intensity `0.002`, opacity `0.01`, flare size `0.0015`, glare size `0`, ghost scale `0`, flare shape `0.03`, animated mode off, anamorphic mode on, extra streaks off, secondary ghosts on, star points `3`, and star burst off.
+- Lens Flares default to enabled with strength `0.01`, flare size `0.0015`, glare size `0`, ghost scale `0`, flare shape `0.03`, animated mode off, anamorphic mode on, extra streaks off, secondary ghosts on, star points `3`, star burst off, and star-burst intensity `1.0`.
 - SSR defaults to disabled.
 - Ambient Occlusion defaults to `N8AO` with a radius of `1m`.
 - Vignette defaults to enabled with intensity `0.6`.
@@ -496,6 +499,7 @@
 - The current reflection probes are authored-baseline offline captures rather than live-recaptured responses to every debug-slider change.
 - The visible skybox remains the authored HDRI even when local reflection probes drive material reflections.
 - The visible skybox and the baked environment lighting use the same calibrated HDRI intensity path.
+- The debug controls panel includes a live HDRI brightness slider that adjusts the visible skybox brightness without triggering rebakes or changing baked lighting artifacts.
 - The torch and sky-source bake intensities are pre-scaled from the legacy `-4.5` stop baseline so runtime `Exposure 0.0` preserves the previously approved lighting balance without needing an extra exposure offset.
 - The ground and walls use extracted PBR texture packs with tiling based on a 1 meter world scale unless a source specifies otherwise.
 - Maze wall materials do not add direct runtime scene-environment diffuse lighting on top of their baked diffuse lightmaps.
@@ -564,6 +568,8 @@
 - Lens-flare visibility rejects torch lights that are occluded by maze walls or monsters.
 - Lens-flare occlusion ray tests ignore torch billboards and sconce fixture meshes.
 - Lens-flare bokeh and ghosts remain translucent and additive rather than appearing as opaque black or opaque solid sprites.
+- Lens-flare strength is controlled by a single user-facing strength slider with no hidden large app-side gain multiplier.
+- Lens-flare star-burst contribution has its own live intensity control.
 - Lens-flare controls expose the actual high-impact flare parameters with ranges that allow meaningful adjustment near zero as well as visibly strong flares at the top of the range.
 - Increasing or decreasing volumetric fog or smoke parameters produces a visible corresponding change in the full-scene fog volume.
 - Volumetric fog is implemented with one runtime fog effect over the rendered world instead of one expensive full-screen fog pass per rendered level.
@@ -601,11 +607,14 @@
 - The credits modal includes `"Head of a Bull" (https://skfb.ly/6TOXX) by Kirk Hiatt is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
 - The credits modal includes `"Metal Gate" (https://skfb.ly/oK7QR) by i bull your wife is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
 - The credits modal includes `"Bronze Sword Mycean" (https://skfb.ly/6RZxG) by Ryoce is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
+- The credits modal includes `"Priest's Throne" (https://skfb.ly/QH8R) by cachgill is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
 - The credits modal includes the ShareTextures `metal-rust` texture pack credit for `https://www.sharetextures.com/textures/metal/metal-rust`.
 
 ## Debug Controls
 - The debug controls panel can be opened and closed with backquote.
 - The debug controls panel exposes exposure.
+- The debug controls panel exposes HDRI brightness as a live scalar control.
+- The debug controls panel exposes saturation from `0` for luminance grayscale to `1` for unchanged color, defaulting to `1`.
 - The debug controls panel exposes the camera field of view as a live slider with a maximum of `120` degrees.
 - The debug controls panel camera field-of-view slider defaults to `80` degrees.
 - Free-camera inspection mode is toggled with `F1`, where `WASD` and arrow keys move freely with mouselook detached from the turn-based player.
@@ -622,9 +631,10 @@
 - The bloom tab exposes enabled state and all useful bloom parameters, including intensity, threshold, smoothing, resolution scale, and kernel size.
 - Bloom starts disabled by default.
 - The depth-of-field tab exposes enabled state and all useful depth-of-field parameters, including `focusDistance`, `focalLength`, `bokehScale`, and resolution scale.
-- The lens-flare tab exposes enabled state and all useful flare parameters needed to tune visibility and opacity, including flare size, glare size, ghost scale, halo scale, star-point count, and the wrapped effect's animated and anamorphic toggles.
-- Lens flares start enabled by default with intensity `0.002`, flare opacity `0.01`, flare size `0.0015`, three star points, and secondary ghosts enabled.
-- The lens-flare intensity debug control is an editable numeric input so very small values can be typed exactly.
+- The lens-flare tab exposes enabled state and all useful flare parameters needed to tune visibility and shape, including a single strength control, flare size, glare size, ghost scale, halo scale, star-burst intensity, star-point count, and the wrapped effect's animated and anamorphic toggles.
+- Lens flares start enabled by default with strength `0.01`, flare size `0.0015`, three star points, secondary ghosts enabled, and star-burst intensity `1.0`.
+- The lens-flare strength debug control is an editable numeric input so very small values can be typed exactly.
+- The monster debug tab exposes a minotaur albedo color picker with `#2b2130` as the default color.
 - The SSR tab exposes enabled state and the core canonical tuning parameters needed to tune its documented implementation, including opacity, distance, thickness, resolution scale, and pass output mode.
 - The volumetric-fog tab exposes enabled state and the core fog parameters needed to tune its probe-lit volume implementation, including amount and noise frequency.
 - The volumetric-fog tab also exposes the high-impact density-shaping parameters needed to tune the current implementation, including noise strength, height falloff, lighting strength, and ray-march step count; the default ray-march count is `6`.

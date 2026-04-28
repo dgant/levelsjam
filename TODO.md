@@ -375,3 +375,13 @@ Regenerate the mazes, and give each one randomly placed minotaur, wolf, spider (
 [x] Monsters should never go to sleep if they have line of sight of the player. Monsters have line of sight through gates. When a minotaur is taking its turn, and it has line of sight with the player through a gate that is blocking it, it should "attempt" the move and fail (animate a failed move the same way we animate it for the player trying to walk through a wall).
 [x] Fog noise should be truly 3D. Create a 3D noise volume texture (on disk) and sample that for the fog noise. 
 [x] Doors are rendering as completely black. Are they missing their material? They should be using metal_rust-1K
+[x] Doors should be closed by default like gates but are not. That was not fixed at all. Literally the first door in the game, outside Entrance, starts open when it should be closed. Don't just gloss over it this time.
+[x] Add a debug slider for HDRI brightness
+[x] Add a color picker for minotaur albedo
+[x] I suspect there's some huge multiplier on lens flare intensity, like 10x, 100x, or 1000x, that's causing the lens flares to require extremely tiny settings to not be overwhelmingly bright. Investigate and remove any such huge multiplier if it exists so we can use less extreme intensity settings
+[x] Add a saturation slider to the debug menu, from 0 (fully desaturated by luminance) to 1 (no effect), defaulting to 1
+
+[x] Add a credit: "Priest's Throne" (https://skfb.ly/QH8R) by cachgill is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
+[x] Remove the LENS_FLARE_COLOR_GAIN and LENS_FLARE_INTENSITY_SCALE multipliers
+[x] Collapse the redundant Lens Flares adjuster with the Flare Opacity slider into a single slider control
+[x] Introduce a controllable Star Burst intensity and debug slider (default to 1.0)
