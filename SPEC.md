@@ -29,6 +29,7 @@
 - Rendered level groups are resource and visibility groups only; changing the player's current level focus must not remount the scene, reset startup readiness, replace global rules state, or change camera-attached held-item rendering.
 - Full-screen effects and global render passes sample currently resident world resources rather than a single active level's resources.
 - Volumetric fog is level-agnostic at runtime and samples the currently resident world-space volumetric-lightmap resources.
+- Runtime volumetric-fog passes must stay within the browser's fragment texture-sampler budget when multiple rendered levels are resident; per-level fog resources are isolated into pass-safe shader programs or packed into a shared resource rather than merged into one over-budget effect shader.
 - Lens flares are level-agnostic at runtime and choose from the currently rendered visible torch billboards/lights, regardless of the level that authored them.
 - Reflection and volumetric probe debug visualization shows all currently loaded/rendered probes rather than only the active level's probes.
 - Walking across a level boundary updates only the active debug/resource-priority focus and any rules context needed to interpret the player's current world cell.

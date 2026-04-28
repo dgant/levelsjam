@@ -9368,6 +9368,7 @@ function FogVolume({
   const scene = useThree((state) => state.scene)
   const volumetricShadowsEnabled = useContext(VolumetricShadowContext)
   const effect = useMemo(() => new FogVolumeEffectImpl(), [])
+  const pass = useMemo(() => new EffectPass(camera, effect as unknown as Effect), [camera, effect])
   const fogNoiseTexture = useFogNoiseTexture()
   const probeBounds = useMemo(() => {
     const firstProbe = layout.reflectionProbes[0]?.position
@@ -9523,9 +9524,9 @@ function FogVolume({
     }
   })
 
-  useEffect(() => () => effect.dispose(), [effect])
+  useEffect(() => () => pass.dispose(), [pass])
 
-  return visible ? <primitive object={effect as unknown as Effect} /> : null
+  return visible ? <primitive object={pass} /> : null
 }
 
 function ReflectionProbeVisualization({
@@ -20617,7 +20618,8 @@ export default function App() {
             gl={{ antialias: true }}
             onCreated={({ gl }) => {
               recordStartupMarker('canvasCreatedAt')
-              gl.debug.checkShaderErrors = false
+              gl.debug.checkShaderErrors =
+                new URLSearchParams(window.location.search).has('debugShaderErrors')
               gl.outputColorSpace = SRGBColorSpace
               gl.toneMapping = NoToneMapping
               gl.toneMappingExposure = 1

@@ -1808,6 +1808,100 @@ test('four forward moves keep Chamber 1 surfaces lit with postprocessing disable
   expect(pageErrors).toEqual([])
 })
 
+test('default postprocessing survives the Entrance to Chamber 1 transition', async ({ page }) => {
+  const badConsoleMessages = []
+  const pageErrors = []
+
+  page.on('console', (message) => {
+    const text = message.text()
+
+    if (
+      /Shader Error|VALIDATE_STATUS false|texture image units count exceeds|useProgram: program not valid/i.test(text)
+    ) {
+      badConsoleMessages.push(text)
+    }
+  })
+
+  page.on('pageerror', (error) => {
+    pageErrors.push(String(error))
+  })
+
+  await page.goto('/?debugShaderErrors=1', { waitUntil: 'domcontentloaded' })
+  await page.waitForFunction(
+    () => document.querySelector('canvas')?.dataset.sceneReady === 'true',
+    undefined,
+    { timeout: 30_000 }
+  )
+  await page.waitForFunction(
+    () => window.__levelsjamDebug?.getReplayControllerState?.()?.inputEnabled === true,
+    undefined,
+    { timeout: 10_000 }
+  )
+
+  const expectedStates = [
+    { maze: 'entrance', cell: { x: 1, y: 1 } },
+    { maze: 'entrance', cell: { x: 1, y: 0 } },
+    { maze: 'chamber-1', cell: { x: 2, y: 17 } },
+    { maze: 'chamber-1', cell: { x: 2, y: 16 } }
+  ]
+
+  for (const expectedState of expectedStates) {
+    await page.keyboard.press('KeyW')
+    await page.waitForFunction(
+      (state) => {
+        const lifecycle = window.__levelsjamDebug?.getMazeLifecycleState?.()
+        const player = window.__levelsjamDebug?.getTurnStateSummary?.()?.player
+
+        return lifecycle?.instantiatedMazeId === state.maze &&
+          player?.cell?.x === state.cell.x &&
+          player?.cell?.y === state.cell.y
+      },
+      expectedState,
+      { timeout: 10_000 }
+    )
+    await page.waitForTimeout(100)
+  }
+
+  await page.waitForFunction(
+    () => Object.keys(window.__levelsjamDebug?.getFogState?.()?.byLevel ?? {}).length >= 6,
+    undefined,
+    { timeout: 10_000 }
+  )
+  await page.waitForTimeout(500)
+  const state = await page.evaluate(() => ({
+    fog: window.__levelsjamDebug?.getFogState?.() ?? null,
+    ground: window.__levelsjamDebug?.getDebugMeshState?.('maze-ground-lightmap', 0) ?? null,
+    lifecycle: window.__levelsjamDebug?.getMazeLifecycleState?.() ?? null,
+    settings: window.__levelsjamDebug?.getVisualSettings?.() ?? null,
+    turn: window.__levelsjamDebug?.getTurnStateSummary?.() ?? null,
+    wall: window.__levelsjamDebug?.getDebugMeshState?.('maze-wall', 0) ?? null,
+    worldLighting: window.__levelsjamDebug?.getWorldLightingState?.() ?? null
+  }))
+
+  expect(state.lifecycle.instantiatedMazeId).toBe('chamber-1')
+  expect(state.turn.player.cell).toEqual({ x: 2, y: 16 })
+  expect(state.settings.volumetricLighting.enabled).toBe(true)
+  expect(Object.keys(state.fog?.byLevel ?? {})).toEqual(
+    expect.arrayContaining(['entrance', 'chamber-1', 'maze-001', 'maze-002', 'maze-003', 'maze-005'])
+  )
+  expect(state.worldLighting).toMatchObject({
+    activeMazeId: 'chamber-1',
+    ready: true
+  })
+  expect(state.wall).toMatchObject({
+    hasLightMap: true,
+    visible: true
+  })
+  expect(state.wall.lightMapIntensity).toBeGreaterThan(0)
+  expect(state.ground).toMatchObject({
+    hasLightMap: true,
+    visible: true
+  })
+  expect(state.ground.lightMapIntensity).toBeGreaterThan(0)
+  expect(badConsoleMessages).toEqual([])
+  expect(pageErrors).toEqual([])
+})
+
 test('startup turn input waits for streamed lighting resources before moving', async ({ page }) => {
   const consoleErrors = []
   const pageErrors = []
@@ -2088,9 +2182,21 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByRole('spinbutton', { name: 'minotaur left eye X' })).toBeVisible()
     await expect(page.getByRole('slider', { name: 'Exposure' })).not.toBeVisible()
 
-    const swordStrikeFadeState = await page.evaluate(async () => {
+    await page.evaluate(() => {
       document.body.dataset.playerEffect = 'sword-strike'
-      await new Promise((resolve) => setTimeout(resolve, 150))
+    })
+    await expect
+      .poll(
+        async () => page.evaluate(() =>
+          window.__levelsjamDebug.getPlayerFadeState()?.alpha ?? 0
+        ),
+        {
+          timeout: 1_000,
+          intervals: [25, 50, 100]
+        }
+      )
+      .toBeGreaterThan(0.9)
+    const swordStrikeFadeState = await page.evaluate(async () => {
       const fadeIn = window.__levelsjamDebug.getPlayerFadeState()
       document.body.dataset.playerEffect = 'sword-strike-out'
       await new Promise((resolve) => requestAnimationFrame(resolve))
