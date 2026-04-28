@@ -52,6 +52,10 @@
 - Runtime lighting resources remain published for every mounted rendered level until that level unmounts; changing which level has debug focus must not temporarily clear surface-lightmap, volumetric-lightmap, or reflection-probe bindings.
 - The loading overlay remains up until every level rendered in the initial current-level neighborhood has its own surface lightmap and startup probe resources ready, so the first ordinary boundary crossing cannot reveal unlit destination-level geometry.
 - When a destination level is already in the rendered neighborhood, walking into it must preserve its existing lighting resource bindings rather than remounting, clearing, or reprioritizing them in a way that changes visible lighting.
+- Runtime global lighting state is a world-space registry of all currently rendered levels' lighting resources; the active level is only a gameplay/debug focus and is not the source of truth for whether world lighting exists.
+- Surface lightmap sampling is mesh-owner-local: each level-owned wall and floor mesh samples only its owning level's surface-lightmap atlas through that mesh's authored lightmap UVs.
+- Volumetric, fog, reflection, and debug consumers use the world lighting registry or their owning rendered level's resource entry rather than reading an implicit active-level singleton.
+- Debug reflection-probe readiness reports aggregate world lighting readiness across all rendered levels, while per-level readiness remains inspectable separately.
 - When precomputed visibility is enabled and the player's current visible cell set includes a level transition cell, the adjacent streamed level renders the cells that are precomputed-visible from that adjacent level's ingress cell rather than rendering the entire adjacent maze.
 - When precomputed visibility is disabled, adjacent streamed levels may render their full geometry for debugging.
 - Level-boundary walls that face playable cells render with the same visibility and baked-lightmap treatment as ordinary interior-facing walls.

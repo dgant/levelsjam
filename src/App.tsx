@@ -1996,6 +1996,13 @@ type RuntimeReflectionProbeState = {
   textureMemoryBudgetBytes?: number
 }
 
+type WorldLightingRegistryEntry = {
+  isActive: boolean
+  mazeId: string
+  resources: RuntimeLevelLightingResources
+  transform: LevelWorldTransform
+}
+
 type ProbeBlendConfig = {
   diffuseIntensity?: number
   mode: ProbeBlendMode
@@ -6460,6 +6467,60 @@ function createInitialRuntimeReflectionProbeState(
     startupVolumetricProbeCount: 0,
     startupVolumetricProbeIndices: [],
     textureMemoryBudgetBytes: REFLECTION_PROBE_RUNTIME_TEXTURE_MEMORY_BUDGET_BYTES
+  }
+}
+
+function createWorldReflectionProbeState(
+  entries: WorldLightingRegistryEntry[]
+): RuntimeReflectionProbeState {
+  const loadedEntries = entries.filter((entry) => entry.resources)
+  const readyEntries = loadedEntries.filter(
+    (entry) =>
+      entry.resources.surfaceLightmap.ready &&
+      entry.resources.reflectionProbeState.ready
+  )
+  const activeEntry = loadedEntries.find((entry) => entry.isActive) ?? loadedEntries[0] ?? null
+
+  return {
+    activeProbeId: activeEntry?.mazeId ?? null,
+    complete: loadedEntries.length > 0 &&
+      loadedEntries.every((entry) => entry.resources.reflectionProbeState.complete !== false),
+    loadedProbeCount: loadedEntries.reduce(
+      (count, entry) => count + (entry.resources.reflectionProbeState.loadedProbeCount ?? 0),
+      0
+    ),
+    loadedVolumetricProbeCount: loadedEntries.reduce(
+      (count, entry) =>
+        count + (entry.resources.reflectionProbeState.loadedVolumetricProbeCount ?? 0),
+      0
+    ),
+    priorityProbeIndices: activeEntry?.resources.reflectionProbeState.priorityProbeIndices ?? [],
+    probeCount: loadedEntries.reduce(
+      (count, entry) => count + entry.resources.reflectionProbeState.probeCount,
+      0
+    ),
+    probeTextureUUIDs: loadedEntries.flatMap(
+      (entry) => entry.resources.reflectionProbeState.probeTextureUUIDs ?? []
+    ),
+    ready: loadedEntries.length > 0 && readyEntries.length === loadedEntries.length,
+    requestedResidentProbeIndices:
+      activeEntry?.resources.reflectionProbeState.requestedResidentProbeIndices ?? [],
+    residentProbeLimit: loadedEntries.reduce(
+      (count, entry) => count + (entry.resources.reflectionProbeState.residentProbeLimit ?? 0),
+      0
+    ),
+    startupVolumetricProbeCount: loadedEntries.reduce(
+      (count, entry) =>
+        count + (entry.resources.reflectionProbeState.startupVolumetricProbeCount ?? 0),
+      0
+    ),
+    startupVolumetricProbeIndices:
+      activeEntry?.resources.reflectionProbeState.startupVolumetricProbeIndices ?? [],
+    textureMemoryBudgetBytes: loadedEntries.reduce(
+      (count, entry) =>
+        count + (entry.resources.reflectionProbeState.textureMemoryBudgetBytes ?? 0),
+      0
+    )
   }
 }
 
@@ -15707,6 +15768,9 @@ function RuntimeLevelGeometry({
 }) {
   const scene = useThree((state) => state.scene)
   const lightingResources = useRuntimeLevelLightingResources(layout, priorityPosition)
+  const lightingResourcesReady =
+    lightingResources.surfaceLightmap.ready &&
+    lightingResources.reflectionProbeState.ready
   const computedOpenGateIds = useMemo(
     () => new Set(getOpenGateIds(layout.maze, turnState)),
     [layout.maze, turnState]
@@ -15742,12 +15806,6 @@ function RuntimeLevelGeometry({
   ])
 
   useEffect(() => {
-    if (isActive) {
-      scene.userData.reflectionProbeState = lightingResources.reflectionProbeState
-    }
-  }, [isActive, lightingResources.reflectionProbeState, scene])
-
-  useEffect(() => {
     return () => {
       const userData = scene.userData as typeof scene.userData & {
         levelLightingStatesByLevel?: Record<string, unknown>
@@ -15775,6 +15833,7 @@ function RuntimeLevelGeometry({
           reflectionCaptureExcluded: !isActive,
           streamedLevelId: layout.maze.id
         }}
+        visible={lightingResourcesReady}
       >
         <SceneGeometry
         environmentTexture={lightingResources.environmentTexture}
@@ -15913,6 +15972,13 @@ function Scene({
     () => renderedLayouts,
     [renderedLayouts]
   )
+  const runtimeRenderedLayouts = useMemo(
+    () => [
+      layout,
+      ...stagedRenderedLayouts.filter((renderedLayout) => renderedLayout.maze.id !== layout.maze.id)
+    ],
+    [layout, stagedRenderedLayouts]
+  )
   const handleLevelLightingResourcesChange = useCallback((
     mazeId: string,
     resources: RuntimeLevelLightingResources | null,
@@ -15944,6 +16010,37 @@ function Scene({
       return next
     })
   }, [])
+  const worldLightingRegistry = useMemo<WorldLightingRegistryEntry[]>(
+    () => runtimeRenderedLayouts
+      .map((renderedLayout) => {
+        const resources = levelLightingResources.get(renderedLayout.maze.id)
+
+        if (!resources) {
+          return null
+        }
+
+        return {
+          isActive: renderedLayout.maze.id === layout.maze.id,
+          mazeId: renderedLayout.maze.id,
+          resources,
+          transform: getRuntimeLevelWorldTransform(renderedLayout.maze.id)
+        } satisfies WorldLightingRegistryEntry
+      })
+      .filter((entry): entry is WorldLightingRegistryEntry => Boolean(entry)),
+    [layout.maze.id, levelLightingResources, runtimeRenderedLayouts]
+  )
+
+  useEffect(() => {
+    scene.userData.worldLightingRegistry = worldLightingRegistry
+    scene.userData.reflectionProbeState = createWorldReflectionProbeState(worldLightingRegistry)
+
+    return () => {
+      if (scene.userData.worldLightingRegistry === worldLightingRegistry) {
+        delete scene.userData.worldLightingRegistry
+        delete scene.userData.reflectionProbeState
+      }
+    }
+  }, [scene, worldLightingRegistry])
 
   useEffect(() => {
     let cancelled = false
@@ -16095,6 +16192,16 @@ function Scene({
           surfaceLightmapReady: boolean
           trackedMazeIds: string[]
         }
+        getWorldLightingState?: () => {
+          activeMazeId: string
+          ready: boolean
+          renderedMazeIds: string[]
+          trackedMazeIds: string[]
+          totalLoadedProbeCount: number
+          totalLoadedVolumetricProbeCount: number
+          totalProbeCount: number
+          visibleRenderedMazeIds: string[]
+        }
         setDebugVisible?: (
           role: string,
           index: number,
@@ -16168,6 +16275,19 @@ function Scene({
     }
     const existing = globalWindow.__levelsjamDebug ?? {}
     const debugRoots = [scene]
+    const isEffectivelyVisible = (object: Object3D) => {
+      let current: Object3D | null = object
+
+      while (current) {
+        if (!current.visible) {
+          return false
+        }
+
+        current = current.parent
+      }
+
+      return true
+    }
     let restoreDebugIsolation = () => {}
     const pmremFromCubemap = (renderer: WebGLRenderer, texture: Texture) => {
       const generator = new PMREMGenerator(renderer)
@@ -16244,6 +16364,32 @@ function Scene({
       surfaceLightmapReady: Boolean(activeLightingResources?.surfaceLightmap.ready),
       trackedMazeIds: Array.from(levelLightingResources.keys()).sort()
     })
+    const getWorldLightingState = () => {
+      const worldProbeState = createWorldReflectionProbeState(worldLightingRegistry)
+      const visibleRenderedMazeIds = new Set<string>()
+
+      scene.traverse((object) => {
+        const streamedLevelId = object.userData?.streamedLevelId
+
+        if (
+          typeof streamedLevelId === 'string' &&
+          isEffectivelyVisible(object)
+        ) {
+          visibleRenderedMazeIds.add(streamedLevelId)
+        }
+      })
+
+      return {
+        activeMazeId: layout.maze.id,
+        ready: worldProbeState.ready,
+        renderedMazeIds: runtimeRenderedLayouts.map((renderedLayout) => renderedLayout.maze.id),
+        trackedMazeIds: worldLightingRegistry.map((entry) => entry.mazeId).sort(),
+        totalLoadedProbeCount: worldProbeState.loadedProbeCount ?? 0,
+        totalLoadedVolumetricProbeCount: worldProbeState.loadedVolumetricProbeCount ?? 0,
+        totalProbeCount: worldProbeState.probeCount,
+        visibleRenderedMazeIds: Array.from(visibleRenderedMazeIds).sort()
+      }
+    }
     const getSceneObjectStats = () => {
       const effectivelyVisible: Record<string, number> = {}
       const mounted: Record<string, number> = {}
@@ -16831,6 +16977,7 @@ function Scene({
       getFogState,
       getActiveLightingResourceState,
       getLevelLightingState,
+      getWorldLightingState,
       getReflectionCaptureSceneState: getReflectionCaptureSceneStateDebug,
       getRendererStats: () => ({
         calls: gl.info.render.calls,
@@ -16861,6 +17008,7 @@ function Scene({
       delete globalWindow.__levelsjamDebug.getFogState
       delete globalWindow.__levelsjamDebug.getActiveLightingResourceState
       delete globalWindow.__levelsjamDebug.getLevelLightingState
+      delete globalWindow.__levelsjamDebug.getWorldLightingState
       delete globalWindow.__levelsjamDebug.getReflectionCaptureSceneState
       delete globalWindow.__levelsjamDebug.getRendererStats
       delete globalWindow.__levelsjamDebug.getSceneObjectStats
@@ -16872,7 +17020,20 @@ function Scene({
         delete globalWindow.__levelsjamDebug
       }
     }
-  }, [activeLightingResources, environmentIntensity, environmentTexture, gl, layout, levelLightingResources, reflectionProbeDepthTextures, reflectionProbeRawTextures, reflectionProbeTextures, scene])
+  }, [
+    activeLightingResources,
+    environmentIntensity,
+    environmentTexture,
+    gl,
+    layout,
+    levelLightingResources,
+    reflectionProbeDepthTextures,
+    reflectionProbeRawTextures,
+    reflectionProbeTextures,
+    runtimeRenderedLayouts,
+    scene,
+    worldLightingRegistry
+  ])
 
   const ambientOcclusionActive = isAmbientOcclusionActive(visualSettings)
   const bloomActive = isEffectActive(visualSettings.bloom)
@@ -16946,13 +17107,6 @@ function Scene({
 
     return states
   }, [effectiveVisibilityState, layout.maze, stagedRenderedLayouts])
-  const runtimeRenderedLayouts = useMemo(
-    () => [
-      layout,
-      ...stagedRenderedLayouts.filter((renderedLayout) => renderedLayout.maze.id !== layout.maze.id)
-    ],
-    [layout, stagedRenderedLayouts]
-  )
 
   return (
     <>

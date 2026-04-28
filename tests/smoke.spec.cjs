@@ -1292,7 +1292,8 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
     lifecycle: window.__levelsjamDebug?.getMazeLifecycleState?.() ?? null,
     loadedMazeId: document.body.dataset.loadedMazeId ?? null,
     requestedMazeId: document.body.dataset.requestedMazeId ?? null,
-    turn: window.__levelsjamDebug?.getTurnStateSummary?.() ?? null
+    turn: window.__levelsjamDebug?.getTurnStateSummary?.() ?? null,
+    worldLighting: window.__levelsjamDebug?.getWorldLightingState?.() ?? null
   }))
 
   expect(state).toMatchObject({
@@ -1312,6 +1313,12 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
     surfaceLightmapReady: true
   })
   expect(state.lifecycle.loadedMazeIds).toEqual(expect.arrayContaining(['entrance', 'chamber-1']))
+  expect(state.worldLighting).toMatchObject({
+    activeMazeId: 'entrance',
+    ready: true,
+    renderedMazeIds: expect.arrayContaining(['entrance', 'chamber-1']),
+    trackedMazeIds: expect.arrayContaining(['entrance', 'chamber-1'])
+  })
   expect(state.lighting).toEqual(
     expect.arrayContaining([
       expect.objectContaining({
