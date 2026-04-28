@@ -14419,6 +14419,8 @@ function FlightRig({
   const inputEnabledRef = useRef(inputEnabled)
   const inputEnabledAt = useRef(inputEnabled ? performance.now() : Number.POSITIVE_INFINITY)
   const isLevelLightingReadyRef = useRef(isLevelLightingReady)
+  const levelTransitionCommitTarget = useRef<string | null>(null)
+  const lastSyncedLayoutId = useRef(layout.maze.id)
   const hasInitializedPose = useRef(false)
   const cameraShake = useRef({ amplitude: 0, endsAt: 0 })
   const playerAnimation = useRef<{
@@ -14451,13 +14453,36 @@ function FlightRig({
     ]
   )
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (levelTransitionCommitTarget.current === layout.maze.id) {
+      levelTransitionCommitTarget.current = null
+      delete document.body.dataset.committingLevelTransitionId
+    }
+
     if (replayActive.current || playerAnimation.current) {
       return
     }
 
+    const currentState = turnStateRef.current
+    const layoutChanged = lastSyncedLayoutId.current !== layout.maze.id
+    const propIsOlderTurn = turnState.turn < currentState.turn
+    const propPlayerDiffersAtSameTurn =
+      turnState.turn === currentState.turn &&
+      (
+        turnState.player.cell.x !== currentState.player.cell.x ||
+        turnState.player.cell.y !== currentState.player.cell.y ||
+        turnState.player.direction !== currentState.player.direction ||
+        turnState.player.hasSword !== currentState.player.hasSword ||
+        turnState.player.hasTrophy !== currentState.player.hasTrophy
+      )
+
+    if (!layoutChanged && (propIsOlderTurn || propPlayerDiffersAtSameTurn)) {
+      return
+    }
+
+    lastSyncedLayoutId.current = layout.maze.id
     turnStateRef.current = turnState
-  }, [turnState])
+  }, [layout.maze.id, turnState])
 
   useEffect(() => {
     inputEnabledRef.current = inputEnabled
@@ -15390,6 +15415,7 @@ function FlightRig({
         inputEnabled: inputEnabledRef.current,
         inputEnabledAt: inputEnabledAt.current,
         inputQueueLength: inputQueue.current.length,
+        levelTransitionCommitTarget: levelTransitionCommitTarget.current,
         playerAnimationAction: playerAnimation.current?.action ?? null,
         replayActive: replayActive.current,
         replayQueueLength: replayQueue.current.length
@@ -15498,10 +15524,11 @@ function FlightRig({
     try {
       if (!freeCamera.current) {
       if (!playerAnimation.current) {
-        const replayAction = inputEnabledRef.current
+        const transitionCommitBlocked = levelTransitionCommitTarget.current !== null
+        const replayAction = inputEnabledRef.current && !transitionCommitBlocked
           ? replayQueue.current.shift()
           : undefined
-        const action = inputEnabledRef.current
+        const action = inputEnabledRef.current && !transitionCommitBlocked
           ? replayAction ?? inputQueue.current.shift()
           : undefined
 
@@ -15599,7 +15626,8 @@ function FlightRig({
               delete document.body.dataset.pendingLevelTransitionSince
               playerAnimation.current = null
               turnStateRef.current = activeAnimation.to
-              inputQueue.current = []
+              levelTransitionCommitTarget.current = targetLevelId
+              document.body.dataset.committingLevelTransitionId = targetLevelId
               replayQueue.current = []
               if (replayActive.current) {
                 replayActive.current = false
@@ -15772,6 +15800,7 @@ function FlightRig({
       }
       delete document.body.dataset.pendingLevelTransitionId
       delete document.body.dataset.pendingLevelTransitionSince
+      delete document.body.dataset.committingLevelTransitionId
       onReplayActiveChange(false)
       setDisplayedOpenGateIds([])
     }

@@ -34,6 +34,8 @@
 - Walking across a level boundary updates only the active debug/resource-priority focus and any rules context needed to interpret the player's current world cell.
 - Walking across a connected level boundary preserves the player's world-space position, camera yaw, camera pitch, inventory flags, held-item visibility, and current input flow.
 - Walking across a connected level boundary keeps the player camera continuous through the final frame of the move animation and the first frame of the destination level; the camera must not snap back to the source exit cell before settling in the destination ingress cell.
+- The rendered player/camera controller synchronizes active turn state before the next rendered frame when the active level changes, so it never evaluates source-level cell coordinates under the destination level layout.
+- Buffered movement input may be retained during a seamless boundary handoff, but it is not consumed until the destination level has become the active rendered layout.
 - Only the active gameplay level may render camera-attached held pickup models; adjacent rendered levels may render their ground pickups but must not attach their saved inventory state to the active camera.
 - Camera-attached held pickup models are positioned relative to the camera in continuous world space and must not inherit a rendered level group's transform as an extra offset or rotation.
 - Walking across a connected level boundary updates only the active rules context and streamed-neighborhood bookkeeping; it does not teleport the player, rotate the player, remount the scene, reset the target level, or show pickup items that were not actually picked up.

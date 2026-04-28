@@ -1490,6 +1490,18 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
   expect(Math.abs(transitionedState.camera.yaw - beforeBoundaryMove.camera.yaw)).toBeLessThan(0.001)
   expect(Math.abs(transitionedState.camera.pitch - beforeBoundaryMove.camera.pitch)).toBeLessThan(0.001)
   const transitionSamples = await transitionSamplesPromise
+  const transitionZSamples = transitionSamples
+    .map((sample) => Array.isArray(sample.position) ? sample.position[2] : null)
+    .filter((z) => Number.isFinite(z))
+  let furthestTransitionZ = beforeBoundaryMove.camera.position[2]
+
+  for (const z of transitionZSamples) {
+    if (z < furthestTransitionZ) {
+      furthestTransitionZ = z
+    }
+    expect(z).toBeLessThanOrEqual(furthestTransitionZ + 0.35)
+  }
+
   const firstDestinationFrame = transitionSamples.findIndex(
     (sample) => Array.isArray(sample.position) && sample.position[2] <= -3.8
   )
