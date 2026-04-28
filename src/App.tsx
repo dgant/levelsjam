@@ -15858,7 +15858,6 @@ function Scene({
   recordStartupMarker('sceneRenderStartedAt')
   const [displayedOpenGateIds, setDisplayedOpenGateIds] = useState<string[]>([])
   const [runtimeModelsEnabled, setRuntimeModelsEnabled] = useState(false)
-  const [startupAdjacentLevelsMounted, setStartupAdjacentLevelsMounted] = useState(false)
   const [startupGeometryExpanded, setStartupGeometryExpanded] = useState(false)
   const [startupSceneReady, setStartupSceneReady] = useState(false)
   const runtimeModelsEnabledRef = useRef(false)
@@ -15878,21 +15877,6 @@ function Scene({
     },
     [layout.maze.id, onTurnStateChange]
   )
-  useEffect(() => {
-    if (startupAdjacentLevelsMounted) {
-      return
-    }
-
-    if (!hasReportedBasicAssetsReady.current) {
-      return
-    }
-
-    const handle = window.setTimeout(() => {
-      setStartupAdjacentLevelsMounted(true)
-    }, 250)
-
-    return () => window.clearTimeout(handle)
-  }, [startupAdjacentLevelsMounted, startupSceneReady])
   useEffect(() => {
     recordStartupMarker('sceneMountedAt')
     document.body.dataset.sceneMountCount = String(
@@ -15926,10 +15910,8 @@ function Scene({
   )
   const closedGateIds = useMemo(() => new Set<string>(), [])
   const stagedRenderedLayouts = useMemo(
-    () => startupAdjacentLevelsMounted
-      ? renderedLayouts
-      : renderedLayouts.filter((renderedLayout) => renderedLayout.maze.id === layout.maze.id),
-    [layout.maze.id, renderedLayouts, startupAdjacentLevelsMounted]
+    () => renderedLayouts,
+    [renderedLayouts]
   )
   const handleLevelLightingResourcesChange = useCallback((
     mazeId: string,
@@ -16019,15 +16001,23 @@ function Scene({
       const levelLightingStates = scene.userData.levelLightingStatesByLevel as
         | Record<string, { ready?: boolean; surfaceLightmapReady?: boolean }>
         | undefined
-      const activeLightingState = levelLightingStates?.[layout.maze.id]
-      const activeLightingReady = Boolean(
-        activeLightingState?.ready &&
-        activeLightingState.surfaceLightmapReady
+      const expectedLightingLayouts = stagedRenderedLayouts.length > 0
+        ? stagedRenderedLayouts
+        : [layout]
+      const renderedLightingReady = expectedLightingLayouts.every(
+        (renderedLayout) => {
+          const lightingState = levelLightingStates?.[renderedLayout.maze.id]
+
+          return Boolean(
+            lightingState?.ready &&
+            lightingState.surfaceLightmapReady
+          )
+        }
       )
 
       if (
         !getReflectionCaptureSceneState(scene, layout).ready ||
-        !activeLightingReady
+        !renderedLightingReady
       ) {
         rafId = window.requestAnimationFrame(waitForSceneObjects)
         return
@@ -16061,7 +16051,8 @@ function Scene({
     onAssetsReady,
     scene,
     setRuntimeModelsEnabledState,
-    setStartupGeometryExpandedState
+    setStartupGeometryExpandedState,
+    stagedRenderedLayouts
   ])
 
   useEffect(() => {

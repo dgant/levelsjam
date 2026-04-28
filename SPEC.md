@@ -50,6 +50,8 @@
 - Adjacent rendered levels use their own lightmaps and probe data while they are visible from the current level, so walking across a boundary does not cause lighting bindings to churn or appear unlit until the destination becomes active.
 - Runtime lighting resources are owned and tracked per rendered level id; cleanup from the previously active level must not clear or replace the newly active level's lighting resources during a seamless boundary transition.
 - Runtime lighting resources remain published for every mounted rendered level until that level unmounts; changing which level has debug focus must not temporarily clear surface-lightmap, volumetric-lightmap, or reflection-probe bindings.
+- The loading overlay remains up until every level rendered in the initial current-level neighborhood has its own surface lightmap and startup probe resources ready, so the first ordinary boundary crossing cannot reveal unlit destination-level geometry.
+- When a destination level is already in the rendered neighborhood, walking into it must preserve its existing lighting resource bindings rather than remounting, clearing, or reprioritizing them in a way that changes visible lighting.
 - When precomputed visibility is enabled and the player's current visible cell set includes a level transition cell, the adjacent streamed level renders the cells that are precomputed-visible from that adjacent level's ingress cell rather than rendering the entire adjacent maze.
 - When precomputed visibility is disabled, adjacent streamed levels may render their full geometry for debugging.
 - Level-boundary walls that face playable cells render with the same visibility and baked-lightmap treatment as ordinary interior-facing walls.
@@ -675,6 +677,7 @@
 - Visual layout changes are reviewed in the rendered scene, not only in source code.
 - Collision behavior is checked in the browser for stable contact with the ground plane and the walls.
 - Automated browser smoke coverage verifies that a real maze wall material writes visible scene color in the default render path rather than leaving only the skybox and billboards visible.
+- Automated browser coverage for level lighting disables lens flares as evidence and verifies rendered destination-level lighting resources are ready before seamless boundary traversal.
 - Automated rendering verification of the probe-blended PBR path confirms the live compiled shader uniforms change at runtime when probe-driven reflection or IBL controls are toggled.
 - Automated browser smoke coverage remains focused on startup readiness, debug-control availability, and the live probe-blended shader path so the benchmarked runner stays within its documented budget.
 - A separate automated render-integration browser test covers the slower end-to-end reflection, fog, and extended visual-control assertions that are intentionally excluded from the benchmarked smoke runner.

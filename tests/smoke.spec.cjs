@@ -1319,6 +1319,12 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
         ready: true,
         reflectionReady: true,
         surfaceLightmapReady: true
+      }),
+      expect.objectContaining({
+        mazeId: 'chamber-1',
+        ready: true,
+        reflectionReady: true,
+        surfaceLightmapReady: true
       })
     ])
   )
