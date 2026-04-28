@@ -1,7 +1,7 @@
 # How To Work On This Project
 
 ## Current State
-The repository contains a runnable browser game prototype for GitHub Pages. The intended build serves a three.js scene with turn-based grid movement, an `F1` free-camera inspection toggle, a `C` credits modal, a local Poly Haven `overcast_soil` HDRI used for the visible skybox, an infinite `puddle-ground` base plane plus a maze-local lit floor patch, one randomly selected persisted maze built from `stone-wall-29` wall meshes, maze-mounted metal sconces with asynchronously loaded animated torch billboards, baked per-maze torch lightmaps, static local reflection probes for in-maze specular response, volumetric-lightmap probe data, and a backquote visual-controls panel with exposure, `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, `Reflection Intensity`, ambient-occlusion mode, tone-mapper, post-effect controls, and build metadata in the FPS overlay.
+The repository contains a runnable browser game prototype for GitHub Pages. The intended build serves a three.js scene with turn-based grid movement, an `F1` free-camera inspection toggle, a `C` credits modal, a local Poly Haven `overcast_soil` HDRI used for the visible skybox, an infinite `puddle-ground` base plane plus a maze-local lit floor patch, one randomly selected persisted maze built from `stone-wall-29` wall meshes, maze-mounted metal sconces with asynchronously loaded animated torch billboards, baked per-maze torch, moonlight, and skylight lightmaps, static local reflection probes for in-maze specular response, volumetric-lightmap probe data, and a backquote visual-controls panel with exposure, `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, `Reflection Intensity`, ambient-occlusion mode, tone-mapper, post-effect controls, and build metadata in the FPS overlay.
 The initial `MINOTAUR` loading shell now appears directly from inline HTML in [index.html](/E:/p/levelsjam/index.html) before the React bundle finishes booting.
 The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutRuntime.ts](/E:/p/levelsjam/src/lib/sceneLayoutRuntime.ts) so the main app bundle stays small, while Node tests and scripts continue to use the synchronous [sceneLayout.js](/E:/p/levelsjam/src/lib/sceneLayout.js) path.
 
@@ -79,7 +79,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify the sconces are visibly readable outside the maze walls rather than disappearing into the surface behind them.
 - Verify the torch billboards animate and stay camera-facing even on walls whose parent groups are rotated.
 - Verify the visible flame fills the square billboard, that the billboard width matches its wall clearance, and that the billboard bottom edge is flush with the sconce top.
-- Verify each persisted maze includes baked torch lightmap data.
+- Verify each persisted maze includes baked torch, moonlight, and skylight lightmap data.
 - Verify the browser runtime requests `surface-lightmap-rgbe.png` for surface lightmaps and does not request `surface-lightmap.bin` during ordinary page load.
 - Verify the baked lightmap visibly affects the maze walls and the maze-local lit floor patch in the rendered scene.
 - Verify the infinite base ground remains present outside the lit floor patch.

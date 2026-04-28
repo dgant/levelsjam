@@ -89,6 +89,8 @@ uniform vec4 uSurfaceA;
 uniform vec4 uSurfaceB;
 uniform vec4 uGroundBounds;
 uniform vec3 uGroundBounceAlbedo;
+uniform vec3 uMoonLightColor;
+uniform vec3 uMoonLightDirection;
 uniform vec3 uTorchLightColor;
 uniform vec3 uSkyLightColor;
 uniform vec3 uWallBounceAlbedo;
@@ -533,6 +535,23 @@ vec3 sampleSkylight(vec3 samplePosition, vec3 sampleNormal) {
   return color / accumulatedWeight;
 }
 
+vec3 sampleMoonlight(vec3 samplePosition, vec3 sampleNormal) {
+  vec3 direction = normalize(uMoonLightDirection);
+  float lambert = dot(sampleNormal, direction);
+
+  if (lambert <= 0.0) {
+    return vec3(0.0);
+  }
+
+  vec3 rayStart = samplePosition + (sampleNormal * uSampleEpsilon);
+
+  if (isSegmentOccluded(rayStart, rayStart + (direction * uSkyRayDistance))) {
+    return vec3(0.0);
+  }
+
+  return uMoonLightColor * lambert;
+}
+
 vec3 accumulateTorchLighting(
   vec3 samplePosition,
   vec3 sampleNormal,
@@ -635,12 +654,14 @@ vec3 directAndSkyLighting(
 ) {
   return
     max(vec3(0.0), accumulateTorchLighting(samplePosition, sampleNormal, seed, sphereSampleCount)) +
+    max(vec3(0.0), sampleMoonlight(samplePosition, sampleNormal)) +
     max(vec3(0.0), sampleSkylight(samplePosition, sampleNormal));
 }
 
 vec3 legacyDirectAndSkyLighting(vec3 samplePosition, vec3 sampleNormal) {
   return
     max(vec3(0.0), accumulateLegacyTorchLighting(samplePosition, sampleNormal)) +
+    max(vec3(0.0), sampleMoonlight(samplePosition, sampleNormal)) +
     max(vec3(0.0), sampleSkylight(samplePosition, sampleNormal));
 }
 
@@ -973,6 +994,8 @@ void main() {
       groundBounds: gl.getUniformLocation(program, 'uGroundBounds'),
       indirectSampleOffset: gl.getUniformLocation(program, 'uIndirectSampleOffset'),
       indirectSequenceSampleCount: gl.getUniformLocation(program, 'uIndirectSequenceSampleCount'),
+      moonLightColor: gl.getUniformLocation(program, 'uMoonLightColor'),
+      moonLightDirection: gl.getUniformLocation(program, 'uMoonLightDirection'),
       rect: gl.getUniformLocation(program, 'uRect'),
       sampleEpsilon: gl.getUniformLocation(program, 'uSampleEpsilon'),
       sconceRadius: gl.getUniformLocation(program, 'uSconceRadius'),
@@ -1090,6 +1113,8 @@ void main() {
       gl.uniform1f(locations.torchStrength, bakeJob.constants.torchStrength)
       gl.uniform4fv(locations.groundBounds, bakeJob.constants.groundBounds)
       gl.uniform3fv(locations.groundBounceAlbedo, bakeJob.constants.groundBounceAlbedo)
+      gl.uniform3fv(locations.moonLightColor, bakeJob.constants.moonLightColor)
+      gl.uniform3fv(locations.moonLightDirection, bakeJob.constants.moonLightDirection)
       gl.uniform3fv(locations.torchLightColor, bakeJob.constants.torchLightColor)
       gl.uniform3fv(locations.skyLightColor, bakeJob.constants.skyLightColor)
       gl.uniform3fv(locations.wallBounceAlbedo, bakeJob.constants.wallBounceAlbedo)

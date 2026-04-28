@@ -79,7 +79,10 @@
 - The scene uses image-based lighting from the Poly Haven `overcast_soil` environment.
 - The scene does not use `@takram/three-atmosphere`.
 - The scene does not use the three.js `Water` helper.
-- The scene does not use a directional sunlight source.
+- The scene does not use a runtime directional sunlight source.
+- Static bake-time moonlight is a directional light baked into surface lightmaps and volumetric probes, not a runtime light.
+- Bake-time moonlight is positioned 15 degrees above the horizon and 30 degrees east of south in level-local world space.
+- Bake-time moonlight uses a slightly bluish light-gray tint and approximately half the one-meter direct luminance of a torch.
 - The scene contains maze-floor ground geometry covering the playable maze footprint and its required baked-lighting bounds.
 - The maze-floor ground uses the extracted ShareTextures `puddle-ground` PBR pack rather than preview imagery.
 - The maze-floor ground uses the full authored `puddle-ground` PBR material stack rather than a reduced compatibility material.
@@ -128,7 +131,7 @@
 - Wall decals are never placed on wall faces that contain a torch/sconce light.
 - Wall decals render upright on their wall faces.
 - Each maze includes a baked torch lightmap generated as a late step in maze generation.
-- Each maze lightmap stores the baked static direct and skylight contribution for the maze floor and wall faces.
+- Each maze lightmap stores the baked static direct torch, directional moonlight, and skylight contribution for the maze floor and wall faces.
 - Each maze wall face receives baked torch lighting on the side that faces the lit cell rather than on the wall's opposite face.
 - Each maze lightmap is source-controlled together with its maze definition.
 - Each torch billboard brightness derives from a 1500 candela torch baseline scaled by the shared torch intensity multiplier.

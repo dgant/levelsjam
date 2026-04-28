@@ -15,9 +15,10 @@ export const MAZE_CELL_SIZE = 2
 export const MAZE_WALL_THICKNESS = 0.25
 export const MAZE_WALL_HEIGHT = 2
 export const MAZE_TARGET_COUNT = 5
-export const MAZE_LIGHTMAP_VERSION = 29
+export const MAZE_LIGHTMAP_VERSION = 30
 export const MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS = 0.125
 
+const REC709_LUMINANCE = [0.2126, 0.7152, 0.0722]
 const MAZE_LIGHTMAP_GROUND_TILE_SIZE = 256
 const MAZE_LIGHTMAP_WALL_TILE_WIDTH = 128
 const MAZE_LIGHTMAP_WALL_TILE_HEIGHT = 128
@@ -35,6 +36,30 @@ const MAZE_REFLECTION_PROBE_Y = 1.25
 const MAZE_LIGHTMAP_GROUND_BOUNCE_ALBEDO = [0.34, 0.32, 0.28]
 const MAZE_LIGHTMAP_WALL_BOUNCE_ALBEDO = [0.5, 0.48, 0.43]
 const MAZE_TORCH_LIGHT_COLOR = [10, 2.0863687013464577, 0]
+const MAZE_MOONLIGHT_TINT = [0.78, 0.84, 1.0]
+const MAZE_MOONLIGHT_ELEVATION_RADIANS = 15 * Math.PI / 180
+const MAZE_MOONLIGHT_AZIMUTH_EAST_OF_SOUTH_RADIANS = 30 * Math.PI / 180
+const MAZE_MOONLIGHT_HORIZONTAL = Math.cos(MAZE_MOONLIGHT_ELEVATION_RADIANS)
+const MAZE_MOONLIGHT_DIRECTION = {
+  x: Math.sin(MAZE_MOONLIGHT_AZIMUTH_EAST_OF_SOUTH_RADIANS) * MAZE_MOONLIGHT_HORIZONTAL,
+  y: Math.sin(MAZE_MOONLIGHT_ELEVATION_RADIANS),
+  z: Math.cos(MAZE_MOONLIGHT_AZIMUTH_EAST_OF_SOUTH_RADIANS) * MAZE_MOONLIGHT_HORIZONTAL
+}
+const MAZE_TORCH_DIRECT_LUMINANCE =
+  (MAZE_TORCH_LIGHT_COLOR[0] * REC709_LUMINANCE[0]) +
+  (MAZE_TORCH_LIGHT_COLOR[1] * REC709_LUMINANCE[1]) +
+  (MAZE_TORCH_LIGHT_COLOR[2] * REC709_LUMINANCE[2])
+const MAZE_MOONLIGHT_TINT_LUMINANCE =
+  (MAZE_MOONLIGHT_TINT[0] * REC709_LUMINANCE[0]) +
+  (MAZE_MOONLIGHT_TINT[1] * REC709_LUMINANCE[1]) +
+  (MAZE_MOONLIGHT_TINT[2] * REC709_LUMINANCE[2])
+const MAZE_MOONLIGHT_COLOR = MAZE_MOONLIGHT_TINT.map(
+  (component) =>
+    component *
+    (MAZE_TORCH_DIRECT_LUMINANCE * 0.5) /
+    Math.max(MAZE_MOONLIGHT_TINT_LUMINANCE, 1e-6) *
+    MAZE_LIGHTMAP_TORCH_STRENGTH
+)
 const MAZE_SKY_LIGHT_COLOR = [
   1.4241132301976904 * getHdrLightingIntensity(AUTHORED_LIGHTING_SOURCE_SCALE),
   1.4103858565213159 * getHdrLightingIntensity(AUTHORED_LIGHTING_SOURCE_SCALE),
@@ -2180,6 +2205,55 @@ function sampleSkylight(
   ]
 }
 
+function sampleMoonlight(
+  samplePosition,
+  sampleNormal,
+  walls,
+  skipWallId,
+  skipSurfaceGroupId
+) {
+  const lambert =
+    (sampleNormal.x * MAZE_MOONLIGHT_DIRECTION.x) +
+    (sampleNormal.y * MAZE_MOONLIGHT_DIRECTION.y) +
+    (sampleNormal.z * MAZE_MOONLIGHT_DIRECTION.z)
+
+  if (lambert <= 0) {
+    return [0, 0, 0]
+  }
+
+  const rayStart = {
+    x: samplePosition.x + (sampleNormal.x * MAZE_LIGHTMAP_SAMPLE_EPSILON),
+    y: samplePosition.y + (sampleNormal.y * MAZE_LIGHTMAP_SAMPLE_EPSILON),
+    z: samplePosition.z + (sampleNormal.z * MAZE_LIGHTMAP_SAMPLE_EPSILON)
+  }
+
+  if (
+    isSkyOccluded(
+      rayStart,
+      MAZE_MOONLIGHT_DIRECTION,
+      walls,
+      skipWallId,
+      skipSurfaceGroupId
+    )
+  ) {
+    return [0, 0, 0]
+  }
+
+  return [
+    MAZE_MOONLIGHT_COLOR[0] * lambert,
+    MAZE_MOONLIGHT_COLOR[1] * lambert,
+    MAZE_MOONLIGHT_COLOR[2] * lambert
+  ]
+}
+
+function addLightColors(first, second) {
+  return [
+    (first[0] ?? 0) + (second[0] ?? 0),
+    (first[1] ?? 0) + (second[1] ?? 0),
+    (first[2] ?? 0) + (second[2] ?? 0)
+  ]
+}
+
 function accumulateTorchLighting(
   samplePosition,
   sampleNormal,
@@ -2310,6 +2384,10 @@ export function computeMazeVolumetricLightmapCoefficients(
     coefficients,
     MAZE_SKY_LIGHT_COLOR.map((component) => component * skylightVisibility)
   )
+
+  if (!isSkyOccluded(probePosition, MAZE_MOONLIGHT_DIRECTION, walls, null, null)) {
+    addDirectionalProbeRadiance(coefficients, MAZE_MOONLIGHT_DIRECTION, MAZE_MOONLIGHT_COLOR)
+  }
 
   for (const torch of torchPlacements) {
     const toTorchX = torch.torchPosition.x - probePosition.x
@@ -2520,6 +2598,12 @@ export async function bakeMazeLightmap(
         groundBounds.maxZ
       ],
       groundBounceAlbedo: MAZE_LIGHTMAP_GROUND_BOUNCE_ALBEDO,
+      moonLightColor: MAZE_MOONLIGHT_COLOR,
+      moonLightDirection: [
+        MAZE_MOONLIGHT_DIRECTION.x,
+        MAZE_MOONLIGHT_DIRECTION.y,
+        MAZE_MOONLIGHT_DIRECTION.z
+      ],
       sampleEpsilon: MAZE_LIGHTMAP_SAMPLE_EPSILON,
       sconceRadius,
       skyLightColor: MAZE_SKY_LIGHT_COLOR,
@@ -2771,14 +2855,23 @@ function bakeMazeLightmapCpu(
     MAZE_LIGHTMAP_GROUND_SUPERSAMPLE_GRID,
     (u, v) => {
       const sample = getGroundSample(groundBounds, u, v)
-      return accumulateTorchLighting(
-        sample.position,
-        sample.normal,
-        torchPlacements,
-        walls,
-        null,
-        null,
-        sconceRadius
+      return addLightColors(
+        accumulateTorchLighting(
+          sample.position,
+          sample.normal,
+          torchPlacements,
+          walls,
+          null,
+          null,
+          sconceRadius
+        ),
+        sampleMoonlight(
+          sample.position,
+          sample.normal,
+          walls,
+          null,
+          null
+        )
       )
     }
   )
@@ -2812,14 +2905,23 @@ function bakeMazeLightmapCpu(
         MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID,
         (u, v) => {
           const sample = getWallSurfaceFaceSample(surfaceGroup, faceKey, u, v)
-          return accumulateTorchLighting(
-            sample.position,
-            sample.normal,
-            torchPlacements,
-            walls,
-            null,
-            null,
-            sconceRadius
+          return addLightColors(
+            accumulateTorchLighting(
+              sample.position,
+              sample.normal,
+              torchPlacements,
+              walls,
+              null,
+              null,
+              sconceRadius
+            ),
+            sampleMoonlight(
+              sample.position,
+              sample.normal,
+              walls,
+              null,
+              null
+            )
           )
         },
         { alignUToRectEdges: true }
@@ -2851,14 +2953,23 @@ function bakeMazeLightmapCpu(
         MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID,
         (u, v) => {
           const sample = getWallShortFaceSample(wall, faceKey, u, v)
-          return accumulateTorchLighting(
-            sample.position,
-            sample.normal,
-            torchPlacements,
-            walls,
-            null,
-            null,
-            sconceRadius
+          return addLightColors(
+            accumulateTorchLighting(
+              sample.position,
+              sample.normal,
+              torchPlacements,
+              walls,
+              null,
+              null,
+              sconceRadius
+            ),
+            sampleMoonlight(
+              sample.position,
+              sample.normal,
+              walls,
+              null,
+              null
+            )
           )
         }
       )

@@ -534,6 +534,46 @@ test('stores baked wall skylight in the HDR lightmap', async () => {
   )
 })
 
+test('bakes low-angle directional moonlight into wall lightmaps', async () => {
+  const wallMaze = {
+    height: 1,
+    id: 'wall-moonlight-test',
+    lights: [],
+    openEdges: [],
+    opening: { cell: { x: 0, y: 0 }, side: 'west' },
+    width: 1
+  }
+  const lightmap = await bakeCachedMazeLightmap(wallMaze)
+  const bytes = Buffer.from(lightmap.dataBase64, 'base64')
+  const moonFacingRect = lightmap.wallRects['0,0:north:exterior'].pz
+  const moonAwayRect = lightmap.wallRects['0,0:south:exterior'].nz
+  const topRow = 120
+  let moonFacingSum = 0
+  let moonAwaySum = 0
+
+  for (let column = 0; column < moonFacingRect.width; column += 1) {
+    moonFacingSum += sampleLightmapLuminance(
+      bytes,
+      lightmap,
+      moonFacingRect,
+      column,
+      topRow
+    )
+    moonAwaySum += sampleLightmapLuminance(
+      bytes,
+      lightmap,
+      moonAwayRect,
+      column,
+      topRow
+    )
+  }
+
+  assert.ok(
+    moonFacingSum > moonAwaySum * 1.1,
+    `expected south-facing wall top to receive more baked moonlight, got facing=${moonFacingSum} away=${moonAwaySum}`
+  )
+})
+
 test('bakes lightmap rectangles for maze wall short end faces', async () => {
   const wallMaze = {
     height: 1,
