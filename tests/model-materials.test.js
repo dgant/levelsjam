@@ -174,12 +174,12 @@ test('doors use generated Minoan-door ORM textures and baked dynamic lighting', 
   )
   assert.match(
     appSource,
-    /activePlayerTurn > 0 &&\s*doorWorldPosition/,
+    /activePlayerTurn > 0 &&\s*!completedMazeLevelIds\.has\(layout\.maze\.id\) &&\s*doorWorldPosition/,
     'maze entrance doors should open from world-space adjacency after gameplay movement without starting open'
   )
   assert.match(
     appSource,
-    /isOpen=\{\s*\(isActive && isDoorOpenForTurnState\(door, layout\.maze, turnState\)\) \|\|\s*isAdjacentToActivePlayer\s*\}/,
+    /isOpen=\{\s*!isPermanentlyClosed &&[\s\S]*?\(isActive && isDoorOpenForTurnState\(door, layout\.maze, turnState\)\) \|\|\s*isAdjacentToActivePlayer/,
     'maze entrance doors should be driven by active rules state or active world-space player adjacency'
   )
   assert.match(
@@ -187,6 +187,15 @@ test('doors use generated Minoan-door ORM textures and baked dynamic lighting', 
     /const DOOR_HEIGHT = 1\.8/,
     'door leaves should be 1.8m high'
   )
+})
+
+test('completed altar target mazes keep entrance doors closed after resume', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(appSource, /const completedMazeLevelIds = useMemo/)
+  assert.match(appSource, /altar\.targetLevelId && activatedAltarIds\.has\(altar\.id\)/)
+  assert.match(appSource, /completedMazeLevelIds\.has\(layout\.maze\.id\)/)
+  assert.match(appSource, /!isPermanentlyClosed &&[\s\S]*?isDoorOpenForTurnState/)
 })
 
 test('door back faces keep handles toward the doorway center', () => {
@@ -227,6 +236,15 @@ test('lens flare controls do not use app-side giant multipliers', () => {
   assert.doesNotMatch(appSource, /Flare Opacity/)
 })
 
+test('lens flares apply per-source inverse-square camera distance falloff', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(appSource, /distanceToLight <= 1\.5/)
+  assert.match(appSource, /\(1\.5 \/ Math\.max\(distanceToLight, 0\.001\)\) \*\* 2/)
+  assert.match(appSource, /visibleLensPositions\.push\(\{\s*intensity: distanceAttenuation/)
+  assert.match(appSource, /colorGainUniform\.value[\s\S]*?multiplyScalar\(settings\.colorGain \* \(visibleLens\?\.intensity \?\? 0\)\)/)
+})
+
 test('lens flare occlusion raycasts against all opaque scene meshes', () => {
   const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
 
@@ -245,6 +263,25 @@ test('lens flare occlusion raycasts against all opaque scene meshes', () => {
     /debugRole === 'maze-door-leaf'[\s\S]{0,120}return false/,
     'door leaves must remain eligible lens-flare occluders'
   )
+})
+
+test('debug probes render only in detached free-camera mode', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(appSource, /scene\.userData\.freeCameraActive === true/)
+  assert.match(appSource, /document\.body\.dataset\.freeCameraActive = freeCamera\.current \? 'true' : 'false'/)
+})
+
+test('boundary volumetric-lightmap mode samples both sides of a boundary', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.doesNotMatch(
+    appSource,
+    /vec3 sampleProbeGridDiffuseBoundary8\([\s\S]{0,160}return sampleProbeGridDiffuseCell5/,
+    'boundary8 should not alias to the ordinary cell5 sampler'
+  )
+  assert.match(appSource, /normalIndex = 0; normalIndex < 2/)
+  assert.match(appSource, /tangentIndex = 0; tangentIndex < 4/)
 })
 
 test('mobile menu exposes compact graphics controls and swipe-safe touch zones', () => {
@@ -320,6 +357,12 @@ test('debug lighting and post controls are wired to live render settings', () =>
   assert.match(appSource, /aria-label="Chromatic Aberration Intensity"/)
   assert.match(appSource, /focusRange=\{visualSettings\.depthOfField\.focusRange\}/)
   assert.doesNotMatch(appSource, /focalLength=\{visualSettings\.depthOfField/)
+})
+
+test('monster eye controls accept the requested extended range', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(appSource, /aria-label=\{label\}[\s\S]*?onMonsterEyeOffsetChange\(monsterType, eye, axis[\s\S]*?min=\{-4\}[\s\S]*?max=\{4\}/)
 })
 
 test('static detail meshes receive the static surface lighting path', () => {

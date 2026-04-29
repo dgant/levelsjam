@@ -68,6 +68,7 @@ function cloneState(state) {
       cell: cloneCell(state.checkpoint.cell),
       direction: state.checkpoint.direction
     },
+    itemStates: { ...(state.itemStates ?? {}) },
     monsters: state.monsters.map(cloneMonster),
     player: {
       ...state.player,
@@ -111,6 +112,31 @@ function shortestPathLength(maze, from, to) {
   }
 
   return Number.POSITIVE_INFINITY
+}
+
+function createRandom(seed) {
+  let state = seed >>> 0
+
+  return () => {
+    state = ((state * 1664525) + 1013904223) >>> 0
+    return state / 0x100000000
+  }
+}
+
+function shuffleInPlace(values, random) {
+  if (!random) {
+    return values
+  }
+
+  for (let index = values.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1))
+    const value = values[index]
+
+    values[index] = values[swapIndex]
+    values[swapIndex] = value
+  }
+
+  return values
 }
 
 function createDistanceLookup(maze) {
@@ -421,6 +447,30 @@ function observeState(maze, actualState, memory) {
   return visibleCells
 }
 
+function getVisibleCellsIncludingDiagonals(maze, state) {
+  const visible = new Set(getVisibleCells(maze, state))
+  const center = state.player.cell
+
+  for (let dy = -1; dy <= 1; dy += 1) {
+    for (let dx = -1; dx <= 1; dx += 1) {
+      const cell = { x: center.x + dx, y: center.y + dy }
+
+      if (
+        cell.x < 0 ||
+        cell.y < 0 ||
+        cell.x >= maze.width ||
+        cell.y >= maze.height
+      ) {
+        continue
+      }
+
+      visible.add(cellKey(cell))
+    }
+  }
+
+  return visible
+}
+
 function createObservationSignature(memory) {
   const observedCells = [...memory.observedCells].sort().join(',')
 
@@ -462,7 +512,15 @@ function getPlanningActionCost(previousState, nextState, action) {
   return baseCost
 }
 
-function planToGoal(maze, beliefMaze, beliefState, remainingMoveBound, goal, estimateRemainingCost) {
+function planToGoal(
+  maze,
+  beliefMaze,
+  beliefState,
+  remainingMoveBound,
+  goal,
+  estimateRemainingCost,
+  maxExpansions = 1_500
+) {
   if (remainingMoveBound < 0) {
     return null
   }
@@ -474,7 +532,7 @@ function planToGoal(maze, beliefMaze, beliefState, remainingMoveBound, goal, est
       estimateRemainingCost,
       getActionCost: getPlanningActionCost,
       goal,
-      maxExpansions: 1_500,
+      maxExpansions,
       moveBound: remainingMoveBound
     }
   )
@@ -578,10 +636,12 @@ function hasUnseenNeighbor(maze, memory, cell) {
 }
 
 function countUnseenNeighbors(maze, memory, cell) {
+  const openEdges = createBaseOpenEdgeSet(maze)
   let count = 0
 
   for (const direction of CARDINAL_DIRECTIONS) {
     const neighbor = getNeighbor(cell, direction)
+    const neighborEdgeKey = [cellKey(cell), cellKey(neighbor)].sort().join('|')
 
     if (
       neighbor.x < 0 ||
@@ -592,7 +652,7 @@ function countUnseenNeighbors(maze, memory, cell) {
       continue
     }
 
-    if (!memory.observedCells.has(cellKey(neighbor))) {
+    if (openEdges.has(neighborEdgeKey) && !memory.observedCells.has(cellKey(neighbor))) {
       count += 1
     }
   }
@@ -612,11 +672,13 @@ function shouldDelayTrophyApproach(maze, memory) {
   return countUnseenNeighbors(maze, memory, memory.knownTrophyCell) > 0
 }
 
-function chooseNextPlan(maze, memory, moveBound, distanceBetween) {
+function chooseNextPlan(maze, memory, moveBound, distanceBetween, options = {}) {
   const beliefState = memory.beliefState
   const beliefMaze = createBeliefMaze(maze, memory)
   const beliefDistanceBetween = distanceBetween
   const remainingMoveBound = moveBound - memory.moveCount
+  const maxPlanExpansions = options.maxPlanExpansions ?? 1_500
+  const random = options.random ?? null
   const plans = []
   const delayTrophyApproach = shouldDelayTrophyApproach(maze, memory)
 
@@ -627,7 +689,8 @@ function chooseNextPlan(maze, memory, moveBound, distanceBetween) {
       beliefState,
       remainingMoveBound,
       (state) => state.escaped,
-      (state) => estimateEscapeCost(beliefDistanceBetween, maze, state)
+      (state) => estimateEscapeCost(beliefDistanceBetween, maze, state),
+      maxPlanExpansions
     ))
   }
 
@@ -643,7 +706,8 @@ function chooseNextPlan(maze, memory, moveBound, distanceBetween) {
         state.player.hasSword ||
         cellKey(state.player.cell) === cellKey(swordCell)
       ),
-      (state) => estimateDistanceToCell(beliefDistanceBetween, state, swordCell)
+      (state) => estimateDistanceToCell(beliefDistanceBetween, state, swordCell),
+      maxPlanExpansions
     ))
   }
 
@@ -663,11 +727,15 @@ function chooseNextPlan(maze, memory, moveBound, distanceBetween) {
         state.player.hasTrophy ||
         cellKey(state.player.cell) === cellKey(trophyCell)
       ),
-      (state) => estimateDistanceToCell(beliefDistanceBetween, state, trophyCell)
+      (state) => estimateDistanceToCell(beliefDistanceBetween, state, trophyCell),
+      maxPlanExpansions
     ))
   }
 
-  for (const target of getExplorationTargets(maze, memory, beliefDistanceBetween)) {
+  const explorationTargets = getExplorationTargets(maze, memory, beliefDistanceBetween)
+  shuffleInPlace(explorationTargets, random)
+
+  for (const target of explorationTargets) {
     const targetCell = cloneCell(target.cell)
 
     plans.push(() => planToGoal(
@@ -676,7 +744,8 @@ function chooseNextPlan(maze, memory, moveBound, distanceBetween) {
       beliefState,
       remainingMoveBound,
       (state) => cellKey(state.player.cell) === cellKey(targetCell),
-      (state) => estimateDistanceToCell(beliefDistanceBetween, state, targetCell)
+      (state) => estimateDistanceToCell(beliefDistanceBetween, state, targetCell),
+      maxPlanExpansions
     ))
   }
 
@@ -696,7 +765,8 @@ function chooseNextPlan(maze, memory, moveBound, distanceBetween) {
         state.player.hasTrophy ||
         cellKey(state.player.cell) === cellKey(trophyCell)
       ),
-      (state) => estimateDistanceToCell(beliefDistanceBetween, state, trophyCell)
+      (state) => estimateDistanceToCell(beliefDistanceBetween, state, trophyCell),
+      maxPlanExpansions
     ))
   }
 
@@ -714,6 +784,10 @@ function chooseNextPlan(maze, memory, moveBound, distanceBetween) {
 export function solveMaze(maze, options = {}) {
   const moveBound = options.moveBound ?? getMazeSolutionMoveBound(maze)
   const debugLog = options.debugLog ?? null
+  const maxPlanExpansions = options.maxPlanExpansions ?? 1_500
+  const random = typeof options.explorationSeed === 'number'
+    ? createRandom(options.explorationSeed)
+    : null
 
   if (!Number.isFinite(moveBound) || moveBound <= 0) {
     return null
@@ -775,7 +849,13 @@ export function solveMaze(maze, options = {}) {
       return null
     }
 
-    const plan = chooseNextPlan(maze, memory, moveBound, distanceBetween)
+    const plan = chooseNextPlan(
+      maze,
+      memory,
+      moveBound,
+      distanceBetween,
+      { maxPlanExpansions, random }
+    )
 
     if (!plan?.actions?.length) {
       debugLog?.({
@@ -836,6 +916,233 @@ export function solveMaze(maze, options = {}) {
   }
 
   return null
+}
+
+export function getSolutionRouteMetrics(maze, actions = []) {
+  let state = createInitialTurnState(maze)
+  const walkedCells = new Set([cellKey(state.player.cell)])
+  const seenCells = new Set(getVisibleCellsIncludingDiagonals(maze, state))
+  const preTrophyWalkedCells = new Set([cellKey(state.player.cell)])
+  const postTrophyNewWalkedCells = new Set()
+  let moveCount = 0
+  let trophyMoveCount = null
+  let trophyActionIndex = null
+
+  for (let actionIndex = 0; actionIndex < actions.length; actionIndex += 1) {
+    const action = actions[actionIndex]
+    const result = applyTurnAction(maze, state, action)
+
+    if (result.blocked || result.killed) {
+      break
+    }
+
+    state = result.state
+
+    if (action === 'move-forward' || action === 'move-backward') {
+      moveCount += 1
+      const key = cellKey(state.player.cell)
+
+      walkedCells.add(key)
+      if (state.player.hasTrophy) {
+        if (trophyMoveCount === null) {
+          trophyMoveCount = moveCount
+          trophyActionIndex = actionIndex
+        }
+        if (!preTrophyWalkedCells.has(key)) {
+          postTrophyNewWalkedCells.add(key)
+        }
+      } else {
+        preTrophyWalkedCells.add(key)
+      }
+    }
+
+    for (const key of getVisibleCellsIncludingDiagonals(maze, state)) {
+      seenCells.add(key)
+    }
+
+    if (state.escaped) {
+      break
+    }
+  }
+
+  const cellCount = Math.max(1, maze.width * maze.height)
+
+  return {
+    cellCount,
+    escaped: state.escaped,
+    moveCount,
+    postTrophyMoveCount: trophyMoveCount === null ? 0 : moveCount - trophyMoveCount,
+    postTrophyNewCellCount: postTrophyNewWalkedCells.size,
+    postTrophyNewCellRatio: postTrophyNewWalkedCells.size / cellCount,
+    preTrophyMoveCount: trophyMoveCount ?? moveCount,
+    seenCellCount: seenCells.size,
+    seenCellRatio: seenCells.size / cellCount,
+    trophyActionIndex,
+    trophyMoveCount,
+    walkedCellCount: walkedCells.size,
+    walkedCellRatio: walkedCells.size / cellCount
+  }
+}
+
+function cloneMazeForValidation(maze, overrides = {}) {
+  return JSON.parse(JSON.stringify({
+    ...maze,
+    lightmap: undefined,
+    solution: undefined,
+    visibility: undefined,
+    ...overrides
+  }))
+}
+
+export function solveMazeWithPerfectInformation(maze, options = {}) {
+  const moveBound = options.moveBound ?? getMazeSolutionMoveBound(maze)
+  const initialState = options.initialState ?? createInitialTurnState(maze)
+  const distanceBetween = createDistanceLookup(maze)
+  const solution = searchTurnState(
+    maze,
+    cloneState(initialState),
+    {
+      estimateRemainingCost: (state) => {
+        if (state.player.hasTrophy) {
+          return estimateEscapeCost(distanceBetween, maze, state)
+        }
+
+        return estimateDistanceToCell(
+          distanceBetween,
+          state,
+          maze.trophy?.cell ?? maze.opening.cell
+        )
+      },
+      goal: (state) => state.escaped && state.player.hasTrophy,
+      maxExpansions: options.maxExpansions ?? 50_000,
+      moveBound
+    }
+  )
+
+  if (!solution) {
+    return null
+  }
+
+  return {
+    ...solution,
+    metrics: getSolutionRouteMetrics(maze, solution.actions),
+    perfectInformation: true
+  }
+}
+
+export function validateMazeAdvancedDifficulty(maze, options = {}) {
+  const errors = []
+  const imperfectTrialCount = options.imperfectTrialCount ?? 5
+  const requiredImperfectSuccessRate = options.requiredImperfectSuccessRate ?? 0.8
+  const perfect = solveMazeWithPerfectInformation(maze, {
+    maxExpansions: options.maxPerfectExpansions ?? 50_000
+  })
+
+  if (!perfect) {
+    return {
+      errors: ['Advanced validation requires a perfect-information winning solution'],
+      imperfectSuccessRate: 0,
+      metrics: null,
+      perfect: null,
+      valid: false
+    }
+  }
+
+  const imperfectSolutions = []
+  for (let trial = 0; trial < imperfectTrialCount; trial += 1) {
+    const solution = solveMaze(maze, {
+      explorationSeed: (Number(maze.seed ?? 0) + (trial * 977)) >>> 0,
+      maxActionCount: options.maxImperfectActionCount ?? 320,
+      maxPlanExpansions: options.maxImperfectPlanExpansions ?? 500
+    })
+
+    if (solution) {
+      imperfectSolutions.push(solution)
+    }
+  }
+
+  const imperfectSuccessRate = imperfectSolutions.length / Math.max(1, imperfectTrialCount)
+  if (imperfectSuccessRate < requiredImperfectSuccessRate) {
+    errors.push(
+      `Imperfect-information solver success rate ${imperfectSuccessRate.toFixed(2)} is below ${requiredImperfectSuccessRate.toFixed(2)}`
+    )
+  }
+
+  const noMonsterMaze = cloneMazeForValidation(maze, { monsters: [] })
+  const noMonster = solveMazeWithPerfectInformation(noMonsterMaze, {
+    maxExpansions: options.maxPerfectExpansions ?? 50_000
+  })
+
+  if (!noMonster) {
+    errors.push('Monster-free baseline must be solvable')
+  } else {
+    if (!(perfect.metrics.preTrophyMoveCount > noMonster.metrics.preTrophyMoveCount)) {
+      errors.push('Optimal solution must take more turns to acquire the trophy than the monster-free baseline')
+    }
+    if (!(perfect.metrics.postTrophyMoveCount > noMonster.metrics.postTrophyMoveCount)) {
+      errors.push('Optimal solution must take more turns to exit after the trophy than the monster-free baseline')
+    }
+  }
+
+  for (const [monsterIndex, monster] of (maze.monsters ?? []).entries()) {
+    const withoutMonster = cloneMazeForValidation(maze, {
+      monsters: (maze.monsters ?? []).filter((_, candidateIndex) => candidateIndex !== monsterIndex)
+    })
+    const solution = solveMazeWithPerfectInformation(withoutMonster, {
+      maxExpansions: options.maxPerfectExpansions ?? 50_000
+    })
+
+    if (solution && !(solution.moveCount < perfect.moveCount)) {
+      errors.push(`Removing monster ${monster.id ?? monster.type} must produce a faster optimal solution`)
+    }
+  }
+
+  const withoutSword = solveMazeWithPerfectInformation(
+    cloneMazeForValidation(maze, { sword: null }),
+    { maxExpansions: options.maxPerfectExpansions ?? 50_000 }
+  )
+  if (withoutSword) {
+    errors.push('Removing the sword must make the maze impossible')
+  }
+
+  for (const gate of maze.gates ?? []) {
+    const gateEdgeKey = [cellKey(gate.from), cellKey(gate.to)].sort().join('|')
+    const withoutGate = cloneMazeForValidation(maze, {
+      gates: (maze.gates ?? []).filter((candidate) => {
+        return [cellKey(candidate.from), cellKey(candidate.to)].sort().join('|') !== gateEdgeKey
+      }),
+      openEdges: (maze.openEdges ?? []).filter((edge) => {
+        return [cellKey(edge.from), cellKey(edge.to)].sort().join('|') !== gateEdgeKey
+      })
+    })
+    const solution = solveMazeWithPerfectInformation(withoutGate, {
+      maxExpansions: options.maxPerfectExpansions ?? 50_000
+    })
+
+    if (solution) {
+      errors.push(`Sealing gate edge ${gateEdgeKey} must make the maze impossible`)
+    }
+  }
+
+  if (perfect.metrics.walkedCellRatio < 0.75) {
+    errors.push(`Optimal solution must walk at least 75% of cells; got ${(perfect.metrics.walkedCellRatio * 100).toFixed(1)}%`)
+  }
+  if (perfect.metrics.seenCellRatio < 0.9) {
+    errors.push(`Optimal solution must see at least 90% of cells; got ${(perfect.metrics.seenCellRatio * 100).toFixed(1)}%`)
+  }
+  if (perfect.metrics.postTrophyNewCellRatio < 0.25) {
+    errors.push(`Optimal return must walk at least 25% new cells after trophy; got ${(perfect.metrics.postTrophyNewCellRatio * 100).toFixed(1)}%`)
+  }
+
+  return {
+    errors,
+    imperfectSuccessRate,
+    imperfectSolutions,
+    metrics: perfect.metrics,
+    monsterFree: noMonster,
+    perfect,
+    valid: errors.length === 0
+  }
 }
 
 export function validateRecordedSolution(maze) {

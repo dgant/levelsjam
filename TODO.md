@@ -537,32 +537,37 @@ Go implement this. We need robust central camera control with an architecture th
   [x] When resuming a game, return the player to the starting position/direction of the last level they were in
   [x] When resuming a game, all the same altars must be lit
   [x] When resuming a game, all passageways opened by those altars must be lit (This has no meaning now, but will in the future)
-[] New maze generation and validation rules
+[x] New maze generation and validation rules
   These are the new rules for generating and validating mazes. Assume they supercede all previous rules where they would contradict.
   Mazes are a subset of levels. All mazes are levels but not all levels are mazes.
   [x] A maze has a rectangular shape except for the transition cell leading into its entrance (this is hopefully not new, but only a restatement)
   [x] The maze's border edges must all be walls except for the transition cell, whose entrance is a door (this is hopefully not new, but only a restatement)
-  [] When the maze's transition cell entry door closes, if the player is not inside the maze (including the transition cell), reset the state of all maze elements (monsters, pickups, doors, gates). If the player is holding a sword, remove it.
+  [x] When the maze's transition cell entry door closes, if the player is not inside the maze (including the transition cell), reset the state of all maze elements (monsters, pickups, doors, gates). If the player is holding a sword, remove it.
   [x] Every maze is associated with an altar that is in the chamber outside. The trophy of the maze can only exist in one place at a time: in the maze, in the player's possession, or (permanently) on the altar.
-  [] Once the associated altar has received a trophy, the maze's door must close and never re-open. It is important that this property is also enforced after resuming a saved game
+  [x] Once the associated altar has received a trophy, the maze's door must close and never re-open. It is important that this property is also enforced after resuming a saved game
   [x] Each maze cell must have at least two open edges
   [x] Each maze cell must have two paths to the cell inside the opening, that share no cells in common (besides the start and end cells)
   [x] Every unwalled edge must, if walled, violate one of these constraints (ie. it should not be possible to add a wall anywhere and still adhere to these constraints)
   [x] Each maze will have a given set of dimensions, and contain an assigned number of minotaurs, spiders, werewolves, swords, gates, and one trophy
   [x] Position the trophy at an unoccupied tile furthest fron the entrance by path distance
-  [] After following these generation steps, the maze is ready for validation. The purpose of validation is to ensure the maze is appropriately difficult: Solvable, but not trivial.
+  [x] After following these generation steps, the maze is ready for validation. The purpose of validation is to ensure the maze is appropriately difficult: Solvable, but not trivial.
     A maze passes validation only if all the following are true:
-    [] An agent optimized for finding the shortest possible solution with perfect information, must find a solution to the maze, meaning acquiring the trophy and leaving the maze with it (We'll call this the "optimal solution")
-    [] An agent optimized for finding a solution without perfect information (only knows the state of cells that would be observable from one of the cells it has previously traversed; count diagonals in this as well), which explores stochastically, must succeed at solving the maze over 80% of the time
-    [] Removing any one monster must result in a faster solution than the optimal solution
-    [] Removing any sword or gate makes the maze provably impossible
-    [] The optimal solution must require more turns to acquire the trophy than it would take if all monsters were removed (the shortest possible path)
-    [] The optimal solution must require more turns to exit after acquiring trophy than it would take if all monsters were removed (the shortest possible path)
-    [] The optimal solution must require walking on at least 75% of the cells in the maze
-    [] The optimal solution must require seeing (via line of sight) at least 90% of the cells in the maze
-    [] The optimal solution must require walking on 25% of the maze's cells after acquiring the trophy that were not reached before acquiring the trophy (ie. measuring that the path back is sufficiently different than the path there)
+    [x] An agent optimized for finding the shortest possible solution with perfect information, must find a solution to the maze, meaning acquiring the trophy and leaving the maze with it (We'll call this the "optimal solution")
+    [x] An agent optimized for finding a solution without perfect information (only knows the state of cells that would be observable from one of the cells it has previously traversed; count diagonals in this as well), which explores stochastically, must succeed at solving the maze over 80% of the time
+    [x] Removing any one monster must result in a faster solution than the optimal solution
+    [x] Removing any sword or gate makes the maze provably impossible
+    [x] The optimal solution must require more turns to acquire the trophy than it would take if all monsters were removed (the shortest possible path)
+    [x] The optimal solution must require more turns to exit after acquiring trophy than it would take if all monsters were removed (the shortest possible path)
+    [x] The optimal solution must require walking on at least 75% of the cells in the maze
+    [x] The optimal solution must require seeing (via line of sight) at least 90% of the cells in the maze
+    [x] The optimal solution must require walking on 25% of the maze's cells after acquiring the trophy that were not reached before acquiring the trophy (ie. measuring that the path back is sufficiently different than the path there)
   [x] Torches
     [x] After finishing the maze layout, create a list of unlit cells, sorted by distance from the entrance (most distant first). Whenever you place a torch in the following steps, remove any any cells with unbroken cardinal-direction line of sight from the torch cell that are also within the 5x5 cross centered on the cell.
     - Place a torch on each cell with a trophy or sword
     - For each monster, in the imperfect information agent testing stages, when the agent first observes the monster's cell, determine the shortest path from the monster's cell to the agent's cell, then note this path's direction when leaving the monster's cell. Flip that direction, and trace a line to the first wall hit. Place a torch on that wall. If the monster is a minotaur or werewolf, their initial direction should be facing that torch. The goal is for the monster to be backlit (scary) and to turn around to face the player when awakened (also scary)
     - Go down the list of unlit cells in order and add a torch to each one (once again, removing cells from the unlit list every time any torch is added)
+[x] Lens flare intensity, for each flare, should scale with the source's distance from the camera. 1x intensity at 1.5m or below, then dropping off with inverse square falloff.
+[x] The first VLM probe inside Chamber 1, just past the door, is bright despite not being exposed to any lights. Why?
+[x] Only show debug probes when in detached floating camera mode (they surround your camera perspective when in first person mode)
+[x] From Chamber 1, the door of maze-004 is pitch black. That shouldn't be the case
+[x] Increase the allowed range of eye XYZ to +/- 4

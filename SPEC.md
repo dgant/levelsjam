@@ -41,7 +41,9 @@
 - Runtime volumetric fog treats volumetric-lightmap coefficient textures as its readiness requirement; specular reflection-cubemap residency must not determine whether fog can sample a level's diffuse probe lighting.
 - Runtime volumetric fog uses a default environment-and-moonlight volumetric probe for world cells that do not have level-authored volumetric-lightmap data, so sky and out-of-level fog receive continuous low-frequency lighting instead of hard black seams.
 - Lens flares are level-agnostic at runtime and choose from the currently rendered visible torch billboards/lights, regardless of the level that authored them.
+- Lens flare contribution from each visible source is full-strength at `1.5m` or closer to the camera, then falls off by inverse square distance.
 - Reflection and volumetric probe debug visualization shows all currently loaded/rendered probes rather than only the active level's probes.
+- Reflection and volumetric probe debug visualization is drawn only in detached free-camera inspection mode.
 - Walking across a level boundary updates only the active debug/resource-priority focus and any rules context needed to interpret the player's current world cell.
 - Walking across a connected level boundary preserves the player's world-space position, camera yaw, camera pitch, inventory flags, held-item visibility, and current input flow.
 - Walking across a connected level boundary keeps the player camera continuous through the final frame of the move animation and the first frame of the destination level; the camera must not snap back to the source exit cell before settling in the destination ingress cell.
@@ -392,6 +394,7 @@
 - Maze validation requires an imperfect-information stochastic solver, using only cells seen from traversed cells including diagonals, to solve the maze in at least 80% of attempts.
 - Maze validation requires every monster, sword, and gate to be relevant: removing a monster makes the optimal solution faster, while removing any sword or gate makes the maze impossible.
 - Maze validation requires the optimal solution to be meaningfully maze-covering: trophy acquisition and exit must be slower than the monster-free shortest paths, the path must traverse at least 75% of maze cells, see at least 90% of maze cells, and traverse at least 25% of maze cells after acquiring the trophy that were not visited before acquiring it.
+- Boundary-spanning static and dynamic geometry uses the boundary volumetric-lightmap sampling path, which blends probe candidates on both sides of the boundary rather than aliasing to the ordinary single-cell sampler.
 - Awake minotaurs and werewolves face the player during idle, rotation, and movement animations.
 - Pressing `1` toggles a free-camera inspection mode that detaches the camera from the player.
 - Free-camera inspection mode uses WASD plus mouse look, has no collisions, supports the arrow keys as movement aliases, and maps `E` to move down and `Q` to move up.
@@ -734,6 +737,7 @@
 - The `Replay solution` action is edge-triggered by a new user request. Re-entering a level after a replay completes does not restart the previous replay request.
 - The debug controls panel exposes a monster-eyes tab or section with live controls for per-monster-type eye offsets.
 - Monster-eye offset controls are editable numeric inputs rather than sliders.
+- Monster-eye offset controls allow values from `-4m` through `+4m` on each axis.
 
 ## Performance Requirements
 - The page becomes interactive quickly on load.

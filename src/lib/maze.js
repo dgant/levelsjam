@@ -6,6 +6,7 @@ import { DataUtils } from 'three'
 import {
   getMazeSolutionMoveBound,
   solveMaze,
+  validateMazeAdvancedDifficulty,
   validateRecordedSolution
 } from './mazeSolver.js'
 import { limitFirstOrderProbeCoefficientsToNonNegative } from './probeSphericalHarmonics.js'
@@ -941,8 +942,8 @@ function hasValidRecordedSolution(maze) {
   )
 }
 
-function recordMazeSolution(maze) {
-  const solution = solveMaze(maze)
+function recordMazeSolution(maze, options = {}) {
+  const solution = solveMaze(maze, options)
 
   if (!solution) {
     maze.solution = null
@@ -961,6 +962,7 @@ function recordMazeSolution(maze) {
 
 export function validateMaze(maze, options = {}) {
   const {
+    requireAdvancedDifficulty = false,
     requireLightmap = true
   } = options
   const core = validateMazeCore(maze)
@@ -991,6 +993,9 @@ export function validateMaze(maze, options = {}) {
   const solutionErrors = hasValidRecordedSolution(maze)
     ? []
     : ['Maze must include a recorded winning solution within the move bound']
+  const advancedValidation = requireAdvancedDifficulty
+    ? validateMazeAdvancedDifficulty(maze, options.advancedDifficultyOptions ?? {})
+    : { errors: [], valid: true }
 
   return {
     errors: [
@@ -998,14 +1003,16 @@ export function validateMaze(maze, options = {}) {
       ...lightValidation.errors,
       ...contentValidation.errors,
       ...lightmapErrors,
-      ...solutionErrors
+      ...solutionErrors,
+      ...advancedValidation.errors
     ],
     valid:
       minimalityErrors.length === 0 &&
       lightValidation.valid &&
       contentValidation.valid &&
       lightmapErrors.length === 0 &&
-      solutionErrors.length === 0
+      solutionErrors.length === 0 &&
+      advancedValidation.valid
   }
 }
 
@@ -1250,7 +1257,7 @@ export function generateMaze(seed = Date.now(), options = {}) {
     maze,
     getSolutionRouteCells(maze, adjacency)
   )
-  for (let attempt = 0; attempt < 24; attempt += 1) {
+  for (let attempt = 0; attempt < 1; attempt += 1) {
     maze.monsters = generateMazeMonsters(
       maze,
       random,
@@ -1259,7 +1266,10 @@ export function generateMaze(seed = Date.now(), options = {}) {
     maze.lights = generateMazeLights(maze, random)
     maze.visibility = computeMazeCellVisibility(maze)
 
-    if (recordMazeSolution(maze)) {
+    if (recordMazeSolution(maze, {
+      maxActionCount: 320,
+      maxPlanExpansions: 220
+    })) {
       break
     }
   }

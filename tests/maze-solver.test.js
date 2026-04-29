@@ -4,7 +4,10 @@ import test from 'node:test'
 import { generateMaze, validateMaze } from '../src/lib/maze.js'
 import {
   getMazeSolutionMoveBound,
+  getSolutionRouteMetrics,
   solveMaze,
+  solveMazeWithPerfectInformation,
+  validateMazeAdvancedDifficulty,
   validateRecordedSolution
 } from '../src/lib/mazeSolver.js'
 import { createInitialTurnState } from '../src/lib/turnRules.js'
@@ -115,4 +118,46 @@ test('solver does not use hidden trophy placement before it becomes visible', ()
   assert.ok(leftSolution)
   assert.ok(leftFirstAction)
   assert.equal(leftFirstAction, rightFirstAction)
+})
+
+test('perfect-information maze solver and route metrics are available for advanced validation', () => {
+  const maze = generateMaze(13579, { bakeLightmap: false })
+  const perfect = solveMazeWithPerfectInformation(maze, {
+    maxExpansions: 20_000
+  })
+
+  assert.ok(perfect)
+  assert.equal(perfect.perfectInformation, true)
+  assert.equal(perfect.metrics.escaped, true)
+  assert.ok(perfect.metrics.walkedCellCount > 0)
+  assert.ok(perfect.metrics.seenCellCount >= perfect.metrics.walkedCellCount)
+
+  const metrics = getSolutionRouteMetrics(maze, perfect.actions)
+  assert.equal(metrics.escaped, true)
+  assert.equal(metrics.moveCount, perfect.moveCount)
+})
+
+test('advanced maze validation reports difficulty failures as diagnostics', () => {
+  const trivialMaze = {
+    gates: [],
+    height: 1,
+    id: 'advanced-validation-trivial',
+    lights: [],
+    monsters: [],
+    opening: { cell: { x: 0, y: 0 }, side: 'west' },
+    openEdges: [
+      { from: { x: 0, y: 0 }, to: { x: 1, y: 0 } }
+    ],
+    sword: { cell: { x: 1, y: 0 } },
+    trophy: { cell: { x: 1, y: 0 } },
+    width: 2
+  }
+  const validation = validateMazeAdvancedDifficulty(trivialMaze, {
+    imperfectTrialCount: 1,
+    maxPerfectExpansions: 1_000
+  })
+
+  assert.equal(validation.valid, false)
+  assert.ok(validation.perfect)
+  assert.ok(validation.errors.some((error) => error.includes('75%') || error.includes('monster-free')))
 })

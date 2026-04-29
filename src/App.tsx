@@ -3487,7 +3487,48 @@ vec3 sampleProbeGridDiffuseBoundary8(
   vec3 worldPosition,
   vec3 direction
 ) {
-  return sampleProbeGridDiffuseCell5( worldPosition, direction );
+  vec2 gridPosition = ( worldPosition.xz - probeGridMin ) / max( probeCellSize, 0.0001 );
+  vec2 boundaryNormalInput = probeBoundaryNormal;
+
+  if ( length( boundaryNormalInput ) <= 0.0001 ) {
+    return sampleProbeGridDiffuseCell5( worldPosition, direction );
+  }
+
+  vec2 boundaryNormal = normalize( boundaryNormalInput );
+  vec2 tangent = vec2( -boundaryNormal.y, boundaryNormal.x );
+  vec4 accumulated = vec4( 0.0 );
+
+  for ( int normalIndex = 0; normalIndex < 2; normalIndex += 1 ) {
+    float normalOffset = normalIndex == 0 ? -0.5 : 0.5;
+
+    for ( int tangentIndex = 0; tangentIndex < 4; tangentIndex += 1 ) {
+      float tangentOffset = float( tangentIndex ) - 1.5;
+      vec2 sampleGridPosition = gridPosition +
+        ( boundaryNormal * normalOffset ) +
+        ( tangent * tangentOffset * 0.5 );
+      vec2 cell = floor( sampleGridPosition + vec2( 0.5 ) );
+      float spatialWeight =
+        ( 1.0 - smoothstep( 0.5, 1.5, abs( normalOffset ) ) ) *
+        ( 1.0 - smoothstep( 0.75, 1.75, abs( tangentOffset * 0.5 ) ) );
+
+      if ( spatialWeight <= 0.0001 ) {
+        continue;
+      }
+
+      accumulated += sampleProbeGridCandidate(
+        worldPosition,
+        direction,
+        gridPosition,
+        cell
+      ) * spatialWeight;
+    }
+  }
+
+  if ( accumulated.a <= 0.0001 ) {
+    return vec3( 0.0 );
+  }
+
+  return accumulated.rgb / accumulated.a;
 }
 #endif
 
@@ -5222,6 +5263,7 @@ function computeCubeRenderTargetDebugStats(
       r: number
       x: number
       y: number
+      intensity: number
     }> = []
 
     for (const sampleY of [0.25, 0.5, 0.75]) {
@@ -6035,7 +6077,7 @@ function useFireFlipbookTexture() {
       const overlayCompleteAt = document.body.dataset.loadingOverlayCompleteAt
 
       if (overlayCompleteAt && overlayCompleteAt !== 'pending') {
-        loadDelayHandle = window.setTimeout(startLoading, 1500)
+        loadDelayHandle = window.setTimeout(startLoading, 0)
         return
       }
 
@@ -10204,12 +10246,23 @@ function ReflectionProbeVisualization({
   reflectionProbeTextures: Texture[]
   visible: boolean
 }) {
+  const scene = useThree((state) => state.scene)
+  const groupRef = useRef<Group>(null)
+
+  useFrame(() => {
+    if (groupRef.current) {
+      groupRef.current.visible = visible &&
+        mode !== 'none' &&
+        scene.userData.freeCameraActive === true
+    }
+  })
+
   if (!visible || mode === 'none') {
     return null
   }
 
   return (
-    <>
+    <group ref={groupRef}>
       {layout.reflectionProbes.map((probe, index) => {
         let material: ReactNode = null
 
@@ -10307,7 +10360,7 @@ function ReflectionProbeVisualization({
           </group>
         )
       })}
-    </>
+    </group>
   )
 }
 
@@ -11858,6 +11911,7 @@ function SceneGeometry({
   activatedAltarIds,
   activePlayerWorldPosition,
   activePlayerTurn,
+  completedMazeLevelIds,
   environmentTexture,
   environmentIntensity,
   iblContributionIntensity,
@@ -11884,6 +11938,7 @@ function SceneGeometry({
   activatedAltarIds: Set<string>
   activePlayerWorldPosition: Vector3
   activePlayerTurn: number
+  completedMazeLevelIds: Set<string>
   environmentTexture: Texture | null
   environmentIntensity: number
   iblContributionIntensity: number
@@ -11967,6 +12022,7 @@ function SceneGeometry({
           <MazeDoors
             activePlayerWorldPosition={activePlayerWorldPosition}
             activePlayerTurn={activePlayerTurn}
+            completedMazeLevelIds={completedMazeLevelIds}
             iblContributionIntensity={iblContributionIntensity}
             isActive={isActive}
             layout={layout}
@@ -12683,6 +12739,7 @@ function MazeDoorActor({
 function MazeDoors({
   activePlayerWorldPosition,
   activePlayerTurn,
+  completedMazeLevelIds,
   iblContributionIntensity,
   isActive,
   layout,
@@ -12698,6 +12755,7 @@ function MazeDoors({
 }: {
   activePlayerWorldPosition: Vector3
   activePlayerTurn: number
+  completedMazeLevelIds: Set<string>
   iblContributionIntensity: number
   isActive: boolean
   layout: MazeLayout
@@ -12724,17 +12782,22 @@ function MazeDoors({
         }, levelWorldTransform)
         const isAdjacentToActivePlayer = Boolean(
           activePlayerTurn > 0 &&
+          !completedMazeLevelIds.has(layout.maze.id) &&
           doorWorldPosition.distanceToSquared(activePlayerWorldPosition) <=
             ((MAZE_CELL_SIZE * 0.6) ** 2)
         )
+        const isPermanentlyClosed = completedMazeLevelIds.has(layout.maze.id)
 
         return (
           <MazeDoorActor
             door={door}
             iblContributionIntensity={iblContributionIntensity}
             isOpen={
-              (isActive && isDoorOpenForTurnState(door, layout.maze, turnState)) ||
-              isAdjacentToActivePlayer
+              !isPermanentlyClosed &&
+              (
+                (isActive && isDoorOpenForTurnState(door, layout.maze, turnState)) ||
+                isAdjacentToActivePlayer
+              )
             }
             key={door.id}
             layout={layout}
@@ -15875,12 +15938,15 @@ function TorchLensFlare({
       const lensScore =
         (projectedPosition.x * projectedPosition.x) +
         (projectedPosition.y * projectedPosition.y)
+      const distanceToLight = camera.position.distanceTo(lensPosition)
+      const distanceAttenuation = distanceToLight <= 1.5
+        ? 1
+        : (1.5 / Math.max(distanceToLight, 0.001)) ** 2
 
       raycasterPosition.set(projectedPosition.x, projectedPosition.y)
       raycaster.setFromCamera(raycasterPosition, camera)
 
       const intersections = raycaster.intersectObjects(occlusionMeshes.current, false)
-      const distanceToLight = camera.position.distanceTo(lensPosition)
       let occluded = false
 
       for (const intersection of intersections) {
@@ -15904,6 +15970,7 @@ function TorchLensFlare({
       }
 
       visibleLensPositions.push({
+        intensity: distanceAttenuation,
         position: lensPosition,
         score: lensScore
       })
@@ -15924,6 +15991,13 @@ function TorchLensFlare({
         slot.lensPositionUniform.value.set(projectedPosition.x, projectedPosition.y, 0)
       }
 
+      const colorGainUniform = slot.effect.uniforms.get('colorGain') as Uniform<Color> | undefined
+      if (colorGainUniform) {
+        colorGainUniform.value
+          .copy(FIRE_COLOR)
+          .multiplyScalar(settings.colorGain * (visibleLens?.intensity ?? 0))
+      }
+
       if (slot.occlusionOpacityUniform) {
         slot.occlusionOpacityUniform.value = MathUtils.damp(
           slot.occlusionOpacityUniform.value,
@@ -15940,6 +16014,7 @@ function TorchLensFlare({
       totalLensCount: lensPositions.current.length,
       visibleLensCount: visibleLensPositions.length,
       visibleLenses: visibleLensPositions.map((lens) => ({
+        intensity: lens.intensity,
         position: [lens.position.x, lens.position.y, lens.position.z],
         score: lens.score
       }))
@@ -17220,6 +17295,9 @@ function FlightRig({
     const profileStartedAt = beginFrameProfileStep()
 
     try {
+      scene.userData.freeCameraActive = freeCamera.current
+      document.body.dataset.freeCameraActive = freeCamera.current ? 'true' : 'false'
+
       if (!freeCamera.current) {
       if (altarCutsceneTarget) {
         const currentState = turnStateRef.current
@@ -17597,6 +17675,7 @@ function RuntimeLevelGeometry({
   activatedAltarIds,
   activePlayerWorldPosition,
   activePlayerTurn,
+  completedMazeLevelIds,
   environmentIntensity,
   iblContributionIntensity,
   isActive,
@@ -17621,6 +17700,7 @@ function RuntimeLevelGeometry({
   activatedAltarIds: Set<string>
   activePlayerWorldPosition: Vector3
   activePlayerTurn: number
+  completedMazeLevelIds: Set<string>
   environmentIntensity: number
   iblContributionIntensity: number
   isActive: boolean
@@ -17735,6 +17815,7 @@ function RuntimeLevelGeometry({
             activatedAltarIds={activatedAltarIds}
             activePlayerWorldPosition={activePlayerWorldPosition}
             activePlayerTurn={activePlayerTurn}
+            completedMazeLevelIds={completedMazeLevelIds}
             environmentTexture={stableLightingResources.environmentTexture}
           environmentIntensity={environmentIntensity}
           iblContributionIntensity={iblContributionIntensity}
@@ -19176,6 +19257,19 @@ function Scene({
     visualSettings.ambientOcclusionMode === 'n8ao'
     ? 1
     : 0.5
+  const completedMazeLevelIds = useMemo(() => {
+    const completed = new Set<string>()
+
+    for (const renderedLayout of runtimeRenderedLayouts) {
+      for (const altar of renderedLayout.altars ?? []) {
+        if (altar.targetLevelId && activatedAltarIds.has(altar.id)) {
+          completed.add(altar.targetLevelId)
+        }
+      }
+    }
+
+    return completed
+  }, [activatedAltarIds, runtimeRenderedLayouts])
 
   return (
     <>
@@ -19204,6 +19298,7 @@ function Scene({
               activatedAltarIds={activatedAltarIds}
               activePlayerWorldPosition={activePlayerWorldPosition}
               activePlayerTurn={turnState.turn}
+              completedMazeLevelIds={completedMazeLevelIds}
               environmentIntensity={environmentIntensity}
               iblContributionIntensity={runtimeDynamicVolumetricIntensity}
               isActive={isActive}
@@ -21488,6 +21583,8 @@ function VisualControls({
                         onMonsterEyeOffsetChange(monsterType, eye, axis, Number(event.target.value))
                       }}
                       step={0.01}
+                      min={-4}
+                      max={4}
                       type="number"
                       value={value}
                     />
