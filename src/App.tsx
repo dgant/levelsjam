@@ -4909,7 +4909,6 @@ function getFogProbeBounds(layout: MazeLayout) {
 
 function isFogLightingEntryReady(entry: WorldLightingRegistryEntry) {
   return Boolean(
-    entry.resources.reflectionProbeState.ready &&
     entry.resources.probeCoefficientTextures[0]
   )
 }
@@ -4958,10 +4957,6 @@ function compareFogLightingCandidates(
 ) {
   if (aDistanceSquared !== bDistanceSquared) {
     return aDistanceSquared - bDistanceSquared
-  }
-
-  if (a.entry.isActive !== b.entry.isActive) {
-    return a.entry.isActive ? -1 : 1
   }
 
   return a.entry.mazeId.localeCompare(b.entry.mazeId)
@@ -7277,7 +7272,7 @@ function useRuntimeLevelLightingResources(
       disposeProbeTargets(previousTargets)
       reflectionProbeTargets.current = []
     }
-  }, [layout, priorityPosition.x, priorityPosition.z, scene])
+  }, [layout, scene])
 
   return useMemo(() => ({
     environmentTexture: null,

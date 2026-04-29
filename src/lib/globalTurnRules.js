@@ -1,6 +1,11 @@
 import { getRuntimeLevelWorldTransform } from './levels.js'
 import { MAZE_CELL_SIZE } from './maze.js'
 import { createInitialTurnState } from './turnRules.js'
+import {
+  buildWorldGridFromLayouts,
+  getLevelLocalCellForWorldCell,
+  localCellToWorldCell
+} from './worldGrid.js'
 
 const DIRECTIONS_TO_YAW = {
   east: -Math.PI / 2,
@@ -300,16 +305,28 @@ export function transitionGlobalTurnState({
   const sourceMaze = sourceLayout?.maze ?? null
   const sourceStoredState = cloneTurnStateForGlobal(sourcePreviousState ?? sourceState)
   const targetStoredState = cloneTurnStateForGlobal(next.levelStates[targetLevelId])
+  const sourceWorldCell = sourceLayout
+    ? localCellToWorldCell(sourceLayout, sourceState.player.cell)
+    : null
+  const canonicalTargetCell = sourceWorldCell && sourceLayout
+    ? getLevelLocalCellForWorldCell(
+        buildWorldGridFromLayouts([sourceLayout, targetLayout]),
+        targetLevelId,
+        sourceWorldCell
+      )
+    : null
   const targetPlayer = {
-    cell: sourceMaze
-      ? mapLocalCellBetweenLevels(
+    cell: canonicalTargetCell ?? (
+      sourceMaze
+        ? mapLocalCellBetweenLevels(
           sourceMaze,
           sourceTransform,
           targetLayout.maze,
           targetTransform,
           sourceState.player.cell
         )
-      : findIngressCellForGlobalTransition(targetLayout.maze, sourceLevelId),
+        : findIngressCellForGlobalTransition(targetLayout.maze, sourceLevelId)
+    ),
     direction: yawToDirection(targetLocalYaw),
     hasSword: sourceState.player.hasSword,
     hasTrophy: sourceState.player.hasTrophy

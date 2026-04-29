@@ -35,6 +35,8 @@
 - Runtime volumetric fog renders through one global full-screen pass rather than duplicating one fog pass per rendered level.
 - The runtime volumetric-fog pass stays within the browser's fragment texture-sampler budget by binding only a capped set of nearby ready volumetric-lightmap atlases selected from the world lighting registry by camera position.
 - The current runtime volumetric-fog atlas cap is four selected atlases per frame, chosen from the nearest ready rendered level probe bounds so fog remains continuous at level boundaries without exceeding the WebGL sampler budget.
+- Runtime volumetric-fog atlas selection is based on world-space camera distance and stable level identity; active-level focus is not a tie-breaker and cannot by itself change which equally near atlas is sampled.
+- Runtime volumetric fog treats volumetric-lightmap coefficient textures as its readiness requirement; specular reflection-cubemap residency must not determine whether fog can sample a level's diffuse probe lighting.
 - Lens flares are level-agnostic at runtime and choose from the currently rendered visible torch billboards/lights, regardless of the level that authored them.
 - Reflection and volumetric probe debug visualization shows all currently loaded/rendered probes rather than only the active level's probes.
 - Walking across a level boundary updates only the active debug/resource-priority focus and any rules context needed to interpret the player's current world cell.
@@ -59,6 +61,7 @@
 - Adjacent rendered levels use their own lightmaps and probe data while they are visible from the current level, so walking across a boundary does not cause lighting bindings to churn or appear unlit until the destination becomes active.
 - Runtime lighting resources are owned and tracked per rendered level id; cleanup from the previously active level must not clear or replace the newly active level's lighting resources during a seamless boundary transition.
 - Runtime lighting resources remain published for every mounted rendered level until that level unmounts; changing which level has debug focus must not temporarily clear surface-lightmap, volumetric-lightmap, or reflection-probe bindings.
+- Runtime reflection-probe residency for an already mounted level is stable across active-level focus changes; focus changes do not remount, dispose, or reload that level's probe textures.
 - The loading overlay remains up until every level rendered in the initial current-level neighborhood has its own surface lightmap and startup probe resources ready, so the first ordinary boundary crossing cannot reveal unlit destination-level geometry.
 - Movement and turn input are ignored until the startup scene has reached its lighting-ready state, so buffered startup keystrokes cannot move the player into a level whose lightmaps or probes are still streaming.
 - When a destination level is already in the rendered neighborhood, walking into it must preserve its existing lighting resource bindings rather than remounting, clearing, or reprioritizing them in a way that changes visible lighting.

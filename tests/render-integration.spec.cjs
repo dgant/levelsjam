@@ -972,6 +972,9 @@ test('walking from Entrance into Chamber 1 keeps surface lighting resident', asy
   await page.waitForTimeout(250)
 
   const canvas = page.locator('canvas').first()
+  const initialLightingStates = await page.evaluate(
+    () => window.__levelsjamDebug?.getLevelLightingState?.() ?? []
+  )
   const entranceBrightness = measureBrightness(
     await screenshotCanvasRegion(page, canvas, 180, 120, 0.5, 0.72)
   )
@@ -998,8 +1001,23 @@ test('walking from Entrance into Chamber 1 keeps surface lighting resident', asy
   const lightingState = await page.evaluate(
     () => window.__levelsjamDebug?.getActiveLightingResourceState?.() ?? null
   )
+  const levelLightingStates = await page.evaluate(
+    () => window.__levelsjamDebug?.getLevelLightingState?.() ?? []
+  )
 
   expect(lightingState?.activeMazeId).toBe('chamber-1')
+  expect(initialLightingStates).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ mazeId: 'entrance', ready: true }),
+      expect.objectContaining({ mazeId: 'chamber-1', ready: true })
+    ])
+  )
+  expect(levelLightingStates).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ mazeId: 'entrance', ready: true }),
+      expect.objectContaining({ mazeId: 'chamber-1', ready: true })
+    ])
+  )
   expect(chamberBrightness.average).toBeGreaterThan(8)
   expect(chamberBrightness.max).toBeGreaterThan(20)
   expect(chamberBrightness.average).toBeGreaterThan(entranceBrightness.average * 0.2)
