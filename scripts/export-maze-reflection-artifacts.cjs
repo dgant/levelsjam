@@ -38,6 +38,10 @@ function getRuntimeProbeManifestPath(runtimeDirectory, mazeId) {
   return path.join(runtimeDirectory, mazeId, 'probe-assets.json')
 }
 
+function getReflectionBakeUrl(mazeId) {
+  return `http://127.0.0.1:${servePort}/?maze=${encodeURIComponent(mazeId)}&bake=reflection-probes`
+}
+
 function hasCompleteRuntimeProbeManifest(maze, probeCount) {
   const existingRuntimeDirectories = runtimeMazeDataDirectories.filter((runtimeDirectory) =>
     fs.existsSync(path.join(runtimeDirectory, maze.id))
@@ -149,6 +153,14 @@ function computeVolumetricCoefficientsFromCapture(rawRgbEAtlas, computeFromPixel
   })
 }
 
+function addVolumetricCoefficients(left, right) {
+  return left.map((coefficient, coefficientIndex) => (
+    coefficient.map((component, channelIndex) =>
+      component + (right?.[coefficientIndex]?.[channelIndex] ?? 0)
+    )
+  ))
+}
+
 function waitForPort(port, timeoutMs) {
   return new Promise((resolve, reject) => {
     const deadline = Date.now() + timeoutMs
@@ -184,16 +196,17 @@ function waitForPort(port, timeoutMs) {
 
 async function waitForCaptureSceneReady(page, mazeId) {
   await page.waitForFunction(
-    () => window.__levelsjamDebug?.getReflectionProbeState?.()?.captureSceneState?.ready === true ||
-      window.__levelsjamDebug?.getReflectionCaptureSceneState?.()?.ready === true,
+    () => window.__levelsjamDebug?.getReflectionCaptureSceneState?.({
+      requireTorchBillboards: true
+    })?.ready === true,
     undefined,
     { timeout: sceneReadyTimeoutMs }
   )
 
   const state = await page.evaluate(
-    () => window.__levelsjamDebug?.getReflectionProbeState?.()?.captureSceneState ??
-      window.__levelsjamDebug?.getReflectionCaptureSceneState?.() ??
-      null
+    () => window.__levelsjamDebug?.getReflectionCaptureSceneState?.({
+      requireTorchBillboards: true
+    }) ?? null
   )
 
   if (!state?.ready) {
@@ -273,7 +286,7 @@ async function captureMazeReflectionArtifacts(
     stepKind: 'wrapper'
   })
 
-  await page.goto(`http://127.0.0.1:${servePort}/?maze=${maze.id}`, {
+  await page.goto(getReflectionBakeUrl(maze.id), {
     timeout: 60_000,
     waitUntil: 'domcontentloaded'
   })
@@ -359,7 +372,9 @@ async function captureMazeReflectionArtifacts(
     ) {
       const probeState = await page.evaluate(
         () => ({
-          captureSceneState: window.__levelsjamDebug?.getReflectionCaptureSceneState?.() ?? null,
+          captureSceneState: window.__levelsjamDebug?.getReflectionCaptureSceneState?.({
+            requireTorchBillboards: true
+          }) ?? null,
           reflectionProbeState: window.__levelsjamDebug?.getReflectionProbeState?.() ?? null
         })
       )
@@ -391,17 +406,22 @@ async function captureMazeReflectionArtifacts(
       )
     }
 
+    const analyticCoefficients = computeMazeVolumetricLightmapCoefficients(
+      maze,
+      mazeLayout.reflectionProbes[probeIndex].position,
+      sconceRadius
+    )
+    const capturedCoefficients = Array.isArray(capture.rawRgbEAtlas)
+      ? computeVolumetricCoefficientsFromCapture(
+          capture.rawRgbEAtlas,
+          computeVolumetricLightmapCoefficientsFromPixels
+        )
+      : null
+
     manifest.probes.push({
-      coefficients: Array.isArray(capture.rawRgbEAtlas)
-        ? computeVolumetricCoefficientsFromCapture(
-            capture.rawRgbEAtlas,
-            computeVolumetricLightmapCoefficientsFromPixels
-          )
-        : computeMazeVolumetricLightmapCoefficients(
-            maze,
-            mazeLayout.reflectionProbes[probeIndex].position,
-            sconceRadius
-          ),
+      coefficients: capturedCoefficients
+        ? addVolumetricCoefficients(capturedCoefficients, analyticCoefficients)
+        : analyticCoefficients,
       index: probeIndex,
       processedCubeUvRgbE: path.posix.join(
         runtimeProbeDirectoryRelative,
@@ -458,7 +478,7 @@ async function captureMazeReflectionArtifacts(
     }
 
     writeRuntimeManifest(firstPassManifest)
-    await page.goto(`http://127.0.0.1:${servePort}/?maze=${maze.id}`, {
+    await page.goto(getReflectionBakeUrl(maze.id), {
       timeout: 60_000,
       waitUntil: 'domcontentloaded'
     })

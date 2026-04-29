@@ -560,6 +560,11 @@
 - The reflective maze floor patch uses local reflection probes so puddled areas can reflect nearby torch sources rather than only the global HDRI.
 - The reflective maze floor patch blends nearby local reflection probes with weighted interpolation rather than switching between one nearest probe per region.
 - Reflective maze sconces blend nearby local reflection probes with weighted interpolation rather than switching between one nearest probe at the object position.
+- Offline reflection-probe captures include visible maze geometry and torch billboard emitters, so captured probe textures are never valid if they contain only the HDRI skybox.
+- A reflection probe captured from inside a fully walled cell must differ substantially from a skybox-only capture; a probe that matches the skybox baseline is considered a failed capture.
+- Offline reflection-probe and volumetric-lightmap baking mounts and renders the full target level independent of gameplay visibility culling, player position, or startup-only geometry expansion.
+- Runtime volumetric-lightmap coefficients are derived from captures that include local torch emitters and must provide enough diffuse energy for dynamic objects near torches to read in the same ballpark as static lightmapped surfaces.
+- Runtime volumetric-lightmap coefficients include occluded analytic direct torch, moon, and skylight terms in addition to captured local radiance so small visible emitters do not vanish from diffuse lighting due to cubemap solid-angle averaging.
 - Local reflection probes apply parallax-corrected local projection so nearby walls, sconces, and torches do not behave like infinitely distant reflections.
 - Local reflection probes use the baked local reflection source directly; wall-separated diffuse and fog occlusion is handled by connectivity-gated volumetric lightmaps.
 - Local reflection probes do not make baked lighting or image-based lighting appear to flicker as the camera moves between maze cells.
@@ -760,6 +765,8 @@
 - Automated render-integration coverage verifies that volumetric fog responds immediately to its live controls and uses probe-fed lighting without breaking fog visibility.
 - Automated render-integration coverage verifies that double-clicking a debug-panel label resets the associated control to its authored default.
 - Automated render-integration coverage verifies that reflection-probe debug visualization shows captured maze walls and respects wall occlusion of torch emitters.
+- Automated render-integration coverage verifies exact reflection-probe capture artifacts differ substantially from a skybox-only baseline before those artifacts are accepted.
+- Automated render-integration coverage verifies volumetric-lightmap coefficients near torches are bright enough to illuminate dynamic objects in the same rough luminance range as nearby static lightmapped surfaces.
 - Automated render-integration coverage verifies that a geometry-only reflection-probe capture contains maze geometry, so the cube-camera capture path itself is proven before beauty-pass probe behavior is judged.
 - Maze-generation logic is covered by automated tests that validate every persisted maze against the maze rules.
 - Maze-validation coverage includes an agent that must beat each maze under the same movement, visibility, monster, gate, sword, and trophy rules available to the player while observing only player-visible information.

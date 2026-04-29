@@ -5656,14 +5656,25 @@ function hasReflectionCaptureExcludedAncestor(object: Object3D) {
   return false
 }
 
-function getReflectionCaptureSceneState(scene: ThreeScene, layout: MazeLayout) {
+type ReflectionCaptureSceneStateOptions = {
+  requireTorchBillboards?: boolean
+}
+
+function getReflectionCaptureSceneState(
+  scene: ThreeScene,
+  layout: MazeLayout,
+  options: ReflectionCaptureSceneStateOptions = {}
+) {
   const expectedGroundPatchCount = buildGroundReflectionProbeRects(layout).length
+  const expectedTorchBillboardCount = layout.lights.length
   let groundPatchCount = 0
   let readyGroundPatchCount = 0
   let wallCount = 0
   let readyWallCount = 0
   let sconceCount = 0
   let readySconceCount = 0
+  let torchBillboardCount = 0
+  let readyTorchBillboardCount = 0
 
   scene.traverse((object) => {
     if (!(object instanceof Mesh) || hasReflectionCaptureExcludedAncestor(object)) {
@@ -5712,12 +5723,21 @@ function getReflectionCaptureSceneState(scene: ThreeScene, layout: MazeLayout) {
       })) {
         readySconceCount += 1
       }
+      return
+    }
+
+    if (object.userData?.debugRole === 'torch-billboard') {
+      torchBillboardCount += 1
+      if (isMeshMaterialReady(object, { map: true })) {
+        readyTorchBillboardCount += 1
+      }
     }
   })
 
   return (
     {
       expectedGroundPatchCount,
+      expectedTorchBillboardCount,
       groundPatchCount,
       readyGroundPatchCount,
       ready:
@@ -5725,10 +5745,19 @@ function getReflectionCaptureSceneState(scene: ThreeScene, layout: MazeLayout) {
         wallCount > 0 &&
         readyGroundPatchCount === groundPatchCount &&
         readyWallCount === wallCount &&
-        readySconceCount === sconceCount,
+        readySconceCount === sconceCount &&
+        (
+          !options.requireTorchBillboards ||
+          (
+            readyTorchBillboardCount >= expectedTorchBillboardCount &&
+            torchBillboardCount >= expectedTorchBillboardCount
+          )
+        ),
       readySconceCount,
+      readyTorchBillboardCount,
       readyWallCount,
       sconceCount,
+      torchBillboardCount,
       wallCount
     }
   )
@@ -8666,7 +8695,9 @@ function EnvironmentLighting({
         return
       }
 
-      const captureSceneState = getReflectionCaptureSceneState(scene, layout)
+      const captureSceneState = getReflectionCaptureSceneState(scene, layout, {
+        requireTorchBillboards: true
+      })
       scene.userData.reflectionProbeState = buildReflectionProbeState(captureSceneState)
 
       if (!captureSceneState.ready) {
@@ -17750,6 +17781,10 @@ function Scene({
           probeIndex: number,
           size?: number
         ) => string[] | null
+        captureReflectionProbeSkyboxOnlyAtlas?: (
+          probeIndex: number,
+          size?: number
+        ) => string[] | null
         captureReflectionProbeWallMaterialContinuum?: (
           probeIndex: number,
           wallIndex: number,
@@ -17759,7 +17794,9 @@ function Scene({
           key: WallMaterialContinuumStepKey
           label: string
         }> | null
-        getReflectionCaptureSceneState?: () => ReturnType<typeof getReflectionCaptureSceneState>
+        getReflectionCaptureSceneState?: (
+          options?: ReflectionCaptureSceneStateOptions
+        ) => ReturnType<typeof getReflectionCaptureSceneState>
         getRendererStats?: () => {
           calls: number
           frame: number
@@ -18027,8 +18064,9 @@ function Scene({
       }
     }
 
-    const getReflectionCaptureSceneStateDebug = () =>
-      getReflectionCaptureSceneState(scene, layout)
+    const getReflectionCaptureSceneStateDebug = (
+      options: ReflectionCaptureSceneStateOptions = {}
+    ) => getReflectionCaptureSceneState(scene, layout, options)
 
     const getTextureImageInfo = (texture: Texture | null | undefined) => {
       if (!texture) {
@@ -18221,7 +18259,6 @@ function Scene({
           object.userData?.debugRole === 'torch-lens-flare' ||
           object.userData?.debugRole === 'global-fog-volume' ||
           object.userData?.debugRole === 'reflection-probe-visual' ||
-          object.userData?.debugRole === 'torch-billboard' ||
           isOfflineBakeExcludedObject(object)
         ) {
           hiddenObjects.push({ object, visible: object.visible })
@@ -18312,6 +18349,65 @@ function Scene({
       }
 
       return captureCubeUvTextureAtlasDataUrls(gl, probeTexture, size)
+    }
+
+    const captureReflectionProbeSkyboxOnlyAtlas = (probeIndex: number, size = 128) => {
+      const probe = layout.reflectionProbes[probeIndex]
+      const backgroundTexture = scene.background instanceof Texture
+        ? scene.background
+        : null
+      const captureEnvironmentTexture = environmentTexture ?? backgroundTexture
+
+      if (!probe || size <= 0 || !captureEnvironmentTexture) {
+        return null
+      }
+
+      const hiddenObjects: Array<{ object: { visible: boolean }, visible: boolean }> = []
+      const savedBackground = scene.background
+      const savedBackgroundIntensity = scene.backgroundIntensity
+      const savedEnvironment = scene.environment
+      const savedEnvironmentIntensity = scene.environmentIntensity
+      const skyboxTarget = new WebGLCubeRenderTarget(size, {
+        type: HalfFloatType
+      })
+      const skyboxCamera = new CubeCamera(0.1, REFLECTION_PROBE_FAR, skyboxTarget)
+
+      scene.traverse((object) => {
+        if (object !== scene && object.visible) {
+          hiddenObjects.push({ object, visible: object.visible })
+          object.visible = false
+        }
+      })
+
+      skyboxCamera.position.set(
+        probe.position.x,
+        probe.position.y,
+        probe.position.z
+      )
+      scene.background = savedBackground
+      scene.backgroundIntensity = BAKED_ENVIRONMENT_INTENSITY
+      scene.environment = captureEnvironmentTexture
+      scene.environmentIntensity = environmentIntensity
+
+      try {
+        scene.add(skyboxCamera)
+        skyboxCamera.update(gl, scene)
+        scene.remove(skyboxCamera)
+
+        return captureCubeTextureAtlasDataUrls(gl, skyboxTarget.texture, size, {
+          applyColorSpaceTransform: false
+        })
+      } finally {
+        scene.background = savedBackground
+        scene.backgroundIntensity = savedBackgroundIntensity
+        scene.environment = savedEnvironment
+        scene.environmentIntensity = savedEnvironmentIntensity
+        skyboxTarget.dispose()
+        scene.remove(skyboxCamera)
+        for (const entry of hiddenObjects) {
+          entry.object.visible = entry.visible
+        }
+      }
     }
 
     const getReflectionProbeTextureState = (probeIndex: number) => ({
@@ -18507,6 +18603,7 @@ function Scene({
       captureReflectionProbeAtlas,
       captureReflectionProbeProcessedAtlas,
       captureReflectionProbeGeometryAtlas,
+      captureReflectionProbeSkyboxOnlyAtlas,
       captureReflectionProbeWallMaterialContinuum,
       clearDebugIsolation,
       getFogState,
@@ -18538,6 +18635,7 @@ function Scene({
       delete globalWindow.__levelsjamDebug.captureReflectionProbeAtlas
       delete globalWindow.__levelsjamDebug.captureReflectionProbeProcessedAtlas
       delete globalWindow.__levelsjamDebug.captureReflectionProbeGeometryAtlas
+      delete globalWindow.__levelsjamDebug.captureReflectionProbeSkyboxOnlyAtlas
       delete globalWindow.__levelsjamDebug.captureReflectionProbeWallMaterialContinuum
       delete globalWindow.__levelsjamDebug.clearDebugIsolation
       delete globalWindow.__levelsjamDebug.getFogState
@@ -18593,6 +18691,13 @@ function Scene({
   const runtimeReflectionIntensity = visualSettings.unlitMode
     ? 0
     : getEnabledContributionIntensity(visualSettings.reflectionContribution)
+  const offlineReflectionBakeMode = useMemo(() => {
+    if (typeof window === 'undefined') {
+      return false
+    }
+
+    return new URLSearchParams(window.location.search).get('bake') === 'reflection-probes'
+  }, [])
   const precomputedVisibilityState = useMemo<PrecomputedVisibilityState>(() => {
     const visibleCellKeys =
       layout.maze.visibility?.cells?.[getMazeCellKey(turnState.player.cell)]
@@ -18709,7 +18814,7 @@ function Scene({
               lightmapContributionIntensity={runtimeLightmapIntensity}
               minotaurAlbedoHex={visualSettings.minotaurAlbedoHex}
               monsterEyes={visualSettings.monsterEyes}
-              mountAllGeometry={startupGeometryExpanded}
+              mountAllGeometry={startupGeometryExpanded || offlineReflectionBakeMode}
               offeringAltarId={
                 altarCutscene?.levelId === renderedLayout.maze.id &&
                 !activatedAltarIds.has(altarCutscene.altarId)
@@ -18734,7 +18839,9 @@ function Scene({
               transform={getRuntimeLevelWorldTransform(renderedLayout.maze.id)}
               turnState={renderedTurnState}
               visibilityState={
-                isActive
+                offlineReflectionBakeMode
+                  ? DISABLED_PRECOMPUTED_VISIBILITY
+                  : isActive
                   ? effectiveVisibilityState
                   : (
                     adjacentLevelVisibilityStates.get(renderedLayout.maze.id) ??
