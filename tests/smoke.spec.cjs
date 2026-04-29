@@ -2215,6 +2215,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     expect(swordStrikeFadeState.fadeOut.name).toBe('sword-strike-out')
     expect(swordStrikeFadeState.fadeOut.color).toEqual([0.5, 0, 0])
 
+    await page.getByRole('button', { name: 'Core' }).click()
     await page.getByLabel('Probe Debug', { exact: true }).selectOption('reflection')
     await expect
       .poll(
@@ -2375,7 +2376,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
             mode: 'disabled',
             probeConnectivity: true,
             radianceIntensity: 1,
-            radianceMode: 'disabled'
+            radianceMode: 'world'
           }
         },
         wall: {
@@ -2384,7 +2385,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
             diffuseIntensity: 1,
             radianceIntensity: 1,
             mode: 'disabled',
-            radianceMode: 'disabled'
+            radianceMode: 'world'
           }
         }
       })

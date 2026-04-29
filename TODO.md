@@ -500,3 +500,34 @@ Fix all of this once and for all. The rules engine must not exist per-level or p
 [x] Restore full-res N8AO
 [x] Add a debug slider for camera tilt (ie. towards the ground or sky)
 [x] Expose N8AO settings in the debug menu
+[x] Calculate a default volumetric lightmap probe, using just the environment light + moonlight, to use for any cells that do not have volumetric lightmap data (namely, ones outside levels). The goal is for volumetric lighting (specifically fog lighting) to remain continuous and sensible across cells inside levels and cells outside levels. The most important use case is volumetric fog, where right now there are hard seams in the sky where fog above in-level cells receives lightmapping and fog above outside cells receives no lighting whatsoever, when those cells should 1. at least receive moonlight + environment lighting 2. smoothly fade from one cell to another like volumetric lighting does in general
+[x] Altar blocks, altar bowls, and sconces should use the static material, and receive and use surface lightmaps
+[x] Extend range of reflection intensity slider to 12x
+[x] Add a slider for torch billboard intensity
+[x] Add a slider for surface lightmap saturation (0-1), tuning the lightmap saturation before applying it them
+[x] Add a slider for volumetric lightmap saturation (0-1), tuning the lightmap saturation before applying it them
+[x] Implement three.js's chromatic aberration, with its own debug tab with tunable settings and an enable/disable checkbox
+[x] DoF focus range slider should just be "focus range" and the slider should go from some small value up to 8m
+[x] There's a lot of stuttering when walking into chamber 1 or the first time
+[x] I am still observing camera backtracking, where the camera movement jumps backward to a previous position then catches back up. This is a major, major bug that we need to fix once and for all. "ecause the camera is currently treated as a shared mutable three.js object, not as the output of a single camera-state system.
+
+  That is architecturally wrong for the gameplay camera. The code has grown several features that directly mutate camera.position / camera.quaternion because it was convenient at the time:
+
+  - Main gameplay camera controller writes the turn-based player view every frame.
+  - Free camera mode writes directly for debug inspection.
+  - Replay setup resets the camera directly.
+  - Debug setView writes directly.
+  - Altar/cutscene look code writes directly inside the gameplay controller.
+  - Initial pose effect writes directly on mount.
+  - Camera shake mutates the final camera position after gameplay positioning.
+
+  The intended architecture should be: one camera rig owns the actual three.js camera write. Everything else writes requests/state into that rig, such as mode = gameplay/free/debug/cutscene, desired world pose, shake offset, or teleport reset. Then exactly one late-frame function resolves the final pose and calls
+  camera.position/quaternion.
+
+  So yes, this should not be possible. It is a legacy accumulation problem. The fix is to centralize camera writes and ban direct camera mutation outside the camera controller, ideally with a small helper/API and tests or lint/source tests that catch camera.position.set/copy/lerpVectors/add and camera.quaternion...
+  outside the owner."
+Go implement this. We need robust central camera control with an architecture that should make accidentally discontinuous camera movement impossible.
+[x] All the default debug menu settings should live in a config file that I can modify
+[x] Add to the debug menu an export button that exports the debug menu settings to a config file I can drop in as replacement to the previous config file
+[x] Settings menu: Don't blur or dim the background so much, like max 25% dimming
+[x] "Mobile: Tapping a button should not highlight the whole third of the screen" This was checked as fixed but is not fixed at all. When you tap one of the three clickable D-pad areas on mobile, the whole clickable area lights up. This must not happen.

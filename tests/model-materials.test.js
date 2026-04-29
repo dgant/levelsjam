@@ -263,3 +263,87 @@ test('altar cup runtime model is simplified to the requested triangle budget', (
     `runtime altar cup should stay close to 5k triangles, got ${getGltfTriangleCount(gltf)}`
   )
 })
+
+test('debug visual defaults live in the editable source config', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+  const defaults = JSON.parse(
+    fs.readFileSync(path.join(rootDir, 'src/visual-settings.defaults.json'), 'utf8')
+  )
+
+  assert.match(appSource, /visual-settings\.defaults\.json/)
+  assert.equal(defaults.reflectionContribution.intensity, 1)
+  assert.equal(defaults.lightmapSaturation, 1)
+  assert.equal(defaults.volumetricSaturation, 1)
+  assert.equal(defaults.torchBillboardIntensity, 1)
+  assert.equal(defaults.depthOfField.focusRange, 0.03)
+  assert.equal(defaults.chromaticAberration.enabled, false)
+  assert.match(appSource, /link\.download = 'visual-settings\.defaults\.json'/)
+})
+
+test('debug lighting and post controls are wired to live render settings', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(appSource, /const MAX_REFLECTION_CONTRIBUTION_INTENSITY = 12/)
+  assert.match(appSource, /aria-label="Surface-LM Saturation"/)
+  assert.match(appSource, /aria-label="Volumetric-LM Saturation"/)
+  assert.match(appSource, /aria-label="Torch Billboard Intensity"/)
+  assert.match(appSource, /<ChromaticAberration/)
+  assert.match(appSource, /aria-label="Chromatic Aberration Intensity"/)
+  assert.match(appSource, /focusRange=\{visualSettings\.depthOfField\.focusRange\}/)
+  assert.doesNotMatch(appSource, /focalLength=\{visualSettings\.depthOfField/)
+})
+
+test('static detail meshes receive the static surface lighting path', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+  const mazeSource = fs.readFileSync(path.join(rootDir, 'src/lib/maze.js'), 'utf8')
+
+  assert.match(mazeSource, /wallFaceKey/)
+  assert.match(mazeSource, /wallId/)
+  assert.match(appSource, /function createSconceGeometry/)
+  assert.match(appSource, /lightMap=\{lightmapTexture\}/)
+  assert.match(appSource, /applyRectLightmapUvsToModel\(cupModel/)
+  assert.match(appSource, /material\.lightMap = lightmapTexture/)
+})
+
+test('mobile touch controls do not paint the whole tap region on press', () => {
+  const cssSource = fs.readFileSync(path.join(rootDir, 'src/styles.css'), 'utf8')
+
+  assert.match(cssSource, /\.mobile-touch-zone:active\s*\{\s*background: transparent;/)
+  assert.match(cssSource, /-webkit-tap-highlight-color: transparent/)
+  assert.match(cssSource, /-webkit-touch-callout: none/)
+})
+
+test('gameplay camera writes are centralized through the camera rig helper', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+  const directWriteMatches = [
+    ...appSource.matchAll(/camera\.(position|quaternion)\.(set|copy|lerpVectors|add|addScaledVector|setFromEuler)|camera\.lookAt|camera\.updateMatrixWorld/g)
+  ].map((match) => {
+    const line = appSource.slice(0, match.index).split('\n').length
+
+    return { line, text: match[0] }
+  })
+  const allowedLines = new Set(
+    appSource
+      .split('\n')
+      .map((line, index) => ({ line, number: index + 1 }))
+      .filter(({ line }) =>
+        line.includes('camera.position.copy(position)') ||
+        line.includes('camera.quaternion.setFromEuler') ||
+        line.includes('camera.position.add(cameraShakeOffset.current)') ||
+        line.includes('camera.updateMatrixWorld()')
+      )
+      .map(({ number }) => number)
+  )
+
+  assert.ok(
+    directWriteMatches.length > 0,
+    'source test should detect the camera rig helper writes'
+  )
+  assert.deepEqual(
+    directWriteMatches.filter((match) => !allowedLines.has(match.line)),
+    [],
+    'camera.position/quaternion writes should stay inside applyCameraRigPose'
+  )
+  assert.match(appSource, /fromWorldPosition: Vector3/)
+  assert.match(appSource, /toWorldPosition: Vector3/)
+})

@@ -1,0 +1,125 @@
+{
+  "anamorphic": {
+    "colorGain": 1,
+    "enabled": false,
+    "intensity": 0.5,
+    "samples": 32,
+    "scale": 3,
+    "threshold": 0.9
+  },
+  "ambientOcclusionIntensity": 1,
+  "ambientOcclusionMode": "n8ao",
+  "ambientOcclusionRadius": 1,
+  "bloom": {
+    "enabled": false,
+    "intensity": 0.65,
+    "kernelSize": "huge",
+    "resolutionScale": 0.25,
+    "smoothing": 0.5,
+    "threshold": 0.5
+  },
+  "cameraFov": 80,
+  "cameraTiltDegrees": -5,
+  "chromaticAberration": {
+    "enabled": false,
+    "intensity": 0,
+    "modulationOffset": 0.15,
+    "offsetX": 0.001,
+    "offsetY": 0.001,
+    "radialModulation": false
+  },
+  "depthOfField": {
+    "bokehScale": 0,
+    "enabled": false,
+    "focusDistance": 0.02,
+    "focusRange": 0.03,
+    "resolutionScale": 0.25
+  },
+  "exposureStops": 0,
+  "hdriBrightness": 1,
+  "iblContribution": {
+    "enabled": true,
+    "intensity": 1
+  },
+  "lensFlare": {
+    "aditionalStreaks": false,
+    "animated": false,
+    "anamorphic": true,
+    "enabled": true,
+    "flareShape": 0.03,
+    "flareSize": 0.0015,
+    "flareSpeed": 0.01,
+    "ghostScale": 0,
+    "glareSize": 0,
+    "haloScale": 0.16,
+    "intensity": 0.01,
+    "opacity": 0.01,
+    "secondaryGhosts": true,
+    "starBurst": false,
+    "starBurstIntensity": 1,
+    "starPoints": 3
+  },
+  "lightmapContribution": {
+    "enabled": true,
+    "intensity": 1
+  },
+  "lightmapSaturation": 1,
+  "minotaurAlbedoHex": "#2b2130",
+  "movement": {
+    "accelerationDistance": 2,
+    "decelerationDistance": 0.5,
+    "maxHorizontalSpeedMph": 20
+  },
+  "n8aoDenoiseIterations": 2,
+  "n8aoDenoiseRadius": 8,
+  "n8aoDenoiseSamples": 4,
+  "n8aoSamples": 8,
+  "precomputedVisibilityEnabled": true,
+  "probeDebugMode": "none",
+  "reflectionContribution": {
+    "enabled": true,
+    "intensity": 1
+  },
+  "saturation": 1,
+  "ssr": {
+    "blur": true,
+    "bouncing": false,
+    "distanceAttenuation": true,
+    "enabled": false,
+    "fresnel": true,
+    "infiniteThick": false,
+    "intensity": 0,
+    "maxDistance": 18,
+    "output": "default",
+    "resolutionScale": 0.75,
+    "thickness": 0.018
+  },
+  "staticVolumetricContribution": {
+    "enabled": false,
+    "intensity": 1
+  },
+  "toneMapping": "neutral",
+  "torchBillboardIntensity": 1,
+  "unlitMode": false,
+  "vignette": {
+    "enabled": true,
+    "exposureNoiseIntensity": 0,
+    "intensity": 0.6,
+    "noiseIntensity": 0,
+    "noisePeriod": 5
+  },
+  "volumetricAmbientHex": "#2c2c68",
+  "volumetricDistance": 12,
+  "volumetricHeightFalloff": 0.4,
+  "volumetricLighting": {
+    "enabled": true,
+    "intensity": 0.75
+  },
+  "volumetricLightingStrength": 1,
+  "volumetricNoiseFrequency": 0.25,
+  "volumetricNoisePeriod": 0.75,
+  "volumetricNoiseStrength": 1,
+  "volumetricSaturation": 1,
+  "volumetricShadowsEnabled": true,
+  "volumetricStepCount": 6
+}

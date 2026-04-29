@@ -37,11 +37,14 @@
 - The current runtime volumetric-fog atlas cap is four selected atlases per frame, chosen from the nearest ready rendered level probe bounds so fog remains continuous at level boundaries without exceeding the WebGL sampler budget.
 - Runtime volumetric-fog atlas selection is based on world-space camera distance and stable level identity; active-level focus is not a tie-breaker and cannot by itself change which equally near atlas is sampled.
 - Runtime volumetric fog treats volumetric-lightmap coefficient textures as its readiness requirement; specular reflection-cubemap residency must not determine whether fog can sample a level's diffuse probe lighting.
+- Runtime volumetric fog uses a default environment-and-moonlight volumetric probe for world cells that do not have level-authored volumetric-lightmap data, so sky and out-of-level fog receive continuous low-frequency lighting instead of hard black seams.
 - Lens flares are level-agnostic at runtime and choose from the currently rendered visible torch billboards/lights, regardless of the level that authored them.
 - Reflection and volumetric probe debug visualization shows all currently loaded/rendered probes rather than only the active level's probes.
 - Walking across a level boundary updates only the active debug/resource-priority focus and any rules context needed to interpret the player's current world cell.
 - Walking across a connected level boundary preserves the player's world-space position, camera yaw, camera pitch, inventory flags, held-item visibility, and current input flow.
 - Walking across a connected level boundary keeps the player camera continuous through the final frame of the move animation and the first frame of the destination level; the camera must not snap back to the source exit cell before settling in the destination ingress cell.
+- The three.js camera object is written by one camera rig/controller path; gameplay, free-camera, replay, debug view, cutscene, and shake systems provide camera-state requests instead of mutating `camera.position` or `camera.quaternion` directly.
+- Camera movement animations store their source and destination poses in world space at animation start, so a level-focus or resource update during the move cannot reproject the active animation through a different local layout and create backtracking.
 - The rendered player/camera controller synchronizes active turn state before the next rendered frame when the active level changes, so it never evaluates source-level cell coordinates under the destination level layout.
 - Buffered movement input may be retained during a seamless boundary handoff, but it is not consumed until the destination level has become the active rendered layout.
 - Once a streamed level has ready surface lightmap and probe resources, ordinary movement, level-focus changes, and background resource refreshes keep rendering that level with the last known-good lighting resources until a complete replacement is ready.
@@ -116,6 +119,7 @@
 - Each wall sconce uses a 0.125 meter radius lower hemisphere with the cut top replaced by a flat circular cap.
 - Each wall sconce uses the requested `metal-13` PBR texture pack rather than a debug material.
 - Each wall sconce uses the full authored `metal-13` PBR material stack, excluding only the known-problematic ambient-occlusion map path.
+- Each wall sconce uses the shared static PBR lighting path and receives baked surface-lightmap lighting when attached to a lightmapped wall.
 - Each wall sconce is positioned with its center one sconce radius outside the wall face.
 - Each wall sconce receives visible local volumetric-lightmap illumination and must not render as hard black under the default lighting stack.
 - Each wall sconce supports a camera-facing torch billboard above it.
@@ -130,6 +134,7 @@
 - Each torch billboard animation plays eight times faster than the previous 4-second loop.
 - Each torch billboard uses an unlit material.
 - Each torch billboard brightness is scaled from a 1500 candela torch baseline.
+- Each torch billboard brightness is multiplied by a live runtime debug-control intensity so the visible flame can be balanced against baked lighting without rebaking.
 - Each torch billboard samples the linked atlas so the visible flame fills the specified quad and sits on the sconce instead of floating above it due to transparent frame padding.
 - Each torch billboard is rendered through a dedicated translucent composite path after the opaque AO and SSR inputs have been generated.
 - Each torch billboard blends additively into the already-rendered scene color rather than replacing the background color under its alpha.
@@ -150,6 +155,7 @@
 - The maze-floor ground preserves the authored world-space puddle-texture texel density rather than retileing the puddle textures at a different density.
 - The maze-floor ground samples the baked surface lightmap with the same world-space X/Z orientation used by the bake, so floor light appears under the torch sources that produced it.
 - The maze-floor ground and maze walls integrate the baked HDR lightmap directly into their PBR material path rather than drawing it as a separate transparent overlay mesh.
+- Static altar blocks and altar bowls use the shared static PBR lighting path and receive baked surface-lightmap lighting.
 - The maze walls apply their baked torch lightmap on the actual wall mesh through authored lightmap UVs instead of through duplicate front-face or back-face overlay planes.
 - Runtime maze walls sample a shared baked surface-lightmap atlas through wall-specific atlas UVs rather than allocating separate lightmap textures for each wall face.
 - The baked wall-face lightmap aligns with both local wall-face UV orientations so off-center torch gradients do not appear mirrored on one face orientation.
@@ -157,6 +163,7 @@
 - The baked maze lightmap follows the same pre-tonemap HDR lighting path as the rest of the wall and floor shading.
 - Each baked maze lightmap stores full three-channel HDR irradiance rather than scalar torch-only values.
 - Each baked maze lightmap stores raw lighting values and is never tone-mapped, exposure-compensated, or artistically re-tinted at runtime.
+- Runtime surface-lightmap contribution supports a debug saturation control from grayscale to full authored color before the lightmap is applied.
 - Each baked maze lightmap uses an HDR encoding that preserves headroom instead of clipping bright torch-adjacent texels to full white during bake generation.
 - Each baked maze lightmap uses supersampled texel evaluation so torch gradients on walls and the maze floor patch are smoother than a single-sample bake.
 - Baked torch lighting uses physical inverse-square falloff across all represented lightmapped surfaces without an authored hard maximum distance cutoff.
@@ -206,6 +213,8 @@
 - Diffuse volumetric-lightmap shading and volumetric-fog probe lighting blend continuously across connected cells, including across the midlines between adjacent probe centers, while still rejecting contribution across maze walls when volumetric occlusion is enabled.
 - Diffuse volumetric-lightmap shading visibly contributes to surface materials when its runtime intensity is nonzero.
 - Local reflection probes visibly contribute to reflective surface materials when their runtime intensity is nonzero.
+- Runtime volumetric-lightmap diffuse contribution supports a debug saturation control from grayscale to full authored color before the probe lighting is applied.
+- Runtime local reflection intensity can be inspected and tuned from zero through twelve-times contribution in the debug controls.
 - Geometry that lives primarily inside a maze cell, such as monsters and cell-ground surfaces, evaluates diffuse volumetric-lightmap shading from the current probe plus the four cardinally adjacent probes.
 - Geometry that spans a boundary between maze cells, such as maze walls and wall-mounted sconces, evaluates diffuse volumetric-lightmap shading from the eight closest probes around that boundary.
 - Volumetric-lightmap diffuse shading blends probe influence continuously across surface position so adjacent surfaces do not show hard probe-selection seams.
@@ -380,6 +389,7 @@
 - The menu fits inside the viewport on mobile and desktop and includes a visible close button.
 - The menu is tabbed, with a Graphics tab containing Lighting, Fog, and Ambient Occlusion toggles, and a Levels tab containing the level-selection list.
 - On touch/mobile layouts, the bottom of the screen displays left-turn, forward, and right-turn controls.
+- Pressing a touch/mobile movement zone does not draw a browser tap highlight or pressed-state wash over the whole control region.
 - Mobile turn controls have large click/touch hit regions that divide the full screen into playable control areas while their visible labels remain along the bottom.
 - Mobile turn controls do not show browser tap-highlight selection when touched.
 - Mobile turn controls accept left, right, and upward swipes as alternate rotate-left, rotate-right, and move-forward commands.
@@ -436,7 +446,9 @@
 - The debug panel exposes separate `Dynamic Volumetric` and `Static Volumetric` enabled toggles and scalar sliders for local-probe diffuse contribution.
 - `Dynamic Volumetric` controls non-lightmapped lit objects and defaults to enabled with intensity `1.0`.
 - `Static Volumetric` controls lightmapped objects and defaults to disabled with intensity `1.0`.
-- The debug panel exposes a `Reflection Intensity` enabled toggle and scalar slider that control the local-probe reflection contribution on participating materials.
+- The debug panel exposes a `Reflection Intensity` enabled toggle and scalar slider from `0` to `12` that controls the local-probe reflection contribution on participating materials.
+- The debug panel exposes `Surface Lightmap Saturation` and `Volumetric Lightmap Saturation` sliders from `0` to `1`.
+- The debug panel exposes a `Torch Billboard Intensity` slider that changes visible flame brightness without rebaking.
 - The debug panel lens flare control provides useful adjustment very close to zero rather than jumping immediately to an over-bright flare.
 - The debug panel SSR intensity control is clamped to a maximum of `1.0`.
 - The debug panel exposes an ambient-occlusion mode dropdown with working `Off`, `N8AO`, and `SSAO` modes.
@@ -444,9 +456,9 @@
 - The debug panel exposes an ambient-occlusion radius control and labels the radius in scene units or screen-space units as appropriate for the selected AO mode.
 - The debug panel exposes working N8AO quality controls for AO samples, denoise samples, denoise radius, and denoise iterations.
 - The debug panel ambient-occlusion mode defaults to `Off`.
-- The debug panel exposes Depth of Field `focusDistance`, `focalLength`, and `bokehScale`.
-- The debug panel labels Depth of Field `focusDistance` and `focalLength` with their units.
-- The debug panel allows Depth of Field focus distance values up to 8 meters.
+- The debug panel exposes Depth of Field `focusDistance`, `focusRange`, and `bokehScale`.
+- The debug panel labels Depth of Field `focusDistance` and `focusRange` with their units.
+- The debug panel allows Depth of Field focus distance and focus-range values up to 8 meters.
 - The debug panel exposes Bloom `kernelSize`.
 - The Bloom kernel-size control updates the configured bloom kernel preset.
 - Disabling `Surface Lightmap` visibly removes the baked surface-lightmap contribution from materials that use those lightmaps while leaving the underlying geometry visible.
@@ -678,11 +690,13 @@
 - The default debug tab exposes an `Unlit Mode` checkbox that disables baked/runtime lighting contributions and applies a uniform white ambient light for material and geometry inspection.
 - The `Probe Debug` control appears above `Tone Mapper`.
 - The `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, and `Reflection Intensity` checkbox-plus-slider controls each occupy one line in the same style as other effect rows.
-- Separate debug tabs exist for Ambient Occlusion, Bloom, Depth of Field, Lens Flares, SSR, Volumetric Fog, Vignette, and Anamorphic.
+- Separate debug tabs exist for Ambient Occlusion, Bloom, Depth of Field, Lens Flares, SSR, Volumetric Fog, Vignette, Chromatic Aberration, and Anamorphic.
+- The debug panel loads its authored default settings from a source-controlled config file and can export the current settings as a replacement config file.
+- The settings menu dims the game background by no more than 25%.
 - The ambient-occlusion tab exposes mode, intensity, and radius.
 - The bloom tab exposes enabled state and all useful bloom parameters, including intensity, threshold, smoothing, resolution scale, and kernel size.
 - Bloom starts disabled by default.
-- The depth-of-field tab exposes enabled state and all useful depth-of-field parameters, including `focusDistance`, `focalLength`, `bokehScale`, and resolution scale.
+- The depth-of-field tab exposes enabled state and all useful depth-of-field parameters, including `focusDistance`, `focusRange`, `bokehScale`, and resolution scale.
 - The lens-flare tab exposes enabled state and all useful flare parameters needed to tune visibility and shape, including a single strength control, flare size, glare size, ghost scale, halo scale, star-burst intensity, star-point count, and the wrapped effect's animated and anamorphic toggles.
 - Lens flares start enabled by default with strength `0.01`, flare size `0.0015`, three star points, secondary ghosts enabled, and star-burst intensity `1.0`.
 - The lens-flare strength debug control is an editable numeric input so very small values can be typed exactly.

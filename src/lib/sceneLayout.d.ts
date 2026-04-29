@@ -59,6 +59,9 @@ export type MazeLayout = {
     sconcePosition: Vector3Like
     side: 'north' | 'east' | 'south' | 'west'
     torchPosition: Vector3Like
+    wallAxis?: 'x' | 'z'
+    wallFaceKey?: 'pz' | 'nz'
+    wallId?: string
   }>
   maze: {
     lightmap: {

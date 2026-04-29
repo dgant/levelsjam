@@ -3169,6 +3169,14 @@ export function getMazeTorchPlacements(maze, sconceRadius) {
     .filter((light) => !isFilteredExteriorMazeLight(maze, light))
     .map((light, index) => {
       const descriptor = getWallDescriptorFromCellSide(maze, light.cell, light.side)
+      const neighbor = getNeighbor(light.cell, light.side)
+      const wallId = isPlayableCell(maze, neighbor)
+        ? edgeKey(light.cell, neighbor)
+        : `${cellKey(light.cell)}:${light.side}:exterior`
+      const wallFaceKey =
+        descriptor.normal.x > 0 || descriptor.normal.z > 0
+          ? 'pz'
+          : 'nz'
       const torchBillboardHalfSize =
         ((MAZE_WALL_THICKNESS / 2) + sconceRadius) / 2
       const sconcePosition = {
@@ -3195,7 +3203,9 @@ export function getMazeTorchPlacements(maze, sconceRadius) {
         side: light.side,
         torchPosition,
         wallAxis: descriptor.axis,
-        wallCenter: { ...descriptor.center }
+        wallCenter: { ...descriptor.center },
+        wallFaceKey,
+        wallId
       }
     })
 }

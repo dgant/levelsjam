@@ -1,4 +1,5 @@
 import {
+  ChromaticAberration,
   DepthOfField,
   EffectComposer,
   LensFlareEffect as PostLensFlareEffect,
@@ -39,6 +40,7 @@ import {
   AgXToneMapping,
   CineonToneMapping,
   LinearToneMapping,
+  LatheGeometry,
   Mesh,
   MeshBasicMaterial,
   MeshDepthMaterial,
@@ -120,6 +122,7 @@ import {
 } from './lib/levels.js'
 import { getAdjacentLevelVisibleCellKeys } from './lib/levelVisibility.js'
 import levelsMarkdown from '../LEVELS.md?raw'
+import defaultVisualSettingsConfig from './visual-settings.defaults.json'
 import { decodeRgbE8 } from './lib/probeSphericalHarmonics.js'
 import {
   getCameraPosition,
@@ -682,6 +685,7 @@ const DEFAULT_LIGHTMAP_CONTRIBUTION_INTENSITY = 1
 const DEFAULT_PROBE_IBL_INTENSITY = 1
 const DEFAULT_REFLECTION_INTENSITY = 1
 const MAX_LIGHTING_CONTRIBUTION_INTENSITY = 4
+const MAX_REFLECTION_CONTRIBUTION_INTENSITY = 12
 const BLOCKED_MOVE_FRACTION = 0.25
 
 function recordStartupMarker(name: string) {
@@ -1118,10 +1122,12 @@ uniform mat4 cameraWorldMatrix;
 uniform vec3 cameraWorldPosition;
 uniform float density;
 uniform vec3 environmentFogColor;
+uniform vec3 fallbackProbeAmbientColor;
 uniform float fogDistance;
 uniform float groundHeight;
 uniform float heightFalloff;
 uniform float lightingStrength;
+uniform float probeSaturation;
 uniform float noiseFrequency;
 uniform float noisePeriod;
 uniform float noiseStrength;
@@ -1342,9 +1348,14 @@ vec4 sampleFogAmbientCandidate(int atlasIndex, vec3 worldPosition, vec2 gridPosi
   return vec4(color * weight, weight);
 }
 
+vec3 applyFogSaturation(vec3 color, float saturation) {
+  float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
+  return mix(vec3(luminance), color, clamp(saturation, 0.0, 1.0));
+}
+
 vec3 sampleFogAmbientColor(vec3 worldPosition) {
   if (useProbeCoefficientTexture < 0.5) {
-    return vec3(0.0);
+    return fallbackProbeAmbientColor;
   }
 
   vec4 atlasAccumulated = vec4(0.0);
@@ -1384,10 +1395,10 @@ vec3 sampleFogAmbientColor(vec3 worldPosition) {
   float weight = atlasAccumulated.a;
 
   if (weight <= 0.0001) {
-    return vec3(0.0);
+    return fallbackProbeAmbientColor;
   }
 
-  return color / weight;
+  return applyFogSaturation(color / weight, probeSaturation);
 }
 
 vec3 reconstructWorldPosition(vec2 uv, float sceneDepth) {
@@ -1513,6 +1524,7 @@ type VisualControlTabKey =
   | 'ssr'
   | 'fog'
   | 'vignette'
+  | 'chromatic'
   | 'anamorphic'
   | 'performance'
   | 'solution'
@@ -1539,6 +1551,13 @@ type AnamorphicSettings = EffectSettings & {
   samples: number
   scale: number
   threshold: number
+}
+
+type ChromaticAberrationSettings = EffectSettings & {
+  modulationOffset: number
+  offsetX: number
+  offsetY: number
+  radialModulation: boolean
 }
 
 type SSRPassOutputMode =
@@ -1579,8 +1598,8 @@ type BloomSettings = EffectSettings & {
 type DepthOfFieldSettings = {
   bokehScale: number
   enabled: boolean
-  focalLength: number
   focusDistance: number
+  focusRange: number
   resolutionScale: number
 }
 
@@ -1649,6 +1668,7 @@ const VISUAL_CONTROL_TABS: Array<{
   { key: 'ssr', label: 'SSR' },
   { key: 'fog', label: 'Fog' },
   { key: 'vignette', label: 'Vignette' },
+  { key: 'chromatic', label: 'Chromatic' },
   { key: 'anamorphic', label: 'Anamorphic' },
   { key: 'eyes', label: 'Eyes' },
   { key: 'performance', label: 'Performance' },
@@ -1774,9 +1794,11 @@ type VisualSettings = {
   probeDebugMode: ProbeDebugMode
   reflectionContribution: LightingContributionSettings
   saturation: number
+  lightmapSaturation: number
   staticVolumetricContribution: LightingContributionSettings
   toneMapping: ToneMappingMode
   bloom: BloomSettings
+  chromaticAberration: ChromaticAberrationSettings
   depthOfField: DepthOfFieldSettings
   movement: MovementSettings
   monsterEyes: MonsterEyeSettings
@@ -1790,8 +1812,10 @@ type VisualSettings = {
   volumetricNoiseFrequency: number
   volumetricNoisePeriod: number
   volumetricNoiseStrength: number
+  volumetricSaturation: number
   volumetricShadowsEnabled: boolean
   volumetricStepCount: number
+  torchBillboardIntensity: number
   unlitMode: boolean
   vignette: VignetteSettings
 }
@@ -1806,6 +1830,7 @@ type VisualSettingsPatch = Partial<{
   n8aoSamples: number
   anamorphic: Partial<AnamorphicSettings>
   bloom: Partial<BloomSettings>
+  chromaticAberration: Partial<ChromaticAberrationSettings>
   depthOfField: Partial<DepthOfFieldSettings>
   exposureStops: number
   cameraFov: number
@@ -1824,6 +1849,7 @@ type VisualSettingsPatch = Partial<{
   probeDebugMode: ProbeDebugMode
   reflectionContribution: Partial<LightingContributionSettings>
   saturation: number
+  lightmapSaturation: number
   staticVolumetricContribution: Partial<LightingContributionSettings>
   ssr: Partial<SSRSettings>
   toneMapping: ToneMappingMode
@@ -1835,8 +1861,10 @@ type VisualSettingsPatch = Partial<{
   volumetricNoiseFrequency: number
   volumetricNoisePeriod: number
   volumetricNoiseStrength: number
+  volumetricSaturation: number
   volumetricShadowsEnabled: boolean
   volumetricStepCount: number
+  torchBillboardIntensity: number
   unlitMode: boolean
   vignette: Partial<VignetteSettings>
 }>
@@ -1867,13 +1895,16 @@ type ScalarSettingKey =
   | 'n8aoSamples'
   | 'reflectionContributionIntensity'
   | 'saturation'
+  | 'lightmapSaturation'
   | 'staticVolumetricContributionIntensity'
+  | 'torchBillboardIntensity'
   | 'volumetricDistance'
   | 'volumetricHeightFalloff'
   | 'volumetricLightingStrength'
   | 'volumetricNoiseFrequency'
   | 'volumetricNoisePeriod'
   | 'volumetricNoiseStrength'
+  | 'volumetricSaturation'
   | 'volumetricStepCount'
   | 'vignetteExposureNoiseIntensity'
   | 'vignetteIntensity'
@@ -2150,6 +2181,7 @@ type ProbeBlendConfig = {
 type ProbeBlendShader = Shader & {
   uniforms: Shader['uniforms'] & {
     lightMapAmbientTint?: Uniform<Color>
+    lightMapSaturation?: Uniform<number>
     lightMapTorchTint?: Uniform<Color>
     localProbeBoxMax0?: Uniform<Vector3>
     localProbeBoxMax1?: Uniform<Vector3>
@@ -2206,6 +2238,7 @@ type ProbeBlendShader = Shader & {
     localProbeConnectivityTexture?: Uniform<Texture | null>
     probeBlendMode?: Uniform<number>
     probeBlendDiffuseIntensity?: Uniform<number>
+    probeBlendSaturation?: Uniform<number>
     probeBoundaryNormal?: Uniform<Vector2>
     probeCellSize?: Uniform<number>
     probeHeight?: Uniform<number>
@@ -2226,11 +2259,17 @@ type MaterialShaderPatchConfig = {
   lightMapEncoding?: LightmapTextureEncoding
   lightMapAmbientTint?: Color
   lightMapTorchTint?: Color
+  lightMapSaturation?: number
+  probeSaturation?: number
 }
 
 type LightmapTextureEncoding = 'linear' | 'rgbe8'
 
 const VolumetricShadowContext = createContext(true)
+const TorchBillboardIntensityContext = createContext(1)
+const LightmapSaturationContext = createContext(1)
+const VolumetricSaturationContext = createContext(1)
+const EMPTY_MATERIAL_SHADER_PATCH_CONFIG: MaterialShaderPatchConfig = {}
 
 type WallMaterialContinuumStepKey =
   | 'basic-white'
@@ -2353,10 +2392,12 @@ class FogVolumeEffectImpl extends Effect {
         ['cameraWorldPosition', new Uniform(new Vector3())],
         ['density', new Uniform(0)],
         ['environmentFogColor', new Uniform(DEFAULT_FOG_IBL_COLOR.clone())],
+        ['fallbackProbeAmbientColor', new Uniform(new Color(1, 1, 1))],
         ['fogDistance', new Uniform(DEFAULT_VOLUMETRIC_FOG_DISTANCE)],
         ['groundHeight', new Uniform(GROUND_Y)],
         ['heightFalloff', new Uniform(DEFAULT_VOLUMETRIC_HEIGHT_FALLOFF)],
         ['lightingStrength', new Uniform(DEFAULT_VOLUMETRIC_LIGHTING_STRENGTH)],
+        ['probeSaturation', new Uniform(1)],
         ['noiseFrequency', new Uniform(DEFAULT_VOLUMETRIC_NOISE_FREQUENCY)],
         ['noisePeriod', new Uniform(DEFAULT_VOLUMETRIC_NOISE_PERIOD)],
         ['noiseStrength', new Uniform(DEFAULT_VOLUMETRIC_NOISE_STRENGTH)],
@@ -2404,6 +2445,10 @@ class FogVolumeEffectImpl extends Effect {
     this.uniforms.get('environmentFogColor').value.copy(value)
   }
 
+  set fallbackProbeAmbientColor(value: Color) {
+    this.uniforms.get('fallbackProbeAmbientColor').value.copy(value)
+  }
+
   set fogDistance(value: number) {
     this.uniforms.get('fogDistance').value = value
   }
@@ -2418,6 +2463,10 @@ class FogVolumeEffectImpl extends Effect {
 
   set lightingStrength(value: number) {
     this.uniforms.get('lightingStrength').value = value
+  }
+
+  set probeSaturation(value: number) {
+    this.uniforms.get('probeSaturation').value = MathUtils.clamp(value, 0, 1)
   }
 
   set noiseFrequency(value: number) {
@@ -2506,7 +2555,7 @@ class FogVolumeEffectImpl extends Effect {
 }
 
 function createDefaultVisualSettings(): VisualSettings {
-  return {
+  return applyVisualSettingsPatch({
     anamorphic: {
       colorGain: 1,
       enabled: false,
@@ -2559,10 +2608,12 @@ function createDefaultVisualSettings(): VisualSettings {
       intensity: DEFAULT_REFLECTION_INTENSITY
     },
     saturation: DEFAULT_SATURATION,
+    lightmapSaturation: 1,
     staticVolumetricContribution: {
       enabled: false,
       intensity: DEFAULT_PROBE_IBL_INTENSITY
     },
+    torchBillboardIntensity: 1,
     unlitMode: false,
     toneMapping: 'neutral',
     bloom: {
@@ -2573,11 +2624,19 @@ function createDefaultVisualSettings(): VisualSettings {
       smoothing: 0.5,
       threshold: 0.5
     },
+    chromaticAberration: {
+      enabled: false,
+      intensity: 0,
+      modulationOffset: 0.15,
+      offsetX: 0.001,
+      offsetY: 0.001,
+      radialModulation: false
+    },
     depthOfField: {
       bokehScale: 0,
       enabled: false,
-      focalLength: 0.03,
       focusDistance: 0.02,
+      focusRange: 0.03,
       resolutionScale: 0.25
     },
     movement: {
@@ -2610,6 +2669,7 @@ function createDefaultVisualSettings(): VisualSettings {
     volumetricNoiseFrequency: DEFAULT_VOLUMETRIC_NOISE_FREQUENCY,
     volumetricNoisePeriod: DEFAULT_VOLUMETRIC_NOISE_PERIOD,
     volumetricNoiseStrength: DEFAULT_VOLUMETRIC_NOISE_STRENGTH,
+    volumetricSaturation: 1,
     volumetricShadowsEnabled: true,
     volumetricStepCount: DEFAULT_VOLUMETRIC_STEP_COUNT,
     vignette: {
@@ -2619,7 +2679,7 @@ function createDefaultVisualSettings(): VisualSettings {
       noiseIntensity: 0,
       noisePeriod: 5
     }
-  }
+  }, defaultVisualSettingsConfig as VisualSettingsPatch)
 }
 
 function isEffectActive(effect: EffectSettings) {
@@ -2725,15 +2785,24 @@ function applyVisualSettingsPatch(
     ...(patch.volumetricNoiseStrength === undefined
       ? null
       : { volumetricNoiseStrength: patch.volumetricNoiseStrength }),
+    ...(patch.volumetricSaturation === undefined
+      ? null
+      : { volumetricSaturation: patch.volumetricSaturation }),
     ...(patch.volumetricShadowsEnabled === undefined
       ? null
       : { volumetricShadowsEnabled: patch.volumetricShadowsEnabled }),
     ...(patch.volumetricStepCount === undefined
       ? null
       : { volumetricStepCount: patch.volumetricStepCount }),
+    ...(patch.torchBillboardIntensity === undefined
+      ? null
+      : { torchBillboardIntensity: patch.torchBillboardIntensity }),
     ...(patch.saturation === undefined
       ? null
       : { saturation: patch.saturation }),
+    ...(patch.lightmapSaturation === undefined
+      ? null
+      : { lightmapSaturation: patch.lightmapSaturation }),
     anamorphic: patch.anamorphic
       ? {
           ...settings.anamorphic,
@@ -2746,6 +2815,12 @@ function applyVisualSettingsPatch(
           ...patch.bloom
         }
       : settings.bloom,
+    chromaticAberration: patch.chromaticAberration
+      ? {
+          ...settings.chromaticAberration,
+          ...patch.chromaticAberration
+        }
+      : settings.chromaticAberration,
     depthOfField: patch.depthOfField
       ? {
           ...settings.depthOfField,
@@ -3106,6 +3181,11 @@ vec3 decodeRGBE8( vec4 rgbe ) {
 
   float exponent = ( rgbe.a * 255.0 ) - 128.0;
   return rgbe.rgb * exp2( exponent );
+}
+
+vec3 applyLevelsJamSaturation( vec3 color, float saturation ) {
+  float luminance = dot( color, vec3( 0.2126, 0.7152, 0.0722 ) );
+  return mix( vec3( luminance ), color, clamp( saturation, 0.0, 1.0 ) );
 }
 
 float probeBlendSafeComponent( float value ) {
@@ -3643,6 +3723,7 @@ vec3 getIBLIrradiance( const in vec3 normal ) {
       probeBlendMode,
       probeBlendDiffuseIntensity
     );
+    envMapColor = applyLevelsJamSaturation( envMapColor, probeBlendSaturation );
 
     return PI * envMapColor;
 
@@ -3710,7 +3791,9 @@ const LEVELSJAM_LIGHTS_FRAGMENT_MAPS = `
 \t\t\tvec3 lightMapColor = lightMapTexel.rgb;
 \t\t#endif
 
-\t\tvec3 lightMapIrradiance = lightMapColor * lightMapIntensity;
+\t\tfloat lightMapLuminance = dot( lightMapColor, vec3( 0.2126, 0.7152, 0.0722 ) );
+\t\tvec3 saturatedLightMapColor = mix( vec3( lightMapLuminance ), lightMapColor, clamp( lightMapSaturation, 0.0, 1.0 ) );
+\t\tvec3 lightMapIrradiance = saturatedLightMapColor * lightMapIntensity;
 
 \t\tirradiance += lightMapIrradiance;
 
@@ -3757,9 +3840,23 @@ function updateProbeBlendShaderUniforms(
   shader.uniforms.lightMapAmbientTint?.value.copy(
     patchConfig.lightMapAmbientTint ?? BLACK_COLOR
   )
+  if (shader.uniforms.lightMapSaturation) {
+    shader.uniforms.lightMapSaturation.value = MathUtils.clamp(
+      patchConfig.lightMapSaturation ?? 1,
+      0,
+      1
+    )
+  }
   shader.uniforms.lightMapTorchTint?.value.copy(
     patchConfig.lightMapTorchTint ?? WHITE_COLOR
   )
+  if (shader.uniforms.probeBlendSaturation) {
+    shader.uniforms.probeBlendSaturation.value = MathUtils.clamp(
+      patchConfig.probeSaturation ?? 1,
+      0,
+      1
+    )
+  }
 
   const probePositions = probeBlend.probePositions ?? []
   const probeBoxes = probeBlend.probeBoxes ?? []
@@ -4020,6 +4117,8 @@ function getProbeBlendUpdateKey(
 ) {
   return JSON.stringify({
     lightMapEncoding: patchConfig.lightMapEncoding ?? 'linear',
+    lightMapSaturation: patchConfig.lightMapSaturation ?? 1,
+    probeSaturation: patchConfig.probeSaturation ?? 1,
     lightMapAmbientTint: patchConfig.lightMapAmbientTint
       ? [
           patchConfig.lightMapAmbientTint.r,
@@ -4265,6 +4364,7 @@ function patchProbeBlendMaterialShader(
       : ''
 
   probeBlendShader.uniforms.lightMapAmbientTint = new Uniform(BLACK_COLOR.clone())
+  probeBlendShader.uniforms.lightMapSaturation = new Uniform(1)
   probeBlendShader.uniforms.lightMapTorchTint = new Uniform(WHITE_COLOR.clone())
   probeBlendShader.uniforms.localProbePosition0 = new Uniform(DEFAULT_PROBE_POSITION.clone())
   probeBlendShader.uniforms.localProbePosition1 = new Uniform(DEFAULT_PROBE_POSITION.clone())
@@ -4313,6 +4413,7 @@ function patchProbeBlendMaterialShader(
   probeBlendShader.uniforms.localProbeConnectivityTexture = new Uniform<Texture | null>(null)
   probeBlendShader.uniforms.probeBlendMode = new Uniform(0)
   probeBlendShader.uniforms.probeBlendDiffuseIntensity = new Uniform(1)
+  probeBlendShader.uniforms.probeBlendSaturation = new Uniform(1)
   probeBlendShader.uniforms.probeBoundaryNormal = new Uniform(new Vector2(0, 1))
   probeBlendShader.uniforms.probeCellSize = new Uniform(MAZE_CELL_SIZE)
   probeBlendShader.uniforms.probeHeight = new Uniform(1.25)
@@ -4351,7 +4452,7 @@ function patchProbeBlendMaterialShader(
 \t#include <project_vertex>`
       )
   probeBlendShader.fragmentShader =
-    `${shaderFeatureDefines}${vlmFeatureDefines}${lightMapFeatureDefines}uniform vec3 lightMapAmbientTint;\nuniform vec3 lightMapTorchTint;\nuniform float probeBlendDiffuseIntensity;\nuniform float probeBlendRadianceIntensity;\nvarying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
+    `${shaderFeatureDefines}${vlmFeatureDefines}${lightMapFeatureDefines}uniform vec3 lightMapAmbientTint;\nuniform float lightMapSaturation;\nuniform vec3 lightMapTorchTint;\nuniform float probeBlendDiffuseIntensity;\nuniform float probeBlendSaturation;\nuniform float probeBlendRadianceIntensity;\nvarying vec3 vProbeBlendWorldPosition;\n${probeBlendShader.fragmentShader}`
       .replace(
         '#include <envmap_physical_pars_fragment>',
         PROBE_BLEND_SHADER_CHUNK
@@ -5332,17 +5433,27 @@ function useProbeBlendMaterialShader(
   patchConfig: MaterialShaderPatchConfig = {},
   materialKey: string
 ) {
+  const runtimeLightmapSaturation = useContext(LightmapSaturationContext)
+  const runtimeVolumetricSaturation = useContext(VolumetricSaturationContext)
+  const runtimePatchConfig = useMemo(
+    () => ({
+      ...patchConfig,
+      lightMapSaturation: patchConfig.lightMapSaturation ?? runtimeLightmapSaturation,
+      probeSaturation: patchConfig.probeSaturation ?? runtimeVolumetricSaturation
+    }),
+    [patchConfig, runtimeLightmapSaturation, runtimeVolumetricSaturation]
+  )
   const shaderRef = useRef<ProbeBlendShader | null>(null)
   const materialRef = useRef(material)
   const probeBlendRef = useRef(probeBlend)
-  const patchConfigRef = useRef(patchConfig)
-  const probeBlendUpdateKeyRef = useRef(getProbeBlendUpdateKey(probeBlend, patchConfig))
+  const patchConfigRef = useRef(runtimePatchConfig)
+  const probeBlendUpdateKeyRef = useRef(getProbeBlendUpdateKey(probeBlend, runtimePatchConfig))
   const appliedProbeBlendUpdateKeyRef = useRef<string | null>(null)
 
   materialRef.current = material
   probeBlendRef.current = probeBlend
-  patchConfigRef.current = patchConfig
-  probeBlendUpdateKeyRef.current = getProbeBlendUpdateKey(probeBlend, patchConfig)
+  patchConfigRef.current = runtimePatchConfig
+  probeBlendUpdateKeyRef.current = getProbeBlendUpdateKey(probeBlend, runtimePatchConfig)
 
   const customProgramCacheKey = useMemo(
     () => () => {
@@ -5412,12 +5523,12 @@ function useProbeBlendMaterialShader(
 
   useEffect(() => {
     updateProbeBlendMaterialDebugState(material, probeBlend)
-    updateProbeBlendShaderUniforms(shaderRef.current, probeBlend, patchConfig)
+    updateProbeBlendShaderUniforms(shaderRef.current, probeBlend, runtimePatchConfig)
     updateProbeBlendUniformDebugState(material, shaderRef.current)
     appliedProbeBlendUpdateKeyRef.current = shaderRef.current
       ? probeBlendUpdateKeyRef.current
       : null
-  }, [material, materialKey, patchConfig, probeBlend])
+  }, [material, materialKey, runtimePatchConfig, probeBlend])
 
   return {
     customProgramCacheKey,
@@ -6085,10 +6196,20 @@ function createLitCloneMaterial(
 
 function disposeCloneMaterials(root: Group) {
   const disposedMaterials = new Set<Material>()
+  const disposedGeometries = new Set<Mesh['geometry']>()
 
   root.traverse((object) => {
     if (!(object instanceof Mesh)) {
       return
+    }
+
+    if (
+      object.userData.surfaceLightmapGeometryCloned &&
+      object.geometry &&
+      !disposedGeometries.has(object.geometry)
+    ) {
+      disposedGeometries.add(object.geometry)
+      object.geometry.dispose()
     }
 
     const materials = Array.isArray(object.material)
@@ -6181,8 +6302,20 @@ function useClonedRuntimeModel(
 
 function useAttachProbeBlendToModel(
   model: Group | null,
-  probeBlend: ProbeBlendConfig
+  probeBlend: ProbeBlendConfig,
+  basePatchConfig: MaterialShaderPatchConfig = EMPTY_MATERIAL_SHADER_PATCH_CONFIG
 ) {
+  const runtimeLightmapSaturation = useContext(LightmapSaturationContext)
+  const runtimeVolumetricSaturation = useContext(VolumetricSaturationContext)
+  const patchConfig = useMemo(
+    () => ({
+      ...basePatchConfig,
+      lightMapSaturation: basePatchConfig.lightMapSaturation ?? runtimeLightmapSaturation,
+      probeSaturation: basePatchConfig.probeSaturation ?? runtimeVolumetricSaturation
+    }),
+    [basePatchConfig, runtimeLightmapSaturation, runtimeVolumetricSaturation]
+  )
+
   useEffect(() => {
     if (!model) {
       return
@@ -6217,18 +6350,18 @@ function useAttachProbeBlendToModel(
           | undefined
 
         if (attachment) {
-          attachment.set(probeBlend)
+          attachment.set(probeBlend, patchConfig)
         } else {
           material.userData.probeBlendAttachment = attachProbeBlendMaterialShader(
             material,
             probeBlend,
-            {},
+            patchConfig,
             { current: null }
           )
         }
       })
     })
-  }, [model, probeBlend])
+  }, [model, patchConfig, probeBlend])
 }
 
 function decodeBase64Bytes(base64: string) {
@@ -7545,6 +7678,109 @@ function createWallGeometry(lightmap: MazeLightmap, wallId: string) {
 
   geometry.setAttribute('uv1', new Float32BufferAttribute(uv1, 2))
   return geometry
+}
+
+function getLightmapRectForSconce(
+  lightmap: MazeLightmap,
+  mazeLight: MazeLayout['lights'][number]
+) {
+  const wallId = mazeLight.wallId
+  const faceKey = mazeLight.wallFaceKey ??
+    (mazeLight.side === 'north' || mazeLight.side === 'west' ? 'pz' : 'nz')
+
+  if (!wallId) {
+    return lightmap.neutralRect
+  }
+
+  return lightmap.wallRects[wallId]?.[faceKey] ?? lightmap.neutralRect
+}
+
+function createSconceGeometry(
+  lightmap: MazeLightmap,
+  mazeLight: MazeLayout['lights'][number]
+) {
+  const geometry = new LatheGeometry(SCONCE_PROFILE_POINTS, 24)
+  const position = geometry.getAttribute('position')
+  const uv1 = new Float32Array(position.count * 2)
+  const rect = getLightmapRectForSconce(lightmap, mazeLight)
+  const axis = mazeLight.wallAxis ?? (mazeLight.side === 'east' || mazeLight.side === 'west' ? 'z' : 'x')
+  const mirrorX = (mazeLight.wallFaceKey ??
+    (mazeLight.side === 'north' || mazeLight.side === 'west' ? 'pz' : 'nz')) === 'nz'
+
+  for (let vertexIndex = 0; vertexIndex < position.count; vertexIndex += 1) {
+    const localAlong = axis === 'x'
+      ? position.getX(vertexIndex)
+      : position.getZ(vertexIndex)
+    const localU = MathUtils.clamp(
+      0.5 + (localAlong / Math.max(WALL_LENGTH, 0.0001)),
+      0,
+      1
+    )
+    const localV = MathUtils.clamp(
+      (mazeLight.sconcePosition.y + position.getY(vertexIndex) - GROUND_Y) / WALL_HEIGHT,
+      0,
+      1
+    )
+    const [atlasU, atlasV] = mapLightmapRectUvToAtlas(
+      rect,
+      lightmap.atlasWidth,
+      lightmap.atlasHeight,
+      localU,
+      localV,
+      { mirrorX }
+    )
+
+    uv1[vertexIndex * 2] = atlasU
+    uv1[(vertexIndex * 2) + 1] = atlasV
+  }
+
+  geometry.setAttribute('uv1', new Float32BufferAttribute(uv1, 2))
+  return geometry
+}
+
+function applyRectLightmapUvsToModel(
+  model: Group,
+  lightmap: MazeLightmap,
+  rect: MazeLightmap['neutralRect']
+) {
+  const key = `${lightmap.atlasWidth}:${lightmap.atlasHeight}:${rect.x}:${rect.y}:${rect.width}:${rect.height}`
+
+  model.traverse((object) => {
+    if (!(object instanceof Mesh)) {
+      return
+    }
+
+    const sourceUv = object.geometry.getAttribute('uv')
+
+    if (!sourceUv) {
+      return
+    }
+
+    if (object.userData.surfaceLightmapUvKey !== key) {
+      if (!object.userData.surfaceLightmapGeometryCloned) {
+        object.geometry = object.geometry.clone()
+        object.userData.surfaceLightmapGeometryCloned = true
+      }
+
+      const uv1 = new Float32Array(sourceUv.count * 2)
+
+      for (let vertexIndex = 0; vertexIndex < sourceUv.count; vertexIndex += 1) {
+        const [atlasU, atlasV] = mapLightmapRectUvToAtlas(
+          rect,
+          lightmap.atlasWidth,
+          lightmap.atlasHeight,
+          sourceUv.getX(vertexIndex),
+          sourceUv.getY(vertexIndex)
+        )
+
+        uv1[vertexIndex * 2] = atlasU
+        uv1[(vertexIndex * 2) + 1] = atlasV
+      }
+
+      object.geometry.setAttribute('uv1', new Float32BufferAttribute(uv1, 2))
+      object.userData.surfaceLightmapUvKey = key
+    }
+  })
 }
 
 function getBoxFaceLightmapKey(normal: { x: number; y: number; z: number }) {
@@ -9212,6 +9448,7 @@ function TorchBillboard({
   texture: Texture | null
 }) {
   const camera = useThree((state) => state.camera)
+  const billboardIntensity = useContext(TorchBillboardIntensityContext)
   const group = useRef<Group>(null)
   const material = useRef<Mesh>(null)
   const parentWorldQuaternion = useMemo(() => new Quaternion(), [])
@@ -9261,7 +9498,7 @@ function TorchBillboard({
       }
 
       billboardMaterial.color.copy(color).multiplyScalar(
-        TORCH_BASE_CANDELA * FIRE_BILLBOARD_INTENSITY_SCALE
+        TORCH_BASE_CANDELA * FIRE_BILLBOARD_INTENSITY_SCALE * billboardIntensity
       )
     }
   })
@@ -9310,6 +9547,8 @@ function WallSconce({
   iblContributionIntensity,
   layout,
   lightmapContributionIntensity,
+  lightmapTexture,
+  lightmapTextureEncoding,
   mazeLight,
   probeDepthAtlasTextures,
   probeCoefficientTextures,
@@ -9325,6 +9564,8 @@ function WallSconce({
   iblContributionIntensity: number
   layout: MazeLayout
   lightmapContributionIntensity: number
+  lightmapTexture: Texture
+  lightmapTextureEncoding: LightmapTextureEncoding
   mazeLight: MazeLayout['lights'][number]
   probeDepthAtlasTextures: ProbeDepthAtlasTextures
   probeCoefficientTextures: [Texture, Texture, Texture, Texture]
@@ -9339,12 +9580,26 @@ function WallSconce({
   const levelWorldTransform = useContext(LevelRenderTransformContext)
   const volumetricShadowsEnabled = useContext(VolumetricShadowContext)
   const [material, setMaterial] = useState<ThreeMeshStandardMaterial | null>(null)
+  const surfaceLightmapsEnabled =
+    lightmapContributionIntensity > EFFECT_EPSILON
+  const lightMapIntensity =
+    surfaceLightmapsEnabled
+      ? lightmapContributionIntensity * WALL_LIGHTMAP_INTENSITY_SCALE
+      : 0
   const patchConfig = useMemo(
     () => ({
-      lightMapAmbientTint: BLACK_COLOR,
+      lightMapAmbientTint:
+        surfaceLightmapsEnabled
+          ? LIGHTMAP_AMBIENT_TINT.clone().multiplyScalar(lightmapContributionIntensity)
+          : BLACK_COLOR,
+      lightMapEncoding: lightmapTextureEncoding,
       lightMapTorchTint: TORCH_LIGHTMAP_TINT
     }),
-    []
+    [lightmapContributionIntensity, lightmapTextureEncoding, surfaceLightmapsEnabled]
+  )
+  const geometry = useMemo(
+    () => createSconceGeometry(layout.maze.lightmap, mazeLight),
+    [layout.maze.lightmap, mazeLight]
   )
   const position: [number, number, number] = [
     mazeLight.sconcePosition.x,
@@ -9408,11 +9663,7 @@ function WallSconce({
           diffuseIntensity: diffuseProbeIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: diffuseProbeAvailable
-            ? 'disabled'
-            : reflectionAvailable
-              ? 'constant'
-              : 'disabled',
+          radianceMode: reflectionAvailable ? 'constant' : 'disabled',
           useProbeConnectivity: volumetricShadowsEnabled,
           vlmBoundaryNormal:
             mazeLight.side === 'east'
@@ -9458,11 +9709,16 @@ function WallSconce({
     materialKey
   )
 
+  useEffect(() => () => {
+    geometry.dispose()
+  }, [geometry])
+
   return (
     <>
       <SconceMesh
         debugIndex={mazeLight.index}
         debugRole="sconce-body"
+        geometry={geometry}
         material={
           <meshStandardMaterial
             color="white"
@@ -9470,6 +9726,8 @@ function WallSconce({
             envMap={getProbeBlendEnvMap(probeBlend)}
             envMapIntensity={0}
             key={materialKey}
+            lightMap={lightmapTexture}
+            lightMapIntensity={lightMapIntensity}
             map={metal.map}
             metalness={0.85}
             metalnessMap={metal.metalnessMap}
@@ -9693,12 +9951,14 @@ function BillboardCompositePass() {
 function SconceMesh({
   debugIndex,
   debugRole,
+  geometry,
   material,
   position,
   visible = true
 }: {
   debugIndex: number
   debugRole: string
+  geometry: LatheGeometry
   material: ReactNode
   position: [number, number, number]
   visible?: boolean
@@ -9711,7 +9971,7 @@ function SconceMesh({
       userData={{ debugIndex, debugRole }}
       visible={visible}
     >
-      <latheGeometry args={[SCONCE_PROFILE_POINTS, 24]} />
+      <primitive attach="geometry" object={geometry} />
       {material}
     </mesh>
   )
@@ -9726,6 +9986,7 @@ function FogVolume({
   noiseFrequency,
   noisePeriod,
   noiseStrength,
+  probeSaturation,
   rayStepCount,
   visible,
   volumeIntensity
@@ -9738,6 +9999,7 @@ function FogVolume({
   noiseFrequency: number
   noisePeriod: number
   noiseStrength: number
+  probeSaturation: number
   rayStepCount: number
   visible: boolean
   volumeIntensity: number
@@ -9783,16 +10045,18 @@ function FogVolume({
     const useProbeCoefficientTexture = probeCoeffTextureL0s.some(Boolean) ? 1 : 0
     const useProbeConnectivity =
       volumetricShadowsEnabled && probeConnectivityTextures.some(Boolean) ? 1 : 0
-    const appliedDensity = visible && useProbeCoefficientTexture
+    const appliedDensity = visible
       ? volumeIntensity * FOG_EXTINCTION_SCALE
       : 0
 
     effect.density = appliedDensity
     effect.environmentFogColor = ambientColor
+    effect.fallbackProbeAmbientColor = WHITE_COLOR
     effect.fogDistance = fogDistance
     effect.groundHeight = GROUND_Y
     effect.heightFalloff = heightFalloff
     effect.lightingStrength = lightingStrength
+    effect.probeSaturation = probeSaturation
     effect.noiseFrequency = noiseFrequency
     effect.noisePeriod = noisePeriod
     effect.noiseStrength = noiseStrength
@@ -9861,6 +10125,7 @@ function FogVolume({
     noiseFrequency,
     noisePeriod,
     noiseStrength,
+    probeSaturation,
     fogNoiseTexture,
     rayStepCount,
     scene,
@@ -10982,10 +11247,12 @@ function MazeWalls({
         <WallSconce
           environmentTexture={environmentTexture}
           environmentIntensity={environmentIntensity}
-          iblContributionIntensity={iblContributionIntensity}
+          iblContributionIntensity={staticVolumetricContributionIntensity}
           key={mazeLight.id}
           layout={layout}
           lightmapContributionIntensity={lightmapContributionIntensity}
+          lightmapTexture={lightmapTexture}
+          lightmapTextureEncoding={lightmapTextureEncoding}
           mazeLight={mazeLight}
           probeDepthAtlasTextures={probeDepthAtlasTextures}
           probeCoefficientTextures={probeCoefficientTextures}
@@ -12815,7 +13082,40 @@ function MazeAltarActor({
     }
   }, [cupModel])
 
-  useAttachProbeBlendToModel(cupModel, cupProbeBlend)
+  const cupLightmapRect = useMemo(
+    () => layout.maze.lightmap.altarRects?.[altar.id]?.py ?? layout.maze.lightmap.neutralRect,
+    [altar.id, layout.maze.lightmap]
+  )
+
+  useAttachProbeBlendToModel(cupModel, cupProbeBlend, patchConfig)
+
+  useEffect(() => {
+    if (!cupModel) {
+      return
+    }
+
+    applyRectLightmapUvsToModel(cupModel, layout.maze.lightmap, cupLightmapRect)
+    cupModel.traverse((object) => {
+      if (!(object instanceof Mesh)) {
+        return
+      }
+
+      const materials = Array.isArray(object.material)
+        ? object.material
+        : [object.material]
+
+      materials.forEach((material) => {
+        if (
+          material instanceof ThreeMeshStandardMaterial ||
+          material instanceof ThreeMeshPhysicalMaterial
+        ) {
+          material.lightMap = lightmapTexture
+          material.lightMapIntensity = lightMapIntensity
+          material.needsUpdate = true
+        }
+      })
+    })
+  }, [cupLightmapRect, cupModel, layout.maze.lightmap, lightMapIntensity, lightmapTexture])
 
   useEffect(() => () => {
     blockGeometry.dispose()
@@ -15757,6 +16057,11 @@ function FlightRig({
     levelTransition: {
       targetLevelId: string
     } | null
+    fromWorldPosition: Vector3
+    toWorldPosition: Vector3
+    fromYaw: number
+    toYaw: number
+    blockedWorldBumpOffset: Vector3 | null
     playerEffect: 'death' | 'escape' | 'sword-strike' | null
     startedAt: number
     to: TurnState
@@ -15765,6 +16070,7 @@ function FlightRig({
   const isPointerLocked = useRef(false)
   const up = useMemo(() => new Vector3(0, 1, 0), [])
   const cameraShakeOffset = useRef(new Vector3())
+  const cameraRigPosition = useRef(new Vector3())
   const resolvedMovementSettings = useMemo(
     () =>
       createMovementSettings({
@@ -15786,6 +16092,29 @@ function FlightRig({
     () => MathUtils.degToRad(MathUtils.clamp(cameraTiltDegrees, -20, 20)),
     [cameraTiltDegrees]
   )
+  const applyCameraRigPose = useCallback((
+    position: Vector3,
+    nextYaw: number,
+    nextPitch: number,
+    includeShake = true
+  ) => {
+    yaw.current = nextYaw
+    pitch.current = nextPitch
+    camera.position.copy(position)
+    camera.quaternion.setFromEuler(cameraEuler.set(nextPitch, nextYaw, 0, 'YXZ'))
+    if (includeShake && cameraShake.current.endsAt > performance.now()) {
+      const remaining = Math.max(0, (cameraShake.current.endsAt - performance.now()) / 1000)
+      const envelope = Math.min(1, remaining) * Math.min(1, remaining)
+      const timeSeconds = performance.now() / 1000
+      const lateral = Math.sin(timeSeconds * 31.3) * cameraShake.current.amplitude * envelope
+      const vertical = Math.sin((timeSeconds * 24.7) + 1.3) * cameraShake.current.amplitude * 0.6 * envelope
+
+      cameraShakeOffset.current.set(lateral, vertical, 0)
+      cameraShakeOffset.current.applyQuaternion(camera.quaternion)
+      camera.position.add(cameraShakeOffset.current)
+    }
+    camera.updateMatrixWorld()
+  }, [camera])
 
   useLayoutEffect(() => {
     if (levelTransitionCommitTarget.current === layout.maze.id) {
@@ -15865,21 +16194,21 @@ function FlightRig({
     )
 
     playerPosition.current.copy(spawnPosition)
-    camera.position.set(
+    cameraRigPosition.current.set(
       spawnPosition.x,
       GROUND_Y + PLAYER_EYE_HEIGHT,
       spawnPosition.z
     )
-    yaw.current = directionToYaw(nextState.player.direction) + levelTransform.rotationY
-    pitch.current = gameplayCameraPitch
-    camera.quaternion.setFromEuler(
-      cameraEuler.set(gameplayCameraPitch, yaw.current, 0, 'YXZ')
+    applyCameraRigPose(
+      cameraRigPosition.current,
+      directionToYaw(nextState.player.direction) + levelTransform.rotationY,
+      gameplayCameraPitch,
+      false
     )
-    camera.updateMatrixWorld()
     setDisplayedOpenGateIds([])
     setTurnState(nextState)
     onReplayActiveChange(replayActive.current)
-  }, [camera, gameplayCameraPitch, layout.maze, levelTransform, onReplayActiveChange, replayRequestId, replayRequestMazeId, setDisplayedOpenGateIds, setTurnState])
+  }, [applyCameraRigPose, gameplayCameraPitch, layout.maze, levelTransform, onReplayActiveChange, replayRequestId, replayRequestMazeId, setDisplayedOpenGateIds, setTurnState])
 
   useEffect(() => {
     if (hasInitializedPose.current) {
@@ -15900,20 +16229,16 @@ function FlightRig({
     )
 
     camera.rotation.order = 'YXZ'
-    camera.position.set(cameraPosition.x, cameraPosition.y, cameraPosition.z)
-    yaw.current = directionToYaw(turnState.player.direction) + levelTransform.rotationY
-    camera.quaternion.setFromEuler(cameraEuler.set(gameplayCameraPitch, yaw.current, 0, 'YXZ'))
-    pitch.current = gameplayCameraPitch
+    applyCameraRigPose(
+      cameraPosition,
+      directionToYaw(turnState.player.direction) + levelTransform.rotationY,
+      gameplayCameraPitch,
+      false
+    )
     playerPosition.current.copy(spawnPosition)
-  }, [camera, gameplayCameraPitch, layout.maze, levelTransform, turnState.player.cell, turnState.player.direction])
+  }, [applyCameraRigPose, camera, gameplayCameraPitch, layout.maze, levelTransform, turnState.player.cell, turnState.player.direction])
 
   useEffect(() => {
-    const updateRotation = () => {
-      camera.quaternion.setFromEuler(
-        cameraEuler.set(pitch.current, yaw.current, 0, 'YXZ')
-      )
-    }
-
     const requestLock = () => {
       if (document.pointerLockElement !== canvas) {
         void canvas.requestPointerLock()
@@ -15934,7 +16259,6 @@ function FlightRig({
         -MAX_PITCH,
         Math.min(MAX_PITCH, pitch.current - (event.movementY * LOOK_SENSITIVITY))
       )
-      updateRotation()
     }
 
     const onPointerDown = (event: PointerEvent) => {
@@ -15962,7 +16286,7 @@ function FlightRig({
       window.removeEventListener('mousemove', onMouseMove)
       window.removeEventListener('pointerdown', onPointerDown)
     }
-  }, [camera, canvas])
+  }, [canvas])
 
   useEffect(() => {
     const queueTurnAction = (
@@ -16823,12 +17147,18 @@ function FlightRig({
         )
         velocity.current.set(0, 0, 0)
         keys.current = {}
-        camera.position.set(cameraPosition[0], cameraPosition[1], cameraPosition[2])
-        camera.lookAt(target[0], target[1], target[2])
-        cameraEuler.setFromQuaternion(camera.quaternion, 'YXZ')
-        yaw.current = cameraEuler.y
-        pitch.current = cameraEuler.x
-        camera.updateMatrixWorld()
+        const dx = target[0] - cameraPosition[0]
+        const dy = target[1] - cameraPosition[1]
+        const dz = target[2] - cameraPosition[2]
+        const horizontalDistance = Math.hypot(dx, dz)
+
+        cameraRigPosition.current.set(cameraPosition[0], cameraPosition[1], cameraPosition[2])
+        applyCameraRigPose(
+          cameraRigPosition.current,
+          Math.atan2(-dx, -dz),
+          Math.atan2(dy, Math.max(horizontalDistance, 0.0001)),
+          false
+        )
       }
     }
 
@@ -16853,7 +17183,7 @@ function FlightRig({
         delete globalWindow.__levelsjamDebug
       }
     }
-  }, [camera, gl, scene])
+  }, [applyCameraRigPose, camera, gl, scene])
 
   useFrame((_, delta) => {
     const profileStartedAt = beginFrameProfileStep()
@@ -16895,11 +17225,11 @@ function FlightRig({
         const startYaw = altarLookAnimation.current.startYaw
         const yawDelta = normalizeAngleRadians(altarLookAnimation.current.targetYaw - startYaw)
 
-        camera.position.copy(playerWorldPosition)
-        yaw.current = startYaw + (yawDelta * turnAlpha)
-        pitch.current = gameplayCameraPitch
-        camera.quaternion.setFromEuler(cameraEuler.set(gameplayCameraPitch, yaw.current, 0, 'YXZ'))
-        camera.updateMatrixWorld()
+        applyCameraRigPose(
+          playerWorldPosition,
+          startYaw + (yawDelta * turnAlpha),
+          gameplayCameraPitch
+        )
         return
       }
       altarLookAnimation.current = null
@@ -16968,16 +17298,63 @@ function FlightRig({
             }
           }
 
+          const fromWorldPosition = getTransformedMazeCellWorldPosition(
+            layout.maze,
+            levelTransform,
+            result.previous.player.cell,
+            GROUND_Y + PLAYER_EYE_HEIGHT
+          )
+          const toWorldPosition = getTransformedMazeCellWorldPosition(
+            layout.maze,
+            levelTransform,
+            result.state.player.cell,
+            GROUND_Y + PLAYER_EYE_HEIGHT
+          )
+          const fromYaw =
+            directionToYaw(result.previous.player.direction) + levelTransform.rotationY
+          const toYaw =
+            directionToYaw(result.state.player.direction) + levelTransform.rotationY
+          let blockedWorldBumpOffset: Vector3 | null = null
+
+          if (result.blocked && (action === 'move-forward' || action === 'move-backward')) {
+            const moveDirection =
+              action === 'move-backward'
+                ? (
+                    result.previous.player.direction === 'north'
+                      ? 'south'
+                      : result.previous.player.direction === 'south'
+                        ? 'north'
+                        : result.previous.player.direction === 'east'
+                          ? 'west'
+                          : 'east'
+                  )
+                : result.previous.player.direction
+            const bumpOffset = directionToWorldOffset(moveDirection)
+            const bumpCos = Math.cos(levelTransform.rotationY)
+            const bumpSin = Math.sin(levelTransform.rotationY)
+
+            blockedWorldBumpOffset = new Vector3(
+              (bumpOffset.x * bumpCos) + (bumpOffset.z * bumpSin),
+              0,
+              -(bumpOffset.x * bumpSin) + (bumpOffset.z * bumpCos)
+            )
+          }
+
           playerAnimation.current = {
             action,
             blocked: Boolean(result.blocked),
+            blockedWorldBumpOffset,
             committedGlobalState: globalResult?.state ?? null,
             from: result.previous,
+            fromWorldPosition,
+            fromYaw,
             killed: result.killed,
             levelTransition: result.levelTransition,
             playerEffect: result.playerEffect,
             startedAt: performance.now(),
-            to: result.state
+            to: result.state,
+            toWorldPosition,
+            toYaw
           }
           if (result.playerEffect === 'death' || result.playerEffect === 'sword-strike') {
             if (playerEffectClearTimeout.current !== null) {
@@ -17016,6 +17393,11 @@ function FlightRig({
               delete document.body.dataset.pendingLevelTransitionSince
               playerAnimation.current = null
               turnStateRef.current = activeAnimation.to
+              applyCameraRigPose(
+                activeAnimation.toWorldPosition,
+                activeAnimation.toYaw,
+                gameplayCameraPitch
+              )
               levelTransitionCommitTarget.current = targetLevelId
               document.body.dataset.committingLevelTransitionId = targetLevelId
               replayQueue.current = []
@@ -17089,71 +17471,42 @@ function FlightRig({
         }
       }
 
-      const fromCell =
-        activeAnimation?.from.player.cell ?? displayState.player.cell
-      const toCell = displayState.player.cell
-      const fromPosition = getTransformedMazeCellWorldPosition(
-        layout.maze,
-        levelTransform,
-        fromCell,
-        GROUND_Y + PLAYER_EYE_HEIGHT
-      )
-      const toPosition = getTransformedMazeCellWorldPosition(
-        layout.maze,
-        levelTransform,
-        toCell,
-        GROUND_Y + PLAYER_EYE_HEIGHT
-      )
-      const fromYaw = directionToYaw(
-        activeAnimation?.from.player.direction ?? displayState.player.direction
-      ) + levelTransform.rotationY
-      let toYaw = directionToYaw(displayState.player.direction) + levelTransform.rotationY
+      const fromPosition = activeAnimation?.fromWorldPosition ??
+        getTransformedMazeCellWorldPosition(
+          layout.maze,
+          levelTransform,
+          displayState.player.cell,
+          GROUND_Y + PLAYER_EYE_HEIGHT
+        )
+      const toPosition = activeAnimation?.toWorldPosition ??
+        getTransformedMazeCellWorldPosition(
+          layout.maze,
+          levelTransform,
+          displayState.player.cell,
+          GROUND_Y + PLAYER_EYE_HEIGHT
+        )
+      const fromYaw = activeAnimation?.fromYaw ??
+        directionToYaw(displayState.player.direction) + levelTransform.rotationY
+      const toYaw = activeAnimation?.toYaw ??
+        directionToYaw(displayState.player.direction) + levelTransform.rotationY
       const yawDelta = Math.atan2(Math.sin(toYaw - fromYaw), Math.cos(toYaw - fromYaw))
       if (activeAnimation?.blocked) {
-        const moveDirection =
-          activeAnimation.action === 'move-backward'
-            ? (
-                activeAnimation.from.player.direction === 'north'
-                  ? 'south'
-                  : activeAnimation.from.player.direction === 'south'
-                    ? 'north'
-                    : activeAnimation.from.player.direction === 'east'
-                      ? 'west'
-                      : 'east'
-              )
-            : activeAnimation.from.player.direction
-        const bumpOffset = directionToWorldOffset(moveDirection)
         const bumpAlpha = Math.sin(animationAlpha * Math.PI) * BLOCKED_MOVE_FRACTION
-        const bumpCos = Math.cos(levelTransform.rotationY)
-        const bumpSin = Math.sin(levelTransform.rotationY)
-        const worldBumpOffset = {
-          x: (bumpOffset.x * bumpCos) + (bumpOffset.z * bumpSin),
-          z: -(bumpOffset.x * bumpSin) + (bumpOffset.z * bumpCos)
-        }
+        const bumpOffset = activeAnimation.blockedWorldBumpOffset ?? defaultMoveDirection
 
-        camera.position.set(
-          fromPosition.x + (worldBumpOffset.x * bumpAlpha),
+        cameraRigPosition.current.set(
+          fromPosition.x + (bumpOffset.x * bumpAlpha),
           fromPosition.y,
-          fromPosition.z + (worldBumpOffset.z * bumpAlpha)
+          fromPosition.z + (bumpOffset.z * bumpAlpha)
         )
       } else {
-        camera.position.lerpVectors(fromPosition, toPosition, animationAlpha)
+        cameraRigPosition.current.lerpVectors(fromPosition, toPosition, animationAlpha)
       }
-      yaw.current = fromYaw + (yawDelta * animationAlpha)
-      pitch.current = gameplayCameraPitch
-      camera.quaternion.setFromEuler(cameraEuler.set(gameplayCameraPitch, yaw.current, 0, 'YXZ'))
-      if (cameraShake.current.endsAt > performance.now()) {
-        const remaining = Math.max(0, (cameraShake.current.endsAt - performance.now()) / 1000)
-        const envelope = Math.min(1, remaining) * Math.min(1, remaining)
-        const timeSeconds = performance.now() / 1000
-        const lateral = Math.sin(timeSeconds * 31.3) * cameraShake.current.amplitude * envelope
-        const vertical = Math.sin((timeSeconds * 24.7) + 1.3) * cameraShake.current.amplitude * 0.6 * envelope
-
-        cameraShakeOffset.current.set(lateral, vertical, 0)
-        cameraShakeOffset.current.applyQuaternion(camera.quaternion)
-        camera.position.add(cameraShakeOffset.current)
-      }
-      camera.updateMatrixWorld()
+      applyCameraRigPose(
+        cameraRigPosition.current,
+        fromYaw + (yawDelta * animationAlpha),
+        gameplayCameraPitch
+      )
         return
       }
 
@@ -17174,11 +17527,11 @@ function FlightRig({
     if (keyboardLocal.current.lengthSq() > 1) {
       keyboardLocal.current.normalize()
     }
-    camera.position
+    cameraRigPosition.current.copy(camera.position)
       .addScaledVector(right.current, keyboardLocal.current.x * resolvedFreeCameraSettings.maxHorizontalSpeed * delta)
       .addScaledVector(up, keyboardLocal.current.y * resolvedFreeCameraSettings.maxHorizontalSpeed * delta)
       .addScaledVector(forward.current, keyboardLocal.current.z * resolvedFreeCameraSettings.maxHorizontalSpeed * delta)
-      camera.updateMatrixWorld()
+    applyCameraRigPose(cameraRigPosition.current, yaw.current, pitch.current, false)
     } finally {
       endFrameProfileStep('player rules and camera', profileStartedAt)
     }
@@ -18798,6 +19151,9 @@ function Scene({
       <ambientLight intensity={visualSettings.unlitMode ? 1 : 0} />
       <SceneEnvironmentBackground intensity={environmentIntensity} />
       <VolumetricShadowContext.Provider value={visualSettings.volumetricShadowsEnabled}>
+      <TorchBillboardIntensityContext.Provider value={visualSettings.torchBillboardIntensity}>
+      <LightmapSaturationContext.Provider value={visualSettings.lightmapSaturation}>
+      <VolumetricSaturationContext.Provider value={visualSettings.volumetricSaturation}>
         {runtimeRenderedLayouts.map((renderedLayout) => {
           const isActive = renderedLayout.maze.id === layout.maze.id
           const renderedTurnState = isActive
@@ -18909,6 +19265,7 @@ function Scene({
             noiseFrequency={visualSettings.volumetricNoiseFrequency}
             noisePeriod={visualSettings.volumetricNoisePeriod}
             noiseStrength={visualSettings.volumetricNoiseStrength}
+            probeSaturation={visualSettings.volumetricSaturation}
             rayStepCount={visualSettings.volumetricStepCount}
             visible={visualSettings.volumetricLighting.enabled}
             volumeIntensity={visualSettings.volumetricLighting.intensity}
@@ -18918,8 +19275,8 @@ function Scene({
         {depthOfFieldActive ? (
           <DepthOfField
             bokehScale={visualSettings.depthOfField.bokehScale}
-            focalLength={visualSettings.depthOfField.focalLength}
             focusDistance={visualSettings.depthOfField.focusDistance}
+            focusRange={visualSettings.depthOfField.focusRange}
             resolutionScale={visualSettings.depthOfField.resolutionScale}
           />
         ) : null}
@@ -18928,6 +19285,20 @@ function Scene({
         ) : null}
         {visualSettings.anamorphic.enabled ? (
           <AnamorphicEffectPrimitive settings={visualSettings.anamorphic} />
+        ) : null}
+        {visualSettings.chromaticAberration.enabled &&
+        visualSettings.chromaticAberration.intensity > EFFECT_EPSILON ? (
+          <ChromaticAberration
+            blendFunction={BlendFunction.NORMAL}
+            modulationOffset={visualSettings.chromaticAberration.modulationOffset}
+            offset={[
+              visualSettings.chromaticAberration.offsetX *
+                visualSettings.chromaticAberration.intensity,
+              visualSettings.chromaticAberration.offsetY *
+                visualSettings.chromaticAberration.intensity
+            ]}
+            radialModulation={visualSettings.chromaticAberration.radialModulation}
+          />
         ) : null}
         {lensFlareActive ? (
           <TorchLensFlare
@@ -18972,6 +19343,9 @@ function Scene({
         />
         <PerformanceBenchmarkBridge />
         <StartupReporter ready={startupSceneReady} />
+      </VolumetricSaturationContext.Provider>
+      </LightmapSaturationContext.Provider>
+      </TorchBillboardIntensityContext.Provider>
       </VolumetricShadowContext.Provider>
     </>
   )
@@ -19066,6 +19440,7 @@ function VisualControls({
   onBooleanSettingChange,
   onBloomSettingChange,
   controlsOpen,
+  onChromaticAberrationSettingChange,
   onDepthOfFieldSettingChange,
   onEffectSettingChange,
   onFogAmbientHexChange,
@@ -19077,6 +19452,8 @@ function VisualControls({
   onResetAmbientOcclusionMode,
   onResetBloomSettings,
   onResetBooleanSetting,
+  onResetChromaticAberrationSettings,
+  onResetChromaticAberrationSetting,
   onResetDepthOfFieldSettings,
   onResetEffectSetting,
   onResetFogAmbientHex,
@@ -19100,6 +19477,7 @@ function VisualControls({
     value: boolean
   ) => void
   onBloomSettingChange: (patch: Partial<BloomSettings>) => void
+  onChromaticAberrationSettingChange: (patch: Partial<ChromaticAberrationSettings>) => void
   controlsOpen: boolean
   onDepthOfFieldSettingChange: (patch: Partial<DepthOfFieldSettings>) => void
   onEffectSettingChange: (
@@ -19120,6 +19498,8 @@ function VisualControls({
   onResetAmbientOcclusionMode: () => void
   onResetBloomSettings: () => void
   onResetBooleanSetting: (key: BooleanSettingKey) => void
+  onResetChromaticAberrationSettings: () => void
+  onResetChromaticAberrationSetting: (key: keyof ChromaticAberrationSettings) => void
   onResetDepthOfFieldSettings: () => void
   onResetEffectSetting: (effect: GenericEffectSettingKey) => void
   onResetFogAmbientHex: () => void
@@ -19172,6 +19552,20 @@ function VisualControls({
       setPerformanceCapturePending(false)
     }
   }, [])
+
+  const exportVisualSettingsConfig = useCallback(() => {
+    const blob = new Blob(
+      [`${JSON.stringify(visualSettings, null, 2)}\n`],
+      { type: 'application/json' }
+    )
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+
+    link.href = url
+    link.download = 'visual-settings.defaults.json'
+    link.click()
+    URL.revokeObjectURL(url)
+  }, [visualSettings])
 
   if (!controlsOpen) {
     return null
@@ -19236,6 +19630,12 @@ function VisualControls({
     >
       <div className="visual-controls-header">
         <strong>Visual Controls</strong>
+        <button
+          onClick={exportVisualSettingsConfig}
+          type="button"
+        >
+          Export Settings
+        </button>
         <span>Press ` to close</span>
       </div>
       <div className="visual-control-tabs">
@@ -19306,6 +19706,60 @@ function VisualControls({
           step={0.01}
           type="range"
           value={visualSettings.saturation}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.lightmapSaturation.toFixed(2)}</output>
+        <ResettableLabel onReset={() => onResetScalarSetting('lightmapSaturation')}>
+          Surface Lightmap Saturation
+        </ResettableLabel>
+        <input
+          aria-label="Surface-LM Saturation"
+          max={1}
+          min={0}
+          onChange={(event) => {
+            onScalarSettingChange('lightmapSaturation', Number(event.target.value))
+          }}
+          step={0.01}
+          type="range"
+          value={visualSettings.lightmapSaturation}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.volumetricSaturation.toFixed(2)}</output>
+        <ResettableLabel onReset={() => onResetScalarSetting('volumetricSaturation')}>
+          Volumetric Lightmap Saturation
+        </ResettableLabel>
+        <input
+          aria-label="Volumetric-LM Saturation"
+          max={1}
+          min={0}
+          onChange={(event) => {
+            onScalarSettingChange('volumetricSaturation', Number(event.target.value))
+          }}
+          step={0.01}
+          type="range"
+          value={visualSettings.volumetricSaturation}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.torchBillboardIntensity.toFixed(2)}x</output>
+        <ResettableLabel onReset={() => onResetScalarSetting('torchBillboardIntensity')}>
+          Torch Billboard Intensity
+        </ResettableLabel>
+        <input
+          aria-label="Torch Billboard Intensity"
+          max={8}
+          min={0}
+          onChange={(event) => {
+            onScalarSettingChange('torchBillboardIntensity', Number(event.target.value))
+          }}
+          step={0.05}
+          type="range"
+          value={visualSettings.torchBillboardIntensity}
         />
           </label>
 
@@ -19514,7 +19968,7 @@ function VisualControls({
         <input
           aria-label="Reflection Intensity"
           disabled={!visualSettings.reflectionContribution.enabled}
-          max={MAX_LIGHTING_CONTRIBUTION_INTENSITY}
+          max={MAX_REFLECTION_CONTRIBUTION_INTENSITY}
           min={0}
           onChange={(event) => {
             onScalarSettingChange('reflectionContributionIntensity', Number(event.target.value))
@@ -19929,23 +20383,23 @@ function VisualControls({
           </label>
 
           <label className="visual-control-row">
-        <output>{visualSettings.depthOfField.focalLength.toFixed(3)}</output>
-        <ResettableLabel onReset={() => onResetDepthOfFieldSetting('focalLength')}>
-          DOF Focal Length / Range (m)
+        <output>{visualSettings.depthOfField.focusRange.toFixed(3)}</output>
+        <ResettableLabel onReset={() => onResetDepthOfFieldSetting('focusRange')}>
+          DOF Focus Range (m)
         </ResettableLabel>
         <input
-          aria-label="DOF Focal Length"
+          aria-label="DOF Focus Range"
           disabled={!visualSettings.depthOfField.enabled}
-          max={0.2}
-          min={0}
+          max={8}
+          min={0.001}
           onChange={(event) => {
             onDepthOfFieldSettingChange({
-              focalLength: Number(event.target.value)
+              focusRange: Number(event.target.value)
             })
           }}
           step={0.001}
           type="range"
-          value={visualSettings.depthOfField.focalLength}
+          value={visualSettings.depthOfField.focusRange}
         />
           </label>
 
@@ -20729,6 +21183,118 @@ function VisualControls({
           step={0.01}
           type="range"
           value={visualSettings.vignette.exposureNoiseIntensity}
+        />
+          </label>
+        </>
+      ) : null}
+
+      {activeTab === 'chromatic' ? (
+        <>
+          <div className="visual-control-row">
+        <output>
+          {visualSettings.chromaticAberration.enabled
+            ? visualSettings.chromaticAberration.intensity.toFixed(2)
+            : 'off'}
+        </output>
+        <label className="visual-effect-label">
+          <input
+            checked={visualSettings.chromaticAberration.enabled}
+            onChange={(event) => {
+              onChromaticAberrationSettingChange({ enabled: event.target.checked })
+            }}
+            type="checkbox"
+          />
+          <ResettableLabel onReset={() => {
+            onResetChromaticAberrationSetting('enabled')
+            onResetChromaticAberrationSetting('intensity')
+          }}>
+            Chromatic Aberration
+          </ResettableLabel>
+        </label>
+        <input
+          aria-label="Chromatic Aberration Intensity"
+          disabled={!visualSettings.chromaticAberration.enabled}
+          max={2}
+          min={0}
+          onChange={(event) => {
+            onChromaticAberrationSettingChange({ intensity: Number(event.target.value) })
+          }}
+          step={0.01}
+          type="range"
+          value={visualSettings.chromaticAberration.intensity}
+        />
+          </div>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.chromaticAberration.offsetX.toFixed(4)}</output>
+        <ResettableLabel onReset={() => onResetChromaticAberrationSetting('offsetX')}>
+          Chromatic Offset X
+        </ResettableLabel>
+        <input
+          aria-label="Chromatic Offset X"
+          disabled={!visualSettings.chromaticAberration.enabled}
+          max={0.02}
+          min={-0.02}
+          onChange={(event) => {
+            onChromaticAberrationSettingChange({ offsetX: Number(event.target.value) })
+          }}
+          step={0.0005}
+          type="range"
+          value={visualSettings.chromaticAberration.offsetX}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.chromaticAberration.offsetY.toFixed(4)}</output>
+        <ResettableLabel onReset={() => onResetChromaticAberrationSetting('offsetY')}>
+          Chromatic Offset Y
+        </ResettableLabel>
+        <input
+          aria-label="Chromatic Offset Y"
+          disabled={!visualSettings.chromaticAberration.enabled}
+          max={0.02}
+          min={-0.02}
+          onChange={(event) => {
+            onChromaticAberrationSettingChange({ offsetY: Number(event.target.value) })
+          }}
+          step={0.0005}
+          type="range"
+          value={visualSettings.chromaticAberration.offsetY}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.chromaticAberration.radialModulation ? 'on' : 'off'}</output>
+        <ResettableLabel onReset={() => onResetChromaticAberrationSetting('radialModulation')}>
+          Radial Modulation
+        </ResettableLabel>
+        <input
+          aria-label="Chromatic Radial Modulation"
+          checked={visualSettings.chromaticAberration.radialModulation}
+          disabled={!visualSettings.chromaticAberration.enabled}
+          onChange={(event) => {
+            onChromaticAberrationSettingChange({ radialModulation: event.target.checked })
+          }}
+          type="checkbox"
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.chromaticAberration.modulationOffset.toFixed(2)}</output>
+        <ResettableLabel onReset={() => onResetChromaticAberrationSetting('modulationOffset')}>
+          Modulation Offset
+        </ResettableLabel>
+        <input
+          aria-label="Chromatic Modulation Offset"
+          disabled={!visualSettings.chromaticAberration.enabled}
+          max={1}
+          min={0}
+          onChange={(event) => {
+            onChromaticAberrationSettingChange({ modulationOffset: Number(event.target.value) })
+          }}
+          step={0.01}
+          type="range"
+          value={visualSettings.chromaticAberration.modulationOffset}
         />
           </label>
         </>
@@ -22041,6 +22607,18 @@ export default function App() {
     }))
   }
 
+  const onChromaticAberrationSettingChange = (
+    patch: Partial<ChromaticAberrationSettings>
+  ) => {
+    setVisualSettings((current) => ({
+      ...current,
+      chromaticAberration: {
+        ...current.chromaticAberration,
+        ...patch
+      }
+    }))
+  }
+
   const onSsrSettingChange = (patch: Partial<SSRSettings>) => {
     setVisualSettings((current) => ({
       ...current,
@@ -22266,6 +22844,17 @@ export default function App() {
     }))
   }
 
+  const onResetChromaticAberrationSettings = () => {
+    const defaults = createDefaultVisualSettings()
+
+    setVisualSettings((current) => ({
+      ...current,
+      chromaticAberration: {
+        ...defaults.chromaticAberration
+      }
+    }))
+  }
+
   const onResetBloomSetting = (key: keyof BloomSettings) => {
     const defaults = createDefaultVisualSettings()
 
@@ -22303,6 +22892,14 @@ export default function App() {
 
     onAnamorphicSettingChange({
       [key]: defaults.anamorphic[key]
+    })
+  }
+
+  const onResetChromaticAberrationSetting = (key: keyof ChromaticAberrationSettings) => {
+    const defaults = createDefaultVisualSettings()
+
+    onChromaticAberrationSettingChange({
+      [key]: defaults.chromaticAberration[key]
     })
   }
 
@@ -22649,6 +23246,7 @@ export default function App() {
         onAmbientOcclusionModeChange={onAmbientOcclusionModeChange}
         onBooleanSettingChange={onBooleanSettingChange}
         onBloomSettingChange={onBloomSettingChange}
+        onChromaticAberrationSettingChange={onChromaticAberrationSettingChange}
         onDepthOfFieldSettingChange={onDepthOfFieldSettingChange}
         onEffectSettingChange={onEffectSettingChange}
         onFogAmbientHexChange={onFogAmbientHexChange}
@@ -22660,6 +23258,8 @@ export default function App() {
         onResetAmbientOcclusionMode={onResetAmbientOcclusionMode}
         onResetBloomSettings={onResetBloomSettings}
         onResetBooleanSetting={onResetBooleanSetting}
+        onResetChromaticAberrationSetting={onResetChromaticAberrationSetting}
+        onResetChromaticAberrationSettings={onResetChromaticAberrationSettings}
         onResetDepthOfFieldSettings={onResetDepthOfFieldSettings}
         onResetEffectSetting={onResetEffectSetting}
         onResetFogAmbientHex={onResetFogAmbientHex}

@@ -198,7 +198,7 @@ body {
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgb(0 0 0 / 72%);
+  background: rgb(0 0 0 / 25%);
   color: #f5edda;
 }
 
@@ -513,6 +513,7 @@ body {
     grid-template-columns: repeat(3, 1fr);
     pointer-events: none;
     user-select: none;
+    -webkit-touch-callout: none;
     -webkit-tap-highlight-color: transparent;
   }
 
@@ -525,7 +526,9 @@ body {
     text-shadow: 0 2px 18px rgb(0 0 0 / 80%);
     pointer-events: auto;
     touch-action: none;
+    appearance: none;
     user-select: none;
+    -webkit-touch-callout: none;
     -webkit-tap-highlight-color: transparent;
     display: flex;
     align-items: flex-end;
@@ -534,7 +537,13 @@ body {
   }
 
   .mobile-touch-zone:active {
-    background: rgb(255 255 255 / 5%);
+    background: transparent;
+  }
+
+  .mobile-touch-zone:focus,
+  .mobile-touch-zone:focus-visible {
+    background: transparent;
+    outline: none;
   }
 
   .mobile-menu-button {
@@ -551,6 +560,7 @@ body {
     pointer-events: auto;
     touch-action: manipulation;
     user-select: none;
+    -webkit-touch-callout: none;
     -webkit-tap-highlight-color: transparent;
   }
 

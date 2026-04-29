@@ -82,6 +82,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify the sconces are visibly readable outside the maze walls rather than disappearing into the surface behind them.
 - Verify the torch billboards animate and stay camera-facing even on walls whose parent groups are rotated.
 - Verify the visible flame fills the square billboard, that the billboard width matches its wall clearance, and that the billboard bottom edge is flush with the sconce top.
+- Verify mobile/touch movement buttons do not flash or wash the full tap region when pressed.
 - Verify each persisted maze includes baked torch, moonlight, and skylight lightmap data.
 - Verify the browser runtime requests `surface-lightmap-rgbe.png` for surface lightmaps and does not request `surface-lightmap.bin` during ordinary page load.
 - Verify the baked lightmap visibly affects the maze walls and the maze-local lit floor patch in the rendered scene.
@@ -111,7 +112,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify the tone mapper is `Neutral` by default.
 - Verify the visual controls panel exposes `Exposure`, `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, `Reflection Intensity`, `Ambient Occlusion`, `AO Intensity`, the tone mapper, and the enabled/intensity controls for Bloom, Depth Of Field, Lens Flares, SSR, and Vignette.
 - Verify the visual controls panel also exposes `Probe Debug`.
-- Verify the visual controls panel also exposes `Bloom Kernel`, `AO Radius`, `DOF Focus Distance`, `DOF Focal Length`, `Depth Of Field Bokeh Scale`, and the volumetric fog controls.
+- Verify the visual controls panel also exposes `Bloom Kernel`, `AO Radius`, `DOF Focus Distance`, `DOF Focus Range`, `Depth Of Field Bokeh Scale`, and the volumetric fog controls.
 - Verify debug-panel tabs are selected by clicking their labels and are not prefixed with category hotkey numbers.
 - Verify typing numbers or letters into debug-panel text and numeric inputs does not change the active debug tab.
 - Verify the `DOF Focus Distance` slider reaches 8 meters.
