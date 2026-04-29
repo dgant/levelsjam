@@ -1,4 +1,5 @@
 import { getRuntimeLevelWorldTransform } from './levels.js'
+import { MAZE_CELL_SIZE } from './maze.js'
 import { createInitialTurnState } from './turnRules.js'
 
 const DIRECTIONS_TO_YAW = {
@@ -35,6 +36,50 @@ function directionToYaw(direction) {
 
 function cloneCell(cell) {
   return { x: cell.x, y: cell.y }
+}
+
+function getMazeCellLocalCenter(maze, cell) {
+  return {
+    x: -((maze.width * MAZE_CELL_SIZE) / 2) + (MAZE_CELL_SIZE / 2) + (cell.x * MAZE_CELL_SIZE),
+    z: -((maze.height * MAZE_CELL_SIZE) / 2) + (MAZE_CELL_SIZE / 2) + (cell.y * MAZE_CELL_SIZE)
+  }
+}
+
+function transformLocalPointToWorld(point, transform) {
+  const cos = Math.cos(transform.rotationY)
+  const sin = Math.sin(transform.rotationY)
+
+  return {
+    x: transform.x + (point.x * cos) + (point.z * sin),
+    z: transform.z - (point.x * sin) + (point.z * cos)
+  }
+}
+
+function transformWorldPointToLocal(point, transform) {
+  const dx = point.x - transform.x
+  const dz = point.z - transform.z
+  const cos = Math.cos(transform.rotationY)
+  const sin = Math.sin(transform.rotationY)
+
+  return {
+    x: (dx * cos) - (dz * sin),
+    z: (dx * sin) + (dz * cos)
+  }
+}
+
+function getLocalCellFromLevelLocalPoint(maze, point) {
+  return {
+    x: Math.round((point.x + ((maze.width * MAZE_CELL_SIZE) / 2) - (MAZE_CELL_SIZE / 2)) / MAZE_CELL_SIZE),
+    y: Math.round((point.z + ((maze.height * MAZE_CELL_SIZE) / 2) - (MAZE_CELL_SIZE / 2)) / MAZE_CELL_SIZE)
+  }
+}
+
+function mapLocalCellBetweenLevels(sourceMaze, sourceTransform, targetMaze, targetTransform, cell) {
+  const sourceLocalCenter = getMazeCellLocalCenter(sourceMaze, cell)
+  const worldCenter = transformLocalPointToWorld(sourceLocalCenter, sourceTransform)
+  const targetLocalCenter = transformWorldPointToLocal(worldCenter, targetTransform)
+
+  return getLocalCellFromLevelLocalPoint(targetMaze, targetLocalCenter)
 }
 
 function cloneMonster(monster) {
@@ -240,6 +285,7 @@ export function transitionGlobalTurnState({
   sourceLevelId,
   sourcePreviousState,
   sourceState,
+  sourceLayout,
   targetLayout,
   state
 }) {
@@ -251,10 +297,19 @@ export function transitionGlobalTurnState({
   const sourceWorldYaw =
     directionToYaw(sourceState.player.direction) + sourceTransform.rotationY
   const targetLocalYaw = sourceWorldYaw - targetTransform.rotationY
+  const sourceMaze = sourceLayout?.maze ?? null
   const sourceStoredState = cloneTurnStateForGlobal(sourcePreviousState ?? sourceState)
   const targetStoredState = cloneTurnStateForGlobal(next.levelStates[targetLevelId])
   const targetPlayer = {
-    cell: findIngressCellForGlobalTransition(targetLayout.maze, sourceLevelId),
+    cell: sourceMaze
+      ? mapLocalCellBetweenLevels(
+          sourceMaze,
+          sourceTransform,
+          targetLayout.maze,
+          targetTransform,
+          sourceState.player.cell
+        )
+      : findIngressCellForGlobalTransition(targetLayout.maze, sourceLevelId),
     direction: yawToDirection(targetLocalYaw),
     hasSword: sourceState.player.hasSword,
     hasTrophy: sourceState.player.hasTrophy

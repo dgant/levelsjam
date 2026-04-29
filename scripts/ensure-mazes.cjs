@@ -42,6 +42,7 @@ function runScript(scriptName, { recorder, timeoutMs }) {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now()
     const stepId = recorder.beginStep(`npm:${scriptName}`, {
+      stepKind: 'wrapper',
       timeoutMs
     })
     let settled = false
@@ -123,7 +124,8 @@ async function main() {
   activeRecorder = recorder
   const ensureStartedAt = Date.now()
   const ensureStepId = recorder.beginStep('ensure-maze-files', {
-    directory: mazeDirectory
+    directory: mazeDirectory,
+    stepKind: 'wrapper'
   })
   const activeLightmapSteps = new Map()
   const activeLightmapGpuSteps = new Map()
@@ -164,7 +166,8 @@ async function main() {
               recorder.beginStep('lightmap', {
                 actionReason: progress.actionReason,
                 fileName: progress.fileName,
-                levelId: mazeLabel
+                levelId: mazeLabel,
+                stepKind: 'wrapper'
               })
             )
           }

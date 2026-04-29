@@ -522,28 +522,11 @@ export async function ensureMazeFiles({
       })
       continue
     }
+    normalizeCandidateTiming(maze)
 
-    const shouldRewrite = bakeLightmaps && needsMazeRewrite(maze)
-    if (shouldRewrite) {
-      maze.visibility = computeMazeCellVisibility(maze)
-      maze.lightmap = await bakeMazeLightmapWithProgress(
-        maze,
-        reportProgress,
-        { actionReason: 'rewrite-existing', fileName }
-      )
-      fs.writeFileSync(filePath, serializeMazeModule(maze))
-      reportProgress({
-        action: 'rewrite-lightmap',
-        fileName,
-        stage: 'inspect-existing'
-      })
-    }
+    const preRewriteValidation = validateMaze(maze, { requireLightmap: false })
 
-    const validation = validateMaze(maze, {
-      requireLightmap: bakeLightmaps && maze.lightmap !== undefined
-    })
-
-    if (!validation.valid) {
+    if (!isAcceptableCandidate(maze, preRewriteValidation)) {
       const replacement = await generateReplacementMaze({
         fileName,
         mazeFactory,
@@ -572,6 +555,36 @@ export async function ensureMazeFiles({
         fileName,
         stage: 'inspect-existing',
         validCount: validMazes.length
+      })
+      continue
+    }
+
+    const shouldRewrite = bakeLightmaps && needsMazeRewrite(maze)
+    if (shouldRewrite) {
+      maze.visibility = computeMazeCellVisibility(maze)
+      maze.lightmap = await bakeMazeLightmapWithProgress(
+        maze,
+        reportProgress,
+        { actionReason: 'rewrite-existing', fileName }
+      )
+      fs.writeFileSync(filePath, serializeMazeModule(maze))
+      reportProgress({
+        action: 'rewrite-lightmap',
+        fileName,
+        stage: 'inspect-existing'
+      })
+    }
+
+    const validation = validateMaze(maze, {
+      requireLightmap: bakeLightmaps && maze.lightmap !== undefined
+    })
+
+    if (!validation.valid) {
+      fs.rmSync(filePath, { force: true })
+      reportProgress({
+        action: 'remove-invalid-rewritten-maze',
+        fileName,
+        stage: 'inspect-existing'
       })
       continue
     }

@@ -13,29 +13,29 @@ const AUTHORED_LEVEL_NAMES = Object.freeze(
 
 const RUNTIME_LEVEL_GRAPH = Object.freeze({
   entrance: ['chamber-1'],
-  'chamber-1': ['maze-001', 'maze-002', 'maze-003', 'maze-005'],
+  'chamber-1': ['maze-001', 'maze-002', 'maze-003', 'maze-004'],
   'maze-001': [],
   'maze-002': [],
   'maze-003': [],
-  'maze-005': []
+  'maze-004': []
 })
 
 const RUNTIME_LEVEL_ADJACENCY = Object.freeze({
   entrance: ['chamber-1'],
-  'chamber-1': ['entrance', 'maze-001', 'maze-002', 'maze-003', 'maze-005'],
+  'chamber-1': ['entrance', 'maze-001', 'maze-002', 'maze-003', 'maze-004'],
   'maze-001': ['chamber-1'],
   'maze-002': ['chamber-1'],
   'maze-003': ['chamber-1'],
-  'maze-005': ['chamber-1']
+  'maze-004': ['chamber-1']
 })
 
 const RUNTIME_LEVEL_WORLD_TRANSFORMS = Object.freeze({
   entrance: { x: 0, z: 0, rotationY: 0 },
   'chamber-1': { x: 0, z: -21, rotationY: 0 },
   'maze-001': { x: -12, z: -28, rotationY: Math.PI },
-  'maze-002': { x: -12, z: -12, rotationY: Math.PI },
+  'maze-002': { x: -12, z: -10, rotationY: Math.PI },
   'maze-003': { x: 12, z: -30, rotationY: 0 },
-  'maze-005': { x: 12, z: -12, rotationY: 0 }
+  'maze-004': { x: 12, z: -12, rotationY: 0 }
 })
 
 const authoredLevelMazeCache = new Map()
@@ -168,7 +168,7 @@ function createAuthoredMazeDefinition(id) {
         { cell: { x: 0, y: 2 }, targetLevelId: 'maze-001' },
         { cell: { x: 0, y: 11 }, targetLevelId: 'maze-002' },
         { cell: { x: 4, y: 2 }, targetLevelId: 'maze-003' },
-        { cell: { x: 4, y: 11 }, targetLevelId: 'maze-005' }
+        { cell: { x: 4, y: 11 }, targetLevelId: 'maze-004' }
       ],
       cells,
       exitRequiresTrophy: false,
@@ -181,7 +181,7 @@ function createAuthoredMazeDefinition(id) {
         { cell: { x: 0, y: 3 }, side: 'west', targetLevelId: 'maze-001' },
         { cell: { x: 0, y: 12 }, side: 'west', targetLevelId: 'maze-002' },
         { cell: { x: 4, y: 3 }, side: 'east', targetLevelId: 'maze-003' },
-        { cell: { x: 4, y: 12 }, side: 'east', targetLevelId: 'maze-005' }
+        { cell: { x: 4, y: 12 }, side: 'east', targetLevelId: 'maze-004' }
       ],
       levelName: AUTHORED_LEVEL_NAMES[id],
       lights: [

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const runtimeModelGltfPaths = [
+  'public/models/droop_cup_runtime/scene.gltf',
   'public/models/metal_gate_runtime/scene.gltf',
   'public/models/pbr_jumping_spider_monster/scene.gltf',
   'public/models/awil_werewolf_runtime/scene.gltf',
@@ -25,6 +26,22 @@ function getTextureImageUri(gltf, textureIndex) {
     : null
 
   return typeof image?.uri === 'string' ? image.uri : null
+}
+
+function getAccessorCount(gltf, accessorIndex) {
+  return gltf.accessors?.[accessorIndex]?.count ?? 0
+}
+
+function getPrimitiveTriangleCount(gltf, primitive) {
+  return typeof primitive.indices === 'number'
+    ? Math.floor(getAccessorCount(gltf, primitive.indices) / 3)
+    : Math.floor(getAccessorCount(gltf, primitive.attributes?.POSITION) / 3)
+}
+
+function getGltfTriangleCount(gltf) {
+  return (gltf.meshes ?? [])
+    .flatMap((mesh) => mesh.primitives ?? [])
+    .reduce((sum, primitive) => sum + getPrimitiveTriangleCount(gltf, primitive), 0)
 }
 
 test('runtime imported model GLTFs use ORM material texture convention', () => {
@@ -214,4 +231,15 @@ test('minotaur runtime materials use the authored dark base tint', () => {
       `${material.name ?? '<unnamed>'} should use #2b2130 as its base color factor`
     )
   }
+})
+
+test('altar cup runtime model is simplified to the requested triangle budget', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+  const gltf = readGltf('public/models/droop_cup_runtime/scene.gltf')
+
+  assert.match(appSource, /models\/droop_cup_runtime\/scene\.gltf/)
+  assert.ok(
+    getGltfTriangleCount(gltf) <= 5_500,
+    `runtime altar cup should stay close to 5k triangles, got ${getGltfTriangleCount(gltf)}`
+  )
 })

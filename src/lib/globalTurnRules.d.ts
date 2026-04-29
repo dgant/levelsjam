@@ -58,6 +58,7 @@ export declare function resetGlobalTurnStateLevel(
 ): GlobalTurnState
 export declare function transitionGlobalTurnState(options: {
   sourceLevelId: string
+  sourceLayout?: MazeLayout
   sourcePreviousState?: TurnState
   sourceState: TurnState
   state: GlobalTurnState

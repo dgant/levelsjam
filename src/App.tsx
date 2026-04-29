@@ -161,10 +161,12 @@ import {
   applyTurnAction,
   cellKey,
   createInitialTurnState,
+  getNeighbor,
   getOpenDoorIds,
   getOpenGateIds,
   resetTurnStateToCheckpoint,
   type CardinalDirection,
+  type MazeCell,
   type TurnAction,
   type TurnMonster,
   type TurnState
@@ -199,7 +201,7 @@ const MONSTER_MODEL_URLS = {
 const GATE_MODEL_URL = `${assetBase}models/metal_gate_runtime/scene.gltf`
 const SWORD_MODEL_URL = `${assetBase}models/bronze_sword_mycean/scene.gltf`
 const TROPHY_MODEL_URL = `${assetBase}models/head_of_a_bull_runtime/scene.gltf`
-const DROOP_CUP_MODEL_URL = `${assetBase}models/droop_cup_4th_century_bc/scene.gltf`
+const DROOP_CUP_MODEL_URL = `${assetBase}models/droop_cup_runtime/scene.gltf`
 const PUDDLE_TEXTURE_URLS = {
   color: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_Diffuse.jpg`,
   gloss: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_Gloss.jpg`,
@@ -982,7 +984,7 @@ const REFLECTION_PROBE_FAR = 48
 const REFLECTION_PROBE_LOAD_CONCURRENCY = 8
 const REFLECTION_PROBE_BACKGROUND_LOAD_CONCURRENCY = 4
 const REFLECTION_PROBE_PUBLISH_INTERVAL_MS = 250
-const REFLECTION_PROBE_RUNTIME_RESIDENT_LIMIT = 32
+const REFLECTION_PROBE_RUNTIME_RESIDENT_LIMIT = 128
 const REFLECTION_PROBE_RUNTIME_TEXTURE_MEMORY_BUDGET_BYTES = 768 * 1024 * 1024
 const REFLECTION_PROBE_STARTUP_DELAY_MS = 0
 const REFLECTION_PROBE_STARTUP_CAPTURE_DELAY_MS = 250
@@ -1766,8 +1768,13 @@ type VisualSettings = {
   ambientOcclusionIntensity: number
   ambientOcclusionMode: AmbientOcclusionMode
   ambientOcclusionRadius: number
+  n8aoDenoiseIterations: number
+  n8aoDenoiseRadius: number
+  n8aoDenoiseSamples: number
+  n8aoSamples: number
   exposureStops: number
   cameraFov: number
+  cameraTiltDegrees: number
   hdriBrightness: number
   iblContribution: LightingContributionSettings
   lightmapContribution: LightingContributionSettings
@@ -1802,11 +1809,16 @@ type VisualSettingsPatch = Partial<{
   ambientOcclusionIntensity: number
   ambientOcclusionMode: AmbientOcclusionMode
   ambientOcclusionRadius: number
+  n8aoDenoiseIterations: number
+  n8aoDenoiseRadius: number
+  n8aoDenoiseSamples: number
+  n8aoSamples: number
   anamorphic: Partial<AnamorphicSettings>
   bloom: Partial<BloomSettings>
   depthOfField: Partial<DepthOfFieldSettings>
   exposureStops: number
   cameraFov: number
+  cameraTiltDegrees: number
   hdriBrightness: number
   iblContribution: Partial<LightingContributionSettings>
   lensFlare: Partial<LensFlareSettings>
@@ -1853,10 +1865,15 @@ type ScalarSettingKey =
   | 'ambientOcclusionIntensity'
   | 'ambientOcclusionRadius'
   | 'cameraFov'
+  | 'cameraTiltDegrees'
   | 'exposureStops'
   | 'hdriBrightness'
   | 'iblContributionIntensity'
   | 'lightmapContributionIntensity'
+  | 'n8aoDenoiseIterations'
+  | 'n8aoDenoiseRadius'
+  | 'n8aoDenoiseSamples'
+  | 'n8aoSamples'
   | 'reflectionContributionIntensity'
   | 'saturation'
   | 'staticVolumetricContributionIntensity'
@@ -2510,7 +2527,12 @@ function createDefaultVisualSettings(): VisualSettings {
     ambientOcclusionIntensity: 1,
     ambientOcclusionRadius: DEFAULT_AO_RADIUS_METERS,
     ambientOcclusionMode: 'n8ao',
+    n8aoDenoiseIterations: 2,
+    n8aoDenoiseRadius: 8,
+    n8aoDenoiseSamples: 4,
+    n8aoSamples: 8,
     cameraFov: 80,
+    cameraTiltDegrees: MathUtils.radToDeg(DEFAULT_CAMERA_PITCH),
     exposureStops: DEFAULT_EXPOSURE_STOPS,
     hdriBrightness: DEFAULT_HDRI_BRIGHTNESS,
     iblContribution: {
@@ -2650,12 +2672,27 @@ function applyVisualSettingsPatch(
     ...(patch.ambientOcclusionRadius === undefined
       ? null
       : { ambientOcclusionRadius: patch.ambientOcclusionRadius }),
+    ...(patch.n8aoDenoiseIterations === undefined
+      ? null
+      : { n8aoDenoiseIterations: patch.n8aoDenoiseIterations }),
+    ...(patch.n8aoDenoiseRadius === undefined
+      ? null
+      : { n8aoDenoiseRadius: patch.n8aoDenoiseRadius }),
+    ...(patch.n8aoDenoiseSamples === undefined
+      ? null
+      : { n8aoDenoiseSamples: patch.n8aoDenoiseSamples }),
+    ...(patch.n8aoSamples === undefined
+      ? null
+      : { n8aoSamples: patch.n8aoSamples }),
     ...(patch.exposureStops === undefined
       ? null
       : { exposureStops: patch.exposureStops }),
     ...(patch.cameraFov === undefined
       ? null
       : { cameraFov: patch.cameraFov }),
+    ...(patch.cameraTiltDegrees === undefined
+      ? null
+      : { cameraTiltDegrees: patch.cameraTiltDegrees }),
     ...(patch.hdriBrightness === undefined
       ? null
       : { hdriBrightness: patch.hdriBrightness }),
@@ -2993,7 +3030,10 @@ vec4 probeBlendTextureCubeUV(
 
 const PROBE_BLEND_SHADER_CHUNK = `
 
-const float LEVELSJAM_VLM_IRRADIANCE_TO_THREE_IBL_RADIANCE = 0.10132118364233778;
+// The SH coefficients store average incoming radiance. Three's PBR indirect
+// diffuse hook expects irradiance, so the SH convolution below is calibrated to
+// return pi * radiance for a constant environment.
+const float LEVELSJAM_VLM_IRRADIANCE_TO_THREE_IBL_RADIANCE = 0.3183098861837907;
 
 #if defined(PROBE_BLEND_ENABLE_LOCAL_RADIANCE) && defined(USE_ENVMAP)
 uniform sampler2D localProbeEnvMap0;
@@ -7080,7 +7120,7 @@ function useRuntimeLevelLightingResources(
           .filter(
             (probeIndex) =>
               requestedResidentProbeIndexSet.has(probeIndex) &&
-              !startupVolumetricProbeIndexSet.has(probeIndex)
+              !startupProbeIndexSet.has(probeIndex)
           )
         let activeProbeLoads = 0
         let backgroundProbeLoadingReleased = pendingStartupProbeIndices.length === 0
@@ -7511,7 +7551,7 @@ function getBoxFaceLightmapKey(normal: { x: number; y: number; z: number }) {
 }
 
 function createAltarBlockGeometry(lightmap: MazeLightmap, altarId: string) {
-  const geometry = new BoxGeometry(1, 1, 1)
+  const geometry = new BoxGeometry(0.5, 1, 0.5)
   const uv = geometry.getAttribute('uv')
   const normal = geometry.getAttribute('normal')
   const uv1 = new Float32Array(uv.count * 2)
@@ -8300,10 +8340,10 @@ function EnvironmentLighting({
           const pendingStartupProbeIndices = [...startupVolumetricProbeIndices]
           const pendingBackgroundProbeIndices = manifest.probes
             .map((probe) => probe.index)
-            .filter(
-              (probeIndex) =>
-                requestedResidentProbeIndexSet.has(probeIndex) &&
-                !startupVolumetricProbeIndexSet.has(probeIndex)
+          .filter(
+            (probeIndex) =>
+              requestedResidentProbeIndexSet.has(probeIndex) &&
+                !startupProbeIndexSet.has(probeIndex)
           )
           let activeProbeLoads = 0
           let backgroundProbeLoadingReleased = pendingStartupProbeIndices.length === 0
@@ -9122,11 +9162,7 @@ function Ground({
           diffuseIntensity: iblContributionIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: probeIblAvailable
-            ? 'disabled'
-            : reflectionAvailable
-              ? 'world'
-              : 'disabled',
+          radianceMode: reflectionAvailable ? 'world' : 'disabled',
                   region: rect.region,
                   useProbeConnectivity: volumetricShadowsEnabled,
                   vlmMode: probeIblAvailable ? 'cell5' : 'disabled',
@@ -11451,7 +11487,7 @@ function MazeWallMesh({
           diffuseIntensity: iblContributionIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: 'disabled',
+          radianceMode: hasProbeTextures ? 'world' : 'disabled',
           useProbeConnectivity: volumetricShadowsEnabled,
           vlmBoundaryNormal:
             mazeWall.axis === 'z'
@@ -11464,6 +11500,7 @@ function MazeWallMesh({
       ),
     [
       iblContributionIntensity,
+      hasProbeTextures,
       layout,
       levelWorldTransform,
       lightmapContributionIntensity,
@@ -11539,6 +11576,7 @@ function SceneGeometry({
   lightmapContributionIntensity,
   mountAllGeometry,
   offeringAltarId,
+  offeringStartedAt,
   openGateIds,
   probeDebugMode,
   probeDepthAtlasTextures,
@@ -11564,6 +11602,7 @@ function SceneGeometry({
   lightmapContributionIntensity: number
   mountAllGeometry: boolean
   offeringAltarId: string | null
+  offeringStartedAt: number | null
   openGateIds: Set<string>
   probeDebugMode: ProbeDebugMode
   probeDepthAtlasTextures: ProbeDepthAtlasTextures
@@ -11659,6 +11698,7 @@ function SceneGeometry({
             lightmapTexture={surfaceLightmap.texture}
             lightmapTextureEncoding={surfaceLightmap.encoding}
             offeringAltarId={offeringAltarId}
+            offeringStartedAt={offeringStartedAt}
             probeDepthAtlasTextures={probeDepthAtlasTextures}
             probeCoefficientTextures={probeCoefficientTextures}
             reflectionContributionIntensity={reflectionContributionIntensity}
@@ -11678,7 +11718,7 @@ function SceneGeometry({
             reflectionProbeCoefficients={reflectionProbeCoefficients}
             reflectionProbeDepthTextures={reflectionProbeDepthTextures}
             reflectionProbeTextures={reflectionProbeTextures}
-            renderHeldItems={isActive}
+            renderHeldItems={isActive && !offeringAltarId}
             turnState={turnState}
             visibilityState={visibilityState}
           />
@@ -11766,7 +11806,7 @@ function GateActor({
   )
   const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
   const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
-  const openProgress = useRef(isOpen ? 1 : 0)
+  const openProgress = useRef(0)
   const probeBlend = useMemo(
     () =>
       buildProbeBlendConfig(
@@ -11851,12 +11891,11 @@ function GateActor({
       return
     }
 
-      openProgress.current = isOpen ? 1 : 0
-      group.current.position.set(
-        gate.center.x,
-        MathUtils.lerp(transform.closedY, transform.openY, openProgress.current),
-        gate.center.z
-      )
+    group.current.position.set(
+      gate.center.x,
+      MathUtils.lerp(transform.closedY, transform.openY, openProgress.current),
+      gate.center.z
+    )
     group.current.userData.initialized = true
   }, [gate.center.x, gate.center.z, isOpen, transform])
 
@@ -11968,38 +12007,85 @@ function MazeGates({
   )
 }
 
-function getMazeEntranceDoor(layout: MazeLayout) {
-  const opening = layout.maze.opening
+type MazeRuntimeDoor = {
+  cell: MazeCell
+  center: { x: number, z: number }
+  id: string
+  side: CardinalDirection
+  yaw: number
+}
 
-  if (!opening) {
-    return null
-  }
-
-  const cellCenter = getMazeCellWorldPosition(layout.maze, opening.cell, GROUND_Y)
+function getMazeDoorForBoundary(
+  layout: MazeLayout,
+  boundary: {
+    cell: MazeCell
+    side: CardinalDirection
+    targetLevelId?: string
+  },
+  id: string
+): MazeRuntimeDoor {
+  const cellCenter = getMazeCellWorldPosition(layout.maze, boundary.cell, GROUND_Y)
   const center = {
     x: cellCenter.x,
     z: cellCenter.z
   }
 
-  if (opening.side === 'north') {
+  if (boundary.side === 'north') {
     center.z -= MAZE_CELL_SIZE / 2
-  } else if (opening.side === 'south') {
+  } else if (boundary.side === 'south') {
     center.z += MAZE_CELL_SIZE / 2
-  } else if (opening.side === 'east') {
+  } else if (boundary.side === 'east') {
     center.x += MAZE_CELL_SIZE / 2
   } else {
     center.x -= MAZE_CELL_SIZE / 2
   }
 
   return {
-    cell: opening.cell,
+    cell: boundary.cell,
     center,
-    id: `${layout.maze.id}:entrance-door`,
-    side: opening.side,
-    yaw: opening.side === 'east' || opening.side === 'west'
+    id,
+    side: boundary.side,
+    yaw: boundary.side === 'east' || boundary.side === 'west'
       ? Math.PI / 2
       : 0
   }
+}
+
+function getMazeDoors(layout: MazeLayout): MazeRuntimeDoor[] {
+  const doors: MazeRuntimeDoor[] = []
+  const seenDoorKeys = new Set<string>()
+  const addDoor = (
+    boundary: {
+      cell: MazeCell
+      side: CardinalDirection
+      targetLevelId?: string
+    } | null | undefined,
+    id: string
+  ) => {
+    if (!boundary) {
+      return
+    }
+
+    const key = `${boundary.cell.x},${boundary.cell.y}:${boundary.side}`
+
+    if (seenDoorKeys.has(key)) {
+      return
+    }
+
+    seenDoorKeys.add(key)
+    doors.push(getMazeDoorForBoundary(layout, boundary, id))
+  }
+
+  addDoor(layout.maze.opening, `${layout.maze.id}:entrance-door`)
+
+  for (const exit of layout.maze.levelExits ?? []) {
+    addDoor(
+      exit,
+      `${layout.maze.id}:door:${exit.cell.x},${exit.cell.y}:${exit.side}:${exit.targetLevelId ?? 'exit'}`
+    )
+  }
+
+  return doors
 }
 
 function getDoorBoundaryNormal(side: CardinalDirection) {
@@ -12017,7 +12103,7 @@ function getDoorBoundaryNormal(side: CardinalDirection) {
 }
 
 function isDoorOpenForTurnState(
-  door: NonNullable<ReturnType<typeof getMazeEntranceDoor>>,
+  door: MazeRuntimeDoor,
   maze: MazeLayout['maze'],
   turnState: TurnState
 ) {
@@ -12025,10 +12111,12 @@ function isDoorOpenForTurnState(
 }
 
 function DoorLeafMaterial({
+  attach,
   maps,
   materialKey,
   probeBlend
 }: {
+  attach?: string
   maps: PbrMaps
   materialKey: string
   probeBlend: ProbeBlendConfig
@@ -12044,6 +12132,7 @@ function DoorLeafMaterial({
   return (
     <meshStandardMaterial
       aoMap={maps.aoMap}
+      attach={attach}
       color="white"
       customProgramCacheKey={probeBlendMaterialProps.customProgramCacheKey}
       envMap={getProbeBlendEnvMap(probeBlend)}
@@ -12076,7 +12165,7 @@ function MazeDoorActor({
   reflectionProbeTextures,
   visible
 }: {
-  door: NonNullable<ReturnType<typeof getMazeEntranceDoor>>
+  door: MazeRuntimeDoor
   iblContributionIntensity: number
   isOpen: boolean
   layout: MazeLayout
@@ -12099,9 +12188,26 @@ function MazeDoorActor({
   const doorGeometry = useMemo(() => {
     const geometry = new BoxGeometry(1, DOOR_HEIGHT, WALL_WIDTH * 0.5)
     const uv = geometry.getAttribute('uv')
+    const normal = geometry.getAttribute('normal')
 
     if (uv) {
+      for (let vertexIndex = 0; vertexIndex < uv.count; vertexIndex += 1) {
+        if (normal?.getZ(vertexIndex) < -0.5) {
+          uv.setX(vertexIndex, 1 - uv.getX(vertexIndex))
+        }
+      }
+      uv.needsUpdate = true
       geometry.setAttribute('uv2', uv.clone())
+    }
+
+    if (normal) {
+      const index = geometry.getIndex()
+
+      for (const group of geometry.groups) {
+        const normalIndex = index ? index.getX(group.start) : group.start
+
+        group.materialIndex = normal.getZ(normalIndex) < -0.5 ? 1 : 0
+      }
     }
 
     return geometry
@@ -12183,7 +12289,7 @@ function MazeDoorActor({
     () => getProbeBlendMaterialKey('maze-door', probeBlend, {}),
     [probeBlend]
   )
-  const openProgress = useRef(isOpen ? 1 : 0)
+  const openProgress = useRef(0)
 
   useEffect(() => () => {
     doorGeometry.dispose()
@@ -12228,8 +12334,15 @@ function MazeDoorActor({
         userData={{ debugIndex: 0, debugRole: 'maze-door-leaf' }}
       >
         <DoorLeafMaterial
+          attach="material-0"
           maps={leftDoorMaps}
-          materialKey={`${materialKey}:left`}
+          materialKey={`${materialKey}:left:front`}
+          probeBlend={probeBlend}
+        />
+        <DoorLeafMaterial
+          attach="material-1"
+          maps={rightDoorMaps}
+          materialKey={`${materialKey}:left:back`}
           probeBlend={probeBlend}
         />
       </mesh>
@@ -12242,8 +12355,15 @@ function MazeDoorActor({
         userData={{ debugIndex: 1, debugRole: 'maze-door-leaf' }}
       >
         <DoorLeafMaterial
+          attach="material-0"
           maps={rightDoorMaps}
-          materialKey={`${materialKey}:right`}
+          materialKey={`${materialKey}:right:front`}
+          probeBlend={probeBlend}
+        />
+        <DoorLeafMaterial
+          attach="material-1"
+          maps={leftDoorMaps}
+          materialKey={`${materialKey}:right:back`}
           probeBlend={probeBlend}
         />
       </mesh>
@@ -12283,47 +12403,44 @@ function MazeDoors({
   visibilityState: PrecomputedVisibilityState
 }) {
   const levelWorldTransform = useContext(LevelRenderTransformContext)
-  const door = useMemo(() => getMazeEntranceDoor(layout), [layout])
-  const doorWorldPosition = useMemo(() => {
-    if (!door) {
-      return null
-    }
-
-    return transformLevelLocalPositionToWorld({
-      x: door.center.x,
-      y: GROUND_Y,
-      z: door.center.z
-    }, levelWorldTransform)
-  }, [door, levelWorldTransform])
-  const isAdjacentToActivePlayer = Boolean(
-    activePlayerTurn > 0 &&
-    doorWorldPosition &&
-    activePlayerWorldPosition.distanceToSquared(doorWorldPosition) <=
-      ((MAZE_CELL_SIZE * 0.6) ** 2)
-  )
-
-  if (!door) {
-    return null
-  }
+  const doors = useMemo(() => getMazeDoors(layout), [layout])
 
   return (
-    <MazeDoorActor
-      door={door}
-      iblContributionIntensity={iblContributionIntensity}
-      isOpen={
-        (isActive && isDoorOpenForTurnState(door, layout.maze, turnState)) ||
-        isAdjacentToActivePlayer
-      }
-      layout={layout}
-      lightmapContributionIntensity={lightmapContributionIntensity}
-      probeDepthAtlasTextures={probeDepthAtlasTextures}
-      probeCoefficientTextures={probeCoefficientTextures}
-      reflectionContributionIntensity={reflectionContributionIntensity}
-      reflectionProbeCoefficients={reflectionProbeCoefficients}
-      reflectionProbeDepthTextures={reflectionProbeDepthTextures}
-      reflectionProbeTextures={reflectionProbeTextures}
-      visible={isCellVisible(visibilityState, door.cell)}
-    />
+    <>
+      {doors.map((door) => {
+        const doorWorldPosition = transformLevelLocalPositionToWorld({
+          x: door.center.x,
+          y: GROUND_Y,
+          z: door.center.z
+        }, levelWorldTransform)
+        const isAdjacentToActivePlayer = Boolean(
+          activePlayerTurn > 0 &&
+          doorWorldPosition.distanceToSquared(activePlayerWorldPosition) <=
+            ((MAZE_CELL_SIZE * 0.6) ** 2)
+        )
+
+        return (
+          <MazeDoorActor
+            door={door}
+            iblContributionIntensity={iblContributionIntensity}
+            isOpen={
+              (isActive && isDoorOpenForTurnState(door, layout.maze, turnState)) ||
+              isAdjacentToActivePlayer
+            }
+            key={door.id}
+            layout={layout}
+            lightmapContributionIntensity={lightmapContributionIntensity}
+            probeDepthAtlasTextures={probeDepthAtlasTextures}
+            probeCoefficientTextures={probeCoefficientTextures}
+            reflectionContributionIntensity={reflectionContributionIntensity}
+            reflectionProbeCoefficients={reflectionProbeCoefficients}
+            reflectionProbeDepthTextures={reflectionProbeDepthTextures}
+            reflectionProbeTextures={reflectionProbeTextures}
+            visible={isCellVisible(visibilityState, door.cell)}
+          />
+        )
+      })}
+    </>
   )
 }
 
@@ -12374,12 +12491,21 @@ function AltarBlockMaterial({
 }
 
 function AltarOfferingTrophy({
+  altarPosition,
   materialKey,
-  probeBlend
+  probeBlend,
+  startedAt
 }: {
+  altarPosition: { x: number, y: number, z: number }
   materialKey: string
   probeBlend: ProbeBlendConfig
+  startedAt: number
 }) {
+  const group = useRef<Group>(null)
+  const camera = useThree((state) => state.camera)
+  const levelWorldTransform = useContext(LevelRenderTransformContext)
+  const handWorldPosition = useRef(new Vector3())
+  const handLevelPosition = useRef(new Vector3())
   const trophyModel = useClonedRuntimeModel(
     TROPHY_MODEL_URL,
     'trophy',
@@ -12399,7 +12525,7 @@ function AltarOfferingTrophy({
     bounds.getCenter(center)
     bounds.getSize(size)
 
-    const scale = 0.24 / Math.max(size.y, 0.0001)
+    const scale = 0.5 / Math.max(size.y, 0.0001)
 
     return {
       modelOffset: new Vector3(
@@ -12425,24 +12551,58 @@ function AltarOfferingTrophy({
     })
   }, [trophyModel])
 
+  useFrame(() => {
+    if (!group.current) {
+      return
+    }
+
+    const elapsed = performance.now() - startedAt
+    const handToBowlAlpha = MathUtils.smoothstep(
+      MathUtils.clamp((elapsed - 500) / 2500, 0, 1),
+      0,
+      1
+    )
+    handWorldPosition.current
+      .set(-0.42, -0.52, -0.62)
+      .applyQuaternion(camera.quaternion)
+      .add(camera.position)
+    transformWorldPositionToLevelLocal(
+      handWorldPosition.current,
+      levelWorldTransform,
+      handLevelPosition.current
+    )
+
+    const startX = handLevelPosition.current.x - altarPosition.x
+    const startY = handLevelPosition.current.y - GROUND_Y
+    const startZ = handLevelPosition.current.z - altarPosition.z
+
+    group.current.position.set(
+      MathUtils.lerp(startX, 0, handToBowlAlpha),
+      MathUtils.lerp(startY, 1.08, handToBowlAlpha),
+      MathUtils.lerp(startZ, 0, handToBowlAlpha)
+    )
+  })
+
   if (!trophyModel || !transform) {
     return null
   }
 
   return (
-    <primitive
-      object={trophyModel}
-      position={[
-        transform.modelOffset.x,
-        1.08 + transform.modelOffset.y,
-        transform.modelOffset.z
-      ]}
-      scale={transform.scale}
+    <group ref={group}>
+      <primitive
+        object={trophyModel}
+        position={[
+          transform.modelOffset.x,
+          transform.modelOffset.y,
+          transform.modelOffset.z
+        ]}
+        scale={transform.scale}
       userData={{
         debugRole: 'altar-offering-trophy',
         materialKey
       }}
-    />
+      />
+    </group>
   )
 }
 
@@ -12456,6 +12616,7 @@ function MazeAltarActor({
   lightmapTexture,
   lightmapTextureEncoding,
   offering,
+  offeringStartedAt,
   probeDepthAtlasTextures,
   probeCoefficientTextures,
   reflectionContributionIntensity,
@@ -12474,6 +12635,7 @@ function MazeAltarActor({
   lightmapTexture: Texture
   lightmapTextureEncoding: LightmapTextureEncoding
   offering: boolean
+  offeringStartedAt: number | null
   probeDepthAtlasTextures: ProbeDepthAtlasTextures
   probeCoefficientTextures: [Texture, Texture, Texture, Texture]
   reflectionContributionIntensity: number
@@ -12661,14 +12823,16 @@ function MazeAltarActor({
       ) : null}
       {offering && !activated ? (
         <AltarOfferingTrophy
+          altarPosition={altar.position}
           materialKey={`${materialKey}:offering-trophy`}
           probeBlend={cupProbeBlend}
+          startedAt={offeringStartedAt ?? performance.now()}
         />
       ) : null}
       {activated ? (
         <TorchBillboard
           color={new Color(FIRE_COLOR.b, FIRE_COLOR.r, FIRE_COLOR.g)}
-          position={[0, 1.62, 0]}
+          position={[0, 1.08 + TORCH_BILLBOARD_SIZE, 0]}
           seed={10_000 + altarIndex}
           size={TORCH_BILLBOARD_SIZE * 2}
           texture={torchTexture}
@@ -12686,6 +12850,7 @@ function MazeAltars({
   lightmapTexture,
   lightmapTextureEncoding,
   offeringAltarId,
+  offeringStartedAt,
   probeDepthAtlasTextures,
   probeCoefficientTextures,
   reflectionContributionIntensity,
@@ -12701,6 +12866,7 @@ function MazeAltars({
   lightmapTexture: Texture
   lightmapTextureEncoding: LightmapTextureEncoding
   offeringAltarId: string | null
+  offeringStartedAt: number | null
   probeDepthAtlasTextures: ProbeDepthAtlasTextures
   probeCoefficientTextures: [Texture, Texture, Texture, Texture]
   reflectionContributionIntensity: number
@@ -12730,6 +12896,7 @@ function MazeAltars({
           lightmapTexture={lightmapTexture}
           lightmapTextureEncoding={lightmapTextureEncoding}
           offering={offeringAltarId === altar.id}
+          offeringStartedAt={offeringAltarId === altar.id ? offeringStartedAt : null}
           probeDepthAtlasTextures={probeDepthAtlasTextures}
           probeCoefficientTextures={probeCoefficientTextures}
           reflectionContributionIntensity={reflectionContributionIntensity}
@@ -13018,10 +13185,7 @@ function HeldItemView({
           diffuseIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode:
-            hasProbeTextures && !hasProbeCoefficients
-              ? 'constant'
-              : 'disabled',
+          radianceMode: hasProbeTextures ? 'constant' : 'disabled',
           useProbeConnectivity: volumetricShadowsEnabled,
           vlmMode: hasProbeCoefficients ? 'cell5' : 'disabled',
           worldTransform: levelWorldTransform
@@ -13376,7 +13540,7 @@ function MonsterModel({
           diffuseIntensity: diffuseProbeIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: diffuseProbeAvailable ? 'disabled' : 'none',
+          radianceMode: hasProbeTextures ? 'constant' : 'disabled',
           useProbeConnectivity: volumetricShadowsEnabled,
           vlmMode: diffuseProbeAvailable ? 'cell5' : 'disabled',
           worldTransform: levelWorldTransform
@@ -13385,6 +13549,7 @@ function MonsterModel({
     [
       diffuseProbeAvailable,
       diffuseProbeIntensity,
+      hasProbeTextures,
       layout,
       levelWorldTransform,
       probeCoefficientTextures,
@@ -14251,9 +14416,17 @@ function AnamorphicEffectPrimitive({
 
 function TunedN8AO({
   aoRadius,
+  denoiseIterations,
+  denoiseRadius,
+  denoiseSamples,
+  aoSamples,
   intensity
 }: {
   aoRadius: number
+  denoiseIterations: number
+  denoiseRadius: number
+  denoiseSamples: number
+  aoSamples: number
   intensity: number
 }) {
   const passRef = useRef<{
@@ -14274,18 +14447,17 @@ function TunedN8AO({
       return
     }
 
-    configuration.denoiseIterations = 1
-  })
+    configuration.denoiseIterations = denoiseIterations
+  }, [denoiseIterations])
 
   return (
     <N8AO
       aoRadius={aoRadius}
-      aoSamples={4}
+      aoSamples={aoSamples}
       color="#000000"
-      denoiseSamples={2}
-      denoiseRadius={6}
+      denoiseSamples={denoiseSamples}
+      denoiseRadius={denoiseRadius}
       distanceFalloff={1}
-      halfRes
       intensity={intensity}
       ref={passRef}
     />
@@ -15446,6 +15618,8 @@ function TorchLensFlare({
 }
 
 function FlightRig({
+  altarCutsceneTarget,
+  cameraTiltDegrees,
   inputEnabled,
   isLevelLightingReady,
   layout,
@@ -15460,6 +15634,8 @@ function FlightRig({
   turnState,
   wallBounds
 }: {
+  altarCutsceneTarget: Vector3 | null
+  cameraTiltDegrees: number
   inputEnabled: boolean
   isLevelLightingReady: (mazeId: string) => boolean
   layout: MazeLayout
@@ -15510,6 +15686,11 @@ function FlightRig({
   const lastSyncedLayoutId = useRef(layout.maze.id)
   const hasInitializedPose = useRef(false)
   const cameraShake = useRef({ amplitude: 0, endsAt: 0 })
+  const altarLookAnimation = useRef<{
+    key: string
+    startYaw: number
+    targetYaw: number
+  } | null>(null)
   const playerAnimation = useRef<{
     action: TurnAction
     blocked: boolean
@@ -15538,6 +15719,14 @@ function FlightRig({
       movementSettings.decelerationDistance,
       movementSettings.maxHorizontalSpeedMph
     ]
+  )
+  const resolvedFreeCameraSettings = useMemo(
+    () => createMovementSettings(DEFAULT_MOVEMENT_SETTINGS),
+    []
+  )
+  const gameplayCameraPitch = useMemo(
+    () => MathUtils.degToRad(MathUtils.clamp(cameraTiltDegrees, -20, 20)),
+    [cameraTiltDegrees]
   )
 
   useLayoutEffect(() => {
@@ -15624,15 +15813,15 @@ function FlightRig({
       spawnPosition.z
     )
     yaw.current = directionToYaw(nextState.player.direction) + levelTransform.rotationY
-    pitch.current = DEFAULT_CAMERA_PITCH
+    pitch.current = gameplayCameraPitch
     camera.quaternion.setFromEuler(
-      cameraEuler.set(DEFAULT_CAMERA_PITCH, yaw.current, 0, 'YXZ')
+      cameraEuler.set(gameplayCameraPitch, yaw.current, 0, 'YXZ')
     )
     camera.updateMatrixWorld()
     setDisplayedOpenGateIds([])
     setTurnState(nextState)
     onReplayActiveChange(replayActive.current)
-  }, [camera, layout.maze, levelTransform, onReplayActiveChange, replayRequestId, replayRequestMazeId, setDisplayedOpenGateIds, setTurnState])
+  }, [camera, gameplayCameraPitch, layout.maze, levelTransform, onReplayActiveChange, replayRequestId, replayRequestMazeId, setDisplayedOpenGateIds, setTurnState])
 
   useEffect(() => {
     if (hasInitializedPose.current) {
@@ -15655,10 +15844,10 @@ function FlightRig({
     camera.rotation.order = 'YXZ'
     camera.position.set(cameraPosition.x, cameraPosition.y, cameraPosition.z)
     yaw.current = directionToYaw(turnState.player.direction) + levelTransform.rotationY
-    camera.quaternion.setFromEuler(cameraEuler.set(DEFAULT_CAMERA_PITCH, yaw.current, 0, 'YXZ'))
-    pitch.current = DEFAULT_CAMERA_PITCH
+    camera.quaternion.setFromEuler(cameraEuler.set(gameplayCameraPitch, yaw.current, 0, 'YXZ'))
+    pitch.current = gameplayCameraPitch
     playerPosition.current.copy(spawnPosition)
-  }, [camera, layout.maze, levelTransform, turnState.player.cell, turnState.player.direction])
+  }, [camera, gameplayCameraPitch, layout.maze, levelTransform, turnState.player.cell, turnState.player.direction])
 
   useEffect(() => {
     const updateRotation = () => {
@@ -16613,6 +16802,49 @@ function FlightRig({
 
     try {
       if (!freeCamera.current) {
+      if (altarCutsceneTarget) {
+        const currentState = turnStateRef.current
+        const playerWorldPosition = getTransformedMazeCellWorldPosition(
+          layout.maze,
+          levelTransform,
+          currentState.player.cell,
+          GROUND_Y + PLAYER_EYE_HEIGHT
+        )
+        const dx = altarCutsceneTarget.x - playerWorldPosition.x
+        const dz = altarCutsceneTarget.z - playerWorldPosition.z
+        const targetYaw = Math.atan2(-dx, -dz)
+        const animationKey = `${layout.maze.id}:${altarCutsceneTarget.x.toFixed(3)}:${altarCutsceneTarget.z.toFixed(3)}`
+
+        if (altarLookAnimation.current?.key !== animationKey) {
+          altarLookAnimation.current = {
+            key: animationKey,
+            startYaw: yaw.current,
+            targetYaw
+          }
+        }
+
+        const elapsed = Math.max(
+          0,
+          performance.now() - (document.body.dataset.altarCutsceneStartedAt
+            ? Number(document.body.dataset.altarCutsceneStartedAt)
+            : performance.now())
+        )
+        const turnAlpha = MathUtils.smoothstep(
+          MathUtils.clamp((elapsed - 1000) / 1000, 0, 1),
+          0,
+          1
+        )
+        const startYaw = altarLookAnimation.current.startYaw
+        const yawDelta = normalizeAngleRadians(altarLookAnimation.current.targetYaw - startYaw)
+
+        camera.position.copy(playerWorldPosition)
+        yaw.current = startYaw + (yawDelta * turnAlpha)
+        pitch.current = gameplayCameraPitch
+        camera.quaternion.setFromEuler(cameraEuler.set(gameplayCameraPitch, yaw.current, 0, 'YXZ'))
+        camera.updateMatrixWorld()
+        return
+      }
+      altarLookAnimation.current = null
       if (!playerAnimation.current) {
         const transitionCommitBlocked = levelTransitionCommitTarget.current !== null
         const replayAction = inputEnabledRef.current && !transitionCommitBlocked
@@ -16635,7 +16867,16 @@ function FlightRig({
             setDisplayedOpenGateIds(getOpenGateIds(layout.maze, turnStateRef.current))
           }
 
-          const result = applyTurnAction(layout.maze, turnStateRef.current, action)
+          const rulesMaze = createTurnRulesMaze(layout.maze, turnStateRef.current)
+          const result = applyTurnAction(rulesMaze, turnStateRef.current, action)
+          const levelTransition = !result.blocked && action !== 'rotate-left' && action !== 'rotate-right'
+            ? getLevelTransitionForCompletedMove(
+                layout.maze,
+                turnStateRef.current,
+                result.previous.player.cell,
+                result.state.player.cell
+              )
+            : null
           const previousMinotaur = result.previous.monsters.find(
             (monster) => monster.type === 'minotaur'
           )
@@ -16672,7 +16913,7 @@ function FlightRig({
             blocked: Boolean(result.blocked),
             from: result.previous,
             killed: result.killed,
-            levelTransition: result.levelTransition,
+            levelTransition: result.levelTransition ?? levelTransition,
             playerEffect: result.playerEffect,
             startedAt: performance.now(),
             to: result.state
@@ -16833,8 +17074,8 @@ function FlightRig({
         camera.position.lerpVectors(fromPosition, toPosition, animationAlpha)
       }
       yaw.current = fromYaw + (yawDelta * animationAlpha)
-      pitch.current = DEFAULT_CAMERA_PITCH
-      camera.quaternion.setFromEuler(cameraEuler.set(DEFAULT_CAMERA_PITCH, yaw.current, 0, 'YXZ'))
+      pitch.current = gameplayCameraPitch
+      camera.quaternion.setFromEuler(cameraEuler.set(gameplayCameraPitch, yaw.current, 0, 'YXZ'))
       if (cameraShake.current.endsAt > performance.now()) {
         const remaining = Math.max(0, (cameraShake.current.endsAt - performance.now()) / 1000)
         const envelope = Math.min(1, remaining) * Math.min(1, remaining)
@@ -16868,9 +17109,9 @@ function FlightRig({
       keyboardLocal.current.normalize()
     }
     camera.position
-      .addScaledVector(right.current, keyboardLocal.current.x * resolvedMovementSettings.maxHorizontalSpeed * delta)
-      .addScaledVector(up, keyboardLocal.current.y * resolvedMovementSettings.maxHorizontalSpeed * delta)
-      .addScaledVector(forward.current, keyboardLocal.current.z * resolvedMovementSettings.maxHorizontalSpeed * delta)
+      .addScaledVector(right.current, keyboardLocal.current.x * resolvedFreeCameraSettings.maxHorizontalSpeed * delta)
+      .addScaledVector(up, keyboardLocal.current.y * resolvedFreeCameraSettings.maxHorizontalSpeed * delta)
+      .addScaledVector(forward.current, keyboardLocal.current.z * resolvedFreeCameraSettings.maxHorizontalSpeed * delta)
       camera.updateMatrixWorld()
     } finally {
       endFrameProfileStep('player rules and camera', profileStartedAt)
@@ -16915,6 +17156,7 @@ function RuntimeLevelGeometry({
   monsterEyes,
   mountAllGeometry = false,
   offeringAltarId,
+  offeringStartedAt,
   onLightingResourcesChange,
   openGateIdsOverride = null,
   probeDebugMode,
@@ -16938,6 +17180,7 @@ function RuntimeLevelGeometry({
   monsterEyes: MonsterEyeSettings
   mountAllGeometry?: boolean
   offeringAltarId: string | null
+  offeringStartedAt: number | null
   onLightingResourcesChange: (
     mazeId: string,
     resources: RuntimeLevelLightingResources | null,
@@ -17050,6 +17293,7 @@ function RuntimeLevelGeometry({
           lightmapContributionIntensity={lightmapContributionIntensity}
           mountAllGeometry={mountAllGeometry}
           offeringAltarId={offeringAltarId}
+          offeringStartedAt={offeringStartedAt}
           openGateIds={openGateIds}
           probeDebugMode={probeDebugMode}
           probeDepthAtlasTextures={stableLightingResources.probeDepthAtlasTextures}
@@ -18365,6 +18609,29 @@ function Scene({
     ),
     [layout.maze, levelTransform, turnState.player.cell]
   )
+  const altarCutsceneTarget = useMemo(() => {
+    if (!altarCutscene || altarCutscene.levelId !== layout.maze.id) {
+      return null
+    }
+
+    const altar = layout.altars.find((candidate) => candidate.id === altarCutscene.altarId)
+
+    return altar
+      ? transformLevelLocalPositionToWorld(
+          {
+            x: altar.position.x,
+            y: GROUND_Y + 1.05,
+            z: altar.position.z
+          },
+          levelTransform,
+          new Vector3()
+        )
+      : null
+  }, [altarCutscene, layout.altars, layout.maze.id, levelTransform])
+  const composerResolutionScale = ambientOcclusionActive &&
+    visualSettings.ambientOcclusionMode === 'n8ao'
+    ? 1
+    : 0.5
 
   return (
     <>
@@ -18405,6 +18672,11 @@ function Scene({
                   ? altarCutscene.altarId
                   : null
               }
+              offeringStartedAt={
+                altarCutscene?.levelId === renderedLayout.maze.id
+                  ? altarCutscene.startedAt
+                  : null
+              }
               onLightingResourcesChange={handleLevelLightingResourcesChange}
               openGateIdsOverride={isActive ? activeOpenGateIds : closedGateIds}
               probeDebugMode={visualSettings.probeDebugMode}
@@ -18433,7 +18705,7 @@ function Scene({
         enableNormalPass={ambientOcclusionActive && visualSettings.ambientOcclusionMode === 'ssao'}
         multisampling={0}
         ref={composerRef}
-        resolutionScale={0.5}
+        resolutionScale={composerResolutionScale}
       >
         {visualSettings.ssr.enabled ? (
           <SSRPassPrimitive settings={visualSettings.ssr} />
@@ -18441,6 +18713,10 @@ function Scene({
         {ambientOcclusionActive && visualSettings.ambientOcclusionMode === 'n8ao' ? (
           <TunedN8AO
             aoRadius={visualSettings.ambientOcclusionRadius}
+            aoSamples={visualSettings.n8aoSamples}
+            denoiseIterations={visualSettings.n8aoDenoiseIterations}
+            denoiseRadius={visualSettings.n8aoDenoiseRadius}
+            denoiseSamples={visualSettings.n8aoDenoiseSamples}
             intensity={visualSettings.ambientOcclusionIntensity * 3}
           />
         ) : null}
@@ -18514,6 +18790,8 @@ function Scene({
       </EffectComposer>
         ) : null}
           <FlightRig
+            altarCutsceneTarget={altarCutsceneTarget}
+            cameraTiltDegrees={visualSettings.cameraTiltDegrees}
             inputEnabled={startupSceneReady && !cutsceneActive}
             isLevelLightingReady={isLevelLightingReadyForTransition}
             layout={layout}
@@ -18868,7 +19146,7 @@ function VisualControls({
           </label>
 
           <label className="visual-control-row">
-        <output>{visualSettings.cameraFov.toFixed(0)}°</output>
+        <output>{visualSettings.cameraFov.toFixed(0)} deg</output>
         <ResettableLabel onReset={() => onResetScalarSetting('cameraFov')}>
           Camera FOV
         </ResettableLabel>
@@ -18882,6 +19160,24 @@ function VisualControls({
           step={1}
           type="range"
           value={visualSettings.cameraFov}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.cameraTiltDegrees.toFixed(1)} deg</output>
+        <ResettableLabel onReset={() => onResetScalarSetting('cameraTiltDegrees')}>
+          Camera Tilt
+        </ResettableLabel>
+        <input
+          aria-label="Camera Tilt"
+          max={20}
+          min={-20}
+          onChange={(event) => {
+            onScalarSettingChange('cameraTiltDegrees', Number(event.target.value))
+          }}
+          step={0.5}
+          type="range"
+          value={visualSettings.cameraTiltDegrees}
         />
           </label>
 
@@ -19189,6 +19485,82 @@ function VisualControls({
           step={0.05}
           type="range"
           value={visualSettings.ambientOcclusionRadius}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.n8aoSamples.toFixed(0)}</output>
+        <ResettableLabel onReset={() => onResetScalarSetting('n8aoSamples')}>
+          N8AO Samples
+        </ResettableLabel>
+        <input
+          aria-label="N8AO Samples"
+          disabled={visualSettings.ambientOcclusionMode !== 'n8ao'}
+          max={16}
+          min={1}
+          onChange={(event) => {
+            onScalarSettingChange('n8aoSamples', Number(event.target.value))
+          }}
+          step={1}
+          type="range"
+          value={visualSettings.n8aoSamples}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.n8aoDenoiseSamples.toFixed(0)}</output>
+        <ResettableLabel onReset={() => onResetScalarSetting('n8aoDenoiseSamples')}>
+          N8AO Denoise Samples
+        </ResettableLabel>
+        <input
+          aria-label="N8AO Denoise Samples"
+          disabled={visualSettings.ambientOcclusionMode !== 'n8ao'}
+          max={8}
+          min={1}
+          onChange={(event) => {
+            onScalarSettingChange('n8aoDenoiseSamples', Number(event.target.value))
+          }}
+          step={1}
+          type="range"
+          value={visualSettings.n8aoDenoiseSamples}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.n8aoDenoiseRadius.toFixed(1)}</output>
+        <ResettableLabel onReset={() => onResetScalarSetting('n8aoDenoiseRadius')}>
+          N8AO Denoise Radius
+        </ResettableLabel>
+        <input
+          aria-label="N8AO Denoise Radius"
+          disabled={visualSettings.ambientOcclusionMode !== 'n8ao'}
+          max={16}
+          min={0}
+          onChange={(event) => {
+            onScalarSettingChange('n8aoDenoiseRadius', Number(event.target.value))
+          }}
+          step={0.5}
+          type="range"
+          value={visualSettings.n8aoDenoiseRadius}
+        />
+          </label>
+
+          <label className="visual-control-row">
+        <output>{visualSettings.n8aoDenoiseIterations.toFixed(0)}</output>
+        <ResettableLabel onReset={() => onResetScalarSetting('n8aoDenoiseIterations')}>
+          N8AO Denoise Iterations
+        </ResettableLabel>
+        <input
+          aria-label="N8AO Denoise Iterations"
+          disabled={visualSettings.ambientOcclusionMode !== 'n8ao'}
+          max={4}
+          min={0}
+          onChange={(event) => {
+            onScalarSettingChange('n8aoDenoiseIterations', Number(event.target.value))
+          }}
+          step={1}
+          type="range"
+          value={visualSettings.n8aoDenoiseIterations}
         />
           </label>
         </>
@@ -20707,6 +21079,136 @@ function directionFromCellToCell(
   return null
 }
 
+type LevelSeamExit = {
+  cell: MazeCell
+  side: CardinalDirection
+  targetLevelId: string
+}
+
+type TurnRulesMaze = MazeLayout['maze'] & {
+  cells?: MazeCell[]
+  playerOnlyOpenEdges?: Array<{ from: MazeCell; to: MazeCell }>
+}
+
+function sameCell(left: MazeCell, right: MazeCell) {
+  return left.x === right.x && left.y === right.y
+}
+
+function getRulesCells(maze: MazeLayout['maze']) {
+  if (Array.isArray(maze.cells) && maze.cells.length > 0) {
+    return maze.cells.map((cell) => ({ x: cell.x, y: cell.y }))
+  }
+
+  const cells: MazeCell[] = []
+
+  for (let y = 0; y < maze.height; y += 1) {
+    for (let x = 0; x < maze.width; x += 1) {
+      cells.push({ x, y })
+    }
+  }
+
+  return cells
+}
+
+function getTargetLevelExits(maze: MazeLayout['maze']): LevelSeamExit[] {
+  const explicitExits = (maze.levelExits ?? [])
+    .filter((exit): exit is LevelSeamExit => Boolean(exit.targetLevelId))
+    .map((exit) => ({
+      cell: { ...exit.cell },
+      side: exit.side,
+      targetLevelId: exit.targetLevelId
+    }))
+
+  if (explicitExits.length > 0 || !maze.opening) {
+    return explicitExits
+  }
+
+  const adjacentLevels = getAdjacentRuntimeLevelIds(maze.id)
+
+  if (adjacentLevels.length !== 1) {
+    return []
+  }
+
+  return [{
+    cell: { ...maze.opening.cell },
+    side: maze.opening.side,
+    targetLevelId: adjacentLevels[0]
+  }]
+}
+
+function isTargetLevelExitAllowed(maze: MazeLayout['maze'], state: TurnState) {
+  return maze.exitRequiresTrophy === false || state.player.hasTrophy
+}
+
+function createTurnRulesMaze(maze: MazeLayout['maze'], state: TurnState): TurnRulesMaze {
+  const targetExits = isTargetLevelExitAllowed(maze, state)
+    ? getTargetLevelExits(maze)
+    : []
+
+  if (targetExits.length === 0) {
+    return maze
+  }
+
+  const cells = getRulesCells(maze)
+  const cellKeys = new Set(cells.map(cellKey))
+  const playerOnlyOpenEdges: Array<{ from: MazeCell; to: MazeCell }> = [
+    ...(maze.playerOnlyOpenEdges ?? []).map((edge) => ({
+      from: { ...edge.from },
+      to: { ...edge.to }
+    }))
+  ]
+
+  for (const exit of targetExits) {
+    const to = getNeighbor(exit.cell, exit.side)
+
+    if (!cellKeys.has(cellKey(to))) {
+      cells.push(to)
+      cellKeys.add(cellKey(to))
+    }
+
+    playerOnlyOpenEdges.push({
+      from: { ...exit.cell },
+      to
+    })
+  }
+
+  return {
+    ...maze,
+    cells,
+    levelExits: targetExits,
+    playerOnlyOpenEdges
+  }
+}
+
+function getLevelTransitionForCompletedMove(
+  maze: MazeLayout['maze'],
+  state: TurnState,
+  from: MazeCell,
+  to: MazeCell
+) {
+  if (!isTargetLevelExitAllowed(maze, state)) {
+    return null
+  }
+
+  const transitionExit = getTargetLevelExits(maze).find((exit) => (
+    sameCell(exit.cell, from) &&
+    sameCell(getNeighbor(exit.cell, exit.side), to)
+  ))
+
+  if (!transitionExit) {
+    return null
+  }
+
+  return {
+    direction: transitionExit.side,
+    exit: {
+      ...transitionExit,
+      cell: { ...transitionExit.cell }
+    },
+    targetLevelId: transitionExit.targetLevelId
+  }
+}
+
 function AltarCutsceneOverlay({
   active
 }: {
@@ -20755,6 +21257,7 @@ export default function App() {
   const [altarCutscene, setAltarCutscene] = useState<{
     altarId: string
     levelId: string
+    startedAt: number
   } | null>(null)
   const composerEnabled = true
   const authoredLevels = useMemo(() => parseLevelSpec(levelsMarkdown), [])
@@ -20969,6 +21472,7 @@ export default function App() {
       loadedMazeLayoutsRef.current.set(request.targetLevelId, targetLayout)
       setGlobalTurnState((current) => transitionGlobalTurnState({
         sourceLevelId: request.sourceLevelId,
+        sourceLayout: loadedMazeLayoutsRef.current.get(request.sourceLevelId),
         sourcePreviousState: request.sourcePreviousState,
         sourceState: request.sourceState,
         state: current ?? createInitialGlobalTurnState(targetLayout, Array.from(loadedMazeLayoutsRef.current.values())),
@@ -21926,9 +22430,11 @@ export default function App() {
     }
 
     document.body.dataset.altarCutsceneActive = 'true'
+    document.body.dataset.altarCutsceneStartedAt = performance.now().toFixed(1)
     setAltarCutscene({
       altarId: altar.id,
-      levelId: mazeLayout.maze.id
+      levelId: mazeLayout.maze.id,
+      startedAt: Number(document.body.dataset.altarCutsceneStartedAt)
     })
   }, [
     activatedAltarIds,
@@ -21943,6 +22449,7 @@ export default function App() {
   useEffect(() => {
     if (!altarCutscene) {
       delete document.body.dataset.altarCutsceneActive
+      delete document.body.dataset.altarCutsceneStartedAt
       return undefined
     }
 
@@ -21983,6 +22490,7 @@ export default function App() {
     const restoreControlHandle = window.setTimeout(() => {
       setAltarCutscene(null)
       delete document.body.dataset.altarCutsceneActive
+      delete document.body.dataset.altarCutsceneStartedAt
     }, 4000)
 
     return () => {

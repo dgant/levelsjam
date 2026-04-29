@@ -91,7 +91,7 @@ test('runtime level graph keeps authored neighbors and spatial transforms explic
   assert.deepEqual(getAdjacentRuntimeLevelIds('entrance'), ['chamber-1'])
   assert.deepEqual(
     getAdjacentRuntimeLevelIds('chamber-1'),
-    ['entrance', 'maze-001', 'maze-002', 'maze-003', 'maze-005']
+    ['entrance', 'maze-001', 'maze-002', 'maze-003', 'maze-004']
   )
 
   assert.deepEqual(getRuntimeLevelWorldTransform('entrance'), { x: 0, z: 0, rotationY: 0 })
@@ -359,7 +359,7 @@ test('adjacent streamed levels expose cells visible from the destination ingress
     id: 'chamber-1',
     levelExits: [
       { cell: { x: 0, y: 3 }, side: 'west', targetLevelId: 'maze-001' },
-      { cell: { x: 4, y: 12 }, side: 'east', targetLevelId: 'maze-005' }
+      { cell: { x: 4, y: 12 }, side: 'east', targetLevelId: 'maze-004' }
     ],
     opening: { cell: { x: 2, y: 17 }, side: 'south' },
     playerStart: { cell: { x: 2, y: 17 }, direction: 'north' },

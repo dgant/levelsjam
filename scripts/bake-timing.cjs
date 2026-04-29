@@ -169,15 +169,24 @@ class BakeTimingRecorder {
       status
     })
 
+    const currentStepKind = step.stepKind ?? 'leaf'
     const total = this.report.stepTotals[step.name] ?? {
       count: 0,
       durationHuman: '0.000s',
-      durationMs: 0
+      durationMs: 0,
+      includesNestedWork: false,
+      stepKind: currentStepKind
     }
 
     total.count += 1
     total.durationMs += durationMs
     total.durationHuman = formatDurationMs(total.durationMs)
+    total.includesNestedWork =
+      total.includesNestedWork || currentStepKind === 'wrapper'
+    total.stepKind =
+      total.stepKind === currentStepKind
+        ? total.stepKind
+        : 'mixed'
     this.report.stepTotals[step.name] = total
 
     if (step.levelId) {

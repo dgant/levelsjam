@@ -1,0 +1,286 @@
+{
+  "asset": {
+    "generator": "glTF-Transform v4.3.0",
+    "version": "2.0",
+    "extras": {
+      "author": "The Hunt Museum (https://sketchfab.com/TheHuntMuseum)",
+      "license": "CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)",
+      "source": "https://sketchfab.com/3d-models/droop-cup-4th-century-bc-4a31bd53c44b4c619bc466b97f55e398",
+      "title": "Droop cup 4th century BC"
+    }
+  },
+  "accessors": [
+    {
+      "type": "VEC3",
+      "componentType": 5126,
+      "count": 2503,
+      "max": [
+        100.56868743896484,
+        62.856475830078125,
+        68.30620574951172
+      ],
+      "min": [
+        -94.71092987060547,
+        -54.96052932739258,
+        0.43751099705696106
+      ],
+      "bufferView": 0,
+      "byteOffset": 0
+    },
+    {
+      "type": "VEC3",
+      "componentType": 5126,
+      "count": 2503,
+      "bufferView": 0,
+      "byteOffset": 12
+    },
+    {
+      "type": "VEC2",
+      "componentType": 5126,
+      "count": 2503,
+      "bufferView": 0,
+      "byteOffset": 24
+    },
+    {
+      "type": "SCALAR",
+      "componentType": 5123,
+      "count": 6282,
+      "bufferView": 1,
+      "byteOffset": 0
+    },
+    {
+      "type": "SCALAR",
+      "componentType": 5123,
+      "count": 6399,
+      "bufferView": 1,
+      "byteOffset": 12564
+    },
+    {
+      "type": "SCALAR",
+      "componentType": 5123,
+      "count": 2538,
+      "bufferView": 1,
+      "byteOffset": 25364
+    },
+    {
+      "type": "VEC3",
+      "componentType": 5126,
+      "count": 2681,
+      "max": [
+        97.33556365966797,
+        62.255615234375,
+        67.9927978515625
+      ],
+      "min": [
+        -99.2159194946289,
+        -62.38232421875,
+        0.08491300046443939
+      ],
+      "bufferView": 2,
+      "byteOffset": 0
+    },
+    {
+      "type": "VEC3",
+      "componentType": 5126,
+      "count": 2681,
+      "bufferView": 2,
+      "byteOffset": 12
+    },
+    {
+      "type": "VEC2",
+      "componentType": 5126,
+      "count": 2681,
+      "bufferView": 2,
+      "byteOffset": 24
+    },
+    {
+      "type": "VEC3",
+      "componentType": 5126,
+      "count": 1427,
+      "max": [
+        100.74861145019531,
+        57.85595703125,
+        67.76447296142578
+      ],
+      "min": [
+        -98.76860809326172,
+        -61.570587158203125,
+        0.18619899451732635
+      ],
+      "bufferView": 3,
+      "byteOffset": 0
+    },
+    {
+      "type": "VEC3",
+      "componentType": 5126,
+      "count": 1427,
+      "bufferView": 3,
+      "byteOffset": 12
+    },
+    {
+      "type": "VEC2",
+      "componentType": 5126,
+      "count": 1427,
+      "bufferView": 3,
+      "byteOffset": 24
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteOffset": 0,
+      "byteLength": 80096,
+      "byteStride": 32,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 80096,
+      "byteLength": 30440,
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 110536,
+      "byteLength": 85792,
+      "byteStride": 32,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 196328,
+      "byteLength": 45664,
+      "byteStride": 32,
+      "target": 34962
+    }
+  ],
+  "samplers": [
+    {
+      "magFilter": 9729,
+      "minFilter": 9987,
+      "wrapS": 10497,
+      "wrapT": 10497
+    }
+  ],
+  "textures": [
+    {
+      "source": 0,
+      "sampler": 0
+    }
+  ],
+  "images": [
+    {
+      "mimeType": "image/jpeg",
+      "uri": "textures/material_0_baseColor.jpeg"
+    }
+  ],
+  "buffers": [
+    {
+      "uri": "scene.bin",
+      "byteLength": 241992
+    }
+  ],
+  "materials": [
+    {
+      "name": "material_0",
+      "doubleSided": true,
+      "pbrMetallicRoughness": {
+        "roughnessFactor": 0.2700930136168035,
+        "metallicFactor": 0.17523862929867975,
+        "baseColorTexture": {
+          "index": 0
+        }
+      }
+    }
+  ],
+  "meshes": [
+    {
+      "name": "Object_0",
+      "primitives": [
+        {
+          "attributes": {
+            "NORMAL": 1,
+            "POSITION": 0,
+            "TEXCOORD_0": 2
+          },
+          "mode": 4,
+          "material": 0,
+          "indices": 3
+        }
+      ]
+    },
+    {
+      "name": "Object_1",
+      "primitives": [
+        {
+          "attributes": {
+            "NORMAL": 7,
+            "POSITION": 6,
+            "TEXCOORD_0": 8
+          },
+          "mode": 4,
+          "material": 0,
+          "indices": 4
+        }
+      ]
+    },
+    {
+      "name": "Object_2",
+      "primitives": [
+        {
+          "attributes": {
+            "NORMAL": 10,
+            "POSITION": 9,
+            "TEXCOORD_0": 11
+          },
+          "mode": 4,
+          "material": 0,
+          "indices": 5
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "name": "Sketchfab_model",
+      "rotation": [
+        -0.7071067811865475,
+        0,
+        0,
+        0.7071067811865476
+      ],
+      "children": [
+        1
+      ]
+    },
+    {
+      "name": "HCM_235_Droop_cup.obj.cleaner.materialmerger.gles",
+      "children": [
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "name": "Object_2",
+      "mesh": 0
+    },
+    {
+      "name": "Object_3",
+      "mesh": 1
+    },
+    {
+      "name": "Object_4",
+      "mesh": 2
+    }
+  ],
+  "scenes": [
+    {
+      "name": "Sketchfab_Scene",
+      "nodes": [
+        0
+      ]
+    }
+  ],
+  "scene": 0
+}

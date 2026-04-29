@@ -6,6 +6,8 @@ import {
   canSeeCell,
   chooseSpiderDirection,
   createInitialTurnState,
+  createMonsterMoveEdgeSet,
+  createPlayerMoveEdgeSet,
   getOpenDoorIds,
   getOpenGateIds,
   resetTurnStateToCheckpoint
@@ -291,6 +293,26 @@ test('minotaurs stay awake and record a failed move when a gate blocks line of s
   assert.equal(result.failedMoveDirection, 'west')
 })
 
+test('altar cells are impassable to characters', () => {
+  const maze = testMaze({
+    altars: [
+      { cell: { x: 1, y: 1 }, id: 'altar-0' }
+    ],
+    gates: [],
+    monsters: [],
+    openEdges: [
+      { from: { x: 0, y: 1 }, to: { x: 1, y: 1 } }
+    ],
+    sword: null,
+    trophy: null
+  })
+  const state = createInitialTurnState(maze)
+  const outcome = applyTurnAction(maze, state, 'move-forward')
+
+  assert.equal(outcome.blocked, true)
+  assert.deepEqual(outcome.state.player.cell, { x: 0, y: 1 })
+})
+
 test('walls block line of sight for monster wakeups', () => {
   const maze = testMaze({
     openEdges: [
@@ -423,8 +445,9 @@ test('player can escape only while holding the trophy', () => {
   assert.equal(escaped.state.escaped, true)
 })
 
-test('authored level exits transition without entering escaped state', () => {
+test('target level exits are ordinary movement through explicit player-only seam edges', () => {
   const maze = testMaze({
+    cells: [{ x: 0, y: 0 }],
     exitRequiresTrophy: false,
     gates: [],
     levelExits: [
@@ -447,12 +470,36 @@ test('authored level exits transition without entering escaped state', () => {
     height: 1
   })
   const initial = createInitialTurnState(maze)
-  const result = applyTurnAction(maze, initial, 'move-forward')
+  const blocked = applyTurnAction(maze, initial, 'move-forward')
+
+  assert.equal(blocked.blocked, true)
+  assert.equal(blocked.levelTransition, null)
+  assert.deepEqual(blocked.state.player.cell, { x: 0, y: 0 })
+
+  const seamMaze = {
+    ...maze,
+    cells: [
+      { x: 0, y: 0 },
+      { x: -1, y: 0 }
+    ],
+    playerOnlyOpenEdges: [
+      { from: { x: 0, y: 0 }, to: { x: -1, y: 0 } }
+    ]
+  }
+  const result = applyTurnAction(seamMaze, initial, 'move-forward')
 
   assert.equal(result.escaped, false)
   assert.equal(result.state.escaped, false)
-  assert.equal(result.levelTransition.targetLevelId, 'neighbor-level')
+  assert.equal(result.levelTransition, null)
   assert.deepEqual(result.state.player.cell, { x: -1, y: 0 })
+  assert.equal(
+    createPlayerMoveEdgeSet(seamMaze, initial).has('-1,0|0,0'),
+    true
+  )
+  assert.equal(
+    createMonsterMoveEdgeSet(seamMaze).has('-1,0|0,0'),
+    false
+  )
 })
 
 test('reset restores monsters and items to the initial maze state', () => {

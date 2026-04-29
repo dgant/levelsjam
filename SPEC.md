@@ -21,6 +21,9 @@
 - Player movement through an authored level exit transitions seamlessly into the connected level without fading, showing a loading transition, or exposing the boundary between levels.
 - Runtime gameplay state is one continuous world state, not one independent state per level.
 - Runtime gameplay state is represented by one global rules state with a canonical player, inventory, checkpoint, turn counter, and per-level entity/pickup slices used only as authored-world contents.
+- Runtime gameplay rules operate on one canonical world grid of cells and edges between those cells.
+- Runtime gameplay rules do not give level exits special movement behavior; connected levels expose ordinary adjacent world-grid cells and ordinary open or blocked world-grid edges.
+- Runtime level identity is available to gameplay rules only for ownership, reset, authored solution metadata, and streaming/debug grouping.
 - Runtime levels provide authored data, streaming/resource grouping, solution metadata, debug teleport targets, and future save/load anchors; they do not own separate active player inventory or camera-held item state during ordinary walking.
 - The rules engine resolves movement, pickups, monsters, gates, death, and inventory against the continuous world-space cell contents assembled from all loaded level data.
 - The player has one canonical world-space cell, direction, inventory state, checkpoint, and active animation state across ordinary level boundaries.
@@ -43,7 +46,7 @@
 - Only the active gameplay level may render camera-attached held pickup models; adjacent rendered levels may render their ground pickups but must not attach their saved inventory state to the active camera.
 - Camera-attached held pickup models are positioned relative to the camera in continuous world space and must not inherit a rendered level group's transform as an extra offset or rotation.
 - Walking across a connected level boundary updates only the active rules context and streamed-neighborhood bookkeeping; it does not teleport the player, rotate the player, remount the scene, reset the target level, or show pickup items that were not actually picked up.
-- Walking across a connected level boundary maps the player into the destination-owned ingress cell in the destination level while leaving all scene geometry in its authored world-space position.
+- Walking across a connected level boundary advances the player to the next canonical world cell and may update debug/resource-priority focus; it does not remap the player to a separately chosen target ingress cell.
 - The runtime renders the current level and the levels directly adjacent to it so ordinary walking between connected levels does not reveal level streaming.
 - The initial startup path may defer non-current adjacent level geometry until after the current level is visible, while still loading and retaining adjacent level data early enough that ordinary walking does not expose the deferral.
 - The runtime level graph is a directed acyclic graph rooted at `Entrance`; renderer streaming may use the corresponding undirected neighborhood only as a loading and rendering optimization.
@@ -180,6 +183,8 @@
 - Each persisted maze ships runtime-loadable volumetric-lightmap probe assets derived from the offline bake rather than generating those assets in the browser from the live scene.
 - Runtime reflection-probe asset loading keeps a bounded resident working set prioritized around the player's current world position and updates that resident set as the player moves instead of using only the position where a level first mounted.
 - The current resident reflection-probe budget is large enough for every probe in a current `7x7` maze, so probe-debug visualization can show all active maze probes while still enforcing the texture-memory ceiling.
+- Every rendered cell that is visible according to the current precomputed-visibility state has its required reflection cubemap resident before that cell is considered fully lighting-ready.
+- Reflection-probe residency treats volumetric coefficient availability and reflection texture availability as separate requirements; loading a probe's volumetric coefficients does not count as loading that probe's reflection cubemap.
 - Runtime reflection-probe asset loading must not continue in the background beyond the resident budget if doing so would create avoidable GPU memory pressure or frame-time collapse.
 - Runtime probe residency must be exposed through debug state so automated tests can assert that the loaded probe count stays within the authored resident budget.
 - Volumetric-lightmap probe coefficients and per-cell maze connectivity are packed into runtime textures so materials and fog do not need one sampler per probe.
@@ -257,6 +262,7 @@
 - An opened gate lowers by `1.5m`, leaving part of the gate visibly protruding from the floor rather than disappearing completely below the floor.
 - Every gate state change published by the rules engine is animated by sliding between the underground open position and the above-ground closed position, including state changes that occur before and after player moves.
 - Gate animations run in parallel with player and monster movement animations rather than teleporting or disappearing between turns.
+- Door state changes use the same adjacent-cell rule and animation contract as gates: doors adjacent to the player's new cell open, and all other doors close, without teleporting or snapping.
 - The runtime uses offline-resized `512x512` gate textures instead of the oversized source textures.
 - Each maze entrance edge has a door that follows the same blocking and opening rules as gates.
 - Each door is rendered as two cuboid leaves using an ancient Minoan heavy wooden door PBR material with rusty bronze reinforcements and a bronze ring opener.
@@ -270,9 +276,11 @@
 - Each open door slides its two leaves `0.75m` apart along the doorway edge, leaving a `1.5m` opening.
 - Door open and close animations last `250ms` and participate in the same queued-animation speed scaling as player, monster, and gate animations.
 - Chamber 1 contains one altar near each maze entrance, positioned one cell north of the chamber cell in front of that entrance so the altar sits beside the player when they return from the maze without blocking the exit line.
-- Each altar is a non-colliding static prop consisting of a `1m` cube block centered on the cell floor using the wall texture texel density, with the `Droop cup 4th century BC` model scaled to `0.65m` wide and resting on top.
+- Each altar occupies an impassable cell for players and monsters.
+- Each altar is a static prop consisting of a `0.5m x 1m x 0.5m` block centered on the cell floor using the wall texture texel density, with the `Droop cup 4th century BC` model scaled to `0.65m` wide and resting on top.
 - Altar and cup materials participate in the same baked/probe lighting stack as other static maze props.
-- If the player enters a cell adjacent to an altar while holding a trophy, the runtime plays an uninterruptible trophy-placement cutscene: black letterbox bars slide in for `1s`, the player turns toward the altar for `1s`, the trophy is placed into the bowl for `1s`, the trophy is replaced by a double-size blue flame billboard using BRG-swizzled torch colors, then the letterbox bars slide out for `1s` before player control is restored.
+- The altar cup runtime model is simplified to approximately `5000` triangles while preserving visible surface continuity and normals.
+- If the player enters a cell adjacent to an altar while holding a trophy, the runtime plays an uninterruptible trophy-placement cutscene: black letterbox bars slide in for `1s`, the player turns toward the altar for `1s`, the held trophy moves smoothly from the player's hand into the bowl for `1s`, the trophy is consumed from player inventory, the trophy is replaced by a double-size blue flame billboard using BRG-swizzled torch colors at the base height of the bowl, then the letterbox bars slide out for `1s` before player control is restored.
 - Each cell may contain any number of items and at most one character.
 - Each maze contains one sword on a random unoccupied cell.
 - Each maze contains one trophy on the unoccupied cell with the greatest path distance from the entrance.
@@ -397,6 +405,8 @@
 - The scene uses `postprocessing` Bloom.
 - The scene uses `postprocessing` Depth of Field.
 - The scene uses `n8ao` instead of the previous SSAO effect.
+- The default N8AO path renders at full resolution rather than half resolution.
+- Volumetric-lightmap diffuse reconstruction is calibrated so constant captured radiance produces the irradiance expected by Three.js PBR indirect diffuse lighting.
 - The scene includes screen-space reflections driven by the official three.js `SSRPass` implementation adapted into the current postprocessing stack.
 - The scene includes a universal volumetric fog field that can appear throughout the playable world rather than only inside a fixed horizontal box.
 - The volumetric fog uses a configurable camera-relative fog distance, defaulting to `12m` and capped at `40m`, to limit raymarch distance instead of relying on a fixed world-space fog box.
@@ -429,6 +439,7 @@
 - The debug panel exposes an ambient-occlusion mode dropdown with working `Off`, `N8AO`, and `SSAO` modes.
 - The debug panel exposes one shared ambient-occlusion intensity slider for the selected AO mode.
 - The debug panel exposes an ambient-occlusion radius control and labels the radius in scene units or screen-space units as appropriate for the selected AO mode.
+- The debug panel exposes working N8AO quality controls for AO samples, denoise samples, denoise radius, and denoise iterations.
 - The debug panel ambient-occlusion mode defaults to `Off`.
 - The debug panel exposes Depth of Field `focusDistance`, `focalLength`, and `bokehScale`.
 - The debug panel labels Depth of Field `focusDistance` and `focalLength` with their units.
@@ -512,6 +523,7 @@
 - Vertical motion feels capped and responsive rather than indefinitely accelerating.
 - The player can move with first-person WASD controls.
 - The player can look around with mouse look controls.
+- The debug controls include a camera tilt slider that adjusts the default gameplay camera pitch toward the ground or sky without changing free-camera movement speed.
 - Pressing `Escape`, `Alt`, `Control`, `Meta`, or the Windows key releases mouse lock.
 - Pressing backquote opens and closes the debug controls panel during play.
 - Pressing backquote is reserved for the debug controls panel and does not restore mouse lock.
@@ -582,7 +594,7 @@
 - Enabling SSR does not brighten the visible HDRI skybox independently of the reflected surfaces.
 - Enabling SSR with an intensity of `0` behaves as a visual no-op.
 - Selecting `N8AO` or `SSAO` produces a visible ambient-occlusion change around contact areas.
-- Selecting `N8AO` uses at least `4` AO samples and `2` denoise samples by default, matching the pre-ablation quality level that avoided visible screen-space mottling.
+- Selecting `N8AO` uses full-resolution rendering with at least `4` AO samples and `2` denoise samples by default, matching the pre-ablation quality level that avoided visible screen-space mottling.
 - Selecting `SSAO` produces a visible ambient-occlusion change around contact areas rather than appearing inert.
 - Adjusting `SSAO` intensity or radius produces a visible corresponding change instead of leaving the image effectively unchanged.
 - `SSAO` remains visually stable enough that noisy grain does not dominate the rendered image at the default debug ranges.

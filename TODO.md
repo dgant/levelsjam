@@ -417,3 +417,86 @@ Regenerate the mazes, and give each one randomly placed minotaur, wolf, spider (
 [x] When baking lights, record how long the bake took, and broken down by how long each level took, and how long each step of each level took, and how much each step took in total across levels. Also record the quality parameters that were used (like number of samples, lightmap sizes, etc.) and how much work was done (which levels, how many cubemaps/atlases each, etc.)
 [x] After player death, fade back in over 3s (it's currently less than that)
 [x] After the Werewolf moves, determine what direction it would move if it were to take another turn, and if it's different than its current direction, turn it to face that way (the usual 250ms)
+[] Regarding this conversation about maze-002 being strange: "This is possible because the current implementation is still not a true continuous-world transition. Several systems disagree about where the maze-002 doorway is.
+
+  The concrete mismatch I found:
+
+  - Chamber 1’s maze-002 exit is cell {x:0,y:12}, west side, world center about (-4, -14), boundary about (-5, -14).
+  - maze-002’s generated opening is {x:0,y:5}, west side.
+  - With the current hardcoded transform in /E:/p/levelsjam/src/lib/levels.js:36, that opening lands at world center (-6, -16), boundary (-5, -16).
+
+  So the maze entrance is one full cell south of Chamber 1’s exit. From Chamber 1, you are looking through one place; after transition, the runtime moves you to a different place.
+
+  Why the individual symptoms happen:
+
+  - Missing Chamber-side entrance door: doors are generated from layout.maze.opening only in /E:/p/levelsjam/src/App.tsx:11971, not from every levelExit. Chamber 1’s maze exits are levelExits, so they do not get proper doors.
+  - Sudden appearance change after stepping in: /E:/p/levelsjam/src/lib/globalTurnRules.js:256 explicitly replaces the player cell with the target level’s ingress cell. That is a teleport between two disagreeing coordinate systems.
+  - Blank wall from Chamber 1, torch after entering: same misalignment. The view before transition samples Chamber 1 plus adjacent maze-002 at the wrong seam; after transition the active local cell becomes maze-002’s opening cell, which has a torch on it.
+  - Solid black wall you can walk through: movement treats levelExits specially before normal collision/open-edge checks in /E:/p/levelsjam/src/lib/turnRules.js:753. So rules can permit a transition even if the rendered geometry at that world position looks blocked.
+  - Half-door/gate weirdness: maze-002 has a gate immediately adjacent to its opening, 0,5|0,6. Because the maze is offset, that gate/door-like visual can appear near the wrong seam while the actual transition is controlled by levelExit state, not by that visual object.
+
+  The root cause is architectural: visual layout, rule transition, door rendering, and world placement are not using a single canonical world-space doorway definition. The immediate smoking gun for maze-002 is the hardcoded transform mismatch; the broader bug is that level transitions still teleport into target-local
+  coordinates instead of simply walking through continuous world geometry.
+
+
+› Does the rules engine know anything about levels?!
+
+
+• I’ll answer from the current code, because the naming is misleading: there is both the per-maze turn rules engine and a global wrapper around it. The important distinction is whether movement rules are level-agnostic or whether active state is partitioned by level.
+
+• Yes. More than it should.
+
+  There are two layers:
+
+  - /E:/p/levelsjam/src/lib/turnRules.js: the local per-maze rules engine. It mostly knows about one maze at a time, but it also knows about levelExits and returns outcome.levelTransition when the player moves through one.
+  - /E:/p/levelsjam/src/lib/globalTurnRules.js: a level-aware wrapper. This absolutely knows about levels. It stores activeLevelId, player.levelId, checkpoint.levelId, and levelStates: Record<levelId, TurnState>. On transition, it finds a target ingress cell and rewrites the player into that target level.
+
+  That second layer is the architectural problem. It means rules state is still partitioned per level, and crossing a boundary is treated as “switch active level and remap player into target local coordinates” instead of “player moved one cell in a single global grid.”
+
+  So the honest answer is: yes, the rules engine stack still knows about levels, and that is directly implicated in the bad transition behavior."
+
+Fix all of this once and for all. The rules engine must not exist per-level or per-maze. There must be a single rules engine that operates on a single world grid of cells and the edges between them. The only thing the rules engine knows about levels whatsoever is how to reset them: so it knows which monsters, pickups, cells, and edges belong to which level, and can reset the state of each (when the player walks out of a level and its door closes, or when the player dies, or (in the future) requests a level reset from the menu. Player movement must never result in being teleported besides when the player dies. The required transitional space between levels is not something to "generate". It is a required component at the time a level is designed. Movement rules must not give any special treatment to level exits. It is crucially important to the success of this game that you implement all this in the principled approach you know to be correct.
+
+[x] Lightmap logs: "In this report, the raw steps reveal a problem: maze-002 had five separate lightmap steps, each ~176s, meaning it was rebaked repeatedly inside one run. That is why the total is much worse than it should be." Fix that.
+[x] Fix all the lightmapping issues you observed: "Yes. A few things look weird or at least worth treating as suspects.
+
+  The biggest one is maze-002 rebaked five times in one run. The log shows rewrite-existing, then several generate-replacement attempts, then replace-invalid-maze-in-place. Its torch count changes across attempts: 8, 10, 10, 12, then 11. That means the generation/validation loop was baking rejected candidates, which
+  is extremely wasteful.
+
+  The stepTotals are misleading if read as additive. ensure-maze-files contains the lightmap work, and each lightmap contains a nested lightmap-gpu-job, so those totals double-count nested work. The JSON is useful, but the report should label wrapper steps more clearly.
+
+  maze-004 is absent from the baked artifact list. Current artifacts are entrance, chamber-1, maze-001, maze-002, maze-003, maze-005, maze-006. If maze-004 is supposed to exist, that is a real gap.
+
+  Reflection export says firstPassProbeCount: 0 and bootstrapExisting: 1 for every level. If we expect a true two-pass reflection bake for metallics, this suggests the log is either not recording it correctly or the first pass is being skipped/reused.
+
+  Volumetric probe counts are inconsistent: maze-002/003/005 load 139 volumetric probes, while maze-001/006 load 49. That may be due to adjacency/context, but given our requirement that all maps receive the same treatment, I would not ignore it." Address all of these, then revisit the logs after lightmapping to make sure nothing is untoward.
+
+[x] Re: Reflections: "They exist on disk, but the runtime loader is skipping most of their reflection textures.
+
+  For Entrance, the baked assets are present: /E:/p/levelsjam/public/maze-data/entrance/probe-assets.json lists 9 probes, and there are 9 processed reflection probe PNGs under /E:/p/levelsjam/public/maze-data/entrance/reflection-probes.
+
+  The bug is in the runtime residency logic in /E:/p/levelsjam/src/App.tsx:6838.
+
+  At the Entrance start position, getReflectionProbeBlendForPosition() returns only two unique reflection probe indices: 7 and 8. That is because the player starts on the south edge of the 3x3 room, so the bilinear blend collapses vertically and only produces the two bottom-row probes.
+
+  Then the loader does this:
+
+  - Loads reflection textures only for startupProbeIndices, which are 7 and 8.
+  - Loads volumetric coefficients for all nearby startupVolumetricProbeIndices, which in Entrance is basically all 9 probes.
+  - Excludes all startupVolumetricProbeIndices from the background reflection-texture load queue at /E:/p/levelsjam/src/App.tsx:7072.
+
+  So probes 0-6 become “volumetric coefficients loaded, reflection texture not loaded,” and because the reflection debug spheres only render probes that have a reflection texture, they vanish from the reflection debug view.
+
+  That explains exactly what you're seeing: the probes are baked, but most are resident only as VLM coefficients, not as reflection cubemaps. The loader accidentally treats "loaded for volumetric startup readiness" as if it also handled reflection texture residency." Fix this. Every cell that should be rendered according to precomputed visibility rules must have loaded cubemaps as well.
+[x] Doors look horizontally reversed on one side. On the the door from Entrance to Chamber 1, the side facing Entrance is correctly UV-mapped, but the side facing Chamber 1 is reversed
+[x] The volumetric lightmaps are extremely dark. Objects lit by the volumetric lightmaps appear black or near-black.
+[x] The F1 movement behavior changed out of nowhere. Suddenly it's very slow sometimes. Whatever you changed with it, revert it
+[x] I left a maze carrying a trophy. The letterbox appears and disappears correctly, but the camera does not turn towards the altar. The trophy should move smoothly into the bowl, but instead a second, tiny copy suddenly appears in the bowl. The player is still holding a trophy after this animation, but the player should not be holding a trophy anymore.
+[x] The altar flame should appear sitting at the height that is the base of the bowl, not floating way above the bowl
+[x] The cell with the altar should be impassable to all characters.
+[x] Cut the altar cube width and length in half.
+[x] Gates are STILL suddenly teleporting when opening/closing instead of animating. Fix this once and for all.
+[x] Simplify the altar bowl model to be just 5k tris. As usual, preserve surface continuity and normals.
+[x] Restore full-res N8AO
+[x] Add a debug slider for camera tilt (ie. towards the ground or sky)
+[x] Expose N8AO settings in the debug menu

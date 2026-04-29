@@ -72,6 +72,7 @@ test('global turn state owns canonical player state across level transition', ()
 
   const transitioned = transitionGlobalTurnState({
     sourceLevelId: sourceLayout.maze.id,
+    sourceLayout,
     sourcePreviousState,
     sourceState,
     state: initial,
@@ -84,11 +85,11 @@ test('global turn state owns canonical player state across level transition', ()
   )
 
   assert.equal(transitioned.activeLevelId, 'target-level')
-  assert.deepEqual(transitioned.player.cell, { x: 0, y: 1 })
+  assert.deepEqual(transitioned.player.cell, { x: 1, y: -1 })
   assert.equal(transitioned.player.hasSword, true)
   assert.equal(transitioned.player.hasTrophy, false)
   assert.equal(transitioned.turn, 3)
-  assert.deepEqual(activeTargetState.player.cell, { x: 0, y: 1 })
+  assert.deepEqual(activeTargetState.player.cell, { x: 1, y: -1 })
   assert.equal(activeTargetState.player.hasSword, true)
   assert.equal(activeTargetState.player.hasTrophy, false)
   assert.equal(activeTargetState.escaped, false)

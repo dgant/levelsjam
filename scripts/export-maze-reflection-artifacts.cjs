@@ -250,6 +250,9 @@ async function captureMazeReflectionArtifacts(
     hasCompleteRuntimeProbeManifest(maze, probeCount)
   )
   const shouldRunFirstPass = useTwoPassReflection && !canBootstrapExisting
+  const firstPassSource = shouldRunFirstPass
+    ? 'generated'
+    : (canBootstrapExisting ? 'existing-runtime-probes' : 'disabled')
   const levelStepId = recorder.beginStep('reflection-level', {
     levelId: maze.id,
     quality: {
@@ -262,10 +265,12 @@ async function captureMazeReflectionArtifacts(
     },
     workCounts: {
       expectedCaptureCount: probeCount * (shouldRunFirstPass ? 2 : 1),
+      firstPassSource,
       levelIndex,
       levelTotal,
       probeCount
-    }
+    },
+    stepKind: 'wrapper'
   })
 
   await page.goto(`http://127.0.0.1:${servePort}/?maze=${maze.id}`, {
@@ -293,8 +298,10 @@ async function captureMazeReflectionArtifacts(
 
     recorder.endStep(bootstrapStepId, 'completed', {
       workCounts: {
-        loadedProbeCount: runtimeProbeState.loadedProbeCount ?? 0,
-        loadedVolumetricProbeCount: runtimeProbeState.loadedVolumetricProbeCount ?? 0,
+        levelReflectionProbeCount: probeCount,
+        levelVolumetricProbeCount: probeCount,
+        runtimeLoadedProbeCount: runtimeProbeState.loadedProbeCount ?? 0,
+        runtimeLoadedVolumetricProbeCount: runtimeProbeState.loadedVolumetricProbeCount ?? 0,
         probeCount
       }
     })
@@ -542,7 +549,9 @@ async function captureMazeReflectionArtifacts(
       bootstrapExisting: canBootstrapExisting ? 1 : 0,
       faceSize,
       finalProbeCount: summary.probes.length,
-      firstPassProbeCount: shouldRunFirstPass ? probeCount : 0,
+      firstPassProbeCount: useTwoPassReflection ? probeCount : 0,
+      firstPassSource,
+      generatedFirstPassProbeCount: shouldRunFirstPass ? probeCount : 0,
       probeCount,
       totalCubemapFaces: summary.probes.length * 6
     }
@@ -579,7 +588,8 @@ async function main() {
       probeReadyTimeoutMs,
       sceneReadyTimeoutMs,
       useTwoPassReflection
-    }
+    },
+    stepKind: 'wrapper'
   })
   let serverProcess = null
   let browser = null

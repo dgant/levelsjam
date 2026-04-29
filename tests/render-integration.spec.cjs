@@ -224,12 +224,77 @@ async function setNumberInput(page, label, value) {
   }, value)
 }
 
+async function waitForTurnAnimationIdle(page) {
+  await page.waitForFunction(
+    () => {
+      const state = window.__levelsjamDebug?.getReplayControllerState?.()
+      return Boolean(state) && !state.playerAnimationAction
+    },
+    null,
+    { timeout: 10_000 }
+  )
+}
+
+async function dispatchTurnAction(page, action) {
+  await page.evaluate((nextAction) => {
+    window.dispatchEvent(new CustomEvent('levelsjam:turn-action', {
+      detail: nextAction
+    }))
+  }, action)
+  await waitForTurnAnimationIdle(page)
+}
+
 async function setCheckbox(page, label, enabled) {
   await page.getByRole('checkbox', { exact: true, name: label }).evaluate((element, nextEnabled) => {
     if (element.checked !== Boolean(nextEnabled)) {
       element.click()
     }
   }, enabled)
+}
+
+async function focusVisibleLensFlareSource(page) {
+  const candidateViews = await page.evaluate(() => {
+    const candidates = []
+
+    for (let index = 0; index < 80; index += 1) {
+      const state = window.__levelsjamDebug?.getDebugMeshState?.('torch-billboard', index)
+
+      if (!state?.visible || !Array.isArray(state.worldPosition)) {
+        continue
+      }
+
+      const [x, y, z] = state.worldPosition
+      const target = [x, y, z]
+      const distance = 1.75
+
+      candidates.push(
+        { position: [x, y + 0.35, z + distance], target },
+        { position: [x, y + 0.35, z - distance], target },
+        { position: [x + distance, y + 0.35, z], target },
+        { position: [x - distance, y + 0.35, z], target }
+      )
+    }
+
+    return candidates
+  })
+
+  for (const view of candidateViews.slice(0, 80)) {
+    await page.evaluate(
+      ({ position, target }) => window.__levelsjamDebug.setView(position, target),
+      view
+    )
+    await page.waitForTimeout(100)
+
+    const visibleLensCount = await page.evaluate(
+      () => window.__levelsjamDebug.getLensFlareState?.()?.visibleLensCount ?? 0
+    )
+
+    if (visibleLensCount > 0) {
+      return visibleLensCount
+    }
+  }
+
+  throw new Error('Unable to find a visible lens flare source in the rendered scene')
 }
 
 test('loads the maze scene and exposes working debug/render controls', async ({ page }) => {
@@ -801,17 +866,12 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
 
   await timedStep(timingProfile, 'lens-flares', async () => {
     await page.getByRole('button', { name: 'Flares' }).click()
-    await page.evaluate(() => {
-      window.__levelsjamDebug.setView(
-        [0, 1.55, 3.95],
-        [0, 1.225, 2.75]
-      )
-    })
-    await page.waitForTimeout(200)
     await setCheckbox(page, 'Lens Flares', true)
-    await setNumberInput(page, 'Lens Flare Strength', 0)
+    await setNumberInput(page, 'Lens Flare Strength', 1)
     await setSlider(page, 'Flare Size', 0.05)
     await setSlider(page, 'Glare Size', 0.1)
+    expect(await focusVisibleLensFlareSource(page)).toBeGreaterThan(0)
+    await setNumberInput(page, 'Lens Flare Strength', 0)
     await page.keyboard.press('Backquote')
     await page.waitForTimeout(250)
     const lensFlareOffFrame = await screenshotCanvasRegion(
@@ -877,4 +937,72 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   ).toBe(false)
 
   timingProfile.totalRunMs = Date.now() - runStartedAt
+})
+
+test('walking from Entrance into Chamber 1 keeps surface lighting resident', async ({ page }) => {
+  const consoleErrors = []
+  const pageErrors = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') {
+      consoleErrors.push(message.text())
+    }
+  })
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+
+  const response = await page.goto('/', { waitUntil: 'commit' })
+
+  expect(response?.ok()).toBe(true)
+  await page.waitForSelector('canvas', { state: 'visible', timeout: 15_000 })
+  await page.waitForFunction(
+    () => Boolean(window.__levelsjamDebug?.getActiveLightingResourceState?.()?.surfaceLightmapReady),
+    null,
+    { timeout: 20_000 }
+  )
+  await page.evaluate(() => {
+    window.__levelsjamDebug?.setAnimationSpeedMultiplier?.(12)
+    window.__levelsjamSetVisualSettings?.({
+      ambientOcclusionMode: 'off',
+      bloom: { enabled: false },
+      depthOfField: { enabled: false },
+      lensFlare: { enabled: false },
+      ssr: { enabled: false },
+      volumetricLighting: { enabled: false }
+    })
+  })
+  await page.waitForTimeout(250)
+
+  const canvas = page.locator('canvas').first()
+  const entranceBrightness = measureBrightness(
+    await screenshotCanvasRegion(page, canvas, 180, 120, 0.5, 0.72)
+  )
+
+  for (let index = 0; index < 4; index += 1) {
+    await dispatchTurnAction(page, 'move-forward')
+  }
+
+  await page.waitForFunction(
+    () => window.__levelsjamDebug?.getActiveLightingResourceState?.()?.activeMazeId === 'chamber-1',
+    null,
+    { timeout: 15_000 }
+  )
+  await page.waitForFunction(
+    () => Boolean(window.__levelsjamDebug?.getActiveLightingResourceState?.()?.surfaceLightmapReady),
+    null,
+    { timeout: 15_000 }
+  )
+  await page.waitForTimeout(500)
+
+  const chamberBrightness = measureBrightness(
+    await screenshotCanvasRegion(page, canvas, 180, 120, 0.5, 0.72)
+  )
+  const lightingState = await page.evaluate(
+    () => window.__levelsjamDebug?.getActiveLightingResourceState?.() ?? null
+  )
+
+  expect(lightingState?.activeMazeId).toBe('chamber-1')
+  expect(chamberBrightness.average).toBeGreaterThan(8)
+  expect(chamberBrightness.max).toBeGreaterThan(20)
+  expect(chamberBrightness.average).toBeGreaterThan(entranceBrightness.average * 0.2)
+  expect(consoleErrors).toEqual([])
+  expect(pageErrors).toEqual([])
 })

@@ -49,6 +49,10 @@ function isInsideMaze(maze, cell) {
   )
 }
 
+function isBlockedCell(maze, cell) {
+  return (maze.altars ?? []).some((altar) => cellKey(altar.cell) === cellKey(cell))
+}
+
 function createBaseOpenEdgeSet(maze) {
   return new Set(
     (maze.openEdges ?? []).map((edge) => normalizeEdge(edge.from, edge.to))
@@ -80,6 +84,7 @@ function canMove(maze, openEdges, cell, direction) {
 
   return (
     isInsideMaze(maze, neighbor) &&
+    !isBlockedCell(maze, neighbor) &&
     openEdges.has(normalizeEdge(cell, neighbor))
   )
 }
@@ -136,6 +141,10 @@ function getReservedCellKeys(maze) {
 
   if (maze.trophy?.cell) {
     reserved.add(cellKey(maze.trophy.cell))
+  }
+
+  for (const altar of maze.altars ?? []) {
+    reserved.add(cellKey(altar.cell))
   }
 
   return reserved
@@ -579,6 +588,10 @@ function createPlayerMoveEdgeSet(maze, state) {
     }
   }
 
+  for (const edge of maze.playerOnlyOpenEdges ?? []) {
+    openEdges.add(normalizeEdge(edge.from, edge.to))
+  }
+
   return openEdges
 }
 
@@ -752,23 +765,9 @@ export function applyTurnAction(maze, state, action) {
 
   const levelExit = getExitForMove(maze, next.player.cell, moveDirection)
 
-  if (levelExit) {
+  if (levelExit && !levelExit.targetLevelId) {
     if (maze.exitRequiresTrophy !== false && !next.player.hasTrophy) {
       outcome.blocked = true
-      return outcome
-    }
-
-    if (levelExit.targetLevelId) {
-      next.player.cell = getNeighbor(next.player.cell, moveDirection)
-      next.turn += 1
-      outcome.levelTransition = {
-        direction: moveDirection,
-        exit: {
-          ...levelExit,
-          cell: { ...levelExit.cell }
-        },
-        targetLevelId: levelExit.targetLevelId
-      }
       return outcome
     }
 
