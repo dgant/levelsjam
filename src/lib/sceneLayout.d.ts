@@ -82,6 +82,16 @@ export type MazeLayout = {
       }
       groundRect: { height: number; width: number; x: number; y: number }
       neutralRect: { height: number; width: number; x: number; y: number }
+      altarRects?: Record<
+        string,
+        {
+          nx?: { height: number; width: number; x: number; y: number }
+          nz?: { height: number; width: number; x: number; y: number }
+          px?: { height: number; width: number; x: number; y: number }
+          py?: { height: number; width: number; x: number; y: number }
+          pz?: { height: number; width: number; x: number; y: number }
+        }
+      >
       version: number
       wallRects: Record<
         string,
@@ -103,6 +113,7 @@ export type MazeLayout = {
       id?: string
       targetLevelId?: string
     }>
+    cells?: Array<{ x: number; y: number }>
     height: number
     id: string
     isAuthoredLevel?: boolean

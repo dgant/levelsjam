@@ -44,6 +44,7 @@ export {
 }
 
 type PersistedMaze = {
+  cells?: Array<{ x: number; y: number }>
   height: number
   id: string
   isAuthoredLevel?: boolean

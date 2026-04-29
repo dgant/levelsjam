@@ -85,6 +85,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  type PointerEvent as ReactPointerEvent,
   type RefObject,
   type ReactNode,
   useRef,
@@ -215,10 +216,18 @@ const METAL_TEXTURE_URLS = {
   orm: `${assetBase}textures/runtime/metal-13/metal_13_orm-1K.png`
 }
 const DOOR_TEXTURE_URLS = {
-  ao: `${assetBase}textures/runtime/metal-rust/metal_rust_orm-1K.png`,
-  color: `${assetBase}textures/runtime/metal-rust/metal_rust_basecolor-1K.png`,
-  normal: `${assetBase}textures/runtime/metal-rust/metal_rust_normal-1K.png`,
-  orm: `${assetBase}textures/runtime/metal-rust/metal_rust_orm-1K.png`
+  left: {
+    ao: `${assetBase}textures/runtime/minoan-door/minoan_door_left_orm.png`,
+    color: `${assetBase}textures/runtime/minoan-door/minoan_door_left_basecolor.png`,
+    normal: `${assetBase}textures/runtime/minoan-door/minoan_door_left_normal.png`,
+    orm: `${assetBase}textures/runtime/minoan-door/minoan_door_left_orm.png`
+  },
+  right: {
+    ao: `${assetBase}textures/runtime/minoan-door/minoan_door_right_orm.png`,
+    color: `${assetBase}textures/runtime/minoan-door/minoan_door_right_basecolor.png`,
+    normal: `${assetBase}textures/runtime/minoan-door/minoan_door_right_normal.png`,
+    orm: `${assetBase}textures/runtime/minoan-door/minoan_door_right_orm.png`
+  }
 }
 const FRESCO_DECAL_URLS = [
   `${assetBase}textures/decals/minoan-labyrinth-toss.png`,
@@ -247,7 +256,7 @@ const PUDDLE_TEXTURE_REPEAT = 60
 const WALL_TEXTURE_REPEAT = 2
 const METAL_TEXTURE_REPEAT = 1
 const DOOR_HEIGHT = 1.8
-const DOOR_TEXTURE_REPEAT = WALL_TEXTURE_REPEAT * (DOOR_HEIGHT / WALL_HEIGHT)
+const DOOR_TEXTURE_REPEAT = 1
 const LOADING_FADE_DURATION_MS = 2000
 const FIRE_FLIPBOOK_GRID = 6
 const FIRE_FLIPBOOK_FRAME_COUNT = FIRE_FLIPBOOK_GRID * FIRE_FLIPBOOK_GRID
@@ -4481,6 +4490,21 @@ function getTransformedMazeCellWorldPosition(
   )
 }
 
+function transformLevelLocalPositionToWorld(
+  position: { x: number; y?: number; z: number },
+  transform: LevelWorldTransform,
+  target = new Vector3()
+) {
+  const cos = Math.cos(transform.rotationY)
+  const sin = Math.sin(transform.rotationY)
+
+  return target.set(
+    transform.x + (position.x * cos) + (position.z * sin),
+    position.y ?? GROUND_Y,
+    transform.z - (position.x * sin) + (position.z * cos)
+  )
+}
+
 function transformWorldPositionToLevelLocal(
   position: Vector3,
   transform: LevelWorldTransform,
@@ -7461,6 +7485,57 @@ function createWallGeometry(lightmap: MazeLightmap, wallId: string) {
       uv1[vertexIndex * 2] = atlasU
       uv1[(vertexIndex * 2) + 1] = atlasV
     }
+  }
+
+  geometry.setAttribute('uv1', new Float32BufferAttribute(uv1, 2))
+  return geometry
+}
+
+function getBoxFaceLightmapKey(normal: { x: number; y: number; z: number }) {
+  if (normal.y > 0.5) {
+    return 'py'
+  }
+  if (normal.x > 0.5) {
+    return 'px'
+  }
+  if (normal.x < -0.5) {
+    return 'nx'
+  }
+  if (normal.z > 0.5) {
+    return 'pz'
+  }
+  if (normal.z < -0.5) {
+    return 'nz'
+  }
+  return 'neutral'
+}
+
+function createAltarBlockGeometry(lightmap: MazeLightmap, altarId: string) {
+  const geometry = new BoxGeometry(1, 1, 1)
+  const uv = geometry.getAttribute('uv')
+  const normal = geometry.getAttribute('normal')
+  const uv1 = new Float32Array(uv.count * 2)
+  const rects = lightmap.altarRects?.[altarId] ?? {}
+
+  for (let vertexIndex = 0; vertexIndex < uv.count; vertexIndex += 1) {
+    const faceKey = getBoxFaceLightmapKey({
+      x: normal.getX(vertexIndex),
+      y: normal.getY(vertexIndex),
+      z: normal.getZ(vertexIndex)
+    })
+    const rect = faceKey === 'neutral'
+      ? lightmap.neutralRect
+      : rects[faceKey as keyof typeof rects] ?? lightmap.neutralRect
+    const [atlasU, atlasV] = mapLightmapRectUvToAtlas(
+      rect,
+      lightmap.atlasWidth,
+      lightmap.atlasHeight,
+      uv.getX(vertexIndex),
+      uv.getY(vertexIndex)
+    )
+
+    uv1[vertexIndex * 2] = atlasU
+    uv1[(vertexIndex * 2) + 1] = atlasV
   }
 
   geometry.setAttribute('uv1', new Float32BufferAttribute(uv1, 2))
@@ -11454,6 +11529,8 @@ function MazeWallMesh({
 
 function SceneGeometry({
   activatedAltarIds,
+  activePlayerWorldPosition,
+  activePlayerTurn,
   environmentTexture,
   environmentIntensity,
   iblContributionIntensity,
@@ -11461,6 +11538,7 @@ function SceneGeometry({
   layout,
   lightmapContributionIntensity,
   mountAllGeometry,
+  offeringAltarId,
   openGateIds,
   probeDebugMode,
   probeDepthAtlasTextures,
@@ -11476,6 +11554,8 @@ function SceneGeometry({
   visibilityState = DISABLED_PRECOMPUTED_VISIBILITY
 }: {
   activatedAltarIds: Set<string>
+  activePlayerWorldPosition: Vector3
+  activePlayerTurn: number
   environmentTexture: Texture | null
   environmentIntensity: number
   iblContributionIntensity: number
@@ -11483,6 +11563,7 @@ function SceneGeometry({
   layout: MazeLayout
   lightmapContributionIntensity: number
   mountAllGeometry: boolean
+  offeringAltarId: string | null
   openGateIds: Set<string>
   probeDebugMode: ProbeDebugMode
   probeDepthAtlasTextures: ProbeDepthAtlasTextures
@@ -11555,6 +11636,8 @@ function SceneGeometry({
             visibilityState={visibilityState}
           />
           <MazeDoors
+            activePlayerWorldPosition={activePlayerWorldPosition}
+            activePlayerTurn={activePlayerTurn}
             iblContributionIntensity={iblContributionIntensity}
             isActive={isActive}
             layout={layout}
@@ -11573,6 +11656,9 @@ function SceneGeometry({
             iblContributionIntensity={iblContributionIntensity}
             layout={layout}
             lightmapContributionIntensity={lightmapContributionIntensity}
+            lightmapTexture={surfaceLightmap.texture}
+            lightmapTextureEncoding={surfaceLightmap.encoding}
+            offeringAltarId={offeringAltarId}
             probeDepthAtlasTextures={probeDepthAtlasTextures}
             probeCoefficientTextures={probeCoefficientTextures}
             reflectionContributionIntensity={reflectionContributionIntensity}
@@ -12008,7 +12094,8 @@ function MazeDoorActor({
   const group = useRef<Group>(null)
   const leftLeaf = useRef<Mesh>(null)
   const rightLeaf = useRef<Mesh>(null)
-  const doorMaps = useStandardPbrTextures(DOOR_TEXTURE_URLS, DOOR_TEXTURE_REPEAT)
+  const leftDoorMaps = useStandardPbrTextures(DOOR_TEXTURE_URLS.left, DOOR_TEXTURE_REPEAT)
+  const rightDoorMaps = useStandardPbrTextures(DOOR_TEXTURE_URLS.right, DOOR_TEXTURE_REPEAT)
   const doorGeometry = useMemo(() => {
     const geometry = new BoxGeometry(1, DOOR_HEIGHT, WALL_WIDTH * 0.5)
     const uv = geometry.getAttribute('uv')
@@ -12141,8 +12228,8 @@ function MazeDoorActor({
         userData={{ debugIndex: 0, debugRole: 'maze-door-leaf' }}
       >
         <DoorLeafMaterial
-          maps={doorMaps}
-          materialKey={materialKey}
+          maps={leftDoorMaps}
+          materialKey={`${materialKey}:left`}
           probeBlend={probeBlend}
         />
       </mesh>
@@ -12155,8 +12242,8 @@ function MazeDoorActor({
         userData={{ debugIndex: 1, debugRole: 'maze-door-leaf' }}
       >
         <DoorLeafMaterial
-          maps={doorMaps}
-          materialKey={materialKey}
+          maps={rightDoorMaps}
+          materialKey={`${materialKey}:right`}
           probeBlend={probeBlend}
         />
       </mesh>
@@ -12165,6 +12252,8 @@ function MazeDoorActor({
 }
 
 function MazeDoors({
+  activePlayerWorldPosition,
+  activePlayerTurn,
   iblContributionIntensity,
   isActive,
   layout,
@@ -12178,6 +12267,8 @@ function MazeDoors({
   turnState,
   visibilityState
 }: {
+  activePlayerWorldPosition: Vector3
+  activePlayerTurn: number
   iblContributionIntensity: number
   isActive: boolean
   layout: MazeLayout
@@ -12191,7 +12282,25 @@ function MazeDoors({
   turnState: TurnState
   visibilityState: PrecomputedVisibilityState
 }) {
+  const levelWorldTransform = useContext(LevelRenderTransformContext)
   const door = useMemo(() => getMazeEntranceDoor(layout), [layout])
+  const doorWorldPosition = useMemo(() => {
+    if (!door) {
+      return null
+    }
+
+    return transformLevelLocalPositionToWorld({
+      x: door.center.x,
+      y: GROUND_Y,
+      z: door.center.z
+    }, levelWorldTransform)
+  }, [door, levelWorldTransform])
+  const isAdjacentToActivePlayer = Boolean(
+    activePlayerTurn > 0 &&
+    doorWorldPosition &&
+    activePlayerWorldPosition.distanceToSquared(doorWorldPosition) <=
+      ((MAZE_CELL_SIZE * 0.6) ** 2)
+  )
 
   if (!door) {
     return null
@@ -12201,7 +12310,10 @@ function MazeDoors({
     <MazeDoorActor
       door={door}
       iblContributionIntensity={iblContributionIntensity}
-      isOpen={isActive && isDoorOpenForTurnState(door, layout.maze, turnState)}
+      isOpen={
+        (isActive && isDoorOpenForTurnState(door, layout.maze, turnState)) ||
+        isAdjacentToActivePlayer
+      }
       layout={layout}
       lightmapContributionIntensity={lightmapContributionIntensity}
       probeDepthAtlasTextures={probeDepthAtlasTextures}
@@ -12216,11 +12328,17 @@ function MazeDoors({
 }
 
 function AltarBlockMaterial({
+  lightMap,
+  lightMapIntensity,
   maps,
+  patchConfig,
   materialKey,
   probeBlend
 }: {
+  lightMap: Texture
+  lightMapIntensity: number
   maps: PbrMaps
+  patchConfig: MaterialShaderPatchConfig
   materialKey: string
   probeBlend: ProbeBlendConfig
 }) {
@@ -12228,7 +12346,7 @@ function AltarBlockMaterial({
   const probeBlendMaterialProps = useProbeBlendMaterialShader(
     material,
     probeBlend,
-    {},
+    patchConfig,
     materialKey
   )
 
@@ -12240,6 +12358,8 @@ function AltarBlockMaterial({
       envMap={getProbeBlendEnvMap(probeBlend)}
       envMapIntensity={0}
       key={materialKey}
+      lightMap={lightMap}
+      lightMapIntensity={lightMapIntensity}
       map={maps.map}
       metalness={0}
       metalnessMap={maps.metalnessMap}
@@ -12253,6 +12373,79 @@ function AltarBlockMaterial({
   )
 }
 
+function AltarOfferingTrophy({
+  materialKey,
+  probeBlend
+}: {
+  materialKey: string
+  probeBlend: ProbeBlendConfig
+}) {
+  const trophyModel = useClonedRuntimeModel(
+    TROPHY_MODEL_URL,
+    'trophy',
+    'altar-offering-trophy',
+    0
+  )
+  const transform = useMemo(() => {
+    if (!trophyModel) {
+      return null
+    }
+
+    trophyModel.updateMatrixWorld(true)
+    const bounds = new Box3().setFromObject(trophyModel, true)
+    const center = new Vector3()
+    const size = new Vector3()
+
+    bounds.getCenter(center)
+    bounds.getSize(size)
+
+    const scale = 0.24 / Math.max(size.y, 0.0001)
+
+    return {
+      modelOffset: new Vector3(
+        -center.x * scale,
+        -bounds.min.y * scale,
+        -center.z * scale
+      ),
+      scale
+    }
+  }, [trophyModel])
+
+  useAttachProbeBlendToModel(trophyModel, probeBlend)
+
+  useEffect(() => {
+    if (!trophyModel) {
+      return
+    }
+
+    trophyModel.traverse((object) => {
+      if (object instanceof Mesh) {
+        object.userData.debugRole = 'altar-offering-trophy'
+      }
+    })
+  }, [trophyModel])
+
+  if (!trophyModel || !transform) {
+    return null
+  }
+
+  return (
+    <primitive
+      object={trophyModel}
+      position={[
+        transform.modelOffset.x,
+        1.08 + transform.modelOffset.y,
+        transform.modelOffset.z
+      ]}
+      scale={transform.scale}
+      userData={{
+        debugRole: 'altar-offering-trophy',
+        materialKey
+      }}
+    />
+  )
+}
+
 function MazeAltarActor({
   activated,
   altar,
@@ -12260,6 +12453,9 @@ function MazeAltarActor({
   iblContributionIntensity,
   layout,
   lightmapContributionIntensity,
+  lightmapTexture,
+  lightmapTextureEncoding,
+  offering,
   probeDepthAtlasTextures,
   probeCoefficientTextures,
   reflectionContributionIntensity,
@@ -12275,6 +12471,9 @@ function MazeAltarActor({
   iblContributionIntensity: number
   layout: MazeLayout
   lightmapContributionIntensity: number
+  lightmapTexture: Texture
+  lightmapTextureEncoding: LightmapTextureEncoding
+  offering: boolean
   probeDepthAtlasTextures: ProbeDepthAtlasTextures
   probeCoefficientTextures: [Texture, Texture, Texture, Texture]
   reflectionContributionIntensity: number
@@ -12286,7 +12485,10 @@ function MazeAltarActor({
 }) {
   const levelWorldTransform = useContext(LevelRenderTransformContext)
   const volumetricShadowsEnabled = useContext(VolumetricShadowContext)
-  const blockGeometry = useMemo(() => new BoxGeometry(1, 1, 1), [])
+  const blockGeometry = useMemo(
+    () => createAltarBlockGeometry(layout.maze.lightmap, altar.id),
+    [altar.id, layout.maze.lightmap]
+  )
   const wallMaps = useStandardPbrTextures(WALL_TEXTURE_URLS, WALL_TEXTURE_REPEAT * 0.5)
   const cupModel = useClonedRuntimeModel(
     DROOP_CUP_MODEL_URL,
@@ -12325,9 +12527,7 @@ function MazeAltarActor({
   )
   const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
   const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
-  const diffuseProbeIntensity =
-    iblContributionIntensity + lightmapContributionIntensity
-  const probeBlend = useMemo(
+  const blockProbeBlend = useMemo(
     () =>
       buildProbeBlendConfig(
         layout,
@@ -12338,7 +12538,7 @@ function MazeAltarActor({
         probeCoefficients,
         'disabled',
         {
-          diffuseIntensity: diffuseProbeIntensity,
+          diffuseIntensity: iblContributionIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
           radianceMode: hasProbeTextures ? 'constant' : 'disabled',
@@ -12348,9 +12548,9 @@ function MazeAltarActor({
         }
       ),
     [
-      diffuseProbeIntensity,
       hasProbeCoefficients,
       hasProbeTextures,
+      iblContributionIntensity,
       layout,
       levelWorldTransform,
       probeCoefficientTextures,
@@ -12363,9 +12563,33 @@ function MazeAltarActor({
       volumetricShadowsEnabled
     ]
   )
+  const cupProbeBlend = useMemo(
+    () => ({
+      ...blockProbeBlend,
+      diffuseIntensity: iblContributionIntensity + lightmapContributionIntensity
+    }),
+    [blockProbeBlend, iblContributionIntensity, lightmapContributionIntensity]
+  )
+  const surfaceLightmapsEnabled =
+    lightmapContributionIntensity > EFFECT_EPSILON
+  const lightMapIntensity =
+    surfaceLightmapsEnabled
+      ? lightmapContributionIntensity * WALL_LIGHTMAP_INTENSITY_SCALE
+      : 0
+  const patchConfig = useMemo(
+    () => ({
+      lightMapAmbientTint:
+        surfaceLightmapsEnabled
+          ? LIGHTMAP_AMBIENT_TINT.clone().multiplyScalar(lightmapContributionIntensity)
+          : BLACK_COLOR,
+      lightMapEncoding: lightmapTextureEncoding,
+      lightMapTorchTint: TORCH_LIGHTMAP_TINT
+    }),
+    [lightmapContributionIntensity, lightmapTextureEncoding, surfaceLightmapsEnabled]
+  )
   const materialKey = useMemo(
-    () => getProbeBlendMaterialKey('maze-altar', probeBlend, {}),
-    [probeBlend]
+    () => getProbeBlendMaterialKey('maze-altar', blockProbeBlend, patchConfig),
+    [blockProbeBlend, patchConfig]
   )
   const cupTransform = useMemo(() => {
     if (!cupModel) {
@@ -12392,7 +12616,7 @@ function MazeAltarActor({
     }
   }, [cupModel])
 
-  useAttachProbeBlendToModel(cupModel, probeBlend)
+  useAttachProbeBlendToModel(cupModel, cupProbeBlend)
 
   useEffect(() => () => {
     blockGeometry.dispose()
@@ -12415,9 +12639,12 @@ function MazeAltarActor({
         userData={{ debugRole: 'maze-altar-block' }}
       >
         <AltarBlockMaterial
+          lightMap={lightmapTexture}
+          lightMapIntensity={lightMapIntensity}
           maps={wallMaps}
           materialKey={materialKey}
-          probeBlend={probeBlend}
+          patchConfig={patchConfig}
+          probeBlend={blockProbeBlend}
         />
       </mesh>
       {cupModel && cupTransform ? (
@@ -12430,6 +12657,12 @@ function MazeAltarActor({
           ]}
           scale={cupTransform.scale}
           userData={{ debugRole: 'altar-cup' }}
+        />
+      ) : null}
+      {offering && !activated ? (
+        <AltarOfferingTrophy
+          materialKey={`${materialKey}:offering-trophy`}
+          probeBlend={cupProbeBlend}
         />
       ) : null}
       {activated ? (
@@ -12450,6 +12683,9 @@ function MazeAltars({
   iblContributionIntensity,
   layout,
   lightmapContributionIntensity,
+  lightmapTexture,
+  lightmapTextureEncoding,
+  offeringAltarId,
   probeDepthAtlasTextures,
   probeCoefficientTextures,
   reflectionContributionIntensity,
@@ -12462,6 +12698,9 @@ function MazeAltars({
   iblContributionIntensity: number
   layout: MazeLayout
   lightmapContributionIntensity: number
+  lightmapTexture: Texture
+  lightmapTextureEncoding: LightmapTextureEncoding
+  offeringAltarId: string | null
   probeDepthAtlasTextures: ProbeDepthAtlasTextures
   probeCoefficientTextures: [Texture, Texture, Texture, Texture]
   reflectionContributionIntensity: number
@@ -12488,6 +12727,9 @@ function MazeAltars({
           key={altar.id}
           layout={layout}
           lightmapContributionIntensity={lightmapContributionIntensity}
+          lightmapTexture={lightmapTexture}
+          lightmapTextureEncoding={lightmapTextureEncoding}
+          offering={offeringAltarId === altar.id}
           probeDepthAtlasTextures={probeDepthAtlasTextures}
           probeCoefficientTextures={probeCoefficientTextures}
           reflectionContributionIntensity={reflectionContributionIntensity}
@@ -14834,7 +15076,7 @@ function PlayerFadeEffectPrimitive() {
       }
 
       if (name === 'death-out') {
-        setFade(deathColor, 1 - (elapsed / 1000))
+        setFade(deathColor, 1 - (elapsed / 3000))
         return
       }
 
@@ -16528,7 +16770,7 @@ function FlightRig({
                     delete document.body.dataset.playerEffect
                   }
                   playerEffectClearTimeout.current = null
-                }, 1000)
+                }, 3000)
               }
             }
 
@@ -16662,6 +16904,8 @@ function FlightRig({
 
 function RuntimeLevelGeometry({
   activatedAltarIds,
+  activePlayerWorldPosition,
+  activePlayerTurn,
   environmentIntensity,
   iblContributionIntensity,
   isActive,
@@ -16670,6 +16914,7 @@ function RuntimeLevelGeometry({
   minotaurAlbedoHex,
   monsterEyes,
   mountAllGeometry = false,
+  offeringAltarId,
   onLightingResourcesChange,
   openGateIdsOverride = null,
   probeDebugMode,
@@ -16682,6 +16927,8 @@ function RuntimeLevelGeometry({
   visibilityState
 }: {
   activatedAltarIds: Set<string>
+  activePlayerWorldPosition: Vector3
+  activePlayerTurn: number
   environmentIntensity: number
   iblContributionIntensity: number
   isActive: boolean
@@ -16690,6 +16937,7 @@ function RuntimeLevelGeometry({
   minotaurAlbedoHex: string
   monsterEyes: MonsterEyeSettings
   mountAllGeometry?: boolean
+  offeringAltarId: string | null
   onLightingResourcesChange: (
     mazeId: string,
     resources: RuntimeLevelLightingResources | null,
@@ -16792,6 +17040,8 @@ function RuntimeLevelGeometry({
       >
           <SceneGeometry
             activatedAltarIds={activatedAltarIds}
+            activePlayerWorldPosition={activePlayerWorldPosition}
+            activePlayerTurn={activePlayerTurn}
             environmentTexture={stableLightingResources.environmentTexture}
           environmentIntensity={environmentIntensity}
           iblContributionIntensity={iblContributionIntensity}
@@ -16799,6 +17049,7 @@ function RuntimeLevelGeometry({
           layout={layout}
           lightmapContributionIntensity={lightmapContributionIntensity}
           mountAllGeometry={mountAllGeometry}
+          offeringAltarId={offeringAltarId}
           openGateIds={openGateIds}
           probeDebugMode={probeDebugMode}
           probeDepthAtlasTextures={stableLightingResources.probeDepthAtlasTextures}
@@ -16839,6 +17090,7 @@ function RuntimeLevelGeometry({
 
 function Scene({
   activatedAltarIds,
+  altarCutscene,
   composerEnabled,
   controlsOpen,
   cutsceneActive,
@@ -16856,6 +17108,11 @@ function Scene({
   visualSettings
 }: {
   activatedAltarIds: Set<string>
+  altarCutscene: {
+    altarId: string
+    levelId: string
+    startedAt: number
+  } | null
   composerEnabled: boolean
   controlsOpen: boolean
   cutsceneActive: boolean
@@ -18099,6 +18356,15 @@ function Scene({
 
     return states
   }, [effectiveVisibilityState, layout.maze, stagedRenderedLayouts])
+  const activePlayerWorldPosition = useMemo(
+    () => getTransformedMazeCellWorldPosition(
+      layout.maze,
+      levelTransform,
+      turnState.player.cell,
+      GROUND_Y
+    ),
+    [layout.maze, levelTransform, turnState.player.cell]
+  )
 
   return (
     <>
@@ -18122,6 +18388,8 @@ function Scene({
           return (
             <RuntimeLevelGeometry
               activatedAltarIds={activatedAltarIds}
+              activePlayerWorldPosition={activePlayerWorldPosition}
+              activePlayerTurn={turnState.turn}
               environmentIntensity={environmentIntensity}
               iblContributionIntensity={runtimeDynamicVolumetricIntensity}
               isActive={isActive}
@@ -18131,6 +18399,12 @@ function Scene({
               minotaurAlbedoHex={visualSettings.minotaurAlbedoHex}
               monsterEyes={visualSettings.monsterEyes}
               mountAllGeometry={startupGeometryExpanded}
+              offeringAltarId={
+                altarCutscene?.levelId === renderedLayout.maze.id &&
+                !activatedAltarIds.has(altarCutscene.altarId)
+                  ? altarCutscene.altarId
+                  : null
+              }
               onLightingResourcesChange={handleLevelLightingResourcesChange}
               openGateIdsOverride={isActive ? activeOpenGateIds : closedGateIds}
               probeDebugMode={visualSettings.probeDebugMode}
@@ -20176,13 +20450,28 @@ function CreditsModal({
 
 function LevelMenuModal({
   levels,
+  onAmbientOcclusionModeChange,
+  onBooleanSettingChange,
+  onClose,
+  onEffectSettingChange,
   onSelectLevel,
-  open
+  open,
+  visualSettings
 }: {
   levels: AuthoredLevel[]
+  onAmbientOcclusionModeChange: (mode: AmbientOcclusionMode) => void
+  onBooleanSettingChange: (key: BooleanSettingKey, value: boolean) => void
+  onClose: () => void
+  onEffectSettingChange: (
+    key: GenericEffectSettingKey,
+    patch: Partial<EffectSettings>
+  ) => void
   onSelectLevel: (level: AuthoredLevel, index: number) => void
   open: boolean
+  visualSettings: VisualSettings
 }) {
+  const [activeTab, setActiveTab] = useState<'graphics' | 'levels'>('graphics')
+
   if (!open) {
     return null
   }
@@ -20190,20 +20479,87 @@ function LevelMenuModal({
   return (
     <div className="level-menu-modal" role="dialog" aria-modal="true" aria-label="Level Menu">
       <div className="level-menu-panel">
-        <h2>Levels</h2>
-        <div className="level-menu-list">
-          {levels.map((level, index) => (
-            <button
-              className="level-menu-button"
-              key={`${level.name}:${index}`}
-              onClick={() => onSelectLevel(level, index)}
-              type="button"
-            >
-              <span>{level.name}</span>
-              {level.description ? <small>{level.description}</small> : null}
-            </button>
-          ))}
+        <div className="level-menu-header">
+          <h2>Menu</h2>
+          <button
+            aria-label="Close Menu"
+            className="level-menu-close"
+            onClick={onClose}
+            type="button"
+          >
+            Close
+          </button>
         </div>
+        <div className="level-menu-tabs" role="tablist" aria-label="Menu sections">
+          <button
+            aria-selected={activeTab === 'graphics'}
+            className={`level-menu-tab${activeTab === 'graphics' ? ' level-menu-tab-active' : ''}`}
+            onClick={() => setActiveTab('graphics')}
+            role="tab"
+            type="button"
+          >
+            Graphics
+          </button>
+          <button
+            aria-selected={activeTab === 'levels'}
+            className={`level-menu-tab${activeTab === 'levels' ? ' level-menu-tab-active' : ''}`}
+            onClick={() => setActiveTab('levels')}
+            role="tab"
+            type="button"
+          >
+            Levels
+          </button>
+        </div>
+        {activeTab === 'graphics' ? (
+          <div className="level-menu-settings" role="tabpanel">
+            <label className="level-menu-setting">
+              <span>Lighting</span>
+              <input
+                checked={!visualSettings.unlitMode}
+                onChange={(event) => {
+                  onBooleanSettingChange('unlitMode', !event.target.checked)
+                }}
+                type="checkbox"
+              />
+            </label>
+            <label className="level-menu-setting">
+              <span>Fog</span>
+              <input
+                checked={visualSettings.volumetricLighting.enabled}
+                onChange={(event) => {
+                  onEffectSettingChange('volumetricLighting', {
+                    enabled: event.target.checked
+                  })
+                }}
+                type="checkbox"
+              />
+            </label>
+            <label className="level-menu-setting">
+              <span>Ambient Occlusion</span>
+              <input
+                checked={visualSettings.ambientOcclusionMode !== 'off'}
+                onChange={(event) => {
+                  onAmbientOcclusionModeChange(event.target.checked ? 'n8ao' : 'off')
+                }}
+                type="checkbox"
+              />
+            </label>
+          </div>
+        ) : (
+          <div className="level-menu-list" role="tabpanel">
+            {levels.map((level, index) => (
+              <button
+                className="level-menu-button"
+                key={`${level.name}:${index}`}
+                onClick={() => onSelectLevel(level, index)}
+                type="button"
+              >
+                <span>{level.name}</span>
+                {level.description ? <small>{level.description}</small> : null}
+              </button>
+            ))}
+          </div>
+        )}
         <small>Press Escape to close.</small>
       </div>
     </div>
@@ -20215,10 +20571,64 @@ function MobileTouchControls({
 }: {
   onOpenMenu: () => void
 }) {
+  const touchStart = useRef<{
+    action: TurnAction
+    pointerId: number
+    x: number
+    y: number
+  } | null>(null)
   const dispatchAction = (action: TurnAction) => {
     window.dispatchEvent(new CustomEvent<TurnAction>('levelsjam:turn-action', {
       detail: action
     }))
+  }
+  const onControlPointerDown = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    action: TurnAction
+  ) => {
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    touchStart.current = {
+      action,
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY
+    }
+  }
+  const onControlPointerUp = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const start = touchStart.current
+
+    if (!start || start.pointerId !== event.pointerId) {
+      return
+    }
+
+    touchStart.current = null
+    event.preventDefault()
+
+    const deltaX = event.clientX - start.x
+    const deltaY = event.clientY - start.y
+    const absX = Math.abs(deltaX)
+    const absY = Math.abs(deltaY)
+    const swipeThreshold = 42
+
+    if (Math.max(absX, absY) >= swipeThreshold) {
+      if (absY > absX && deltaY < 0) {
+        dispatchAction('move-forward')
+        return
+      }
+
+      if (absX > absY) {
+        dispatchAction(deltaX < 0 ? 'rotate-left' : 'rotate-right')
+        return
+      }
+    }
+
+    dispatchAction(start.action)
+  }
+  const onControlPointerCancel = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (touchStart.current?.pointerId === event.pointerId) {
+      touchStart.current = null
+    }
   }
 
   return (
@@ -20229,15 +20639,14 @@ function MobileTouchControls({
         onClick={onOpenMenu}
         type="button"
       >
-        Menu
+        &#9776;
       </button>
       <button
         aria-label="Turn Left"
         className="mobile-touch-zone mobile-touch-left"
-        onPointerDown={(event) => {
-          event.preventDefault()
-          dispatchAction('rotate-left')
-        }}
+        onPointerCancel={onControlPointerCancel}
+        onPointerDown={(event) => onControlPointerDown(event, 'rotate-left')}
+        onPointerUp={onControlPointerUp}
         type="button"
       >
         &#8592;
@@ -20245,10 +20654,9 @@ function MobileTouchControls({
       <button
         aria-label="Move Forward"
         className="mobile-touch-zone mobile-touch-forward"
-        onPointerDown={(event) => {
-          event.preventDefault()
-          dispatchAction('move-forward')
-        }}
+        onPointerCancel={onControlPointerCancel}
+        onPointerDown={(event) => onControlPointerDown(event, 'move-forward')}
+        onPointerUp={onControlPointerUp}
         type="button"
       >
         &#8593;
@@ -20256,10 +20664,9 @@ function MobileTouchControls({
       <button
         aria-label="Turn Right"
         className="mobile-touch-zone mobile-touch-right"
-        onPointerDown={(event) => {
-          event.preventDefault()
-          dispatchAction('rotate-right')
-        }}
+        onPointerCancel={onControlPointerCancel}
+        onPointerDown={(event) => onControlPointerDown(event, 'rotate-right')}
+        onPointerUp={onControlPointerUp}
         type="button"
       >
         &#8594;
@@ -20273,6 +20680,31 @@ function areCellsCardinallyAdjacent(
   right: { x: number; y: number }
 ) {
   return Math.abs(left.x - right.x) + Math.abs(left.y - right.y) === 1
+}
+
+function directionFromCellToCell(
+  from: { x: number; y: number },
+  to: { x: number; y: number }
+): CardinalDirection | null {
+  if (from.x === to.x) {
+    if (to.y < from.y) {
+      return 'north'
+    }
+    if (to.y > from.y) {
+      return 'south'
+    }
+  }
+
+  if (from.y === to.y) {
+    if (to.x > from.x) {
+      return 'east'
+    }
+    if (to.x < from.x) {
+      return 'west'
+    }
+  }
+
+  return null
 }
 
 function AltarCutsceneOverlay({
@@ -21469,6 +21901,30 @@ export default function App() {
       return
     }
 
+    const facingDirection = directionFromCellToCell(activeTurnState.player.cell, altar.cell)
+
+    if (facingDirection) {
+      setGlobalTurnState((current) => {
+        if (!current) {
+          return current
+        }
+
+        const levelTurnState = getGlobalTurnStateForLevel(
+          current,
+          mazeLayout.maze.id,
+          mazeLayout.maze
+        )
+
+        return replaceGlobalTurnStateForLevel(current, mazeLayout.maze.id, {
+          ...levelTurnState,
+          player: {
+            ...levelTurnState.player,
+            direction: facingDirection
+          }
+        })
+      })
+    }
+
     document.body.dataset.altarCutsceneActive = 'true'
     setAltarCutscene({
       altarId: altar.id,
@@ -21480,7 +21936,8 @@ export default function App() {
     activeTurnState?.player.cell.y,
     activeTurnState?.player.hasTrophy,
     altarCutscene,
-    mazeLayout
+    mazeLayout,
+    setGlobalTurnState
   ])
 
   useEffect(() => {
@@ -21489,7 +21946,7 @@ export default function App() {
       return undefined
     }
 
-    const handle = window.setTimeout(() => {
+    const replaceWithFlameHandle = window.setTimeout(() => {
       const levelId = altarCutscene.levelId
       const layoutForCutscene = loadedMazeLayoutsRef.current.get(levelId)
 
@@ -21521,11 +21978,17 @@ export default function App() {
           })
         })
       }
+    }, 3000)
+
+    const restoreControlHandle = window.setTimeout(() => {
       setAltarCutscene(null)
       delete document.body.dataset.altarCutsceneActive
     }, 4000)
 
-    return () => window.clearTimeout(handle)
+    return () => {
+      window.clearTimeout(replaceWithFlameHandle)
+      window.clearTimeout(restoreControlHandle)
+    }
   }, [altarCutscene, setGlobalTurnState])
 
   useEffect(() => {
@@ -21593,10 +22056,15 @@ export default function App() {
       <CreditsModal open={creditsOpen} />
       <LevelMenuModal
         levels={authoredLevels}
+        onAmbientOcclusionModeChange={onAmbientOcclusionModeChange}
+        onBooleanSettingChange={onBooleanSettingChange}
+        onClose={() => setLevelMenuOpen(false)}
+        onEffectSettingChange={onEffectSettingChange}
         onSelectLevel={(level, index) => {
           void loadAndActivateLevel(level, index)
         }}
         open={levelMenuOpen}
+        visualSettings={visualSettings}
       />
       <MobileTouchControls
         onOpenMenu={() => {
@@ -21682,6 +22150,7 @@ export default function App() {
             <Suspense fallback={null}>
               <Scene
                 activatedAltarIds={activatedAltarIds}
+                altarCutscene={altarCutscene}
                 composerEnabled={composerEnabled}
                 controlsOpen={controlsOpen}
                 cutsceneActive={activeAltarCutscene}

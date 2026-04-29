@@ -75,6 +75,7 @@
 - Once a level's gameplay-rule state has been loaded, the runtime keeps that state available for the rest of the session instead of unloading or resetting it during ordinary level traversal.
 - Player movement between connected levels is a level transition, not an escape state.
 - One-cell passages that connect levels are outside the rectangular gameplay layout of each connected level; authored level room rectangles contain only the room proper, not the connector passage.
+- Authored levels may define an explicit playable-cell footprint so connector cells can exist outside the room-proper rectangle without causing adjacent non-room cells to render floors, walls, or visibility entries.
 - The authored Entrance level has a closed outer wall wherever it does not connect to Chamber 1.
 
 ## Current Scope
@@ -154,6 +155,7 @@
 - Each baked maze lightmap uses supersampled texel evaluation so torch gradients on walls and the maze floor patch are smoother than a single-sample bake.
 - Baked torch lighting uses physical inverse-square falloff across all represented lightmapped surfaces without an authored hard maximum distance cutoff.
 - Exterior wall faces that are not expected to be player-visible omit baked lightmap rectangles and sample the neutral lightmap region at runtime.
+- Numbered maze exterior boundary walls do not receive runtime torch fixtures or baked torch-light contribution, so their illumination comes only from non-torch baked sources and probe/environment terms.
 - Baked torch lighting clamps only the mathematical point-light singularity at the finite torch source radius needed for numerical stability.
 - Baked torch point-light brightness uses one fifth of the previous authored baseline while preserving the same torch color and inverse-square falloff model.
 - Baked torch point-light brightness is reduced by another factor of ten from the previous baked baseline while preserving the same torch color and inverse-square falloff model.
@@ -170,6 +172,7 @@
 - The current scene does not include realtime torch point lights.
 - Reflection probe captures include temporary shadow-casting torch point lights that match the authored torch-light characteristics except for flicker.
 - Offline reflection-probe export performs an initial capture pass, binds the resulting local probes to the static scene, then performs a second capture pass that is shipped as the runtime probe set so metallic static surfaces appear in reflections with one level of local-reflection feedback.
+- Offline reflection-probe export may use a complete existing runtime probe manifest as the initial local-reflection feedback source when the probe count, face size, and referenced processed probe files match the level being exported.
 - Reflection probe captures wait until every expected opaque maze wall, baked floor patch, and sconce is present with its capture-ready material state before baking.
 - Reflection probe captures include the visible static maze geometry and its baked lighting instead of collapsing to only the HDRI and temporary torch emitters.
 - Reflection probes are captured during the offline maze-lighting pipeline and are not recaptured during ordinary runtime page load or debug-slider interaction.
@@ -213,6 +216,10 @@
 - Each maze artifact directory also includes human-inspectable volumetric-lightmap artifacts for every probe.
 - Each maze artifact directory includes both a human-readable preview PNG and a raw HDR PNG export for the baked surface lightmap so inspection does not require reading binary payloads out of maze JSON.
 - Refreshing persisted maze lighting regenerates the inspectable PNG artifact set for the current mazes under `logs/lightmap-artifacts` so the human-readable lightmap and reflection-capture outputs stay in sync with the latest baked maze data.
+- Every offline maze-lighting bake writes a timestamped JSON timing report under `logs/` that records total duration, per-level duration, per-step duration, per-step totals across levels, bake quality parameters, and work counts.
+- Offline maze-lighting timing reports are flushed as steps start and finish so a timeout or forced termination still leaves the current level and current bake step observable.
+- Maze persistence validates replacement candidates before starting GPU lightmap baking so invalid candidates are rejected cheaply rather than after a multi-minute bake.
+- Offline maze-lighting workers close their headless browser and server processes on successful completion, errors, interrupts, and configured timeouts.
 - The repository includes a source-controlled synthetic `3x3` reflection diagnostic maze for probe-occlusion tests.
 - The synthetic `3x3` reflection diagnostic mazes place their torches on outer-facing cell walls so the sealed center probe has no direct view of any torch-lit wall face.
 - Reflection probe debug visualization displays the actual processed local reflection source used by the runtime shading path directly on the debug spheres so a human can inspect what reflective materials are sampling in-game.
@@ -258,6 +265,7 @@
 - Each door receives local volumetric-lightmap illumination and local reflection-probe response so it renders visibly under the baked lighting stack rather than as black unlit metal.
 - Doors start visually closed like gates and do not open merely because the player begins in or steps onto the entrance cell.
 - Whenever the player moves into a new cell, every door adjacent to the new player cell opens when safe, and all other doors close, in both the rules state and the rendered animation state.
+- Rendered doors in adjacent streamed levels open from the active player's world-space adjacency even when their owning level is not the current rules/debug focus.
 - Each closed door fills its entrance edge using two `1m` long, `1.8m` tall leaves, each with half the wall thickness.
 - Each open door slides its two leaves `0.75m` apart along the doorway edge, leaving a `1.5m` opening.
 - Door open and close animations last `250ms` and participate in the same queued-animation speed scaling as player, monster, and gate animations.
@@ -309,8 +317,8 @@
 - Attempting to move into a blocking wall or gate without a monster present plays a `250ms` sinusoidal bump animation that travels halfway toward the blocked edge and back without consuming a turn.
 - If the player attempts to move into a cell containing a monster, the player dies.
 - If a monster attempts to move into the player cell, the player dies.
-- Player death fades the viewport to black during the movement animation, resets the current maze state to the last checkpoint, and fades back in over `2s`.
-- Player death fades to black over `125ms` and fades back to the camera view over `1s`.
+- Player death fades the viewport to black during the movement animation, resets the current maze state to the last checkpoint, and fades back in over `3s`.
+- Player death fades to black over `125ms` and fades back to the camera view over `3s`.
 - The sword-strike and player-death fade overlays are applied before the vignette effect so the vignette is still visible on top of the fade color.
 - The current checkpoint is the maze entrance position and entrance-facing direction.
 - Each generated maze places one minotaur, one werewolf, and one spider on distinct non-player tiles.
@@ -328,6 +336,7 @@
 - Before moving, an awake spider turns to face the direction it is about to move; after moving, it turns to face the next direction it would choose from its new cell.
 - An awake werewolf that did not move on the previous monster turn moves one step along a shortest legal path toward the player.
 - If multiple shortest werewolf path steps are tied, the werewolf prefers the next step from its previous path, then a step continuing its previous movement direction, then any remaining tied step.
+- After a werewolf moves, it turns to face the direction it would choose if it could take another move immediately.
 - Monster models rotate to face their upcoming move before moving when a rotation is required.
 - After moving, monster models rotate to face the direction they would move if their next turn were resolved immediately.
 - Each minotaur move triggers a mild screen shake whose amplitude falls off with maze distance from the player and whose duration is `1s`.
@@ -357,9 +366,13 @@
 - Pressing `Escape` closes the level menu modal when it is open.
 - The level menu lists the levels parsed from `LEVELS.md` in their authored order.
 - Clicking a level name closes the level menu, loads the corresponding authored level or numbered runtime maze, resets its state, and teleports the player to that level's entrance.
+- The menu fits inside the viewport on mobile and desktop and includes a visible close button.
+- The menu is tabbed, with a Graphics tab containing Lighting, Fog, and Ambient Occlusion toggles, and a Levels tab containing the level-selection list.
 - On touch/mobile layouts, the bottom of the screen displays left-turn, forward, and right-turn controls.
 - Mobile turn controls have large click/touch hit regions that divide the full screen into playable control areas while their visible labels remain along the bottom.
-- Mobile layouts include a top-left menu button that opens the level menu.
+- Mobile turn controls do not show browser tap-highlight selection when touched.
+- Mobile turn controls accept left, right, and upward swipes as alternate rotate-left, rotate-right, and move-forward commands.
+- Mobile layouts include a top-left hamburger menu button that opens the level menu.
 - The first-person held sword is oriented with the blade pointing forward and is pulled back far enough to remain inside the player's current cell.
 - The first-person held trophy appears lower and farther left on screen than the held sword.
 - The character collision volume is a capsule that is 1.75 meters tall and 0.25 meters in radius.
@@ -704,7 +717,7 @@
 - Automated test-duration measurement records a per-run timing breakdown so excessive time can be attributed to specific scripts or smoke-test phases rather than guessed.
 - Automated unit-test measurement records per-file and per-subtest timing data in addition to the overall suite duration so individual regressions can be identified directly.
 - Maze topology generation for one valid maze must complete in under 100 milliseconds before the later baked-lightmap step runs.
-- Full maze generation, validation, and bake for one maze must complete in under 5 seconds.
+- Full whole-game maze lighting and reflection export is targeted to complete in under `10 minutes`; timing reports over that budget must be inspected and the slowest steps improved before rerunning blindly.
 - Maze-regeneration loops have a bounded maximum attempt count and fail with a diagnostic error instead of hanging indefinitely when the maze factory repeatedly returns invalid mazes.
 - Maze-generation performance tests record per-case reported and wall-clock durations in `logs/latest-maze-test-profile.json`.
 - The runtime records high-water RAM and VRAM usage so those values can be inspected during debugging.

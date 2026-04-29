@@ -162,6 +162,35 @@ test('spiders move along their queued facing and then face the next wall-followi
   assert.equal(spider.direction, 'south')
 })
 
+test('werewolves face their next planned move direction after moving', () => {
+  const maze = testMaze({
+    gates: [],
+    monsters: [
+      { cell: { x: 2, y: 2 }, type: 'werewolf' }
+    ],
+    openEdges: [
+      { from: { x: 0, y: 1 }, to: { x: 1, y: 1 } },
+      { from: { x: 1, y: 1 }, to: { x: 1, y: 2 } },
+      { from: { x: 1, y: 2 }, to: { x: 2, y: 2 } }
+    ],
+    sword: null,
+    trophy: null
+  })
+  const state = createInitialTurnState(maze)
+
+  state.monsters[0] = {
+    ...state.monsters[0],
+    awake: true,
+    direction: 'west'
+  }
+
+  const moved = applyTurnAction(maze, state, 'move-forward').state.monsters[0]
+
+  assert.deepEqual(moved.cell, { x: 1, y: 2 })
+  assert.equal(moved.lastMoveDirection, 'west')
+  assert.equal(moved.direction, 'north')
+})
+
 test('rotation changes player direction without advancing monster turns', () => {
   const maze = testMaze()
   const state = createInitialTurnState(maze)
@@ -309,7 +338,7 @@ test('adjacent safe gates open for player movement', () => {
   assert.deepEqual(getOpenGateIds(maze, moved), ['1,1|1,2'])
 })
 
-test('entrance doors open only when the player is in the entrance cell', () => {
+test('entrance doors start closed and open after moving back adjacent to them', () => {
   const maze = testMaze({
     id: 'door-test',
     gates: [],
@@ -319,11 +348,15 @@ test('entrance doors open only when the player is in the entrance cell', () => {
   })
   const state = createInitialTurnState(maze)
 
-  assert.deepEqual(getOpenDoorIds(maze, state), ['door-test:entrance-door'])
+  assert.deepEqual(getOpenDoorIds(maze, state), [])
 
   const moved = applyTurnAction(maze, state, 'move-forward').state
 
   assert.deepEqual(getOpenDoorIds(maze, moved), [])
+
+  const returned = applyTurnAction(maze, moved, 'move-backward').state
+
+  assert.deepEqual(getOpenDoorIds(maze, returned), ['door-test:entrance-door'])
 })
 
 test('player picks up the sword and kills a monster instead of dying', () => {

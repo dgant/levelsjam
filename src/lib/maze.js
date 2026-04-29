@@ -15,7 +15,7 @@ export const MAZE_CELL_SIZE = 2
 export const MAZE_WALL_THICKNESS = 0.25
 export const MAZE_WALL_HEIGHT = 2
 export const MAZE_TARGET_COUNT = 5
-export const MAZE_LIGHTMAP_VERSION = 30
+export const MAZE_LIGHTMAP_VERSION = 31
 export const MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS = 0.125
 
 const REC709_LUMINANCE = [0.2126, 0.7152, 0.0722]
@@ -23,6 +23,9 @@ const MAZE_LIGHTMAP_GROUND_TILE_SIZE = 256
 const MAZE_LIGHTMAP_WALL_TILE_WIDTH = 128
 const MAZE_LIGHTMAP_WALL_TILE_HEIGHT = 128
 const MAZE_LIGHTMAP_NEUTRAL_TILE_SIZE = 4
+const MAZE_LIGHTMAP_ALTAR_TILE_SIZE = 64
+const MAZE_ALTAR_BLOCK_SIZE = 1
+const MAZE_ALTAR_BLOCK_HEIGHT = 1
 const MAZE_LIGHTMAP_GROUND_MARGIN = 16
 const MAZE_LIGHTMAP_SAMPLE_EPSILON = 0.02
 const MAZE_LIGHTMAP_TORCH_STRENGTH = AUTHORED_LIGHTING_SOURCE_SCALE / 50
@@ -159,6 +162,32 @@ const BASE_EAR = [
   { x: 3, y: 3 },
   { x: 3, y: 4 }
 ]
+
+export function getMazeLightmapBakeQualityParameters(options = {}) {
+  const bakeModes = Array.isArray(options.bakeModes) && options.bakeModes.length > 0
+    ? options.bakeModes
+    : [{ key: 'default', mode: 1 }]
+
+  return {
+    bakeModes,
+    directSphereSampleCount: 6,
+    groundAmbientSampleGrid: MAZE_LIGHTMAP_GROUND_AMBIENT_SAMPLE_GRID,
+    groundSupersampleGrid: MAZE_LIGHTMAP_GROUND_SUPERSAMPLE_GRID,
+    groundTileSize: MAZE_LIGHTMAP_GROUND_TILE_SIZE,
+    indirectReleasePassRayCount: 32,
+    indirectReleaseSequenceSampleCount: 64,
+    lightmapVersion: MAZE_LIGHTMAP_VERSION,
+    neutralTileSize: MAZE_LIGHTMAP_NEUTRAL_TILE_SIZE,
+    altarTileSize: MAZE_LIGHTMAP_ALTAR_TILE_SIZE,
+    skyDirectionCount: MAZE_SKY_SAMPLE_DIRECTIONS.length,
+    skyRayDistance: MAZE_LIGHTMAP_SKY_RAY_DISTANCE,
+    wallAmbientSampleGrid: MAZE_LIGHTMAP_WALL_AMBIENT_SAMPLE_GRID,
+    wallSupersampleGrid: MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID,
+    wallTileHeight: MAZE_LIGHTMAP_WALL_TILE_HEIGHT,
+    wallTileWidth: MAZE_LIGHTMAP_WALL_TILE_WIDTH
+  }
+}
+
 function encodeBytesToBase64(bytes) {
   if (typeof Buffer !== 'undefined') {
     return Buffer.from(bytes).toString('base64')
@@ -202,6 +231,10 @@ function parseCellKey(key) {
 }
 
 function allCells(maze) {
+  if (Array.isArray(maze.cells) && maze.cells.length > 0) {
+    return maze.cells.map((cell) => ({ x: cell.x, y: cell.y }))
+  }
+
   const cells = []
 
   for (let y = 0; y < maze.height; y += 1) {
@@ -359,18 +392,28 @@ function isInsideMaze(cell, width, height) {
   )
 }
 
+function isPlayableCell(maze, cell) {
+  if (Array.isArray(maze.cells) && maze.cells.length > 0) {
+    return maze.cells.some((candidate) => cellKey(candidate) === cellKey(cell))
+  }
+
+  return isInsideMaze(cell, maze.width, maze.height)
+}
+
 function buildAdjacency(maze) {
   const adjacency = new Map()
 
-  for (let y = 0; y < maze.height; y += 1) {
-    for (let x = 0; x < maze.width; x += 1) {
-      adjacency.set(cellKey({ x, y }), new Set())
-    }
+  for (const cell of allCells(maze)) {
+    adjacency.set(cellKey(cell), new Set())
   }
 
   for (const edge of maze.openEdges) {
     const from = cellKey(edge.from)
     const to = cellKey(edge.to)
+
+    if (!adjacency.has(from) || !adjacency.has(to)) {
+      continue
+    }
 
     adjacency.get(from).add(to)
     adjacency.get(to).add(from)
@@ -663,7 +706,7 @@ function getClosedSides(maze, adjacency, cell) {
   for (const direction of CARDINAL_DIRECTIONS) {
     const neighbor = getNeighbor(cell, direction.side)
 
-    if (!isInsideMaze(neighbor, maze.width, maze.height)) {
+    if (!isPlayableCell(maze, neighbor)) {
       if (exteriorOpenings.some((opening) => (
         opening.cell?.x === cell.x &&
         opening.cell?.y === cell.y &&
@@ -695,7 +738,7 @@ export function computeLightCoverage(maze, light) {
       const neighbor = getNeighbor(current, direction.side)
 
       if (
-        !isInsideMaze(neighbor, maze.width, maze.height) ||
+        !isPlayableCell(maze, neighbor) ||
         !adjacency.get(cellKey(current))?.has(cellKey(neighbor))
       ) {
         break
@@ -783,7 +826,7 @@ function hasValidMazeLightmap(maze) {
 
   return walls.every((wall) => {
     const rects = lightmap.wallRects[wall.id]
-    return Boolean(rects?.nz && rects?.pz)
+    return Boolean(rects && (rects.nz || rects.pz || rects.nx || rects.px))
   })
 }
 
@@ -1285,14 +1328,12 @@ export function getMazeWallSegments(maze) {
   const seen = new Set()
   const walls = []
 
-  for (let y = 0; y < maze.height; y += 1) {
-    for (let x = 0; x < maze.width; x += 1) {
-      const cell = { x, y }
+  for (const cell of allCells(maze)) {
 
       for (const side of getClosedSides(maze, adjacency, cell)) {
         const neighbor = getNeighbor(cell, side)
         const descriptor = getWallDescriptorFromCellSide(maze, cell, side)
-        const uniqueKey = isInsideMaze(neighbor, maze.width, maze.height)
+        const uniqueKey = isPlayableCell(maze, neighbor)
           ? edgeKey(cell, neighbor)
           : `${cellKey(cell)}:${side}:exterior`
 
@@ -1324,7 +1365,6 @@ export function getMazeWallSegments(maze) {
           yaw: descriptor.axis === 'x' ? 0 : Math.PI / 2
         })
       }
-    }
   }
 
   assignWallSurfaceGroups(walls)
@@ -2437,6 +2477,16 @@ export async function bakeMazeLightmap(
   options = {}
 ) {
   const bakeStart = performance.now()
+  const reportProgress = typeof options.onProgress === 'function'
+    ? options.onProgress
+    : () => {}
+  const quality = getMazeLightmapBakeQualityParameters(options)
+
+  reportProgress({
+    action: 'layout-start',
+    mazeId: maze.id,
+    quality
+  })
   const walls = getMazeWallSegments(maze)
   const surfaceGroups = getWallSurfaceGroups(walls)
   const torchPlacements = getMazeTorchPlacements(maze, sconceRadius)
@@ -2458,6 +2508,7 @@ export async function bakeMazeLightmap(
     MAZE_LIGHTMAP_NEUTRAL_TILE_SIZE,
     MAZE_LIGHTMAP_NEUTRAL_TILE_SIZE
   )
+  const altarRects = {}
   const wallRects = {}
   const surfaceGroupRects = {}
   const surfaces = [{
@@ -2580,7 +2631,89 @@ export async function bakeMazeLightmap(
     }
   }
 
+  for (const altar of getMazeAltarPlacements(maze)) {
+    const rects = {}
+
+    for (const faceKey of ['py', 'nz', 'pz', 'nx', 'px']) {
+      rects[faceKey] = allocateLightmapRect(
+        packer,
+        MAZE_LIGHTMAP_ALTAR_TILE_SIZE,
+        MAZE_LIGHTMAP_ALTAR_TILE_SIZE
+      )
+    }
+
+    altarRects[altar.id] = rects
+    surfaces.push({
+      alignUToRectEdges: false,
+      rect: rects.py,
+      surfaceA: [
+        altar.position.x,
+        altar.position.z,
+        MAZE_ALTAR_BLOCK_SIZE,
+        MAZE_ALTAR_BLOCK_HEIGHT
+      ],
+      surfaceB: [0, 1, 0, 0],
+      supersampleGrid: MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID,
+      type: 3
+    })
+
+    for (const [faceKey, normalX, normalZ] of [
+      ['nz', 0, -1],
+      ['pz', 0, 1],
+      ['nx', -1, 0],
+      ['px', 1, 0]
+    ]) {
+      surfaces.push({
+        alignUToRectEdges: false,
+        rect: rects[faceKey],
+        surfaceA: [
+          altar.position.x,
+          altar.position.z,
+          MAZE_ALTAR_BLOCK_SIZE,
+          MAZE_ALTAR_BLOCK_HEIGHT
+        ],
+        surfaceB: [normalX, normalZ, 0, 0],
+        supersampleGrid: MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID,
+        type: 4
+      })
+    }
+  }
+
   const atlasHeight = getLightmapAtlasHeight(packer)
+  const surfaceTexelCount = surfaces.reduce(
+    (sum, surface) => sum + (surface.rect.width * surface.rect.height),
+    0
+  )
+  const workCounts = {
+    atlasHeight,
+    atlasPixels: atlasWidth * atlasHeight,
+    atlasWidth,
+    lightmapSurfaceCount: surfaces.length,
+    lightmapSurfaceTexelCount: surfaceTexelCount,
+    lightmapSurfaceTexelSamples: surfaces.reduce(
+      (sum, surface) => sum + (
+        surface.rect.width *
+        surface.rect.height *
+        surface.supersampleGrid *
+        surface.supersampleGrid
+      ),
+      0
+    ),
+    altarSurfaceCount: Object.values(altarRects).reduce(
+      (sum, rects) => sum + Object.keys(rects).length,
+      0
+    ),
+    longWallSurfaceGroupCount: surfaceGroups.length,
+    torchCount: torchPlacements.length,
+    wallCount: walls.length
+  }
+
+  reportProgress({
+    action: 'gpu-job-start',
+    mazeId: maze.id,
+    quality,
+    workCounts
+  })
   const nodeLightmapperModulePath = './gpuLightmapperNode.js'
   const { bakeGpuLightmapJob } = await import(
     /* @vite-ignore */ nodeLightmapperModulePath
@@ -2626,6 +2759,13 @@ export async function bakeMazeLightmap(
       minZ: wall.bounds.minZ
     }))
   })
+  reportProgress({
+    action: 'gpu-job-finish',
+    mazeId: maze.id,
+    renderer: result.renderer,
+    vendor: result.vendor,
+    workCounts
+  })
 
   return {
     atlasHeight,
@@ -2639,6 +2779,7 @@ export async function bakeMazeLightmap(
     groundBounds,
     groundRect,
     neutralRect,
+    altarRects,
     version: MAZE_LIGHTMAP_VERSION,
     wallRects
   }
@@ -3019,37 +3160,49 @@ function bakeMazeLightmapCpu(
 }
 
 export function getMazeTorchPlacements(maze, sconceRadius) {
-  return maze.lights.map((light, index) => {
-    const descriptor = getWallDescriptorFromCellSide(maze, light.cell, light.side)
-    const torchBillboardHalfSize =
-      ((MAZE_WALL_THICKNESS / 2) + sconceRadius) / 2
-    const sconcePosition = {
-      x:
-        descriptor.center.x +
-        (descriptor.normal.x * ((MAZE_WALL_THICKNESS / 2) + sconceRadius)),
-      y: GROUND_Y + 1.1,
-      z:
-        descriptor.center.z +
-        (descriptor.normal.z * ((MAZE_WALL_THICKNESS / 2) + sconceRadius))
-    }
-    const torchPosition = {
-      x: sconcePosition.x,
-      y: sconcePosition.y + torchBillboardHalfSize,
-      z: sconcePosition.z
-    }
+  return maze.lights
+    .filter((light) => !isFilteredExteriorMazeLight(maze, light))
+    .map((light, index) => {
+      const descriptor = getWallDescriptorFromCellSide(maze, light.cell, light.side)
+      const torchBillboardHalfSize =
+        ((MAZE_WALL_THICKNESS / 2) + sconceRadius) / 2
+      const sconcePosition = {
+        x:
+          descriptor.center.x +
+          (descriptor.normal.x * ((MAZE_WALL_THICKNESS / 2) + sconceRadius)),
+        y: GROUND_Y + 1.1,
+        z:
+          descriptor.center.z +
+          (descriptor.normal.z * ((MAZE_WALL_THICKNESS / 2) + sconceRadius))
+      }
+      const torchPosition = {
+        x: sconcePosition.x,
+        y: sconcePosition.y + torchBillboardHalfSize,
+        z: sconcePosition.z
+      }
 
-    return {
-      cell: light.cell,
-      id: `maze-light-${index}`,
-      index,
-      normal: { ...descriptor.normal },
-      sconcePosition,
-      side: light.side,
-      torchPosition,
-      wallAxis: descriptor.axis,
-      wallCenter: { ...descriptor.center }
-    }
-  })
+      return {
+        cell: light.cell,
+        id: `maze-light-${index}`,
+        index,
+        normal: { ...descriptor.normal },
+        sconcePosition,
+        side: light.side,
+        torchPosition,
+        wallAxis: descriptor.axis,
+        wallCenter: { ...descriptor.center }
+      }
+    })
+}
+
+function isFilteredExteriorMazeLight(maze, light) {
+  if (!String(maze.id ?? '').match(/^maze-\d{3}$/)) {
+    return false
+  }
+
+  const neighbor = getNeighbor(light.cell, light.side)
+
+  return !isInsideMaze(neighbor, maze.width, maze.height)
 }
 
 export const GROUND_Y = 0

@@ -67,6 +67,33 @@ function averageTorchLightmapChannel(bytes, atlasWidth, rect) {
   return sum / (rect.width * rect.height)
 }
 
+function getNeighborCellForSide(cell, side) {
+  if (side === 'north') {
+    return { x: cell.x, y: cell.y - 1 }
+  }
+
+  if (side === 'south') {
+    return { x: cell.x, y: cell.y + 1 }
+  }
+
+  if (side === 'west') {
+    return { x: cell.x - 1, y: cell.y }
+  }
+
+  return { x: cell.x + 1, y: cell.y }
+}
+
+function isExteriorWallLight(light, maze) {
+  const neighbor = getNeighborCellForSide(light.cell, light.side)
+
+  return (
+    neighbor.x < 0 ||
+    neighbor.x >= maze.width ||
+    neighbor.y < 0 ||
+    neighbor.y >= maze.height
+  )
+}
+
 function getWallBounds(layout) {
   return layout.walls.map((wall) => ({
     ...wall.bounds
@@ -169,6 +196,32 @@ test('places each sconce one radius outside the wall face on the lit-cell side',
       light.sconcePosition.y
     )
   }
+})
+
+test('omits numbered-maze torch placements on exterior boundary walls', async () => {
+  const mazeFiles = fs.readdirSync(mazeDirectory)
+    .filter((fileName) => /^maze-\d+\.js$/.test(fileName))
+  let omittedExteriorLights = 0
+
+  for (const fileName of mazeFiles) {
+    const maze = await importPersistedMaze(fileName)
+    const layout = getMazeSceneLayout(maze, SCONCE_RADIUS)
+
+    omittedExteriorLights += maze.lights.filter((light) => isExteriorWallLight(light, maze)).length
+
+    for (const light of layout.lights) {
+      assert.equal(
+        isExteriorWallLight(light, maze),
+        false,
+        `${maze.id} should not render an exterior wall torch at ${light.cell.x},${light.cell.y}:${light.side}`
+      )
+    }
+  }
+
+  assert.ok(
+    omittedExteriorLights > 0,
+    'the fixture data should include exterior wall torches so this test proves the runtime filter is active'
+  )
 })
 
 test('sizes the torch billboard to match its wall clearance', () => {

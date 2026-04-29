@@ -79,22 +79,40 @@ function cloneCell(cell) {
 }
 
 function openRoomEdges(width, height) {
-  const edges = []
+  return openEdgesForCells(rectangularCells(width, height))
+}
+
+function rectangularCells(width, height) {
+  const cells = []
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      if (x < width - 1) {
-        edges.push({
-          from: { x, y },
-          to: { x: x + 1, y }
-        })
+      cells.push({ x, y })
+    }
+  }
+
+  return cells
+}
+
+function openEdgesForCells(cells) {
+  const cellKeys = new Set(cells.map((cell) => `${cell.x},${cell.y}`))
+  const edges = []
+
+  for (const cell of cells) {
+    for (const delta of [
+      { x: 1, y: 0 },
+      { x: 0, y: 1 }
+    ]) {
+      const to = { x: cell.x + delta.x, y: cell.y + delta.y }
+
+      if (!cellKeys.has(`${to.x},${to.y}`)) {
+        continue
       }
-      if (y < height - 1) {
-        edges.push({
-          from: { x, y },
-          to: { x, y: y + 1 }
-        })
-      }
+
+      edges.push({
+        from: { ...cell },
+        to
+      })
     }
   }
 
@@ -138,6 +156,13 @@ function createAuthoredMazeDefinition(id) {
   }
 
   if (id === 'chamber-1') {
+    const roomCells = rectangularCells(5, 17)
+    const connectorCell = { x: 2, y: 17 }
+    const cells = [
+      ...roomCells,
+      connectorCell
+    ]
+
     return {
       altars: [
         { cell: { x: 0, y: 2 }, targetLevelId: 'maze-001' },
@@ -145,6 +170,7 @@ function createAuthoredMazeDefinition(id) {
         { cell: { x: 4, y: 2 }, targetLevelId: 'maze-003' },
         { cell: { x: 4, y: 11 }, targetLevelId: 'maze-005' }
       ],
+      cells,
       exitRequiresTrophy: false,
       gates: [],
       height: 18,
@@ -169,10 +195,14 @@ function createAuthoredMazeDefinition(id) {
         { cell: { x: 4, y: 13 }, side: 'east' }
       ],
       monsters: [],
-      openEdges: openRoomEdges(5, 18),
+      openEdges: openEdgesForCells(cells),
       opening: {
         cell: { x: 2, y: 17 },
         side: 'south'
+      },
+      roomBounds: {
+        height: 17,
+        width: 5
       },
       playerStart: {
         cell: { x: 2, y: 17 },

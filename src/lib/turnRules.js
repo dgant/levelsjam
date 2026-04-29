@@ -37,6 +37,10 @@ function getNeighbor(cell, direction) {
 }
 
 function isInsideMaze(maze, cell) {
+  if (Array.isArray(maze.cells) && maze.cells.length > 0) {
+    return maze.cells.some((candidate) => cellKey(candidate) === cellKey(cell))
+  }
+
   return (
     cell.x >= 0 &&
     cell.y >= 0 &&
@@ -108,6 +112,10 @@ function createRandom(seed) {
 }
 
 function allCells(maze) {
+  if (Array.isArray(maze.cells) && maze.cells.length > 0) {
+    return maze.cells.map((cell) => ({ x: cell.x, y: cell.y }))
+  }
+
   const cells = []
 
   for (let y = 0; y < maze.height; y += 1) {
@@ -550,7 +558,11 @@ function getDoorId(maze) {
 }
 
 function getOpenDoorIds(maze, state) {
-  if (!maze.opening || cellKey(maze.opening.cell) !== cellKey(state.player.cell)) {
+  if (
+    !maze.opening ||
+    state.turn <= 0 ||
+    cellKey(maze.opening.cell) !== cellKey(state.player.cell)
+  ) {
     return []
   }
 
@@ -665,6 +677,16 @@ function resolveMonsterTurn(maze, openEdges, visibilityEdges, monster, playerCel
     const nextSpiderDirection = chooseSpiderDirection(maze, openEdges, nextMonster)
     if (nextSpiderDirection) {
       nextMonster.direction = nextSpiderDirection
+    }
+  } else if (monster.type === 'werewolf') {
+    const nextWerewolfDirection = chooseWerewolfDirection(
+      maze,
+      openEdges,
+      nextMonster,
+      playerCell
+    ).direction
+    if (nextWerewolfDirection) {
+      nextMonster.direction = nextWerewolfDirection
     }
   }
 

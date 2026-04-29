@@ -24,6 +24,40 @@
   )
   const jobPath = path.default.join(tempDirectory, 'job.json')
   const resultPath = path.default.join(tempDirectory, 'result.json')
+  const timeoutMs = Number(process.env.LEVELSJAM_GPU_LIGHTMAP_TIMEOUT_MS ?? '180000')
+  const killProcessTree = (processId) => new Promise((resolve) => {
+    if (!processId) {
+      resolve()
+      return
+    }
+
+    if (process.platform === 'win32') {
+      const killer = childProcess.default.spawn(
+        'taskkill',
+        ['/pid', String(processId), '/T', '/F'],
+        {
+          stdio: 'ignore',
+          windowsHide: true
+        }
+      )
+
+      killer.on('close', resolve)
+      killer.on('error', resolve)
+      return
+    }
+
+    try {
+      process.kill(-processId, 'SIGTERM')
+    } catch {
+      try {
+        process.kill(processId, 'SIGTERM')
+      } catch {
+        resolve()
+        return
+      }
+    }
+    setTimeout(resolve, 1000)
+  })
 
   try {
     fs.default.writeFileSync(jobPath, JSON.stringify(job))
@@ -39,6 +73,13 @@
       )
       let stdout = ''
       let stderr = ''
+      let settled = false
+      let timedOut = false
+      const timeout = setTimeout(async () => {
+        timedOut = true
+        stderr += `GPU lightmap worker timed out after ${timeoutMs}ms\n`
+        await killProcessTree(child.pid)
+      }, timeoutMs)
 
       child.stdout.on('data', (chunk) => {
         stdout += chunk.toString()
@@ -46,15 +87,32 @@
       child.stderr.on('data', (chunk) => {
         stderr += chunk.toString()
       })
-      child.on('error', reject)
+      child.on('error', async (error) => {
+        if (settled) {
+          return
+        }
+
+        settled = true
+        clearTimeout(timeout)
+        await killProcessTree(child.pid)
+        reject(error)
+      })
       child.on('close', (code) => {
+        if (settled) {
+          return
+        }
+
+        settled = true
+        clearTimeout(timeout)
         if (code === 0) {
           resolve()
           return
         }
 
         reject(new Error(
-          `GPU lightmap worker failed with exit code ${code}\n${stdout}${stderr}`
+          timedOut
+            ? `GPU lightmap worker timed out after ${timeoutMs}ms\n${stdout}${stderr}`
+            : `GPU lightmap worker failed with exit code ${code}\n${stdout}${stderr}`
         ))
       })
     })

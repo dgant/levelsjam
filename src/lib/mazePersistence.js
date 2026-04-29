@@ -120,10 +120,61 @@ function isAcceptableCandidate(maze, validation) {
   )
 }
 
+async function bakeMazeLightmapWithProgress(maze, reportProgress, context = {}) {
+  const startedAt = Date.now()
+  const mazeId = maze.id ?? context.fileName ?? 'unassigned-maze'
+
+  reportProgress({
+    ...context,
+    action: 'start',
+    mazeId,
+    stage: 'bake-lightmap'
+  })
+  try {
+    const lightmap = await bakeMazeLightmap(maze, undefined, {
+      onProgress(progress) {
+        reportProgress({
+          ...context,
+          ...progress,
+          mazeId,
+          stage: 'bake-lightmap'
+        })
+      }
+    })
+
+    reportProgress({
+      ...context,
+      action: 'finish',
+      durationMs: Date.now() - startedAt,
+      lightmap: {
+        atlasHeight: lightmap.atlasHeight,
+        atlasWidth: lightmap.atlasWidth,
+        bakeMs: lightmap.bakeMs,
+        encoding: lightmap.encoding,
+        version: lightmap.version
+      },
+      mazeId,
+      stage: 'bake-lightmap'
+    })
+    return lightmap
+  } catch (error) {
+    reportProgress({
+      ...context,
+      action: 'failed',
+      durationMs: Date.now() - startedAt,
+      error: error.message,
+      mazeId,
+      stage: 'bake-lightmap'
+    })
+    throw error
+  }
+}
+
 async function generateReplacementMaze({
   fileName,
   mazeFactory,
   maxGenerationAttempts,
+  reportProgress = () => {},
   signatures,
   startingAttempt = 0
 }) {
@@ -138,17 +189,26 @@ async function generateReplacementMaze({
     if (!maze.visibility) {
       maze.visibility = computeMazeCellVisibility(maze)
     }
+    const preBakeValidation = validateMaze(maze, { requireLightmap: false })
+
+    if (!isAcceptableCandidate(maze, preBakeValidation)) {
+      continue
+    }
+    const signature = getMazeSignature(maze)
+
+    if (signatures.has(signature)) {
+      continue
+    }
     if (!maze.lightmap) {
-      maze.lightmap = await bakeMazeLightmap(maze)
+      maze.lightmap = await bakeMazeLightmapWithProgress(
+        maze,
+        reportProgress,
+        { actionReason: 'generate-replacement', fileName }
+      )
     }
     const validation = validateMaze(maze)
 
     if (!isAcceptableCandidate(maze, validation)) {
-      continue
-    }
-
-    const signature = getMazeSignature(maze)
-    if (signatures.has(signature)) {
       continue
     }
 
@@ -466,7 +526,11 @@ export async function ensureMazeFiles({
     const shouldRewrite = bakeLightmaps && needsMazeRewrite(maze)
     if (shouldRewrite) {
       maze.visibility = computeMazeCellVisibility(maze)
-      maze.lightmap = await bakeMazeLightmap(maze)
+      maze.lightmap = await bakeMazeLightmapWithProgress(
+        maze,
+        reportProgress,
+        { actionReason: 'rewrite-existing', fileName }
+      )
       fs.writeFileSync(filePath, serializeMazeModule(maze))
       reportProgress({
         action: 'rewrite-lightmap',
@@ -484,6 +548,7 @@ export async function ensureMazeFiles({
         fileName,
         mazeFactory,
         maxGenerationAttempts,
+        reportProgress,
         signatures,
         startingAttempt: fileIndex + 1
       })
@@ -569,7 +634,11 @@ export async function ensureMazeFiles({
       maze.visibility = computeMazeCellVisibility(maze)
     }
     if (bakeLightmaps && !maze.lightmap) {
-      maze.lightmap = await bakeMazeLightmap(maze)
+      maze.lightmap = await bakeMazeLightmapWithProgress(
+        maze,
+        reportProgress,
+        { actionReason: 'generate-new-maze', fileName }
+      )
     }
     fs.writeFileSync(
       path.join(directory, fileName),

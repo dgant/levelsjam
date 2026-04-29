@@ -51,6 +51,22 @@ function getProbeIndex(width, xIndex, yIndex) {
   return (yIndex * width) + xIndex
 }
 
+function getLayoutCells(layout) {
+  if (Array.isArray(layout.maze.cells) && layout.maze.cells.length > 0) {
+    return layout.maze.cells.map((cell) => ({ x: cell.x, y: cell.y }))
+  }
+
+  const cells = []
+
+  for (let y = 0; y < layout.maze.height; y += 1) {
+    for (let x = 0; x < layout.maze.width; x += 1) {
+      cells.push({ x, y })
+    }
+  }
+
+  return cells
+}
+
 export function getReflectionProbeBlendForPosition(layout, position) {
   const xBlend = getAxisBlend(position.x, layout.maze.width, MAZE_CELL_SIZE)
   const zBlend = getAxisBlend(position.z, layout.maze.height, MAZE_CELL_SIZE)
@@ -112,36 +128,34 @@ export function buildGroundReflectionProbeRects(layout) {
   const mazeMinZ = -((layout.maze.height * MAZE_CELL_SIZE) / 2)
   const rects = []
 
-  for (let y = 0; y < layout.maze.height; y += 1) {
+  for (const { x, y } of getLayoutCells(layout)) {
     const z0 = mazeMinZ + (y * MAZE_CELL_SIZE)
     const z1 = z0 + MAZE_CELL_SIZE
     const centerZ = (z0 + z1) / 2
 
-    for (let x = 0; x < layout.maze.width; x += 1) {
-      const x0 = mazeMinX + (x * MAZE_CELL_SIZE)
-      const x1 = x0 + MAZE_CELL_SIZE
-      const centerX = (x0 + x1) / 2
-      const centerBlend = getReflectionProbeBlendForPosition(layout, {
-        x: centerX,
-        z: centerZ
-      })
+    const x0 = mazeMinX + (x * MAZE_CELL_SIZE)
+    const x1 = x0 + MAZE_CELL_SIZE
+    const centerX = (x0 + x1) / 2
+    const centerBlend = getReflectionProbeBlendForPosition(layout, {
+      x: centerX,
+      z: centerZ
+    })
 
-      rects.push({
-        cell: { x, y },
-        centerX,
-        centerZ,
-        depth: z1 - z0,
-        id: `cell-floor-${x}-${y}`,
-        probeIndices: centerBlend.probeIndices,
-        region: {
-          minX: x0,
-          minZ: z0,
-          sizeX: x1 - x0,
-          sizeZ: z1 - z0
-        },
-        width: x1 - x0
-      })
-    }
+    rects.push({
+      cell: { x, y },
+      centerX,
+      centerZ,
+      depth: z1 - z0,
+      id: `cell-floor-${x}-${y}`,
+      probeIndices: centerBlend.probeIndices,
+      region: {
+        minX: x0,
+        minZ: z0,
+        sizeX: x1 - x0,
+        sizeZ: z1 - z0
+      },
+      width: x1 - x0
+    })
   }
 
   return rects

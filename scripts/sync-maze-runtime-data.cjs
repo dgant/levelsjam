@@ -24,6 +24,31 @@ function loadPersistedAuthoredMaze(id) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'))
 }
 
+function authoredMazeNeedsRebake(id, maze) {
+  if (!maze?.lightmap) {
+    return true
+  }
+
+  const altars = Array.isArray(maze.altars) ? maze.altars : []
+
+  if (id === 'chamber-1' && altars.length === 0) {
+    return true
+  }
+
+  if (altars.length === 0) {
+    return false
+  }
+
+  const altarRects = maze.lightmap.altarRects ?? {}
+
+  return altars.some((altar, index) => {
+    const id = altar.id ?? `altar-${index}`
+    const rects = altarRects[id]
+
+    return !rects?.py || !rects?.nz || !rects?.pz || !rects?.nx || !rects?.px
+  })
+}
+
 function replaceMazeLightmapWithRuntimeAssetUrls(maze) {
   if (!maze.lightmap) {
     return maze
@@ -130,12 +155,22 @@ async function main() {
 
   for (let index = 0; index < authoredLevelIds.length; index += 1) {
     const authoredLevelId = authoredLevelIds[index]
-    const maze =
-      loadPersistedAuthoredMaze(authoredLevelId) ??
-      (await createAuthoredRuntimeMaze(authoredLevelId))
+    const persistedMaze = loadPersistedAuthoredMaze(authoredLevelId)
+    const needsAuthoredRebake =
+      !persistedMaze || authoredMazeNeedsRebake(authoredLevelId, persistedMaze)
+    const maze = persistedMaze && !needsAuthoredRebake
+      ? persistedMaze
+      : await createAuthoredRuntimeMaze(authoredLevelId, { bakeLightmap: true })
 
     if (!maze) {
       throw new Error(`Failed to create authored runtime level ${authoredLevelId}`)
+    }
+
+    if (needsAuthoredRebake) {
+      fs.writeFileSync(
+        path.join(authoredMazeDirectory, `${authoredLevelId}.json`),
+        JSON.stringify(maze, null, 2)
+      )
     }
 
     writeRuntimeMaze(maze, authoredLevelId, index + 1, totalPayloads)

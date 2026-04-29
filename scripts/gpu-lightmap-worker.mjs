@@ -9,8 +9,31 @@ if (!jobPath || !resultPath) {
 }
 
 const job = JSON.parse(fs.readFileSync(jobPath, 'utf8'))
+let browser = null
+let closing = false
 
-const browser = await chromium.launch({
+async function closeBrowser() {
+  if (!browser || closing) {
+    return
+  }
+
+  closing = true
+  await browser.close().catch(() => {})
+}
+
+async function closeBrowserAndExit(signal) {
+  await closeBrowser()
+  process.exit(signal === 'SIGINT' ? 130 : 143)
+}
+
+process.once('SIGINT', () => {
+  closeBrowserAndExit('SIGINT')
+})
+process.once('SIGTERM', () => {
+  closeBrowserAndExit('SIGTERM')
+})
+
+browser = await chromium.launch({
   channel: 'chrome',
   headless: true,
   args: [
@@ -200,6 +223,30 @@ void getSurfaceSample(float u, float v, out vec3 position, out vec3 normal) {
       uSurfaceA.y + rotatedPosition.y
     );
     normal = vec3(rotatedNormal.x, 0.0, rotatedNormal.y);
+    return;
+  }
+
+  if (uSurfaceType == 3) {
+    position = vec3(
+      uSurfaceA.x + ((u - 0.5) * uSurfaceA.z),
+      GROUND_Y + uSurfaceA.w,
+      uSurfaceA.y + ((v - 0.5) * uSurfaceA.z)
+    );
+    normal = vec3(0.0, 1.0, 0.0);
+    return;
+  }
+
+  if (uSurfaceType == 4) {
+    vec2 normalXZ = normalize(vec2(uSurfaceB.x, uSurfaceB.y));
+    vec2 tangentXZ = vec2(-normalXZ.y, normalXZ.x);
+    float localAlong = (u - 0.5) * uSurfaceA.z;
+    float localY = v * uSurfaceA.w;
+    vec2 surfaceXZ =
+      vec2(uSurfaceA.x, uSurfaceA.y) +
+      (tangentXZ * localAlong) +
+      (normalXZ * (uSurfaceA.z * 0.5));
+    position = vec3(surfaceXZ.x, GROUND_Y + localY, surfaceXZ.y);
+    normal = vec3(normalXZ.x, 0.0, normalXZ.y);
     return;
   }
 
@@ -1211,5 +1258,5 @@ void main() {
 
   fs.writeFileSync(resultPath, JSON.stringify(result))
 } finally {
-  await browser.close()
+  await closeBrowser()
 }

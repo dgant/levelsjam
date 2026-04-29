@@ -99,6 +99,43 @@ test('runtime level graph keeps authored neighbors and spatial transforms explic
   assert.equal(getRuntimeLevelWorldTransform('maze-001').rotationY, Math.PI)
 })
 
+test('Chamber 1 keeps its entrance passage outside the room footprint', async () => {
+  const chamber = await createAuthoredRuntimeMaze('chamber-1')
+  const cells = chamber.cells.map((cell) => `${cell.x},${cell.y}`).sort()
+
+  assert.equal(chamber.width, 5)
+  assert.equal(chamber.height, 18)
+  assert.deepEqual(chamber.roomBounds, { height: 17, width: 5 })
+  assert.equal(cells.includes('2,17'), true)
+  assert.deepEqual(
+    chamber.cells.filter((cell) => cell.y === 17),
+    [{ x: 2, y: 17 }]
+  )
+  assert.equal(cells.includes('0,17'), false)
+  assert.equal(cells.includes('4,17'), false)
+  assert.equal(
+    chamber.openEdges.some((edge) => (
+      `${edge.from.x},${edge.from.y}|${edge.to.x},${edge.to.y}` === '2,16|2,17'
+    )),
+    true
+  )
+})
+
+test('Chamber 1 bakes static lightmap rectangles for altar blocks', async () => {
+  const chamber = JSON.parse(fs.readFileSync('maze-data/chamber-1.json', 'utf8'))
+
+  assert.equal(chamber.altars.length, 4)
+  for (const [index, altar] of chamber.altars.entries()) {
+    const id = altar.id ?? `altar-${index}`
+    const rects = chamber.lightmap.altarRects[id]
+
+    assert.ok(rects, `${id} should have baked altar lightmap rects`)
+    for (const faceKey of ['py', 'nz', 'pz', 'nx', 'px']) {
+      assert.ok(rects[faceKey], `${id}.${faceKey} should have a lightmap rect`)
+    }
+  }
+})
+
 test('directed runtime level graph is rooted at Entrance and acyclic', () => {
   const graph = getDirectedRuntimeLevelGraph()
   const root = getRuntimeLevelGraphRootId()
@@ -190,6 +227,22 @@ function transformPoint(point, transform) {
   }
 }
 
+function mazeFootprintCells(maze) {
+  if (Array.isArray(maze.cells) && maze.cells.length > 0) {
+    return maze.cells
+  }
+
+  const cells = []
+
+  for (let y = 0; y < maze.height; y += 1) {
+    for (let x = 0; x < maze.width; x += 1) {
+      cells.push({ x, y })
+    }
+  }
+
+  return cells
+}
+
 function wallWorldAxis(wall, transform) {
   const normalizedYaw =
     ((wall.yaw + transform.rotationY) % Math.PI + Math.PI) % Math.PI
@@ -197,7 +250,11 @@ function wallWorldAxis(wall, transform) {
   return Math.abs(normalizedYaw) < 1e-6 ? 'x' : 'z'
 }
 
-function loadRuntimeMaze(levelId) {
+async function loadRuntimeMaze(levelId) {
+  if (levelId === 'entrance' || levelId === 'chamber-1') {
+    return createAuthoredRuntimeMaze(levelId)
+  }
+
   const maze = JSON.parse(
     fs.readFileSync(new URL(`../public/maze-data/${levelId}.json`, import.meta.url), 'utf8')
   )
@@ -225,21 +282,19 @@ function loadRuntimeMaze(levelId) {
   }
 }
 
-test('runtime level cell footprints do not overlap', () => {
+test('runtime level cell footprints do not overlap', async () => {
   const levelIds = Object.keys(getDirectedRuntimeLevelGraph())
   const bounds = []
 
   for (const levelId of levelIds) {
-    const maze = loadRuntimeMaze(levelId)
+    const maze = await loadRuntimeMaze(levelId)
     const transform = getRuntimeLevelWorldTransform(levelId)
 
-    for (let y = 0; y < maze.height; y += 1) {
-      for (let x = 0; x < maze.width; x += 1) {
-        bounds.push({
-          bounds: cellWorldBounds(maze, transform, { x, y }),
-          id: `${levelId}:${x},${y}`
-        })
-      }
+    for (const cell of mazeFootprintCells(maze)) {
+      bounds.push({
+        bounds: cellWorldBounds(maze, transform, cell),
+        id: `${levelId}:${cell.x},${cell.y}`
+      })
     }
   }
 
@@ -254,12 +309,12 @@ test('runtime level cell footprints do not overlap', () => {
   }
 })
 
-test('runtime level wall volumes are not shared between levels', () => {
+test('runtime level wall volumes are not shared between levels', async () => {
   const levelIds = Object.keys(getDirectedRuntimeLevelGraph())
   const walls = []
 
   for (const levelId of levelIds) {
-    const maze = loadRuntimeMaze(levelId)
+    const maze = await loadRuntimeMaze(levelId)
     const transform = getRuntimeLevelWorldTransform(levelId)
 
     for (const wall of getMazeWallSegments(maze)) {

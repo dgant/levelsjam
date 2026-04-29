@@ -16,6 +16,10 @@ const contentTypes = new Map([
   ['.webp', 'image/webp']
 ])
 
+function isExpectedDisconnect(error) {
+  return ['ECONNABORTED', 'ECONNRESET', 'EPIPE'].includes(error?.code)
+}
+
 function resolvePath(requestUrl) {
   const pathname = new URL(requestUrl, `http://127.0.0.1:${port}`).pathname
   const relativePath = decodeURIComponent(pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, ''))
@@ -47,6 +51,11 @@ const server = http.createServer((request, response) => {
       response.end()
     })
     response.on('error', (responseError) => {
+      if (isExpectedDisconnect(responseError)) {
+        stream.destroy()
+        return
+      }
+
       console.error('[serve-root] response error', filePath, responseError)
       stream.destroy()
     })
@@ -61,6 +70,11 @@ const server = http.createServer((request, response) => {
 })
 
 server.on('clientError', (error, socket) => {
+  if (isExpectedDisconnect(error)) {
+    socket.destroy()
+    return
+  }
+
   console.error('[serve-root] client error', error)
   socket.end('HTTP/1.1 400 Bad Request\r\n\r\n')
 })

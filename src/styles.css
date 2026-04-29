@@ -225,6 +225,13 @@ body {
   box-shadow: 0 24px 80px rgb(0 0 0 / 60%);
 }
 
+.level-menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 .credits-panel h2 {
   margin: 0 0 18px;
   text-align: center;
@@ -233,10 +240,54 @@ body {
 }
 
 .level-menu-panel h2 {
-  margin: 0 0 18px;
+  margin: 0;
   text-align: center;
   text-transform: uppercase;
   letter-spacing: 0.16em;
+}
+
+.level-menu-close,
+.level-menu-tab {
+  padding: 8px 12px;
+  background: rgb(255 244 216 / 7%);
+  border: 1px solid rgb(229 198 139 / 18%);
+  border-radius: 999px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.level-menu-close:hover,
+.level-menu-close:focus-visible,
+.level-menu-tab:hover,
+.level-menu-tab:focus-visible,
+.level-menu-tab-active {
+  background: rgb(229 198 139 / 16%);
+  border-color: rgb(229 198 139 / 42%);
+  outline: none;
+}
+
+.level-menu-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 18px 0;
+}
+
+.level-menu-settings {
+  display: grid;
+  gap: 12px;
+}
+
+.level-menu-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 12px 14px;
+  background: rgb(255 244 216 / 7%);
+  border: 1px solid rgb(229 198 139 / 18%);
+  border-radius: 12px;
 }
 
 .credits-panel p {
@@ -461,6 +512,8 @@ body {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     pointer-events: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
   }
 
   .mobile-touch-zone {
@@ -471,7 +524,9 @@ body {
     font: 700 clamp(2.4rem, 12vw, 5rem) / 1 ui-monospace, monospace;
     text-shadow: 0 2px 18px rgb(0 0 0 / 80%);
     pointer-events: auto;
-    touch-action: manipulation;
+    touch-action: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
     display: flex;
     align-items: flex-end;
     justify-content: center;
@@ -495,5 +550,22 @@ body {
     font: 700 13px/1 ui-monospace, monospace;
     pointer-events: auto;
     touch-action: manipulation;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .level-menu-modal {
+    padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  }
+
+  .level-menu-panel {
+    width: 100%;
+    max-height: 100%;
+    padding: 18px;
+    border-radius: 14px;
+  }
+
+  .level-menu-header {
+    align-items: flex-start;
   }
 }

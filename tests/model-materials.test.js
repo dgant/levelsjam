@@ -121,14 +121,19 @@ test('gate dynamic volumetric material variant stays under the WebGL sampler bud
   )
 })
 
-test('doors use runtime metal-rust ORM and baked dynamic lighting', () => {
+test('doors use generated Minoan-door ORM textures and baked dynamic lighting', () => {
   const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
 
   assert.match(appSource, /const DOOR_TEXTURE_URLS = \{/)
   assert.match(
     appSource,
-    /textures\/runtime\/metal-rust\/metal_rust_orm-1K\.png/,
-    'door material should bind the runtime ORM texture'
+    /textures\/runtime\/minoan-door\/minoan_door_left_orm\.png/,
+    'left door leaf should bind its generated runtime ORM texture'
+  )
+  assert.match(
+    appSource,
+    /textures\/runtime\/minoan-door\/minoan_door_right_orm\.png/,
+    'right door leaf should bind its generated runtime ORM texture'
   )
   assert.doesNotMatch(
     appSource,
@@ -147,8 +152,18 @@ test('doors use runtime metal-rust ORM and baked dynamic lighting', () => {
   )
   assert.match(
     appSource,
-    /isOpen=\{isActive && isDoorOpenForTurnState\(door, layout\.maze, turnState\)\}/,
-    'maze entrance doors should be driven by active adjacent player state'
+    /activePlayerWorldPosition/,
+    'maze entrance doors should receive the active player world position'
+  )
+  assert.match(
+    appSource,
+    /activePlayerTurn > 0 &&\s*doorWorldPosition/,
+    'maze entrance doors should open from world-space adjacency after gameplay movement without starting open'
+  )
+  assert.match(
+    appSource,
+    /isOpen=\{\s*\(isActive && isDoorOpenForTurnState\(door, layout\.maze, turnState\)\) \|\|\s*isAdjacentToActivePlayer\s*\}/,
+    'maze entrance doors should be driven by active rules state or active world-space player adjacency'
   )
   assert.match(
     appSource,
@@ -164,6 +179,21 @@ test('lens flare controls do not use app-side giant multipliers', () => {
   assert.match(appSource, /Lens Flare Strength/)
   assert.match(appSource, /Star Burst Intensity/)
   assert.doesNotMatch(appSource, /Flare Opacity/)
+})
+
+test('mobile menu exposes compact graphics controls and swipe-safe touch zones', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+  const stylesSource = fs.readFileSync(path.join(rootDir, 'src/styles.css'), 'utf8')
+
+  assert.match(appSource, /level-menu-tabs/)
+  assert.match(appSource, /onBooleanSettingChange\('unlitMode', !event\.target\.checked\)/)
+  assert.match(appSource, /onEffectSettingChange\('volumetricLighting'/)
+  assert.match(appSource, /onAmbientOcclusionModeChange\(event\.target\.checked \? 'n8ao' : 'off'\)/)
+  assert.match(appSource, /aria-label="Close Menu"/)
+  assert.match(appSource, /&#9776;/)
+  assert.match(appSource, /swipeThreshold = 42/)
+  assert.match(stylesSource, /-webkit-tap-highlight-color: transparent/)
+  assert.match(stylesSource, /touch-action: none/)
 })
 
 test('minotaur runtime materials use the authored dark base tint', () => {
