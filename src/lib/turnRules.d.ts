@@ -28,6 +28,7 @@ export type TurnState = {
   }
   dead: boolean
   escaped: boolean
+  itemStates?: Record<string, 'ground' | 'held' | 'consumed'>
   monsters: TurnMonster[]
   player: {
     cell: MazeCell

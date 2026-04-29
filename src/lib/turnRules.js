@@ -197,9 +197,13 @@ function createPlayerState(maze, direction) {
 }
 
 export function getExitForMove(maze, cell, direction) {
-  const exits = Array.isArray(maze.levelExits) && maze.levelExits.length > 0
-    ? maze.levelExits
-    : [maze.opening]
+  const exits = maze.disableOpeningExit
+    ? (maze.levelExits ?? [])
+    : (
+      Array.isArray(maze.levelExits) && maze.levelExits.length > 0
+        ? maze.levelExits
+        : [maze.opening]
+    )
 
   return exits.find((exit) => (
     cellKey(exit.cell) === cellKey(cell) &&
@@ -341,15 +345,20 @@ export function createInitialTurnState(maze) {
       cell: { ...monster.cell },
       direction: chooseInitialMonsterDirection(maze, monsterMoveEdges, monster),
       hand: monster.hand ?? null,
-      id: `${monster.type}-${index}`,
+      id: monster.id ?? `${monster.type}-${index}`,
       failedMoveDirection: null,
       lastMoveDirection: null,
       lastPath: [],
       lastSeenDirection: null,
       movedPreviousTurn: false,
+      localMonsterIndex: monster.localMonsterIndex ?? null,
+      ownerLevelId: monster.ownerLevelId ?? null,
       type: monster.type
     })),
     player: createPlayerState(maze, playerDirection),
+    itemStates: Object.fromEntries(
+      (maze.items ?? []).map((item) => [item.id, 'ground'])
+    ),
     swordState: maze.sword?.cell ? 'ground' : 'consumed',
     trophyState: maze.trophy?.cell ? 'ground' : 'consumed',
     turn: 0
@@ -364,6 +373,7 @@ function cloneState(state) {
       direction: state.checkpoint.direction
     },
     monsters: state.monsters.map(cloneMonster),
+    itemStates: { ...(state.itemStates ?? {}) },
     player: {
       ...state.player,
       cell: { ...state.player.cell }
@@ -602,6 +612,12 @@ function isExitMove(maze, state, direction) {
 function consumeSword(state) {
   state.player.hasSword = false
   state.swordState = 'consumed'
+  for (const [itemId, itemState] of Object.entries(state.itemStates ?? {})) {
+    if (itemState === 'held' && itemId.includes(':sword')) {
+      state.itemStates[itemId] = 'consumed'
+      return
+    }
+  }
 }
 
 function updateMinotaurSight(maze, visibilityEdges, monster, playerCell) {
@@ -709,6 +725,23 @@ function resolveMonsterTurn(maze, openEdges, visibilityEdges, monster, playerCel
 }
 
 function resolvePlayerPickups(maze, state, outcome) {
+  for (const item of maze.items ?? []) {
+    if (
+      (state.itemStates?.[item.id] ?? 'ground') === 'ground' &&
+      cellKey(state.player.cell) === cellKey(item.cell)
+    ) {
+      state.itemStates ??= {}
+      state.itemStates[item.id] = 'held'
+      if (item.type === 'sword') {
+        state.player.hasSword = true
+        outcome.pickedUpSword = true
+      } else if (item.type === 'trophy') {
+        state.player.hasTrophy = true
+        outcome.pickedUpTrophy = true
+      }
+    }
+  }
+
   if (
     maze.sword?.cell &&
     state.swordState === 'ground' &&

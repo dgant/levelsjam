@@ -1,90 +1,19 @@
-import { getRuntimeLevelWorldTransform } from './levels.js'
-import { MAZE_CELL_SIZE } from './maze.js'
-import { createInitialTurnState } from './turnRules.js'
+import {
+  applyTurnAction,
+  createInitialTurnState
+} from './turnRules.js'
 import {
   buildWorldGridFromLayouts,
+  createWorldRulesMaze,
   getLevelLocalCellForWorldCell,
+  getLocalDirectionForWorldDirection,
+  getWorldCellOwner,
+  getWorldDirectionForLocalDirection,
   localCellToWorldCell
 } from './worldGrid.js'
 
-const DIRECTIONS_TO_YAW = {
-  east: -Math.PI / 2,
-  north: 0,
-  south: Math.PI,
-  west: Math.PI / 2
-}
-
-function normalizeAngleRadians(value) {
-  return Math.atan2(Math.sin(value), Math.cos(value))
-}
-
-function yawToDirection(yaw) {
-  const normalized = normalizeAngleRadians(yaw)
-  const candidates = [
-    { direction: 'north', yaw: 0 },
-    { direction: 'east', yaw: -Math.PI / 2 },
-    { direction: 'south', yaw: Math.PI },
-    { direction: 'west', yaw: Math.PI / 2 }
-  ]
-
-  return candidates.reduce((best, candidate) => {
-    const bestDistance = Math.abs(normalizeAngleRadians(normalized - best.yaw))
-    const candidateDistance = Math.abs(normalizeAngleRadians(normalized - candidate.yaw))
-
-    return candidateDistance < bestDistance ? candidate : best
-  }).direction
-}
-
-function directionToYaw(direction) {
-  return DIRECTIONS_TO_YAW[direction] ?? 0
-}
-
 function cloneCell(cell) {
   return { x: cell.x, y: cell.y }
-}
-
-function getMazeCellLocalCenter(maze, cell) {
-  return {
-    x: -((maze.width * MAZE_CELL_SIZE) / 2) + (MAZE_CELL_SIZE / 2) + (cell.x * MAZE_CELL_SIZE),
-    z: -((maze.height * MAZE_CELL_SIZE) / 2) + (MAZE_CELL_SIZE / 2) + (cell.y * MAZE_CELL_SIZE)
-  }
-}
-
-function transformLocalPointToWorld(point, transform) {
-  const cos = Math.cos(transform.rotationY)
-  const sin = Math.sin(transform.rotationY)
-
-  return {
-    x: transform.x + (point.x * cos) + (point.z * sin),
-    z: transform.z - (point.x * sin) + (point.z * cos)
-  }
-}
-
-function transformWorldPointToLocal(point, transform) {
-  const dx = point.x - transform.x
-  const dz = point.z - transform.z
-  const cos = Math.cos(transform.rotationY)
-  const sin = Math.sin(transform.rotationY)
-
-  return {
-    x: (dx * cos) - (dz * sin),
-    z: (dx * sin) + (dz * cos)
-  }
-}
-
-function getLocalCellFromLevelLocalPoint(maze, point) {
-  return {
-    x: Math.round((point.x + ((maze.width * MAZE_CELL_SIZE) / 2) - (MAZE_CELL_SIZE / 2)) / MAZE_CELL_SIZE),
-    y: Math.round((point.z + ((maze.height * MAZE_CELL_SIZE) / 2) - (MAZE_CELL_SIZE / 2)) / MAZE_CELL_SIZE)
-  }
-}
-
-function mapLocalCellBetweenLevels(sourceMaze, sourceTransform, targetMaze, targetTransform, cell) {
-  const sourceLocalCenter = getMazeCellLocalCenter(sourceMaze, cell)
-  const worldCenter = transformLocalPointToWorld(sourceLocalCenter, sourceTransform)
-  const targetLocalCenter = transformWorldPointToLocal(worldCenter, targetTransform)
-
-  return getLocalCellFromLevelLocalPoint(targetMaze, targetLocalCenter)
 }
 
 function cloneMonster(monster) {
@@ -102,12 +31,31 @@ export function cloneTurnStateForGlobal(state) {
       cell: cloneCell(state.checkpoint.cell),
       direction: state.checkpoint.direction
     },
+    itemStates: { ...(state.itemStates ?? {}) },
     monsters: state.monsters.map(cloneMonster),
     player: {
       ...state.player,
       cell: cloneCell(state.player.cell)
     }
   }
+}
+
+function cloneLayoutRegistry(layouts) {
+  return Object.fromEntries(Object.entries(layouts ?? {}))
+}
+
+function getRegisteredLayouts(state, extraLayouts = []) {
+  const layoutsById = new Map(
+    Object.values(state?.levelLayouts ?? {}).map((layout) => [layout.maze.id, layout])
+  )
+
+  for (const layout of extraLayouts) {
+    if (layout?.maze?.id) {
+      layoutsById.set(layout.maze.id, layout)
+    }
+  }
+
+  return Array.from(layoutsById.values())
 }
 
 function cloneGlobalState(state) {
@@ -118,18 +66,223 @@ function cloneGlobalState(state) {
       direction: state.checkpoint.direction,
       levelId: state.checkpoint.levelId
     },
-    levelStates: Object.fromEntries(
-      Object.entries(state.levelStates).map(([levelId, levelState]) => [
-        levelId,
-        cloneTurnStateForGlobal(levelState)
-      ])
-    ),
+    levelLayouts: cloneLayoutRegistry(state.levelLayouts),
     player: {
       ...state.player,
-      cell: cloneCell(state.player.cell),
-      levelId: state.player.levelId
+      cell: cloneCell(state.player.cell)
+    },
+    worldTurnState: cloneTurnStateForGlobal(state.worldTurnState)
+  }
+}
+
+function createWorldTurnState(layouts, activeLayout) {
+  const worldGrid = buildWorldGridFromLayouts(layouts)
+  const activeInitialState = createInitialTurnState(activeLayout.maze)
+  const activeWorldCell = localCellToWorldCell(activeLayout, activeInitialState.player.cell)
+  const activeWorldDirection = getWorldDirectionForLocalDirection(
+    activeLayout,
+    activeInitialState.player.cell,
+    activeInitialState.player.direction
+  )
+  const worldMaze = createWorldRulesMaze(worldGrid, {
+    playerStart: {
+      cell: activeWorldCell,
+      direction: activeWorldDirection
+    }
+  })
+  const worldTurnState = createInitialTurnState(worldMaze)
+
+  worldTurnState.player.cell = cloneCell(activeWorldCell)
+  worldTurnState.player.direction = activeWorldDirection
+  worldTurnState.checkpoint = {
+    cell: cloneCell(activeWorldCell),
+    direction: activeWorldDirection
+  }
+
+  return worldTurnState
+}
+
+function syncTopLevelState(next, levelId = next.activeLevelId) {
+  next.dead = next.worldTurnState.dead
+  next.escaped = next.worldTurnState.escaped
+  next.turn = next.worldTurnState.turn
+  next.player = {
+    ...next.worldTurnState.player,
+    cell: cloneCell(next.worldTurnState.player.cell),
+    levelId
+  }
+  next.checkpoint = {
+    cell: cloneCell(next.worldTurnState.checkpoint.cell),
+    direction: next.worldTurnState.checkpoint.direction,
+    levelId: next.checkpoint?.levelId ?? levelId
+  }
+  return next
+}
+
+function withWorldTurnState(state, worldTurnState) {
+  return {
+    ...state,
+    worldTurnState: cloneTurnStateForGlobal(worldTurnState)
+  }
+}
+
+function getLayoutForLevel(state, levelId, maze) {
+  return state.levelLayouts[levelId] ?? { maze }
+}
+
+function projectWorldTurnStateToLevel(state, levelId, maze) {
+  const layout = getLayoutForLevel(state, levelId, maze)
+  const worldGrid = buildWorldGridFromLayouts(getRegisteredLayouts(state, [layout]))
+  const projected = createInitialTurnState(maze)
+  const localPlayerCell = getLevelLocalCellForWorldCell(
+    worldGrid,
+    levelId,
+    state.worldTurnState.player.cell
+  )
+
+  projected.dead = state.worldTurnState.dead
+  projected.escaped = state.worldTurnState.escaped
+  projected.turn = state.worldTurnState.turn
+  projected.player = {
+    cell: localPlayerCell ?? cloneCell(projected.player.cell),
+    direction: localPlayerCell
+      ? getLocalDirectionForWorldDirection(
+          layout,
+          localPlayerCell,
+          state.worldTurnState.player.direction
+        )
+      : projected.player.direction,
+    hasSword: state.worldTurnState.player.hasSword,
+    hasTrophy: state.worldTurnState.player.hasTrophy
+  }
+
+  projected.monsters = state.worldTurnState.monsters
+    .filter((monster) => monster.ownerLevelId === levelId)
+    .map((monster) => {
+      const localCell = getLevelLocalCellForWorldCell(worldGrid, levelId, monster.cell)
+
+      return {
+        ...monster,
+        cell: localCell ?? cloneCell(monster.cell),
+        direction: localCell
+          ? getLocalDirectionForWorldDirection(layout, localCell, monster.direction)
+          : monster.direction,
+        id: String(monster.id).startsWith(`${levelId}:`)
+          ? String(monster.id).slice(levelId.length + 1)
+          : monster.id,
+        lastPath: [...(monster.lastPath ?? [])],
+        lastSeenDirection: monster.lastSeenDirection && localCell
+          ? getLocalDirectionForWorldDirection(layout, localCell, monster.lastSeenDirection)
+          : monster.lastSeenDirection
+      }
+    })
+
+  projected.itemStates = Object.fromEntries(
+    Object.entries(state.worldTurnState.itemStates ?? {})
+      .filter(([itemId]) => itemId.startsWith(`${levelId}:`))
+      .map(([itemId, itemState]) => [itemId.slice(levelId.length + 1), itemState])
+  )
+  projected.swordState = state.worldTurnState.itemStates?.[`${levelId}:sword`] ?? 'consumed'
+  projected.trophyState = state.worldTurnState.itemStates?.[`${levelId}:trophy`] ?? 'consumed'
+
+  const localCheckpointCell = getLevelLocalCellForWorldCell(
+    worldGrid,
+    levelId,
+    state.worldTurnState.checkpoint.cell
+  )
+
+  if (localCheckpointCell) {
+    projected.checkpoint = {
+      cell: localCheckpointCell,
+      direction: getLocalDirectionForWorldDirection(
+        layout,
+        localCheckpointCell,
+        state.worldTurnState.checkpoint.direction
+      )
     }
   }
+
+  return projected
+}
+
+function applyLocalProjectionToWorld(state, levelId, turnState, maze) {
+  const next = cloneGlobalState(state)
+  const layout = getLayoutForLevel(next, levelId, maze)
+  const worldGrid = buildWorldGridFromLayouts(getRegisteredLayouts(next, [layout]))
+  const localPlayerCell = turnState.player.cell
+  const worldPlayerCell = localCellToWorldCell(layout, localPlayerCell)
+  const worldPlayerDirection = getWorldDirectionForLocalDirection(
+    layout,
+    localPlayerCell,
+    turnState.player.direction
+  )
+
+  next.activeLevelId = levelId
+  next.worldTurnState.dead = turnState.dead
+  next.worldTurnState.escaped = turnState.escaped
+  next.worldTurnState.turn = turnState.turn
+  next.worldTurnState.player = {
+    ...next.worldTurnState.player,
+    cell: worldPlayerCell,
+    direction: worldPlayerDirection,
+    hasSword: turnState.player.hasSword,
+    hasTrophy: turnState.player.hasTrophy
+  }
+  next.worldTurnState.checkpoint = {
+    cell: localCellToWorldCell(layout, turnState.checkpoint.cell),
+    direction: getWorldDirectionForLocalDirection(
+      layout,
+      turnState.checkpoint.cell,
+      turnState.checkpoint.direction
+    )
+  }
+  next.worldTurnState.itemStates = {
+    ...(next.worldTurnState.itemStates ?? {}),
+    [`${levelId}:sword`]: turnState.swordState,
+    [`${levelId}:trophy`]: turnState.trophyState
+  }
+
+  const localMonsterById = new Map(turnState.monsters.map((monster) => [monster.id, monster]))
+
+  next.worldTurnState.monsters = next.worldTurnState.monsters.map((monster) => {
+    if (monster.ownerLevelId !== levelId) {
+      return monster
+    }
+
+    const localId = String(monster.id).startsWith(`${levelId}:`)
+      ? String(monster.id).slice(levelId.length + 1)
+      : monster.id
+    const localMonster = localMonsterById.get(localId) ?? localMonsterById.get(monster.id)
+
+    if (!localMonster) {
+      return monster
+    }
+
+    const worldCell = localCellToWorldCell(layout, localMonster.cell)
+
+    return {
+      ...monster,
+      ...localMonster,
+      cell: worldCell,
+      direction: getWorldDirectionForLocalDirection(
+        layout,
+        localMonster.cell,
+        localMonster.direction
+      ),
+      id: monster.id,
+      lastPath: [...(localMonster.lastPath ?? [])],
+      lastSeenDirection: localMonster.lastSeenDirection
+        ? getWorldDirectionForLocalDirection(
+            layout,
+            localMonster.cell,
+            localMonster.lastSeenDirection
+          )
+        : localMonster.lastSeenDirection,
+      ownerLevelId: levelId
+    }
+  })
+
+  return syncTopLevelState(next, levelId)
 }
 
 export function findIngressCellForGlobalTransition(targetMaze, sourceLevelId) {
@@ -143,39 +296,68 @@ export function findIngressCellForGlobalTransition(targetMaze, sourceLevelId) {
 }
 
 export function createInitialGlobalTurnState(activeLayout, additionalLayouts = []) {
-  const activeTurnState = createInitialTurnState(activeLayout.maze)
+  const layouts = [activeLayout, ...additionalLayouts]
+    .filter((layout, index, all) => (
+      layout?.maze?.id &&
+      all.findIndex((candidate) => candidate?.maze?.id === layout.maze.id) === index
+    ))
+  const worldTurnState = createWorldTurnState(layouts, activeLayout)
   const globalState = {
     activeLevelId: activeLayout.maze.id,
     checkpoint: {
-      cell: cloneCell(activeTurnState.checkpoint.cell),
-      direction: activeTurnState.checkpoint.direction,
+      cell: cloneCell(worldTurnState.checkpoint.cell),
+      direction: worldTurnState.checkpoint.direction,
       levelId: activeLayout.maze.id
     },
-    dead: activeTurnState.dead,
-    escaped: activeTurnState.escaped,
-    levelStates: {
-      [activeLayout.maze.id]: cloneTurnStateForGlobal(activeTurnState)
-    },
+    dead: worldTurnState.dead,
+    escaped: worldTurnState.escaped,
+    levelLayouts: Object.fromEntries(layouts.map((layout) => [layout.maze.id, layout])),
     player: {
-      ...activeTurnState.player,
-      cell: cloneCell(activeTurnState.player.cell),
+      ...worldTurnState.player,
+      cell: cloneCell(worldTurnState.player.cell),
       levelId: activeLayout.maze.id
     },
-    turn: activeTurnState.turn
+    turn: worldTurnState.turn,
+    worldTurnState
   }
 
-  return ensureGlobalTurnStateLevels(globalState, additionalLayouts)
+  return syncTopLevelState(globalState, activeLayout.maze.id)
 }
 
 export function ensureGlobalTurnStateLevel(state, layout) {
-  if (state.levelStates[layout.maze.id]) {
+  if (state.levelLayouts?.[layout.maze.id]) {
     return state
   }
 
   const next = cloneGlobalState(state)
+  const layouts = getRegisteredLayouts(next, [layout])
+  const previousWorldTurnState = next.worldTurnState
+  const rebuiltWorldTurnState = createWorldTurnState(layouts, getLayoutForLevel(next, next.activeLevelId, layout.maze))
+  const existingMonsterIds = new Set(previousWorldTurnState.monsters.map((monster) => monster.id))
 
-  next.levelStates[layout.maze.id] = createInitialTurnState(layout.maze)
-  return next
+  rebuiltWorldTurnState.player = {
+    ...previousWorldTurnState.player,
+    cell: cloneCell(previousWorldTurnState.player.cell)
+  }
+  rebuiltWorldTurnState.checkpoint = {
+    cell: cloneCell(previousWorldTurnState.checkpoint.cell),
+    direction: previousWorldTurnState.checkpoint.direction
+  }
+  rebuiltWorldTurnState.dead = previousWorldTurnState.dead
+  rebuiltWorldTurnState.escaped = previousWorldTurnState.escaped
+  rebuiltWorldTurnState.turn = previousWorldTurnState.turn
+  rebuiltWorldTurnState.itemStates = {
+    ...(rebuiltWorldTurnState.itemStates ?? {}),
+    ...(previousWorldTurnState.itemStates ?? {})
+  }
+  rebuiltWorldTurnState.monsters = [
+    ...previousWorldTurnState.monsters,
+    ...rebuiltWorldTurnState.monsters.filter((monster) => !existingMonsterIds.has(monster.id))
+  ]
+
+  next.levelLayouts[layout.maze.id] = layout
+  next.worldTurnState = rebuiltWorldTurnState
+  return syncTopLevelState(next)
 }
 
 export function ensureGlobalTurnStateLevels(state, layouts) {
@@ -186,177 +368,139 @@ export function ensureGlobalTurnStateLevels(state, layouts) {
 }
 
 export function getGlobalTurnStateForLevel(state, levelId, maze) {
-  const storedState = state.levelStates[levelId] ?? createInitialTurnState(maze)
-  const renderedState = cloneTurnStateForGlobal(storedState)
-
-  if (levelId !== state.activeLevelId) {
-    return renderedState
-  }
-
-  renderedState.dead = state.dead
-  renderedState.escaped = state.escaped
-  renderedState.player = {
-    cell: cloneCell(state.player.cell),
-    direction: state.player.direction,
-    hasSword: state.player.hasSword,
-    hasTrophy: state.player.hasTrophy
-  }
-  renderedState.turn = state.turn
-
-  if (state.checkpoint.levelId === levelId) {
-    renderedState.checkpoint = {
-      cell: cloneCell(state.checkpoint.cell),
-      direction: state.checkpoint.direction
-    }
-  }
-
-  return renderedState
+  return projectWorldTurnStateToLevel(state, levelId, maze)
 }
 
 export function replaceGlobalTurnStateForLevel(state, levelId, turnState) {
-  const next = cloneGlobalState(state)
-  const storedState = cloneTurnStateForGlobal(turnState)
-
-  next.levelStates[levelId] = storedState
-
-  if (levelId === next.activeLevelId) {
-    next.dead = storedState.dead
-    next.escaped = storedState.escaped
-    next.player = {
-      ...storedState.player,
-      cell: cloneCell(storedState.player.cell),
-      levelId
-    }
-    next.turn = storedState.turn
-    next.checkpoint = {
-      cell: cloneCell(storedState.checkpoint.cell),
-      direction: storedState.checkpoint.direction,
-      levelId
-    }
-  }
-
-  return next
+  return applyLocalProjectionToWorld(state, levelId, turnState, getLayoutForLevel(state, levelId, null).maze)
 }
 
 export function resetGlobalTurnStateLevel(state, layout) {
-  const next = cloneGlobalState(state)
-  const resetState = createInitialTurnState(layout.maze)
-
-  next.levelStates[layout.maze.id] = resetState
-
-  if (layout.maze.id === next.activeLevelId) {
-    next.dead = resetState.dead
-    next.escaped = resetState.escaped
-    next.player = {
-      ...resetState.player,
-      cell: cloneCell(resetState.player.cell),
-      levelId: layout.maze.id
+  const next = cloneGlobalState(ensureGlobalTurnStateLevel(state, layout))
+  const resetState = createInitialTurnState(createWorldRulesMaze(
+    buildWorldGridFromLayouts(getRegisteredLayouts(next)),
+    {
+      playerStart: {
+        cell: localCellToWorldCell(layout, createInitialTurnState(layout.maze).player.cell),
+        direction: getWorldDirectionForLocalDirection(
+          layout,
+          createInitialTurnState(layout.maze).player.cell,
+          createInitialTurnState(layout.maze).player.direction
+        )
+      }
     }
-    next.turn = resetState.turn
-    next.checkpoint = {
-      cell: cloneCell(resetState.checkpoint.cell),
-      direction: resetState.checkpoint.direction,
-      levelId: layout.maze.id
-    }
+  ))
+  const ownerPrefix = `${layout.maze.id}:`
+  const resetItemStates = Object.fromEntries(
+    Object.entries(resetState.itemStates ?? {}).filter(([itemId]) => itemId.startsWith(ownerPrefix))
+  )
+
+  next.worldTurnState.monsters = [
+    ...next.worldTurnState.monsters.filter((monster) => monster.ownerLevelId !== layout.maze.id),
+    ...resetState.monsters.filter((monster) => monster.ownerLevelId === layout.maze.id)
+  ]
+  next.worldTurnState.itemStates = {
+    ...(next.worldTurnState.itemStates ?? {}),
+    ...resetItemStates
   }
 
-  return next
+  if (layout.maze.id === next.activeLevelId) {
+    const localInitialState = createInitialTurnState(layout.maze)
+
+    return applyLocalProjectionToWorld(next, layout.maze.id, localInitialState, layout.maze)
+  }
+
+  return syncTopLevelState(next)
 }
 
 export function activateGlobalTurnStateLevel(state, layout) {
   const ensuredState = ensureGlobalTurnStateLevel(state, layout)
   const next = cloneGlobalState(ensuredState)
-  const activeLevelState = next.levelStates[layout.maze.id]
 
   next.activeLevelId = layout.maze.id
-  next.dead = activeLevelState.dead
-  next.escaped = activeLevelState.escaped
-  next.player = {
-    ...activeLevelState.player,
-    cell: cloneCell(activeLevelState.player.cell),
-    levelId: layout.maze.id
-  }
-  next.turn = activeLevelState.turn
-  next.checkpoint = {
-    cell: cloneCell(activeLevelState.checkpoint.cell),
-    direction: activeLevelState.checkpoint.direction,
-    levelId: layout.maze.id
-  }
-
-  return next
+  return syncTopLevelState(next, layout.maze.id)
 }
 
 export function transitionGlobalTurnState({
   sourceLevelId,
-  sourcePreviousState,
   sourceState,
-  sourceLayout,
   targetLayout,
   state
 }) {
-  const ensuredState = ensureGlobalTurnStateLevel(state, targetLayout)
-  const next = cloneGlobalState(ensuredState)
-  const targetLevelId = targetLayout.maze.id
-  const sourceTransform = getRuntimeLevelWorldTransform(sourceLevelId)
-  const targetTransform = getRuntimeLevelWorldTransform(targetLevelId)
-  const sourceWorldYaw =
-    directionToYaw(sourceState.player.direction) + sourceTransform.rotationY
-  const targetLocalYaw = sourceWorldYaw - targetTransform.rotationY
-  const sourceMaze = sourceLayout?.maze ?? null
-  const sourceStoredState = cloneTurnStateForGlobal(sourcePreviousState ?? sourceState)
-  const targetStoredState = cloneTurnStateForGlobal(next.levelStates[targetLevelId])
-  const sourceWorldCell = sourceLayout
-    ? localCellToWorldCell(sourceLayout, sourceState.player.cell)
-    : null
-  const canonicalTargetCell = sourceWorldCell && sourceLayout
-    ? getLevelLocalCellForWorldCell(
-        buildWorldGridFromLayouts([sourceLayout, targetLayout]),
-        targetLevelId,
-        sourceWorldCell
+  const stateWithSource = sourceState
+    ? replaceGlobalTurnStateForLevel(
+        ensureGlobalTurnStateLevel(state, targetLayout),
+        sourceLevelId,
+        sourceState
       )
-    : null
-  const targetPlayer = {
-    cell: canonicalTargetCell ?? (
-      sourceMaze
-        ? mapLocalCellBetweenLevels(
-          sourceMaze,
-          sourceTransform,
-          targetLayout.maze,
-          targetTransform,
-          sourceState.player.cell
-        )
-        : findIngressCellForGlobalTransition(targetLayout.maze, sourceLevelId)
-    ),
-    direction: yawToDirection(targetLocalYaw),
-    hasSword: sourceState.player.hasSword,
-    hasTrophy: sourceState.player.hasTrophy
+    : ensureGlobalTurnStateLevel(state, targetLayout)
+  const next = cloneGlobalState(stateWithSource)
+
+  next.activeLevelId = targetLayout.maze.id
+  return syncTopLevelState(next, targetLayout.maze.id)
+}
+
+export function applyGlobalTurnAction(state, action) {
+  const layouts = getRegisteredLayouts(state)
+  const worldGrid = buildWorldGridFromLayouts(layouts)
+  const worldMaze = createWorldRulesMaze(worldGrid, {
+    playerStart: {
+      cell: state.worldTurnState.player.cell,
+      direction: state.worldTurnState.player.direction
+    }
+  })
+  const result = applyTurnAction(worldMaze, state.worldTurnState, action)
+  const next = cloneGlobalState(state)
+
+  next.worldTurnState = cloneTurnStateForGlobal(result.state)
+  return {
+    outcome: {
+      ...result,
+      previous: cloneTurnStateForGlobal(result.previous),
+      state: cloneTurnStateForGlobal(result.state)
+    },
+    state: syncTopLevelState(next)
   }
+}
 
-  sourceStoredState.player.hasSword = sourceState.player.hasSword
-  sourceStoredState.player.hasTrophy = sourceState.player.hasTrophy
-  sourceStoredState.turn = Math.max(sourceStoredState.turn, sourceState.turn)
-  next.levelStates[sourceLevelId] = sourceStoredState
+export function applyGlobalTurnActionForLevel(state, levelId, maze, action) {
+  const ensuredState = ensureGlobalTurnStateLevel(state, getLayoutForLevel(state, levelId, maze))
+  const layouts = getRegisteredLayouts(ensuredState)
+  const worldGrid = buildWorldGridFromLayouts(layouts)
+  const result = applyGlobalTurnAction(ensuredState, action)
+  const nextWorldCell = result.outcome.state.player.cell
+  const owners = getWorldCellOwner(worldGrid, nextWorldCell)?.owners ?? []
+  const isRealOwner = (owner) => {
+    const levelCells = worldGrid.levels.get(owner.levelId)?.cells
 
-  targetStoredState.dead = false
-  targetStoredState.escaped = false
-  targetStoredState.player = { ...targetPlayer, cell: cloneCell(targetPlayer.cell) }
-  targetStoredState.turn = Math.max(targetStoredState.turn, sourceState.turn)
-  next.levelStates[targetLevelId] = targetStoredState
-
-  next.activeLevelId = targetLevelId
-  next.dead = false
-  next.escaped = false
-  next.player = {
-    ...targetPlayer,
-    cell: cloneCell(targetPlayer.cell),
-    levelId: targetLevelId
+    return !levelCells || levelCells.has(`${owner.localCell.x},${owner.localCell.y}`)
   }
-  next.turn = targetStoredState.turn
-  next.checkpoint = {
-    cell: cloneCell(targetStoredState.checkpoint.cell),
-    direction: targetStoredState.checkpoint.direction,
-    levelId: targetLevelId
-  }
+  const nextLevelId =
+    owners.find((owner) => owner.levelId !== levelId && isRealOwner(owner))?.levelId ??
+    owners.find((owner) => owner.levelId === levelId && isRealOwner(owner))?.levelId ??
+    owners.find((owner) => owner.levelId !== levelId)?.levelId ??
+    owners.find((owner) => owner.levelId === levelId)?.levelId ??
+    levelId
+  const previousLocalState = projectWorldTurnStateToLevel(
+    withWorldTurnState(ensuredState, result.outcome.previous),
+    levelId,
+    maze
+  )
+  const nextLocalState = projectWorldTurnStateToLevel(
+    withWorldTurnState(result.state, result.outcome.state),
+    levelId,
+    maze
+  )
 
-  return next
+  return {
+    outcome: {
+      ...result.outcome,
+      levelTransition: nextLevelId === levelId
+        ? null
+        : { targetLevelId: nextLevelId },
+      previous: previousLocalState,
+      state: nextLocalState
+    },
+    state: result.state
+  }
 }

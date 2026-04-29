@@ -1,13 +1,22 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { createAuthoredRuntimeMaze } from '../src/lib/levels.js'
 import {
+  activateGlobalTurnStateLevel,
+  applyGlobalTurnActionForLevel,
   createInitialGlobalTurnState,
   ensureGlobalTurnStateLevel,
   getGlobalTurnStateForLevel,
-  replaceGlobalTurnStateForLevel,
-  transitionGlobalTurnState
+  replaceGlobalTurnStateForLevel
 } from '../src/lib/globalTurnRules.js'
+import { localCellToWorldCell } from '../src/lib/worldGrid.js'
+
+async function authoredLayout(id) {
+  return {
+    maze: await createAuthoredRuntimeMaze(id)
+  }
+}
 
 function testMaze(overrides = {}) {
   return {
@@ -34,68 +43,41 @@ function layout(maze) {
   return { maze }
 }
 
-test('global turn state owns canonical player state across level transition', () => {
-  const sourceLayout = layout(testMaze({
-    id: 'source-level',
-    levelExits: [
-      { cell: { x: 1, y: 0 }, side: 'north', targetLevelId: 'target-level' }
-    ]
-  }))
-  const targetLayout = layout(testMaze({
-    id: 'target-level',
-    levelExits: [
-      { cell: { x: 0, y: 1 }, side: 'west', targetLevelId: 'source-level' }
-    ],
-    opening: { cell: { x: 0, y: 1 }, side: 'west' },
-    playerStart: {
-      cell: { x: 0, y: 1 },
-      direction: 'east'
-    },
-    sword: null
-  }))
-  const initial = createInitialGlobalTurnState(sourceLayout, [targetLayout])
-  const sourcePreviousState = getGlobalTurnStateForLevel(
-    initial,
-    sourceLayout.maze.id,
-    sourceLayout.maze
-  )
-  const sourceState = {
-    ...sourcePreviousState,
-    player: {
-      ...sourcePreviousState.player,
-      cell: { x: 1, y: -1 },
-      hasSword: true
-    },
-    swordState: 'held',
-    turn: 3
-  }
+test('global turns move the canonical player across authored level seams without teleporting', async () => {
+  const entrance = await authoredLayout('entrance')
+  const chamber = await authoredLayout('chamber-1')
+  let globalState = createInitialGlobalTurnState(entrance, [chamber])
 
-  const transitioned = transitionGlobalTurnState({
-    sourceLevelId: sourceLayout.maze.id,
-    sourceLayout,
-    sourcePreviousState,
-    sourceState,
-    state: initial,
-    targetLayout
-  })
-  const activeTargetState = getGlobalTurnStateForLevel(
-    transitioned,
-    targetLayout.maze.id,
-    targetLayout.maze
+  assert.equal(Object.prototype.hasOwnProperty.call(globalState, 'levelStates'), false)
+
+  let result = applyGlobalTurnActionForLevel(globalState, entrance.maze.id, entrance.maze, 'move-forward')
+
+  assert.equal(result.outcome.levelTransition, null)
+  globalState = result.state
+
+  result = applyGlobalTurnActionForLevel(globalState, entrance.maze.id, entrance.maze, 'move-forward')
+  assert.equal(result.outcome.levelTransition, null)
+  globalState = result.state
+
+  result = applyGlobalTurnActionForLevel(globalState, entrance.maze.id, entrance.maze, 'move-forward')
+
+  assert.equal(result.outcome.blocked, false)
+  assert.deepEqual(result.outcome.levelTransition, { targetLevelId: 'chamber-1' })
+  assert.deepEqual(
+    result.state.player.cell,
+    localCellToWorldCell(entrance, { x: 1, y: -1 })
   )
 
-  assert.equal(transitioned.activeLevelId, 'target-level')
-  assert.deepEqual(transitioned.player.cell, { x: 1, y: -1 })
-  assert.equal(transitioned.player.hasSword, true)
-  assert.equal(transitioned.player.hasTrophy, false)
-  assert.equal(transitioned.turn, 3)
-  assert.deepEqual(activeTargetState.player.cell, { x: 1, y: -1 })
-  assert.equal(activeTargetState.player.hasSword, true)
-  assert.equal(activeTargetState.player.hasTrophy, false)
-  assert.equal(activeTargetState.escaped, false)
+  const focused = activateGlobalTurnStateLevel(result.state, chamber)
+  const chamberState = getGlobalTurnStateForLevel(focused, chamber.maze.id, chamber.maze)
+
+  assert.equal(focused.activeLevelId, 'chamber-1')
+  assert.deepEqual(focused.player.cell, result.state.player.cell)
+  assert.deepEqual(chamberState.player.cell, { x: 2, y: 17 })
+  assert.equal(chamberState.player.direction, 'north')
 })
 
-test('adding a loaded level does not reset existing per-level pickup state', () => {
+test('adding a loaded level does not reset existing global pickup state', () => {
   const sourceLayout = layout(testMaze())
   const laterLayout = layout(testMaze({
     id: 'later-level',
@@ -129,8 +111,9 @@ test('adding a loaded level does not reset existing per-level pickup state', () 
     sourceLayout.maze
   )
 
+  assert.equal(Object.prototype.hasOwnProperty.call(withLaterLevel, 'levelStates'), false)
+  assert.ok(withLaterLevel.levelLayouts['later-level'])
   assert.equal(preservedSource.player.hasSword, true)
   assert.equal(preservedSource.swordState, 'held')
   assert.equal(preservedSource.turn, 2)
-  assert.ok(withLaterLevel.levelStates['later-level'])
 })

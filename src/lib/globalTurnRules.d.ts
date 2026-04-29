@@ -1,5 +1,5 @@
 import type { MazeLayout } from './sceneLayout.js'
-import type { CardinalDirection, MazeCell, TurnState } from './turnRules.js'
+import type { CardinalDirection, MazeCell, TurnAction, TurnState } from './turnRules.js'
 
 export type GlobalTurnState = {
   activeLevelId: string
@@ -10,7 +10,7 @@ export type GlobalTurnState = {
   }
   dead: boolean
   escaped: boolean
-  levelStates: Record<string, TurnState>
+  levelLayouts: Record<string, MazeLayout>
   player: {
     cell: MazeCell
     direction: CardinalDirection
@@ -19,12 +19,32 @@ export type GlobalTurnState = {
     levelId: string
   }
   turn: number
+  worldTurnState: TurnState
 }
 
 export declare function activateGlobalTurnStateLevel(
   state: GlobalTurnState,
   layout: MazeLayout
 ): GlobalTurnState
+export declare function applyGlobalTurnActionForLevel(
+  state: GlobalTurnState,
+  levelId: string,
+  maze: MazeLayout['maze'],
+  action: TurnAction
+): {
+  outcome: {
+    blocked: boolean
+    escaped: boolean
+    killed: boolean
+    levelTransition: { targetLevelId: string } | null
+    pickedUpSword: boolean
+    pickedUpTrophy: boolean
+    playerEffect: 'death' | 'escape' | 'sword-strike' | null
+    previous: TurnState
+    state: TurnState
+  }
+  state: GlobalTurnState
+}
 export declare function cloneTurnStateForGlobal(state: TurnState): TurnState
 export declare function createInitialGlobalTurnState(
   activeLayout: MazeLayout,

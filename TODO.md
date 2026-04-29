@@ -417,7 +417,7 @@ Regenerate the mazes, and give each one randomly placed minotaur, wolf, spider (
 [x] When baking lights, record how long the bake took, and broken down by how long each level took, and how long each step of each level took, and how much each step took in total across levels. Also record the quality parameters that were used (like number of samples, lightmap sizes, etc.) and how much work was done (which levels, how many cubemaps/atlases each, etc.)
 [x] After player death, fade back in over 3s (it's currently less than that)
 [x] After the Werewolf moves, determine what direction it would move if it were to take another turn, and if it's different than its current direction, turn it to face that way (the usual 250ms)
-[ ] Regarding this conversation about maze-002 being strange: "This is possible because the current implementation is still not a true continuous-world transition. Several systems disagree about where the maze-002 doorway is.
+[x] Regarding this conversation about maze-002 being strange: "This is possible because the current implementation is still not a true continuous-world transition. Several systems disagree about where the maze-002 doorway is.
 
   The concrete mismatch I found:
 

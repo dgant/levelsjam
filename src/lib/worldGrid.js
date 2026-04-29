@@ -68,6 +68,16 @@ function localDirectionToWorldDirection(maze, transform, cell, direction) {
   return DIRECTIONS_BY_DELTA.get(`${dx},${dy}`) ?? direction
 }
 
+function worldDirectionToLocalDirection(maze, transform, cell, direction) {
+  for (const candidateDirection of ['north', 'east', 'south', 'west']) {
+    if (localDirectionToWorldDirection(maze, transform, cell, candidateDirection) === direction) {
+      return candidateDirection
+    }
+  }
+
+  return direction
+}
+
 function addWorldCell(cellsByKey, worldCell, levelId, localCell) {
   const key = worldCellKey(worldCell)
   const existing = cellsByKey.get(key)
@@ -106,6 +116,10 @@ export function buildWorldGridFromLayouts(layouts) {
   const openEdges = new Set()
   const playerOnlyOpenEdges = new Set()
   const levels = new Map()
+  const gates = []
+  const items = []
+  const monsters = []
+  const altars = []
 
   for (const layout of layouts) {
     const maze = layout.maze
@@ -129,6 +143,61 @@ export function buildWorldGridFromLayouts(layouts) {
       openEdges.add(normalizeEdge(from, to))
     }
 
+    for (const gate of maze.gates ?? []) {
+      gates.push({
+        ...gate,
+        from: localCellToWorldCellWithTransform(maze, transform, gate.from),
+        id: gate.id ?? `${levelId}:gate:${gate.from.x},${gate.from.y}:${gate.to.x},${gate.to.y}`,
+        ownerLevelId: levelId,
+        to: localCellToWorldCellWithTransform(maze, transform, gate.to)
+      })
+    }
+
+    for (const altar of maze.altars ?? []) {
+      altars.push({
+        ...altar,
+        cell: localCellToWorldCellWithTransform(maze, transform, altar.cell),
+        id: altar.id ?? `${levelId}:altar:${altar.cell.x},${altar.cell.y}`,
+        ownerLevelId: levelId
+      })
+    }
+
+    if (maze.sword?.cell) {
+      items.push({
+        cell: localCellToWorldCellWithTransform(maze, transform, maze.sword.cell),
+        id: `${levelId}:sword`,
+        ownerLevelId: levelId,
+        type: 'sword'
+      })
+    }
+
+    if (maze.trophy?.cell) {
+      items.push({
+        cell: localCellToWorldCellWithTransform(maze, transform, maze.trophy.cell),
+        id: `${levelId}:trophy`,
+        ownerLevelId: levelId,
+        type: 'trophy'
+      })
+    }
+
+    for (const [monsterIndex, monster] of (maze.monsters ?? []).entries()) {
+      const worldCell = localCellToWorldCellWithTransform(maze, transform, monster.cell)
+
+      monsters.push({
+        ...monster,
+        cell: worldCell,
+        direction: localDirectionToWorldDirection(
+          maze,
+          transform,
+          monster.cell,
+          monster.direction ?? 'north'
+        ),
+        id: `${levelId}:${monster.type}-${monsterIndex}`,
+        localMonsterIndex: monsterIndex,
+        ownerLevelId: levelId
+      })
+    }
+
     for (const exit of maze.levelExits ?? []) {
       if (!exit.targetLevelId) {
         continue
@@ -138,9 +207,8 @@ export function buildWorldGridFromLayouts(layouts) {
       const toLocalCell = getNeighbor(exit.cell, exit.side)
       const to = localCellToWorldCellWithTransform(maze, transform, toLocalCell)
 
-      addWorldCell(cellsByKey, to, exit.targetLevelId, toLocalCell)
+      addWorldCell(cellsByKey, to, levelId, toLocalCell)
       playerOnlyOpenEdges.add(normalizeEdge(from, to))
-      openEdges.add(normalizeEdge(from, to))
     }
 
     levels.set(levelId, {
@@ -151,7 +219,11 @@ export function buildWorldGridFromLayouts(layouts) {
 
   return {
     cells: Array.from(cellsByKey.values()),
+    altars,
     levels,
+    gates,
+    items,
+    monsters,
     openEdges,
     playerOnlyOpenEdges
   }
@@ -181,4 +253,75 @@ export function getWorldDirectionForLocalDirection(layout, cell, direction) {
     cell,
     direction
   )
+}
+
+export function getLocalDirectionForWorldDirection(layout, cell, direction) {
+  return worldDirectionToLocalDirection(
+    layout.maze,
+    getRuntimeLevelWorldTransform(layout.maze.id),
+    cell,
+    direction
+  )
+}
+
+export function createWorldRulesMaze(worldGrid, options = {}) {
+  const cells = worldGrid.cells.map((entry) => ({ ...entry.cell }))
+
+  return {
+    altars: worldGrid.altars.map((altar) => ({
+      ...altar,
+      cell: cloneCell(altar.cell)
+    })),
+    cells,
+    disableOpeningExit: true,
+    exitRequiresTrophy: false,
+    gates: worldGrid.gates.map((gate) => ({
+      ...gate,
+      from: cloneCell(gate.from),
+      to: cloneCell(gate.to)
+    })),
+    height: 1,
+    id: 'world',
+    items: worldGrid.items.map((item) => ({
+      ...item,
+      cell: cloneCell(item.cell)
+    })),
+    monsters: worldGrid.monsters.map((monster) => ({
+      ...monster,
+      cell: cloneCell(monster.cell)
+    })),
+    opening: {
+      cell: cloneCell(options.playerStart?.cell ?? cells[0] ?? { x: 0, y: 0 }),
+      side: 'north'
+    },
+    openEdges: Array.from(worldGrid.openEdges).map((edgeKey) => {
+      const [fromKey, toKey] = edgeKey.split('|')
+      const [fromX, fromY] = fromKey.split(',').map(Number)
+      const [toX, toY] = toKey.split(',').map(Number)
+
+      return {
+        from: { x: fromX, y: fromY },
+        to: { x: toX, y: toY }
+      }
+    }),
+    playerOnlyOpenEdges: Array.from(worldGrid.playerOnlyOpenEdges).map((edgeKey) => {
+      const [fromKey, toKey] = edgeKey.split('|')
+      const [fromX, fromY] = fromKey.split(',').map(Number)
+      const [toX, toY] = toKey.split(',').map(Number)
+
+      return {
+        from: { x: fromX, y: fromY },
+        to: { x: toX, y: toY }
+      }
+    }),
+    playerStart: options.playerStart
+      ? {
+        cell: cloneCell(options.playerStart.cell),
+        direction: options.playerStart.direction
+      }
+      : undefined,
+    sword: null,
+    trophy: null,
+    width: 1
+  }
 }

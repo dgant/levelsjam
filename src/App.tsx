@@ -158,10 +158,8 @@ import {
   getReflectionProbeBlendForPosition
 } from './lib/reflectionProbeBlending.js'
 import {
-  applyTurnAction,
   cellKey,
   createInitialTurnState,
-  getNeighbor,
   getOpenDoorIds,
   getOpenGateIds,
   resetTurnStateToCheckpoint,
@@ -173,6 +171,7 @@ import {
 } from './lib/turnRules.js'
 import {
   activateGlobalTurnStateLevel,
+  applyGlobalTurnActionForLevel,
   createInitialGlobalTurnState,
   ensureGlobalTurnStateLevel,
   ensureGlobalTurnStateLevels,
@@ -4485,6 +4484,7 @@ type LevelWorldTransform = {
 }
 
 type SeamlessLevelTransitionRequest = {
+  committedGlobalState?: GlobalTurnState
   sourcePreviousState?: TurnState
   sourceLevelId: string
   sourceState: TurnState
@@ -15613,8 +15613,10 @@ function TorchLensFlare({
 }
 
 function FlightRig({
+  applyTurnActionForLevel,
   altarCutsceneTarget,
   cameraTiltDegrees,
+  commitGlobalTurnState,
   inputEnabled,
   isLevelLightingReady,
   layout,
@@ -15629,8 +15631,26 @@ function FlightRig({
   turnState,
   wallBounds
 }: {
+  applyTurnActionForLevel: (
+    levelId: string,
+    action: TurnAction
+  ) => {
+    outcome: {
+      blocked: boolean
+      escaped: boolean
+      killed: boolean
+      levelTransition: { targetLevelId: string } | null
+      pickedUpSword: boolean
+      pickedUpTrophy: boolean
+      playerEffect: 'death' | 'escape' | 'sword-strike' | null
+      previous: TurnState
+      state: TurnState
+    }
+    state: GlobalTurnState
+  } | null
   altarCutsceneTarget: Vector3 | null
   cameraTiltDegrees: number
+  commitGlobalTurnState: (state: GlobalTurnState) => void
   inputEnabled: boolean
   isLevelLightingReady: (mazeId: string) => boolean
   layout: MazeLayout
@@ -15691,6 +15711,7 @@ function FlightRig({
     blocked: boolean
     from: TurnState
     killed: boolean
+    committedGlobalState: GlobalTurnState | null
     levelTransition: {
       targetLevelId: string
     } | null
@@ -16862,16 +16883,18 @@ function FlightRig({
             setDisplayedOpenGateIds(getOpenGateIds(layout.maze, turnStateRef.current))
           }
 
-          const rulesMaze = createTurnRulesMaze(layout.maze, turnStateRef.current)
-          const result = applyTurnAction(rulesMaze, turnStateRef.current, action)
-          const levelTransition = !result.blocked && action !== 'rotate-left' && action !== 'rotate-right'
-            ? getLevelTransitionForCompletedMove(
-                layout.maze,
-                turnStateRef.current,
-                result.previous.player.cell,
-                result.state.player.cell
-              )
-            : null
+          const globalResult = applyTurnActionForLevel(layout.maze.id, action)
+          const result = globalResult?.outcome ?? {
+            blocked: true,
+            escaped: false,
+            killed: false,
+            levelTransition: null,
+            pickedUpSword: false,
+            pickedUpTrophy: false,
+            playerEffect: null,
+            previous: turnStateRef.current,
+            state: turnStateRef.current
+          }
           const previousMinotaur = result.previous.monsters.find(
             (monster) => monster.type === 'minotaur'
           )
@@ -16906,9 +16929,10 @@ function FlightRig({
           playerAnimation.current = {
             action,
             blocked: Boolean(result.blocked),
+            committedGlobalState: globalResult?.state ?? null,
             from: result.previous,
             killed: result.killed,
-            levelTransition: result.levelTransition ?? levelTransition,
+            levelTransition: result.levelTransition,
             playerEffect: result.playerEffect,
             startedAt: performance.now(),
             to: result.state
@@ -16958,6 +16982,7 @@ function FlightRig({
                 onReplayActiveChange(false)
               }
               onLevelTransition({
+                committedGlobalState: activeAnimation.committedGlobalState ?? undefined,
                 sourceLevelId: layout.maze.id,
                 sourcePreviousState: activeAnimation.from,
                 sourceState: activeAnimation.to,
@@ -16973,7 +16998,11 @@ function FlightRig({
               : activeAnimation.to
 
             turnStateRef.current = finalState
-            setTurnState(finalState)
+            if (activeAnimation.committedGlobalState && !activeAnimation.killed) {
+              commitGlobalTurnState(activeAnimation.committedGlobalState)
+            } else {
+              setTurnState(finalState)
+            }
             playerAnimation.current = null
             if (
               activeAnimation.action === 'move-forward' ||
@@ -17329,8 +17358,10 @@ function RuntimeLevelGeometry({
 
 function Scene({
   activatedAltarIds,
+  applyTurnActionForLevel,
   altarCutscene,
   composerEnabled,
+  commitGlobalTurnState,
   controlsOpen,
   cutsceneActive,
   layout,
@@ -17347,12 +17378,30 @@ function Scene({
   visualSettings
 }: {
   activatedAltarIds: Set<string>
+  applyTurnActionForLevel: (
+    levelId: string,
+    action: TurnAction
+  ) => {
+    outcome: {
+      blocked: boolean
+      escaped: boolean
+      killed: boolean
+      levelTransition: { targetLevelId: string } | null
+      pickedUpSword: boolean
+      pickedUpTrophy: boolean
+      playerEffect: 'death' | 'escape' | 'sword-strike' | null
+      previous: TurnState
+      state: TurnState
+    }
+    state: GlobalTurnState
+  } | null
   altarCutscene: {
     altarId: string
     levelId: string
     startedAt: number
   } | null
   composerEnabled: boolean
+  commitGlobalTurnState: (state: GlobalTurnState) => void
   controlsOpen: boolean
   cutsceneActive: boolean
   layout: MazeLayout
@@ -18785,8 +18834,10 @@ function Scene({
       </EffectComposer>
         ) : null}
           <FlightRig
+            applyTurnActionForLevel={applyTurnActionForLevel}
             altarCutsceneTarget={altarCutsceneTarget}
             cameraTiltDegrees={visualSettings.cameraTiltDegrees}
+            commitGlobalTurnState={commitGlobalTurnState}
             inputEnabled={startupSceneReady && !cutsceneActive}
             isLevelLightingReady={isLevelLightingReadyForTransition}
             layout={layout}
@@ -21074,136 +21125,6 @@ function directionFromCellToCell(
   return null
 }
 
-type LevelSeamExit = {
-  cell: MazeCell
-  side: CardinalDirection
-  targetLevelId: string
-}
-
-type TurnRulesMaze = MazeLayout['maze'] & {
-  cells?: MazeCell[]
-  playerOnlyOpenEdges?: Array<{ from: MazeCell; to: MazeCell }>
-}
-
-function sameCell(left: MazeCell, right: MazeCell) {
-  return left.x === right.x && left.y === right.y
-}
-
-function getRulesCells(maze: MazeLayout['maze']) {
-  if (Array.isArray(maze.cells) && maze.cells.length > 0) {
-    return maze.cells.map((cell) => ({ x: cell.x, y: cell.y }))
-  }
-
-  const cells: MazeCell[] = []
-
-  for (let y = 0; y < maze.height; y += 1) {
-    for (let x = 0; x < maze.width; x += 1) {
-      cells.push({ x, y })
-    }
-  }
-
-  return cells
-}
-
-function getTargetLevelExits(maze: MazeLayout['maze']): LevelSeamExit[] {
-  const explicitExits = (maze.levelExits ?? [])
-    .filter((exit): exit is LevelSeamExit => Boolean(exit.targetLevelId))
-    .map((exit) => ({
-      cell: { ...exit.cell },
-      side: exit.side,
-      targetLevelId: exit.targetLevelId
-    }))
-
-  if (explicitExits.length > 0 || !maze.opening) {
-    return explicitExits
-  }
-
-  const adjacentLevels = getAdjacentRuntimeLevelIds(maze.id)
-
-  if (adjacentLevels.length !== 1) {
-    return []
-  }
-
-  return [{
-    cell: { ...maze.opening.cell },
-    side: maze.opening.side,
-    targetLevelId: adjacentLevels[0]
-  }]
-}
-
-function isTargetLevelExitAllowed(maze: MazeLayout['maze'], state: TurnState) {
-  return maze.exitRequiresTrophy === false || state.player.hasTrophy
-}
-
-function createTurnRulesMaze(maze: MazeLayout['maze'], state: TurnState): TurnRulesMaze {
-  const targetExits = isTargetLevelExitAllowed(maze, state)
-    ? getTargetLevelExits(maze)
-    : []
-
-  if (targetExits.length === 0) {
-    return maze
-  }
-
-  const cells = getRulesCells(maze)
-  const cellKeys = new Set(cells.map(cellKey))
-  const playerOnlyOpenEdges: Array<{ from: MazeCell; to: MazeCell }> = [
-    ...(maze.playerOnlyOpenEdges ?? []).map((edge) => ({
-      from: { ...edge.from },
-      to: { ...edge.to }
-    }))
-  ]
-
-  for (const exit of targetExits) {
-    const to = getNeighbor(exit.cell, exit.side)
-
-    if (!cellKeys.has(cellKey(to))) {
-      cells.push(to)
-      cellKeys.add(cellKey(to))
-    }
-
-    playerOnlyOpenEdges.push({
-      from: { ...exit.cell },
-      to
-    })
-  }
-
-  return {
-    ...maze,
-    cells,
-    levelExits: targetExits,
-    playerOnlyOpenEdges
-  }
-}
-
-function getLevelTransitionForCompletedMove(
-  maze: MazeLayout['maze'],
-  state: TurnState,
-  from: MazeCell,
-  to: MazeCell
-) {
-  if (!isTargetLevelExitAllowed(maze, state)) {
-    return null
-  }
-
-  const transitionExit = getTargetLevelExits(maze).find((exit) => (
-    sameCell(exit.cell, from) &&
-    sameCell(getNeighbor(exit.cell, exit.side), to)
-  ))
-
-  if (!transitionExit) {
-    return null
-  }
-
-  return {
-    direction: transitionExit.side,
-    exit: {
-      ...transitionExit,
-      cell: { ...transitionExit.cell }
-    },
-    targetLevelId: transitionExit.targetLevelId
-  }
-}
-
 function AltarCutsceneOverlay({
   active
 }: {
@@ -21465,14 +21386,25 @@ export default function App() {
       }
 
       loadedMazeLayoutsRef.current.set(request.targetLevelId, targetLayout)
-      setGlobalTurnState((current) => transitionGlobalTurnState({
-        sourceLevelId: request.sourceLevelId,
-        sourceLayout: loadedMazeLayoutsRef.current.get(request.sourceLevelId),
-        sourcePreviousState: request.sourcePreviousState,
-        sourceState: request.sourceState,
-        state: current ?? createInitialGlobalTurnState(targetLayout, Array.from(loadedMazeLayoutsRef.current.values())),
-        targetLayout
-      }))
+      setGlobalTurnState((current) => {
+        const committedState = request.committedGlobalState
+
+        if (committedState) {
+          return activateGlobalTurnStateLevel(
+            ensureGlobalTurnStateLevel(committedState, targetLayout),
+            targetLayout
+          )
+        }
+
+        return transitionGlobalTurnState({
+          sourceLevelId: request.sourceLevelId,
+          sourceLayout: loadedMazeLayoutsRef.current.get(request.sourceLevelId),
+          sourcePreviousState: request.sourcePreviousState,
+          sourceState: request.sourceState,
+          state: current ?? createInitialGlobalTurnState(targetLayout, Array.from(loadedMazeLayoutsRef.current.values())),
+          targetLayout
+        })
+      })
       setInstantiatedMazeId(request.targetLevelId)
       setMazeLayout(targetLayout)
       document.body.dataset.loadedMazeId = request.targetLevelId
@@ -21537,6 +21469,25 @@ export default function App() {
       return replaceGlobalTurnStateForLevel(ensuredState, mazeId, nextTurnState)
     })
   }, [setGlobalTurnState])
+
+  const commitGlobalTurnState = useCallback((state: GlobalTurnState) => {
+    setGlobalTurnState(state)
+  }, [setGlobalTurnState])
+
+  const handleTurnActionForLevel = useCallback((mazeId: string, action: TurnAction) => {
+    const layout = loadedMazeLayoutsRef.current.get(mazeId)
+
+    if (!layout) {
+      return null
+    }
+
+    const currentState = globalTurnStateRef.current
+    const ensuredState = currentState
+      ? ensureGlobalTurnStateLevel(currentState, layout)
+      : createInitialGlobalTurnState(layout, Array.from(loadedMazeLayoutsRef.current.values()))
+
+    return applyGlobalTurnActionForLevel(ensuredState, mazeId, layout.maze, action)
+  }, [])
 
   const loadAndActivateLevel = async (level: AuthoredLevel, index: number) => {
     const mazeIds = availableMazeIdsRef.current.length > 0
@@ -22653,8 +22604,10 @@ export default function App() {
             <Suspense fallback={null}>
               <Scene
                 activatedAltarIds={activatedAltarIds}
+                applyTurnActionForLevel={handleTurnActionForLevel}
                 altarCutscene={altarCutscene}
                 composerEnabled={composerEnabled}
+                commitGlobalTurnState={commitGlobalTurnState}
                 controlsOpen={controlsOpen}
                 cutsceneActive={activeAltarCutscene}
                 key={`scene:${mazeSceneKey}`}

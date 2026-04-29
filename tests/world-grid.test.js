@@ -28,7 +28,7 @@ test('world grid aligns the Entrance to Chamber 1 seam as one continuous cell ed
   const chamberIngressWorldCell = localCellToWorldCell(chamber, chamberIngress.cell)
 
   assert.deepEqual(seamWorldCell, chamberIngressWorldCell)
-  assert.ok(worldGrid.openEdges.has(normalizeEdge(entranceExitWorldCell, seamWorldCell)))
+  assert.equal(worldGrid.openEdges.has(normalizeEdge(entranceExitWorldCell, seamWorldCell)), false)
   assert.ok(worldGrid.playerOnlyOpenEdges.has(normalizeEdge(entranceExitWorldCell, seamWorldCell)))
 
   const seamOwner = getWorldCellOwner(worldGrid, seamWorldCell)
