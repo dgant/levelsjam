@@ -3,6 +3,10 @@ const { defineConfig } = require('@playwright/test')
 module.exports = defineConfig({
   testDir: './tests',
   testMatch: /.*\.spec\.cjs$/,
+  reporter: [
+    ['line'],
+    ['./scripts/playwright-progress-reporter.cjs']
+  ],
   timeout: 30_000,
   use: {
     baseURL: 'http://127.0.0.1:42731',

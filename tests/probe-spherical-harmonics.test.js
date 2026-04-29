@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import {
   computeVolumetricLightmapCoefficientsFromPixels,
   decodeRgbE8,
+  limitFirstOrderProbeCoefficientsToNonNegative,
   reconstructProbeRadiance
 } from '../src/lib/probeSphericalHarmonics.js'
 
@@ -54,6 +55,30 @@ function luminance(color) {
   return (0.2126 * color[0]) + (0.7152 * color[1]) + (0.0722 * color[2])
 }
 
+function reconstructProbeRadianceUnclamped(direction, coefficients) {
+  const length = Math.hypot(direction[0], direction[1], direction[2]) || 1
+  const normalizedDirection = [
+    direction[0] / length,
+    direction[1] / length,
+    direction[2] / length
+  ]
+  const basis = [
+    0.282095,
+    0.488603 * normalizedDirection[0],
+    0.488603 * normalizedDirection[1],
+    0.488603 * normalizedDirection[2]
+  ]
+  const color = [0, 0, 0]
+
+  for (let basisIndex = 0; basisIndex < basis.length; basisIndex += 1) {
+    color[0] += coefficients[basisIndex][0] * basis[basisIndex]
+    color[1] += coefficients[basisIndex][1] * basis[basisIndex]
+    color[2] += coefficients[basisIndex][2] * basis[basisIndex]
+  }
+
+  return color.map((component) => component * 4 * Math.PI)
+}
+
 function computeCoefficients(faces) {
   return computeVolumetricLightmapCoefficientsFromPixels(
     faces,
@@ -93,4 +118,31 @@ test('volumetric lightmap SH keeps probe face directions coherent', () => {
     luminance(positiveZIncoming) > luminance(negativeZIncoming) * 2,
     'positive-Z capture should reconstruct brighter from positive Z than negative Z'
   )
+})
+
+test('volumetric lightmap SH limiting prevents saturated opposite-color lobes', () => {
+  const sharpDirectionalCoefficients = [
+    [1.0, 0.45, 0.35],
+    [2.8, 0.9, -0.02],
+    [0.0, 0.0, 0.0],
+    [0.0, 0.0, 0.25]
+  ]
+  const limited = limitFirstOrderProbeCoefficientsToNonNegative(sharpDirectionalCoefficients)
+  const sampleDirections = [
+    [1, 0, 0],
+    [-1, 0, 0],
+    [0, 1, 0],
+    [0, -1, 0],
+    [0, 0, 1],
+    [0, 0, -1]
+  ]
+
+  for (const direction of sampleDirections) {
+    const color = reconstructProbeRadianceUnclamped(direction, limited)
+
+    assert.ok(
+      color.every((component) => component >= -1e-6),
+      `expected limited first-order SH to reconstruct non-negative color for ${direction}, got ${color}`
+    )
+  }
 })

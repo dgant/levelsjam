@@ -565,6 +565,8 @@
 - Offline reflection-probe and volumetric-lightmap baking mounts and renders the full target level independent of gameplay visibility culling, player position, or startup-only geometry expansion.
 - Runtime volumetric-lightmap coefficients are derived from captures that include local torch emitters and must provide enough diffuse energy for dynamic objects near torches to read in the same ballpark as static lightmapped surfaces.
 - Runtime volumetric-lightmap coefficients include occluded analytic direct torch, moon, and skylight terms in addition to captured local radiance so small visible emitters do not vanish from diffuse lighting due to cubemap solid-angle averaging.
+- Volumetric-lightmap directional terms are encoded as non-negative low-order diffuse lobes so a strong warm torch cannot create an artificial saturated-blue opposite hemisphere through first-order spherical-harmonic ringing.
+- Volumetric-lightmap debug probes visualize the same diffuse irradiance reconstruction used by runtime materials rather than an unconvolved raw-radiance approximation.
 - Local reflection probes apply parallax-corrected local projection so nearby walls, sconces, and torches do not behave like infinitely distant reflections.
 - Local reflection probes use the baked local reflection source directly; wall-separated diffuse and fog occlusion is handled by connectivity-gated volumetric lightmaps.
 - Local reflection probes do not make baked lighting or image-based lighting appear to flicker as the camera moves between maze cells.
@@ -736,6 +738,7 @@
 - Automated test-duration enforcement fails the run when the smoke runner startup phase, the full smoke runner ceiling, or the unit suite exceeds its documented budget.
 - Automated test-duration measurement records a per-run timing breakdown so excessive time can be attributed to specific scripts or smoke-test phases rather than guessed.
 - Automated unit-test measurement records per-file and per-subtest timing data in addition to the overall suite duration so individual regressions can be identified directly.
+- Automated browser test runners emit regular progress heartbeats naming currently running tests so hangs and long waits can be distinguished without restarting the suite blindly.
 - Maze topology generation for one valid maze must complete in under 100 milliseconds before the later baked-lightmap step runs.
 - Full whole-game maze lighting and reflection export is targeted to complete in under `10 minutes`; timing reports over that budget must be inspected and the slowest steps improved before rerunning blindly.
 - Maze-regeneration loops have a bounded maximum attempt count and fail with a diagnostic error instead of hanging indefinitely when the maze factory repeatedly returns invalid mazes.

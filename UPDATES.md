@@ -130,3 +130,4 @@
 - When taking screenshots to test baked lighting or material lighting in this project, disable postprocess passes unless the postprocess pass itself is the subject of the test.
 - When a graphical bug has a legitimate non-repro, continue with an analytical timing/lifecycle failure model and add a delayed-resource or otherwise adversarial test for the plausible race instead of treating the non-repro as closure.
 - Treat `PERFORMANCE.md` and generated profiles/artifacts under `logs/` as disposable diagnostics, not source-controlled project files. Keep their output directories ignored and remove stale copies before handoff unless they are explicitly needed for the current investigation.
+- Long browser test runners must emit regular progress heartbeats naming the currently running test. If a runner times out or appears hung, inspect the heartbeat/log phase first and avoid blind reruns that repeat the same opaque wait.

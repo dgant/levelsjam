@@ -1136,7 +1136,7 @@ async function waitForPerformanceCooldown(page) {
   const getCooldownState = () => {
     const lifecycle = window.__levelsjamDebug?.getMazeLifecycleState?.()
     const lightingStates = window.__levelsjamDebug?.getLevelLightingState?.() ?? []
-    const expectedLevelIds = ['entrance', 'chamber-1', 'maze-001', 'maze-002', 'maze-003', 'maze-005']
+    const expectedLevelIds = ['entrance', 'chamber-1', 'maze-001', 'maze-002', 'maze-003', 'maze-004']
     const loaded = Boolean(
       lifecycle &&
       expectedLevelIds.every((id) => lifecycle.loadedMazeIds?.includes(id))
@@ -1173,7 +1173,7 @@ async function waitForPerformanceCooldown(page) {
       () => {
         const lifecycle = window.__levelsjamDebug?.getMazeLifecycleState?.()
         const lightingStates = window.__levelsjamDebug?.getLevelLightingState?.() ?? []
-        const expectedLevelIds = ['entrance', 'chamber-1', 'maze-001', 'maze-002', 'maze-003', 'maze-005']
+        const expectedLevelIds = ['entrance', 'chamber-1', 'maze-001', 'maze-002', 'maze-003', 'maze-004']
         const loaded = Boolean(
           lifecycle &&
           expectedLevelIds.every((id) => lifecycle.loadedMazeIds?.includes(id))
@@ -1414,7 +1414,7 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
   }))
 
   expect(transitionedState.lifecycle.loadedMazeIds).toEqual(
-    expect.arrayContaining(['entrance', 'chamber-1', 'maze-001', 'maze-002', 'maze-003', 'maze-005'])
+    expect.arrayContaining(['entrance', 'chamber-1', 'maze-001', 'maze-002', 'maze-003', 'maze-004'])
   )
   await expect
     .poll(
@@ -1607,7 +1607,7 @@ test('default route loads the authored Entrance level to scene-ready', async ({ 
 
   expect(finalTraversalState.lifecycle.instantiatedMazeId).toBe('entrance')
   expect(finalTraversalState.lifecycle.loadedMazeIds).toEqual(
-    expect.arrayContaining(['entrance', 'chamber-1', 'maze-001', 'maze-002', 'maze-003', 'maze-005'])
+    expect.arrayContaining(['entrance', 'chamber-1', 'maze-001', 'maze-002', 'maze-003', 'maze-004'])
   )
   expect(finalTraversalState.turn.player).toMatchObject({
     cell: { x: 1, y: 0 },
@@ -1882,7 +1882,7 @@ test('default postprocessing survives the Entrance to Chamber 1 transition', asy
   expect(state.turn.player.cell).toEqual({ x: 2, y: 16 })
   expect(state.settings.volumetricLighting.enabled).toBe(true)
   expect(state.fog?.trackedMazeIds ?? []).toEqual(
-    expect.arrayContaining(['entrance', 'chamber-1', 'maze-001', 'maze-002', 'maze-003', 'maze-005'])
+    expect.arrayContaining(['entrance', 'chamber-1', 'maze-001', 'maze-002', 'maze-003', 'maze-004'])
   )
   expect(state.fog?.maxAtlasCount).toBe(4)
   expect(state.fog?.selectedAtlasCount).toBeGreaterThanOrEqual(1)

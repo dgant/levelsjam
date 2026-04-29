@@ -8,6 +8,7 @@ import {
   solveMaze,
   validateRecordedSolution
 } from './mazeSolver.js'
+import { limitFirstOrderProbeCoefficientsToNonNegative } from './probeSphericalHarmonics.js'
 
 export const MAZE_WIDTH = 7
 export const MAZE_HEIGHT = 7
@@ -2387,9 +2388,13 @@ function addIsotropicProbeRadiance(coefficients, color) {
 }
 
 function addDirectionalProbeRadiance(coefficients, direction, color) {
-  const scale = 0.25
+  // Encode direct light as a non-negative first-order lobe: full color toward
+  // the source, zero opposite it, and half intensity at grazing directions.
+  const l0Scale = 0.5
+  const l1Scale = 1 / 6
 
   for (let basisIndex = 0; basisIndex < PROBE_SH_BASIS_WEIGHTS.length; basisIndex += 1) {
+    const scale = basisIndex === 0 ? l0Scale : l1Scale
     const basis = PROBE_SH_BASIS_WEIGHTS[basisIndex](direction) * scale
 
     coefficients[basisIndex][0] += color[0] * basis
@@ -2468,7 +2473,7 @@ export function computeMazeVolumetricLightmapCoefficients(
     addDirectionalProbeRadiance(coefficients, direction, color)
   }
 
-  return coefficients
+  return limitFirstOrderProbeCoefficientsToNonNegative(coefficients)
 }
 
 export async function bakeMazeLightmap(

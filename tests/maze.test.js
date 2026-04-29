@@ -477,6 +477,14 @@ test('bakes same-cell torch energy into volumetric lightmap coefficients', () =>
     towardTorch[0] > towardTorch[1] * 2,
     `expected torch VLM energy to be warm, got ${towardTorch}`
   )
+
+  const awayMin = Math.min(...awayFromTorch)
+  const awayMax = Math.max(...awayFromTorch)
+
+  assert.ok(
+    awayMin > awayMax * 0.45,
+    `expected torch-opposite VLM hemisphere to stay low-saturation instead of clamping to blue, got ${awayFromTorch}`
+  )
 })
 
 test('keeps mid-wall torch lighting visible below the sconce top', async () => {

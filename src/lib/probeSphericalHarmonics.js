@@ -122,7 +122,41 @@ export function computeVolumetricLightmapCoefficientsFromPixels(
     }
   }
 
-  return coefficients
+  return limitFirstOrderProbeCoefficientsToNonNegative(coefficients)
+}
+
+export function limitFirstOrderProbeCoefficientsToNonNegative(coefficients) {
+  const limited = coefficients.map((coefficient) => coefficient.slice())
+  const basisL0 = 0.282095
+  const basisL1 = 0.488603
+
+  for (let channel = 0; channel < 3; channel += 1) {
+    const base = limited[0][channel] * basisL0
+    const l1X = limited[1][channel] * basisL1
+    const l1Y = limited[2][channel] * basisL1
+    const l1Z = limited[3][channel] * basisL1
+    const l1Length = Math.hypot(l1X, l1Y, l1Z)
+
+    if (!(base > 0)) {
+      limited[0][channel] = Math.max(0, limited[0][channel])
+      limited[1][channel] = 0
+      limited[2][channel] = 0
+      limited[3][channel] = 0
+      continue
+    }
+
+    if (l1Length <= base || l1Length <= 1e-12) {
+      continue
+    }
+
+    const scale = base / l1Length
+
+    limited[1][channel] *= scale
+    limited[2][channel] *= scale
+    limited[3][channel] *= scale
+  }
+
+  return limited
 }
 
 export function reconstructProbeRadiance(direction, coefficients) {

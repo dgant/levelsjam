@@ -10339,9 +10339,7 @@ uniform vec3 coeffL3;
 
 varying vec3 vProbeDirection;
 
-const float PI = 3.141592653589793;
-
-vec3 reconstructProbeRadiance(
+vec3 reconstructProbeIrradiance(
   vec3 direction,
   vec3 basisCoeffL0,
   vec3 basisCoeffL1,
@@ -10353,19 +10351,21 @@ vec3 reconstructProbeRadiance(
   float basisL1 = 0.488603 * normalizedDirection.x;
   float basisL2 = 0.488603 * normalizedDirection.y;
   float basisL3 = 0.488603 * normalizedDirection.z;
+  float bandKernelL0 = 3.141592653589793;
+  float bandKernelL1 = 2.09439510239;
 
   return max(
     vec3( 0.0 ),
-    ( basisCoeffL0 * basisL0 ) +
-    ( basisCoeffL1 * basisL1 ) +
-    ( basisCoeffL2 * basisL2 ) +
-    ( basisCoeffL3 * basisL3 )
-  ) * ( 4.0 * PI );
+    ( basisCoeffL0 * basisL0 * bandKernelL0 ) +
+    ( basisCoeffL1 * basisL1 * bandKernelL1 ) +
+    ( basisCoeffL2 * basisL2 * bandKernelL1 ) +
+    ( basisCoeffL3 * basisL3 * bandKernelL1 )
+  ) * 12.566370614359172 * 0.3183098861837907;
 }
 
 void main() {
   gl_FragColor = vec4(
-    reconstructProbeRadiance(
+    reconstructProbeIrradiance(
       vProbeDirection,
       coeffL0,
       coeffL1,
