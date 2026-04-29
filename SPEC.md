@@ -628,8 +628,8 @@
 - Lens flares apply to a stable selected visible torch light rather than jumping between arbitrary lights frame to frame.
 - Lens flares support up to five simultaneously visible torch lights and combine those flares additively.
 - Multiple lens flares add only their flare contributions together and never add the previous scene color more than once.
-- Lens-flare visibility rejects torch lights that are occluded by maze walls or monsters.
-- Lens-flare occlusion ray tests ignore torch billboards and sconce fixture meshes.
+- Lens-flare visibility rejects torch lights that are occluded by any effectively visible opaque scene mesh, including walls, doors, gates, floors, sconces, altar meshes, pickups, and monsters.
+- Lens-flare occlusion ray tests ignore translucent flare-source artifacts such as torch billboards and monster-eye source meshes.
 - Lens-flare bokeh and ghosts remain translucent and additive rather than appearing as opaque black or opaque solid sprites.
 - Lens-flare strength is controlled by a single user-facing strength slider with no hidden large app-side gain multiplier.
 - Lens-flare star-burst contribution has its own live intensity control.

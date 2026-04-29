@@ -15659,6 +15659,34 @@ type MutableLensFlareEffect = Effect & {
   setFragmentShader: (fragmentShader: string) => void
 }
 
+function isLensFlareOcclusionMaterial(material: Material | Material[] | null | undefined) {
+  const materials = Array.isArray(material) ? material : [material]
+
+  return materials.some((candidate) => (
+    candidate instanceof Material &&
+    !candidate.transparent &&
+    candidate.opacity > 0.999
+  ))
+}
+
+function isLensFlareOcclusionMesh(object: Mesh) {
+  if (object.userData?.lensflare === 'ignore-occlusion') {
+    return false
+  }
+
+  const debugRole = object.userData?.debugRole
+
+  if (
+    debugRole === 'torch-billboard' ||
+    debugRole === 'monster-eye' ||
+    debugRole === 'reflection-probe-visual'
+  ) {
+    return false
+  }
+
+  return isLensFlareOcclusionMaterial(object.material)
+}
+
 function addLensFlareStarBurstIntensityUniform(effect: PostLensFlareEffect) {
   const mutableEffect = effect as unknown as MutableLensFlareEffect
   const starBurstUniform = effect.uniforms.get('starBurstIntensity')
@@ -15801,13 +15829,7 @@ function TorchLensFlare({
         return
       }
 
-      const debugRoles = object.userData?.debugRoles
-      const isMazeWall =
-        object.userData?.debugRole === 'maze-wall' ||
-        (Array.isArray(debugRoles) && debugRoles.includes('maze-wall'))
-      const isMonster = object.userData?.debugRole === 'monster'
-
-      if (isMazeWall || isMonster) {
+      if (isLensFlareOcclusionMesh(object)) {
         nextOcclusionMeshes.push(object)
       }
 

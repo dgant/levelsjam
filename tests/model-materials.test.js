@@ -227,6 +227,26 @@ test('lens flare controls do not use app-side giant multipliers', () => {
   assert.doesNotMatch(appSource, /Flare Opacity/)
 })
 
+test('lens flare occlusion raycasts against all opaque scene meshes', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(appSource, /function isLensFlareOcclusionMaterial/)
+  assert.match(appSource, /function isLensFlareOcclusionMesh/)
+  assert.match(appSource, /!candidate\.transparent/)
+  assert.match(appSource, /candidate\.opacity > 0\.999/)
+  assert.match(appSource, /isLensFlareOcclusionMesh\(object\)[\s\S]*?nextOcclusionMeshes\.push\(object\)/)
+  assert.doesNotMatch(
+    appSource,
+    /isMazeWall \|\| isMonster/,
+    'lens flare occluders should not be limited to the old wall/monster whitelist'
+  )
+  assert.doesNotMatch(
+    appSource,
+    /debugRole === 'maze-door-leaf'[\s\S]{0,120}return false/,
+    'door leaves must remain eligible lens-flare occluders'
+  )
+})
+
 test('mobile menu exposes compact graphics controls and swipe-safe touch zones', () => {
   const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
   const stylesSource = fs.readFileSync(path.join(rootDir, 'src/styles.css'), 'utf8')
