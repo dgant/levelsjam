@@ -189,6 +189,21 @@ test('doors use generated Minoan-door ORM textures and baked dynamic lighting', 
   )
 })
 
+test('door back faces keep handles toward the doorway center', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(
+    appSource,
+    /maps=\{leftDoorMaps\}\s+materialKey=\{`\$\{materialKey\}:left:front`\}[\s\S]*?maps=\{leftDoorMaps\}\s+materialKey=\{`\$\{materialKey\}:left:back`\}/,
+    'left door leaf should use the left-handle-inward texture on both visible sides'
+  )
+  assert.match(
+    appSource,
+    /maps=\{rightDoorMaps\}\s+materialKey=\{`\$\{materialKey\}:right:front`\}[\s\S]*?maps=\{rightDoorMaps\}\s+materialKey=\{`\$\{materialKey\}:right:back`\}/,
+    'right door leaf should use the right-handle-inward texture on both visible sides'
+  )
+})
+
 test('lens flare controls do not use app-side giant multipliers', () => {
   const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
 

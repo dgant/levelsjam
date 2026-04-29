@@ -12367,7 +12367,7 @@ function MazeDoorActor({
         />
         <DoorLeafMaterial
           attach="material-1"
-          maps={rightDoorMaps}
+          maps={leftDoorMaps}
           materialKey={`${materialKey}:left:back`}
           probeBlend={probeBlend}
         />
@@ -12388,7 +12388,7 @@ function MazeDoorActor({
         />
         <DoorLeafMaterial
           attach="material-1"
-          maps={leftDoorMaps}
+          maps={rightDoorMaps}
           materialKey={`${materialKey}:right:back`}
           probeBlend={probeBlend}
         />
