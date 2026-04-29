@@ -215,6 +215,15 @@ test('lens flare controls do not use app-side giant multipliers', () => {
   assert.doesNotMatch(appSource, /LENS_FLARE_COLOR_GAIN|LENS_FLARE_INTENSITY_SCALE/)
   assert.match(appSource, /Lens Flare Strength/)
   assert.match(appSource, /Star Burst Intensity/)
+  assert.match(appSource, /starBurstFloor/)
+  assert.match(
+    appSource,
+    /starBurstIntensity <= 0\.0 \? vec3\(0\.0\) : clamp\(starBurstFloor \+ \(\(starBurstSignal - starBurstFloor\) \* starBurstIntensity\)/
+  )
+  assert.doesNotMatch(
+    appSource,
+    /clamp\(\(lensMod\.rgb \* getStartBurst\(\)\.rgb \), 0\.01, 1\.0\) \* starBurstIntensity/
+  )
   assert.doesNotMatch(appSource, /Flare Opacity/)
 })
 

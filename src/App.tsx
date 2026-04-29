@@ -15679,7 +15679,11 @@ function addLensFlareStarBurstIntensityUniform(effect: PostLensFlareEffect) {
       )
       .replace(
         'finalColor += clamp((lensMod.rgb * getStartBurst().rgb ), 0.01, 1.0);',
-        'finalColor += clamp((lensMod.rgb * getStartBurst().rgb ), 0.01, 1.0) * starBurstIntensity;'
+        [
+          'vec3 starBurstSignal = clamp((lensMod.rgb * getStartBurst().rgb ), 0.01, 1.0);',
+          'vec3 starBurstFloor = vec3(0.01);',
+          'finalColor += starBurstIntensity <= 0.0 ? vec3(0.0) : clamp(starBurstFloor + ((starBurstSignal - starBurstFloor) * starBurstIntensity), 0.0, 1.0);'
+        ].join('\n        ')
       )
   )
 

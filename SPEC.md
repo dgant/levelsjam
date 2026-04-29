@@ -633,6 +633,7 @@
 - Lens-flare bokeh and ghosts remain translucent and additive rather than appearing as opaque black or opaque solid sprites.
 - Lens-flare strength is controlled by a single user-facing strength slider with no hidden large app-side gain multiplier.
 - Lens-flare star-burst contribution has its own live intensity control.
+- Lens-flare star-burst intensity `1.0` preserves the wrapped effect's original star-burst look; the control scales the star-burst signal rather than the shader's full-screen minimum brightness floor.
 - Lens-flare controls expose the actual high-impact flare parameters with ranges that allow meaningful adjustment near zero as well as visibly strong flares at the top of the range.
 - Increasing or decreasing volumetric fog or smoke parameters produces a visible corresponding change in the full-scene fog volume.
 - Volumetric fog is implemented with one runtime fog effect over the rendered world instead of one expensive full-screen fog pass per rendered level.
