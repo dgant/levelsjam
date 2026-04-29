@@ -19,6 +19,7 @@ const testFiles = [
   'tests/player-motion.test.js',
   'tests/probe-spherical-harmonics.test.js',
   'tests/reflection-probe-blending.test.js',
+  'tests/save-game.test.js',
   'tests/scene-layout.test.js',
   'tests/turn-rules.test.js',
   'tests/world-grid.test.js'
@@ -35,6 +36,7 @@ const perFileThresholdsMs = {
   'tests/player-motion.test.js': 3_000,
   'tests/probe-spherical-harmonics.test.js': 3_000,
   'tests/reflection-probe-blending.test.js': 3_000,
+  'tests/save-game.test.js': 3_000,
   'tests/scene-layout.test.js': 3_000,
   'tests/turn-rules.test.js': 3_000,
   'tests/world-grid.test.js': 3_000

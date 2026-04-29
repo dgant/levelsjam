@@ -21,6 +21,8 @@
 - Player movement through an authored level exit transitions seamlessly into the connected level without fading, showing a loading transition, or exposing the boundary between levels.
 - Runtime gameplay state is one continuous world state, not one independent state per level.
 - Runtime gameplay state is represented by one global rules state with a canonical player, inventory, checkpoint, turn counter, and per-level entity/pickup slices used only as authored-world contents.
+- Runtime gameplay state can be saved and resumed from browser-local storage.
+- Resuming a game places the player at the starting position and direction of the last level they occupied, while preserving permanent level-progress facts such as lit altars and passageways opened by those altars.
 - Runtime gameplay rules operate on one canonical world grid of cells and edges between those cells.
 - Runtime gameplay rules do not give level exits special movement behavior; connected levels expose ordinary adjacent world-grid cells and ordinary open or blocked world-grid edges.
 - Runtime level identity is available to gameplay rules only for ownership, reset, authored solution metadata, and streaming/debug grouping.
@@ -262,6 +264,8 @@
 - The maze grid stores walls and gates as obstacles on edges between cells.
 - Each generated maze inserts four gates on randomly chosen open edges after the base maze topology is created.
 - Maze torch placement starts by placing a torch in every cell containing a generated pickup item, including the sword and the trophy, before filling the remaining unlit cells.
+- Maze torch placement backlights each monster from the direction where an imperfect-information solver first observes that monster, and minotaurs and werewolves initially face that backlight torch when possible.
+- Maze torch placement fills remaining unlit cells from farthest to nearest from the entrance, removing from the unlit set only cells with unbroken cardinal line of sight to the torch inside the `5x5` cross centered on that torch.
 - Generated pickup cells are selected so each pickup can host a same-cell torch against a valid wall side.
 - Before the player resolves a move, every gate adjacent to the player opens if no monster occupies the cell on the opposite side of that gate.
 - After the player resolves a move, every gate closes unless it is already closed.
@@ -296,6 +300,9 @@
 - Each cell may contain any number of items and at most one character.
 - Each maze contains one sword on a random unoccupied cell.
 - Each maze contains one trophy on the unoccupied cell with the greatest path distance from the entrance.
+- Each maze is associated with one altar outside the maze.
+- Each maze trophy has exactly one runtime location at a time: on the maze floor, held by the player, or permanently placed on the associated altar.
+- Once a maze trophy is placed on its associated altar, the maze entrance door closes permanently and does not reopen after reset or resume.
 - The sword uses the `bronze_sword_mycean` model, scaled proportionally to a `1m` length, and starts tip-down with the tip slightly below the ground.
 - The sword mesh is oriented upside down when placed in the maze, with its tip pointing into the ground.
 - The trophy uses the `head_of_a_bull` model, scaled proportionally to `0.5m` tall, and starts resting on the ground in its cell.
@@ -311,9 +318,12 @@
 - If the player would die by intersecting a monster while holding the sword, the monster dies instead, the sword is consumed, and the strike fade plays to dark red before restoring gameplay.
 - The sword-strike fade animates to linear RGB `(0.5, 0, 0)` over `125ms`, then fades back to the camera view over `375ms`, without flashing or transitioning through black.
 - A maze is beaten only when the player acquires the trophy and exits the maze while still holding it.
+- When the player leaves a maze and its entrance door closes while the player is outside that maze and its transition cell, the maze resets its monsters, pickups, doors, and gates; a held sword from that maze is removed.
 - Characters are either the player or monsters.
 - A character may move between adjacent cells only when the shared edge has no blocking obstacle.
-- Each player move consumes one turn, then every active monster resolves its turn in a stable order.
+- Each player move consumes one turn, then every active monster resolves its turn in the stable category order `Player -> Minotaurs -> Werewolves -> Spiders`, with a stable authored order within each monster category.
+- Monsters cannot occupy the same cell as another monster.
+- Monsters treat cells occupied by other monsters as blocked in the same way they treat walls, raised gates, and altar cells as blocked.
 - Player rotation does not consume a turn.
 - Player movement and rotation animations last `250ms`.
 - Monster movement animations last `250ms`.
@@ -376,6 +386,12 @@
 - Maze generation initializes each monster facing a legal neighboring cell when one exists.
 - Non-spider monsters prefer their legal neighbor with the shortest path back to the maze entrance.
 - Spiders initialize facing the next cell they would move into under their left-hand or right-hand wall-following rule.
+- Generated mazes are rectangular maze levels plus their authored transition cell; all maze border edges are walls except the transition-cell entrance door.
+- Generated mazes contain configured counts of minotaurs, spiders, werewolves, swords, gates, and exactly one trophy.
+- Maze validation requires a perfect-information shortest solution that acquires the trophy and exits the maze.
+- Maze validation requires an imperfect-information stochastic solver, using only cells seen from traversed cells including diagonals, to solve the maze in at least 80% of attempts.
+- Maze validation requires every monster, sword, and gate to be relevant: removing a monster makes the optimal solution faster, while removing any sword or gate makes the maze impossible.
+- Maze validation requires the optimal solution to be meaningfully maze-covering: trophy acquisition and exit must be slower than the monster-free shortest paths, the path must traverse at least 75% of maze cells, see at least 90% of maze cells, and traverse at least 25% of maze cells after acquiring the trophy that were not visited before acquiring it.
 - Awake minotaurs and werewolves face the player during idle, rotation, and movement animations.
 - Pressing `1` toggles a free-camera inspection mode that detaches the camera from the player.
 - Free-camera inspection mode uses WASD plus mouse look, has no collisions, supports the arrow keys as movement aliases, and maps `E` to move down and `Q` to move up.

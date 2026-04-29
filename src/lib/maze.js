@@ -731,11 +731,12 @@ function getClosedSides(maze, adjacency, cell) {
 export function computeLightCoverage(maze, light) {
   const adjacency = buildAdjacency(maze)
   const covered = new Set([cellKey(light.cell)])
+  const maxCardinalDistance = 2
 
   for (const direction of CARDINAL_DIRECTIONS) {
     let current = { ...light.cell }
 
-    while (true) {
+    for (let distance = 1; distance <= maxCardinalDistance; distance += 1) {
       const neighbor = getNeighbor(current, direction.side)
 
       if (
@@ -909,6 +910,20 @@ function validateMazeContent(maze) {
     }
   }
 
+  if (maze.trophy?.cell && maze.sword?.cell) {
+    const reservedKeys = new Set([
+      cellKey(maze.opening.cell),
+      cellKey(maze.sword.cell)
+    ])
+    const expectedTrophyCell = chooseMazeTrophyCell(maze, adjacency, reservedKeys)
+
+    if (cellKey(expectedTrophyCell) !== cellKey(maze.trophy.cell)) {
+      errors.push(
+        `Trophy must be placed at the farthest unoccupied path cell; expected ${cellKey(expectedTrophyCell)} but found ${cellKey(maze.trophy.cell)}`
+      )
+    }
+  }
+
   return {
     errors,
     valid: errors.length === 0
@@ -1005,7 +1020,7 @@ function generateMazeLights(maze, random) {
   }
 
   const lights = []
-  const addLightForCell = (cell) => {
+  const addLightForCell = (cell, preferredSide = null) => {
     const key = cellKey(cell)
 
     if (!unlit.has(key)) {
@@ -1018,7 +1033,9 @@ function generateMazeLights(maze, random) {
       return false
     }
 
-    const side = closedSides[integerFromRandom(random, closedSides.length)]
+    const side = preferredSide && closedSides.includes(preferredSide)
+      ? preferredSide
+      : closedSides[integerFromRandom(random, closedSides.length)]
     const light = { cell: { ...cell }, side }
 
     lights.push(light)
@@ -1035,16 +1052,33 @@ function generateMazeLights(maze, random) {
     }
   }
 
+  for (const monster of maze.monsters ?? []) {
+    const closedSides = getClosedSides(maze, adjacency, monster.cell)
+    const preferredSide = monster.direction && closedSides.includes(monster.direction)
+      ? monster.direction
+      : closedSides[integerFromRandom(random, closedSides.length)] ?? null
+
+    if (preferredSide && addLightForCell(monster.cell, preferredSide)) {
+      if (monster.type === 'minotaur' || monster.type === 'werewolf') {
+        monster.direction = preferredSide
+      }
+    }
+  }
+
   while (unlit.size > 0) {
     const candidates = [...unlit]
       .map(parseCellKey)
       .filter((cell) => getClosedSides(maze, adjacency, cell).length > 0)
+      .sort((a, b) => (
+        shortestPathDistance(adjacency, maze.opening.cell, b) -
+        shortestPathDistance(adjacency, maze.opening.cell, a)
+      ))
 
     if (candidates.length === 0) {
       break
     }
 
-    addLightForCell(candidates[integerFromRandom(random, candidates.length)])
+    addLightForCell(candidates[0])
   }
 
   return lights
@@ -1210,19 +1244,25 @@ export function generateMaze(seed = Date.now(), options = {}) {
       new Set([cellKey(maze.opening.cell), cellKey(maze.sword.cell)])
     )
   }
-
-  maze.lights = generateMazeLights(maze, random)
-  maze.monsters = generateMazeMonsters(
-    maze,
-    random,
-    getVisibleCellKeysFromCells(
-      maze,
-      getSolutionRouteCells(maze, adjacency)
-    )
-  )
-  maze.visibility = computeMazeCellVisibility(maze)
   maze.generationMs = performance.now() - startTime
-  recordMazeSolution(maze)
+
+  const protectedMonsterCellKeys = getVisibleCellKeysFromCells(
+    maze,
+    getSolutionRouteCells(maze, adjacency)
+  )
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    maze.monsters = generateMazeMonsters(
+      maze,
+      random,
+      protectedMonsterCellKeys
+    )
+    maze.lights = generateMazeLights(maze, random)
+    maze.visibility = computeMazeCellVisibility(maze)
+
+    if (recordMazeSolution(maze)) {
+      break
+    }
+  }
   if (bakeLightmap) {
     throw new Error(
       'generateMaze no longer performs synchronous lightmap baking; call bakeMazeLightmap(maze) from async tooling after generation'

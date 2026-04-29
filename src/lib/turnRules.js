@@ -1,4 +1,5 @@
 const DIRECTIONS = ['north', 'east', 'south', 'west']
+const MONSTER_TURN_TYPE_ORDER = ['minotaur', 'werewolf', 'spider']
 
 const DIRECTION_DELTAS = {
   east: { x: 1, y: 0 },
@@ -87,6 +88,33 @@ function canMove(maze, openEdges, cell, direction) {
     !isBlockedCell(maze, neighbor) &&
     openEdges.has(normalizeEdge(cell, neighbor))
   )
+}
+
+function canMoveToUnoccupied(maze, openEdges, blockedCellKeys, cell, direction) {
+  const neighbor = getNeighbor(cell, direction)
+
+  return (
+    canMove(maze, openEdges, cell, direction) &&
+    !blockedCellKeys.has(cellKey(neighbor))
+  )
+}
+
+function sortMonstersForTurn(monsters) {
+  return monsters
+    .map((monster, index) => ({ index, monster }))
+    .sort((a, b) => {
+      const aTypeOrder = MONSTER_TURN_TYPE_ORDER.indexOf(a.monster.type)
+      const bTypeOrder = MONSTER_TURN_TYPE_ORDER.indexOf(b.monster.type)
+      const aOrder = aTypeOrder === -1 ? MONSTER_TURN_TYPE_ORDER.length : aTypeOrder
+      const bOrder = bTypeOrder === -1 ? MONSTER_TURN_TYPE_ORDER.length : bTypeOrder
+
+      return (aOrder - bOrder) || (a.index - b.index)
+    })
+    .map(({ monster }) => monster)
+}
+
+function getMonsterIdentity(monster, index = 0) {
+  return monster.id ?? `${monster.type}:${index}`
 }
 
 function rotateDirection(direction, turn) {
@@ -305,7 +333,7 @@ function chooseInitialSpiderDirection(maze, openEdges, monster) {
 }
 
 function chooseInitialMonsterDirection(maze, openEdges, monster) {
-  if (monster.direction && canMove(maze, openEdges, monster.cell, monster.direction)) {
+  if (monster.direction) {
     return monster.direction
   }
 
@@ -443,7 +471,8 @@ function getVisibleCells(maze, state) {
   return visible
 }
 
-function shortestPathDirections(maze, openEdges, from, to) {
+function shortestPathDirections(maze, openEdges, from, to, options = {}) {
+  const blockedCellKeys = options.blockedCellKeys ?? new Set()
   const queue = [{ cell: from, path: [] }]
   const visited = new Set([cellKey(from)])
 
@@ -455,7 +484,7 @@ function shortestPathDirections(maze, openEdges, from, to) {
     }
 
     for (const direction of DIRECTIONS) {
-      if (!canMove(maze, openEdges, current.cell, direction)) {
+      if (!canMoveToUnoccupied(maze, openEdges, blockedCellKeys, current.cell, direction)) {
         continue
       }
 
@@ -477,7 +506,7 @@ function shortestPathDirections(maze, openEdges, from, to) {
   return []
 }
 
-function chooseSpiderDirection(maze, openEdges, monster) {
+function chooseSpiderDirection(maze, openEdges, monster, blockedCellKeys = new Set()) {
   const turnOrder = monster.hand === 'left'
     ? ['left', 'straight', 'right', 'back']
     : ['right', 'straight', 'left', 'back']
@@ -487,7 +516,7 @@ function chooseSpiderDirection(maze, openEdges, monster) {
   for (const turn of turnOrder) {
     const direction = candidateDirection(turn)
 
-    if (canMove(maze, openEdges, monster.cell, direction)) {
+    if (canMoveToUnoccupied(maze, openEdges, blockedCellKeys, monster.cell, direction)) {
       return direction
     }
   }
@@ -495,8 +524,14 @@ function chooseSpiderDirection(maze, openEdges, monster) {
   return null
 }
 
-function chooseWerewolfDirection(maze, openEdges, monster, playerCell) {
-  const path = shortestPathDirections(maze, openEdges, monster.cell, playerCell)
+function chooseWerewolfDirection(maze, openEdges, monster, playerCell, blockedCellKeys = new Set()) {
+  const path = shortestPathDirections(
+    maze,
+    openEdges,
+    monster.cell,
+    playerCell,
+    { blockedCellKeys }
+  )
   const bestLength = path.length
 
   if (bestLength === 0) {
@@ -509,12 +544,18 @@ function chooseWerewolfDirection(maze, openEdges, monster, playerCell) {
   const candidateDirections = []
 
   for (const direction of DIRECTIONS) {
-    if (!canMove(maze, openEdges, monster.cell, direction)) {
+    if (!canMoveToUnoccupied(maze, openEdges, blockedCellKeys, monster.cell, direction)) {
       continue
     }
 
     const nextCell = getNeighbor(monster.cell, direction)
-    const nextPath = shortestPathDirections(maze, openEdges, nextCell, playerCell)
+    const nextPath = shortestPathDirections(
+      maze,
+      openEdges,
+      nextCell,
+      playerCell,
+      { blockedCellKeys }
+    )
 
     if (nextPath.length === 0 && cellKey(nextCell) !== cellKey(playerCell)) {
       continue
@@ -642,7 +683,7 @@ function updateMinotaurSight(maze, visibilityEdges, monster, playerCell) {
   return true
 }
 
-function resolveMonsterTurn(maze, openEdges, visibilityEdges, monster, playerCell) {
+function resolveMonsterTurn(maze, openEdges, visibilityEdges, monster, playerCell, blockedCellKeys = new Set()) {
   const nextMonster = cloneMonster(monster)
   const sawPlayer = canSeeCell(maze, visibilityEdges, monster.cell, playerCell)
   const wasAwake = monster.awake
@@ -666,7 +707,10 @@ function resolveMonsterTurn(maze, openEdges, visibilityEdges, monster, playerCel
       ? directionBetween(monster.cell, playerCell)
       : monster.lastSeenDirection
 
-    if (!moveDirection || !canMove(maze, openEdges, monster.cell, moveDirection)) {
+    if (
+      !moveDirection ||
+      !canMoveToUnoccupied(maze, openEdges, blockedCellKeys, monster.cell, moveDirection)
+    ) {
       nextMonster.awake = sawPlayer
       nextMonster.movedPreviousTurn = false
       nextMonster.failedMoveDirection = moveDirection
@@ -676,21 +720,36 @@ function resolveMonsterTurn(maze, openEdges, visibilityEdges, monster, playerCel
       return nextMonster
     }
   } else if (monster.type === 'spider') {
-    moveDirection = canMove(maze, openEdges, monster.cell, monster.direction)
+    moveDirection = canMoveToUnoccupied(
+      maze,
+      openEdges,
+      blockedCellKeys,
+      monster.cell,
+      monster.direction
+    )
       ? monster.direction
-      : chooseSpiderDirection(maze, openEdges, monster)
+      : chooseSpiderDirection(maze, openEdges, monster, blockedCellKeys)
   } else if (monster.type === 'werewolf') {
     if (monster.movedPreviousTurn) {
       nextMonster.movedPreviousTurn = false
       return nextMonster
     }
 
-    const pathChoice = chooseWerewolfDirection(maze, openEdges, monster, playerCell)
+    const pathChoice = chooseWerewolfDirection(
+      maze,
+      openEdges,
+      monster,
+      playerCell,
+      blockedCellKeys
+    )
     moveDirection = pathChoice.direction
     nextMonster.lastPath = pathChoice.path
   }
 
-  if (!moveDirection || !canMove(maze, openEdges, monster.cell, moveDirection)) {
+  if (
+    !moveDirection ||
+    !canMoveToUnoccupied(maze, openEdges, blockedCellKeys, monster.cell, moveDirection)
+  ) {
     nextMonster.movedPreviousTurn = false
     nextMonster.failedMoveDirection = moveDirection
     return nextMonster
@@ -703,7 +762,12 @@ function resolveMonsterTurn(maze, openEdges, visibilityEdges, monster, playerCel
   nextMonster.movedPreviousTurn = true
 
   if (monster.type === 'spider') {
-    const nextSpiderDirection = chooseSpiderDirection(maze, openEdges, nextMonster)
+    const nextSpiderDirection = chooseSpiderDirection(
+      maze,
+      openEdges,
+      nextMonster,
+      blockedCellKeys
+    )
     if (nextSpiderDirection) {
       nextMonster.direction = nextSpiderDirection
     }
@@ -712,7 +776,8 @@ function resolveMonsterTurn(maze, openEdges, visibilityEdges, monster, playerCel
       maze,
       openEdges,
       nextMonster,
-      playerCell
+      playerCell,
+      blockedCellKeys
     ).direction
     if (nextWerewolfDirection) {
       nextMonster.direction = nextWerewolfDirection
@@ -836,20 +901,36 @@ export function applyTurnAction(maze, state, action) {
   next.player.cell = nextPlayerCell
   resolvePlayerPickups(maze, next, outcome)
 
-  const movedMonsters = []
+  const monsterStateById = new Map(
+    next.monsters.map((monster, index) => [getMonsterIdentity(monster, index), monster])
+  )
+  const orderedMonsters = sortMonstersForTurn(next.monsters)
 
-  for (const monster of next.monsters) {
+  for (const monster of orderedMonsters) {
+    const monsterId = getMonsterIdentity(monster)
+    const currentMonster = monsterStateById.get(monsterId)
+
+    if (!currentMonster) {
+      continue
+    }
+
+    const blockedCellKeys = new Set(
+      Array.from(monsterStateById.entries())
+        .filter(([candidateId]) => candidateId !== monsterId)
+        .map(([, candidate]) => cellKey(candidate.cell))
+    )
     const movedMonster = resolveMonsterTurn(
       maze,
       monsterMoveEdges,
       visibilityEdges,
-      monster,
-      next.player.cell
+      currentMonster,
+      next.player.cell,
+      blockedCellKeys
     )
 
     if (cellKey(movedMonster.cell) === cellKey(next.player.cell)) {
       if (!next.player.hasSword) {
-        movedMonsters.push(movedMonster)
+        monsterStateById.set(monsterId, movedMonster)
         next.dead = true
         outcome.killed = true
         outcome.playerEffect = 'death'
@@ -858,13 +939,16 @@ export function applyTurnAction(maze, state, action) {
 
       consumeSword(next)
       outcome.playerEffect = 'sword-strike'
+      monsterStateById.delete(monsterId)
       continue
     }
 
-    movedMonsters.push(movedMonster)
+    monsterStateById.set(monsterId, movedMonster)
   }
 
-  next.monsters = movedMonsters
+  next.monsters = next.monsters
+    .map((monster, index) => monsterStateById.get(getMonsterIdentity(monster, index)))
+    .filter(Boolean)
   next.turn += 1
 
   return outcome
@@ -887,8 +971,10 @@ export {
   OPPOSITE_DIRECTIONS,
   canSeeCell,
   canMove,
+  canMoveToUnoccupied,
   cellKey,
   chooseSpiderDirection,
+  chooseWerewolfDirection,
   createBaseOpenEdgeSet,
   createMonsterMoveEdgeSet,
   createPlayerMoveEdgeSet,

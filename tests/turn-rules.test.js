@@ -193,6 +193,107 @@ test('werewolves face their next planned move direction after moving', () => {
   assert.equal(moved.direction, 'north')
 })
 
+test('monsters treat other monster cells as blocked', () => {
+  const maze = testMaze({
+    gates: [],
+    height: 2,
+    monsters: [
+      {
+        cell: { x: 3, y: 1 },
+        direction: 'west',
+        type: 'minotaur'
+      },
+      {
+        cell: { x: 2, y: 1 },
+        direction: 'west',
+        type: 'werewolf'
+      }
+    ],
+    openEdges: [
+      { from: { x: 0, y: 0 }, to: { x: 1, y: 0 } },
+      { from: { x: 1, y: 1 }, to: { x: 2, y: 1 } },
+      { from: { x: 2, y: 1 }, to: { x: 3, y: 1 } }
+    ],
+    opening: { cell: { x: 0, y: 0 }, side: 'west' },
+    playerStart: {
+      cell: { x: 0, y: 0 },
+      direction: 'east'
+    },
+    sword: null,
+    trophy: null,
+    width: 4
+  })
+  const state = createInitialTurnState(maze)
+
+  state.monsters[0] = {
+    ...state.monsters[0],
+    awake: true,
+    lastSeenDirection: 'west'
+  }
+  state.monsters[1] = {
+    ...state.monsters[1],
+    awake: true
+  }
+
+  const result = applyTurnAction(maze, state, 'move-forward').state
+
+  assert.deepEqual(result.monsters[0].cell, { x: 3, y: 1 })
+  assert.equal(result.monsters[0].failedMoveDirection, 'west')
+  assert.notDeepEqual(result.monsters[0].cell, result.monsters[1].cell)
+})
+
+test('monster turns resolve by category before authored order', () => {
+  const maze = testMaze({
+    gates: [],
+    height: 2,
+    monsters: [
+      {
+        cell: { x: 2, y: 1 },
+        direction: 'west',
+        type: 'werewolf'
+      },
+      {
+        cell: { x: 3, y: 1 },
+        direction: 'west',
+        type: 'minotaur'
+      }
+    ],
+    openEdges: [
+      { from: { x: 0, y: 0 }, to: { x: 1, y: 0 } },
+      { from: { x: 1, y: 1 }, to: { x: 2, y: 1 } },
+      { from: { x: 2, y: 1 }, to: { x: 3, y: 1 } }
+    ],
+    opening: { cell: { x: 0, y: 0 }, side: 'west' },
+    playerStart: {
+      cell: { x: 0, y: 0 },
+      direction: 'east'
+    },
+    sword: null,
+    trophy: null,
+    width: 4
+  })
+  const state = createInitialTurnState(maze)
+
+  state.monsters[0] = {
+    ...state.monsters[0],
+    awake: true
+  }
+  state.monsters[1] = {
+    ...state.monsters[1],
+    awake: true,
+    lastSeenDirection: 'west'
+  }
+
+  const result = applyTurnAction(maze, state, 'move-forward').state
+
+  assert.deepEqual(
+    result.monsters.map((monster) => monster.type),
+    ['werewolf', 'minotaur']
+  )
+  assert.deepEqual(result.monsters[1].cell, { x: 3, y: 1 })
+  assert.equal(result.monsters[1].failedMoveDirection, 'west')
+})
+
 test('rotation changes player direction without advancing monster turns', () => {
   const maze = testMaze()
   const state = createInitialTurnState(maze)

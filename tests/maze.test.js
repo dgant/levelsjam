@@ -13,6 +13,7 @@ import {
   MAZE_WIDTH,
   bakeMazeLightmap,
   computeMazeCellVisibility,
+  computeLightCoverage,
   computeMazeVolumetricLightmapCoefficients,
   generateMaze,
   getMazeSceneLayout,
@@ -121,17 +122,55 @@ test('places initial torch lights on pickup cells', () => {
   assert.ok(lightCellKeys.has(`${maze.trophy.cell.x},${maze.trophy.cell.y}`))
 })
 
-test('initial monsters face legal movement cells', () => {
+test('bounded torch coverage uses the requested 5x5 cardinal cross', () => {
+  const maze = {
+    height: 7,
+    opening: { cell: { x: 3, y: 6 }, side: 'south' },
+    openEdges: [
+      { from: { x: 3, y: 3 }, to: { x: 3, y: 2 } },
+      { from: { x: 3, y: 2 }, to: { x: 3, y: 1 } },
+      { from: { x: 3, y: 1 }, to: { x: 3, y: 0 } },
+      { from: { x: 3, y: 3 }, to: { x: 4, y: 3 } },
+      { from: { x: 4, y: 3 }, to: { x: 5, y: 3 } },
+      { from: { x: 5, y: 3 }, to: { x: 6, y: 3 } }
+    ],
+    width: 7
+  }
+  const covered = computeLightCoverage(maze, {
+    cell: { x: 3, y: 3 },
+    side: 'north'
+  })
+
+  assert.equal(covered.has('3,1'), true)
+  assert.equal(covered.has('3,0'), false)
+  assert.equal(covered.has('5,3'), true)
+  assert.equal(covered.has('6,3'), false)
+})
+
+test('initial monsters face legal movement cells or their backlight torches', () => {
   const maze = generateMaze(123456, { bakeLightmap: false })
   const state = createInitialTurnState(maze)
   const openEdges = createMonsterMoveEdgeSet(maze)
+  const lightByCell = new Map(
+    maze.lights.map((light) => [cellKey(light.cell), light])
+  )
 
   for (const monster of state.monsters) {
-    assert.equal(
-      canMove(maze, openEdges, monster.cell, monster.direction),
-      true,
-      `${monster.type} at ${cellKey(monster.cell)} faces blocked ${monster.direction}`
-    )
+    const colocatedLight = lightByCell.get(cellKey(monster.cell))
+
+    if (monster.type === 'minotaur' || monster.type === 'werewolf') {
+      assert.equal(
+        monster.direction,
+        colocatedLight?.side,
+        `${monster.type} at ${cellKey(monster.cell)} should face its backlight torch`
+      )
+    } else {
+      assert.equal(
+        canMove(maze, openEdges, monster.cell, monster.direction),
+        true,
+        `${monster.type} at ${cellKey(monster.cell)} faces blocked ${monster.direction}`
+      )
+    }
 
     if (monster.type === 'spider') {
       assert.equal(

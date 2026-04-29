@@ -185,6 +185,11 @@ import {
   transitionGlobalTurnState,
   type GlobalTurnState
 } from './lib/globalTurnRules.js'
+import {
+  createGameSave,
+  readGameSave,
+  writeGameSave
+} from './lib/saveGame.js'
 import { cloneCachedGltfRoot, getCachedGltfRootUrls } from './lib/gltfRuntimeCache'
 
 declare const __GIT_BRANCH__: string
@@ -21879,7 +21884,15 @@ export default function App() {
   const [mazeSceneKey, setMazeSceneKey] = useState(0)
   const [sceneLoaded, setSceneLoaded] = useState(false)
   const [visualSettings, setVisualSettings] = useState(createDefaultVisualSettings)
-  const [activatedAltarIds, setActivatedAltarIds] = useState<Set<string>>(() => new Set())
+  const [activatedAltarIds, setActivatedAltarIds] = useState<Set<string>>(() => {
+    try {
+      const save = readGameSave(window.localStorage)
+
+      return new Set(save?.litAltars ?? [])
+    } catch {
+      return new Set()
+    }
+  })
   const [altarCutscene, setAltarCutscene] = useState<{
     altarId: string
     levelId: string
@@ -21946,6 +21959,23 @@ export default function App() {
       return next
     })
   }, [])
+
+  useEffect(() => {
+    if (!globalTurnState) {
+      return
+    }
+
+    try {
+      writeGameSave(
+        window.localStorage,
+        createGameSave(globalTurnState, {
+          activatedAltarIds
+        })
+      )
+    } catch {
+      // Storage can be unavailable in hardened browser modes; gameplay continues without autosave.
+    }
+  }, [activatedAltarIds, globalTurnState])
 
   const getRenderedTurnState = useCallback((layout: MazeLayout) => {
     const currentGlobalState = globalTurnStateRef.current
@@ -22262,7 +22292,14 @@ export default function App() {
       document.body.dataset.requestedMazeId = requestedMazeId ?? getDefaultRuntimeLevelId()
 
       try {
-        const defaultMazeId = requestedMazeId ?? getDefaultRuntimeLevelId()
+        const savedLevelId = (() => {
+          try {
+            return readGameSave(window.localStorage)?.lastLevelId ?? null
+          } catch {
+            return null
+          }
+        })()
+        const defaultMazeId = requestedMazeId ?? savedLevelId ?? getDefaultRuntimeLevelId()
         const nextLayout = requestedMazeId
           ? await loadMazeLayoutById(requestedMazeId)
           : await loadMazeLayoutById(defaultMazeId)
@@ -23162,7 +23199,7 @@ export default function App() {
             layoutForCutscene.maze
           )
 
-          return replaceGlobalTurnStateForLevel(current, levelId, {
+          const nextGlobalState = replaceGlobalTurnStateForLevel(current, levelId, {
             ...levelTurnState,
             player: {
               ...levelTurnState.player,
@@ -23170,6 +23207,29 @@ export default function App() {
             },
             trophyState: 'consumed'
           })
+          const nextItemStates = { ...(nextGlobalState.worldTurnState.itemStates ?? {}) }
+
+          for (const [itemId, itemState] of Object.entries(nextItemStates)) {
+            if (itemState === 'held' && itemId.endsWith(':trophy')) {
+              nextItemStates[itemId] = 'consumed'
+            }
+          }
+
+          return {
+            ...nextGlobalState,
+            player: {
+              ...nextGlobalState.player,
+              hasTrophy: false
+            },
+            worldTurnState: {
+              ...nextGlobalState.worldTurnState,
+              itemStates: nextItemStates,
+              player: {
+                ...nextGlobalState.worldTurnState.player,
+                hasTrophy: false
+              }
+            }
+          }
         })
       }
     }, 3000)
