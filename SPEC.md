@@ -269,7 +269,7 @@
 - The runtime uses offline-resized `512x512` gate textures instead of the oversized source textures.
 - Each maze entrance edge has a door that follows the same blocking and opening rules as gates.
 - Each door is rendered as two cuboid leaves using an ancient Minoan heavy wooden door PBR material with rusty bronze reinforcements and a bronze ring opener.
-- Each door leaf uses a side-specific texture layout, mirrored between leaves so the opener sits toward the middle of the doorway, at the same world texel density as walls.
+- Each door uses one runtime left-leaf PBR texture set; right leaves mirror their mesh UVs and invert the tangent-space normal X contribution at runtime so the opener sits toward the middle of the doorway without shipping duplicate mirrored textures.
 - Each door uses a runtime-prepared ORM texture for occlusion, roughness, and metalness instead of binding the source specular texture as roughness.
 - Each door receives local volumetric-lightmap illumination and local reflection-probe response so it renders visibly under the baked lighting stack rather than as black unlit metal.
 - Doors start visually closed like gates and do not open merely because the player begins in or steps onto the entrance cell.

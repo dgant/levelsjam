@@ -145,12 +145,12 @@ test('doors use generated Minoan-door ORM textures and baked dynamic lighting', 
   assert.match(
     appSource,
     /textures\/runtime\/minoan-door\/minoan_door_left_orm\.png/,
-    'left door leaf should bind its generated runtime ORM texture'
+    'door leaves should bind the generated runtime left-leaf ORM texture'
   )
-  assert.match(
+  assert.doesNotMatch(
     appSource,
-    /textures\/runtime\/minoan-door\/minoan_door_right_orm\.png/,
-    'right door leaf should bind its generated runtime ORM texture'
+    /minoan_door_right/,
+    'right door leaves should mirror the left texture at runtime instead of binding duplicate right textures'
   )
   assert.doesNotMatch(
     appSource,
@@ -194,13 +194,18 @@ test('door back faces keep handles toward the doorway center', () => {
 
   assert.match(
     appSource,
-    /maps=\{leftDoorMaps\}\s+materialKey=\{`\$\{materialKey\}:left:front`\}[\s\S]*?maps=\{leftDoorMaps\}\s+materialKey=\{`\$\{materialKey\}:left:back`\}/,
-    'left door leaf should use the left-handle-inward texture on both visible sides'
+    /geometry=\{leftDoorGeometry\}[\s\S]*?maps=\{doorMaps\}\s+materialKey=\{`\$\{materialKey\}:left:front`\}[\s\S]*?maps=\{doorMaps\}\s+materialKey=\{`\$\{materialKey\}:left:back`\}/,
+    'left door leaf should use the shared left texture on both visible sides'
   )
   assert.match(
     appSource,
-    /maps=\{rightDoorMaps\}\s+materialKey=\{`\$\{materialKey\}:right:front`\}[\s\S]*?maps=\{rightDoorMaps\}\s+materialKey=\{`\$\{materialKey\}:right:back`\}/,
-    'right door leaf should use the right-handle-inward texture on both visible sides'
+    /createDoorLeafGeometry\(\{ mirrored: true \}\)/,
+    'right door leaf should mirror its UVs at runtime'
+  )
+  assert.match(
+    appSource,
+    /geometry=\{rightDoorGeometry\}[\s\S]*?materialKey=\{`\$\{materialKey\}:right:front`\}\s+mirroredNormal[\s\S]*?materialKey=\{`\$\{materialKey\}:right:back`\}\s+mirroredNormal/,
+    'right door leaf should invert its tangent-space normal X contribution at runtime'
   )
 })
 

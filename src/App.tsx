@@ -217,18 +217,10 @@ const METAL_TEXTURE_URLS = {
   orm: `${assetBase}textures/runtime/metal-13/metal_13_orm-1K.png`
 }
 const DOOR_TEXTURE_URLS = {
-  left: {
-    ao: `${assetBase}textures/runtime/minoan-door/minoan_door_left_orm.png`,
-    color: `${assetBase}textures/runtime/minoan-door/minoan_door_left_basecolor.png`,
-    normal: `${assetBase}textures/runtime/minoan-door/minoan_door_left_normal.png`,
-    orm: `${assetBase}textures/runtime/minoan-door/minoan_door_left_orm.png`
-  },
-  right: {
-    ao: `${assetBase}textures/runtime/minoan-door/minoan_door_right_orm.png`,
-    color: `${assetBase}textures/runtime/minoan-door/minoan_door_right_basecolor.png`,
-    normal: `${assetBase}textures/runtime/minoan-door/minoan_door_right_normal.png`,
-    orm: `${assetBase}textures/runtime/minoan-door/minoan_door_right_orm.png`
-  }
+  ao: `${assetBase}textures/runtime/minoan-door/minoan_door_left_orm.png`,
+  color: `${assetBase}textures/runtime/minoan-door/minoan_door_left_basecolor.png`,
+  normal: `${assetBase}textures/runtime/minoan-door/minoan_door_left_normal.png`,
+  orm: `${assetBase}textures/runtime/minoan-door/minoan_door_left_orm.png`
 }
 const FRESCO_DECAL_URLS = [
   `${assetBase}textures/decals/minoan-labyrinth-toss.png`,
@@ -12140,14 +12132,20 @@ function DoorLeafMaterial({
   attach,
   maps,
   materialKey,
+  mirroredNormal = false,
   probeBlend
 }: {
   attach?: string
   maps: PbrMaps
   materialKey: string
+  mirroredNormal?: boolean
   probeBlend: ProbeBlendConfig
 }) {
   const [material, setMaterial] = useState<ThreeMeshStandardMaterial | null>(null)
+  const normalScale = useMemo(
+    () => new Vector2(mirroredNormal ? -1 : 1, 1),
+    [mirroredNormal]
+  )
   const probeBlendMaterialProps = useProbeBlendMaterialShader(
     material,
     probeBlend,
@@ -12168,6 +12166,7 @@ function DoorLeafMaterial({
       metalness={1}
       metalnessMap={maps.metalnessMap}
       normalMap={maps.normalMap}
+      normalScale={normalScale}
       onBeforeCompile={probeBlendMaterialProps.onBeforeCompile}
       onBeforeRender={probeBlendMaterialProps.onBeforeRender}
       ref={setMaterial}
@@ -12175,6 +12174,41 @@ function DoorLeafMaterial({
       roughnessMap={maps.roughnessMap}
     />
   )
+}
+
+function createDoorLeafGeometry({ mirrored = false }: { mirrored?: boolean } = {}) {
+  const geometry = new BoxGeometry(1, DOOR_HEIGHT, WALL_WIDTH * 0.5)
+  const uv = geometry.getAttribute('uv')
+  const normal = geometry.getAttribute('normal')
+
+  if (uv) {
+    for (let vertexIndex = 0; vertexIndex < uv.count; vertexIndex += 1) {
+      let nextU = uv.getX(vertexIndex)
+
+      if (normal?.getZ(vertexIndex) < -0.5) {
+        nextU = 1 - nextU
+      }
+      if (mirrored) {
+        nextU = 1 - nextU
+      }
+
+      uv.setX(vertexIndex, nextU)
+    }
+    uv.needsUpdate = true
+    geometry.setAttribute('uv2', uv.clone())
+  }
+
+  if (normal) {
+    const index = geometry.getIndex()
+
+    for (const group of geometry.groups) {
+      const normalIndex = index ? index.getX(group.start) : group.start
+
+      group.materialIndex = normal.getZ(normalIndex) < -0.5 ? 1 : 0
+    }
+  }
+
+  return geometry
 }
 
 function MazeDoorActor({
@@ -12209,35 +12243,9 @@ function MazeDoorActor({
   const group = useRef<Group>(null)
   const leftLeaf = useRef<Mesh>(null)
   const rightLeaf = useRef<Mesh>(null)
-  const leftDoorMaps = useStandardPbrTextures(DOOR_TEXTURE_URLS.left, DOOR_TEXTURE_REPEAT)
-  const rightDoorMaps = useStandardPbrTextures(DOOR_TEXTURE_URLS.right, DOOR_TEXTURE_REPEAT)
-  const doorGeometry = useMemo(() => {
-    const geometry = new BoxGeometry(1, DOOR_HEIGHT, WALL_WIDTH * 0.5)
-    const uv = geometry.getAttribute('uv')
-    const normal = geometry.getAttribute('normal')
-
-    if (uv) {
-      for (let vertexIndex = 0; vertexIndex < uv.count; vertexIndex += 1) {
-        if (normal?.getZ(vertexIndex) < -0.5) {
-          uv.setX(vertexIndex, 1 - uv.getX(vertexIndex))
-        }
-      }
-      uv.needsUpdate = true
-      geometry.setAttribute('uv2', uv.clone())
-    }
-
-    if (normal) {
-      const index = geometry.getIndex()
-
-      for (const group of geometry.groups) {
-        const normalIndex = index ? index.getX(group.start) : group.start
-
-        group.materialIndex = normal.getZ(normalIndex) < -0.5 ? 1 : 0
-      }
-    }
-
-    return geometry
-  }, [])
+  const doorMaps = useStandardPbrTextures(DOOR_TEXTURE_URLS, DOOR_TEXTURE_REPEAT)
+  const leftDoorGeometry = useMemo(() => createDoorLeafGeometry(), [])
+  const rightDoorGeometry = useMemo(() => createDoorLeafGeometry({ mirrored: true }), [])
   const reflectionProbeBlend = useMemo(
     () =>
       getReflectionProbeBlendForPosition(layout, {
@@ -12318,8 +12326,9 @@ function MazeDoorActor({
   const openProgress = useRef(0)
 
   useEffect(() => () => {
-    doorGeometry.dispose()
-  }, [doorGeometry])
+    leftDoorGeometry.dispose()
+    rightDoorGeometry.dispose()
+  }, [leftDoorGeometry, rightDoorGeometry])
 
   useFrame((_, delta) => {
     const target = isOpen ? 1 : 0
@@ -12353,7 +12362,7 @@ function MazeDoorActor({
     >
       <mesh
         castShadow
-        geometry={doorGeometry}
+        geometry={leftDoorGeometry}
         position-x={-0.5}
         receiveShadow
         ref={leftLeaf}
@@ -12361,20 +12370,20 @@ function MazeDoorActor({
       >
         <DoorLeafMaterial
           attach="material-0"
-          maps={leftDoorMaps}
+          maps={doorMaps}
           materialKey={`${materialKey}:left:front`}
           probeBlend={probeBlend}
         />
         <DoorLeafMaterial
           attach="material-1"
-          maps={leftDoorMaps}
+          maps={doorMaps}
           materialKey={`${materialKey}:left:back`}
           probeBlend={probeBlend}
         />
       </mesh>
       <mesh
         castShadow
-        geometry={doorGeometry}
+        geometry={rightDoorGeometry}
         position-x={0.5}
         receiveShadow
         ref={rightLeaf}
@@ -12382,14 +12391,16 @@ function MazeDoorActor({
       >
         <DoorLeafMaterial
           attach="material-0"
-          maps={rightDoorMaps}
+          maps={doorMaps}
           materialKey={`${materialKey}:right:front`}
+          mirroredNormal
           probeBlend={probeBlend}
         />
         <DoorLeafMaterial
           attach="material-1"
-          maps={rightDoorMaps}
+          maps={doorMaps}
           materialKey={`${materialKey}:right:back`}
+          mirroredNormal
           probeBlend={probeBlend}
         />
       </mesh>
