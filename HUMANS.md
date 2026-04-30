@@ -128,7 +128,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify changing `Exposure` changes rendered brightness by stop differences.
 - Verify changing `Exposure` updates `canvas[data-renderer-exposure]`.
 - Verify the `Ambient Occlusion` dropdown switches between `Off`, `N8AO`, and `SSAO` and that both AO modes visibly darken contact areas compared with `Off`.
-- Verify `Ambient Occlusion` starts at `Off` in the default scene.
+- Verify `Ambient Occlusion` starts at `N8AO` in the default scene.
 - Verify the `AO Radius` control produces a visible radius change in the selected AO mode.
 - Verify enabling SSR from the visual controls panel does not introduce page errors or halt rendering.
 - Verify enabling SSR visibly changes reflective surfaces.

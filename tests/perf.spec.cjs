@@ -318,17 +318,8 @@ async function moveChamberPlayerToExitSightline(page) {
 
 async function captureChamberMovementRun(page, stepCount = 14) {
   await page.evaluate(() => {
-    window.__levelsjamSetVisualSettings?.({
-      ambientOcclusionMode: 'n8ao',
-      anamorphic: { enabled: false, intensity: 0 },
-      bloom: { enabled: false, intensity: 0 },
-      depthOfField: { bokehScale: 0, enabled: false },
-      lensFlare: { enabled: false, intensity: 0 },
-      precomputedVisibilityEnabled: true,
-      ssr: { enabled: false, intensity: 0 },
-      vignette: { enabled: true, intensity: 0.7 },
-      volumetricLighting: { enabled: true, intensity: 0.33 }
-    })
+    window.__levelsjamResetVisualSettings?.()
+    window.__levelsjamSetVisualSettings?.({ precomputedVisibilityEnabled: true })
   })
   await page.evaluate(async () => {
     for (let index = 0; index < 30; index += 1) {
@@ -688,12 +679,8 @@ test('Chamber 1 with adjacent levels loaded stays within the 144 FPS render budg
     return window.__levelsjamBenchmark(120)
   })
   const defaultVisuals = await page.evaluate(async () => {
-    window.__levelsjamSetVisualSettings?.({
-      ambientOcclusionMode: 'n8ao',
-      precomputedVisibilityEnabled: true,
-      vignette: { enabled: true, intensity: 0.7 },
-      volumetricLighting: { enabled: true, intensity: 0.33 }
-    })
+    window.__levelsjamResetVisualSettings?.()
+    window.__levelsjamSetVisualSettings?.({ precomputedVisibilityEnabled: true })
     for (let index = 0; index < 8; index += 1) {
       await new Promise((resolve) => requestAnimationFrame(() => resolve()))
     }

@@ -70,6 +70,7 @@
 - Runtime lighting resources remain published for every mounted rendered level until that level unmounts; changing which level has debug focus must not temporarily clear surface-lightmap, volumetric-lightmap, or reflection-probe bindings.
 - Runtime reflection-probe residency for an already mounted level is stable across active-level focus changes; focus changes do not remount, dispose, or reload that level's probe textures.
 - The loading overlay remains up until every level rendered in the initial current-level neighborhood has its own surface lightmap and startup probe resources ready, so the first ordinary boundary crossing cannot reveal unlit destination-level geometry.
+- The loading overlay remains up until visible scene material textures have been uploaded and first-use shader/program warmup has completed, so startup never exposes white placeholder materials or an unwarmed first visible frame.
 - Movement and turn input are ignored until the startup scene has reached its lighting-ready state, so buffered startup keystrokes cannot move the player into a level whose lightmaps or probes are still streaming.
 - When a destination level is already in the rendered neighborhood, walking into it must preserve its existing lighting resource bindings rather than remounting, clearing, or reprioritizing them in a way that changes visible lighting.
 - A seamless level transition does not commit the active gameplay/debug focus to the destination level until that destination's rendered level has published ready surface-lightmap and startup probe resources.

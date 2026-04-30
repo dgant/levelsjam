@@ -2,7 +2,6 @@ import {
   ChromaticAberration,
   DepthOfField,
   EffectComposer,
-  LensFlareEffect as PostLensFlareEffect,
   N8AO,
   SSAO,
   ToneMapping
@@ -694,6 +693,7 @@ const TORCH_LIGHTMAP_TINT = FIRE_LIGHT_COLOR.clone()
 const FIRE_BILLBOARD_INTENSITY_SCALE =
   AUTHORED_LIGHTING_SOURCE_SCALE / TORCH_BASE_CANDELA
 const LENS_FLARE_OCCLUSION_MARGIN = 0.05
+const LENS_FLARE_SOURCE_REFRESH_SECONDS = 0.1
 const DEFAULT_HDRI_BRIGHTNESS = 1
 const DEFAULT_SATURATION = 1
 const DEFAULT_MINOTAUR_ALBEDO_HEX = '#2b2130'
@@ -1144,6 +1144,99 @@ float interleavedGradientNoise(vec2 position) {
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
   float noise = interleavedGradientNoise(gl_FragCoord.xy) - 0.5;
   outputColor = vec4(inputColor.rgb + (noise / 255.0), inputColor.a);
+}
+`
+const torchMultiLensFlareEffectShader = `
+uniform vec4 lensData[5];
+uniform int lensCount;
+uniform vec3 colorGain;
+uniform float intensity;
+uniform float opacity;
+uniform float flareSize;
+uniform float flareShape;
+uniform float glareSize;
+uniform float ghostScale;
+uniform float haloScale;
+uniform int anamorphicEnabled;
+uniform int secondaryGhostsEnabled;
+uniform int starBurstEnabled;
+uniform float starBurstIntensity;
+uniform int starPoints;
+
+float cheapFalloff(float distanceValue, float scaleValue) {
+  float normalizedDistance = distanceValue / max(scaleValue, 0.0001);
+
+  return 1.0 / (1.0 + (normalizedDistance * normalizedDistance));
+}
+
+float lineContribution(vec2 delta, vec2 direction, float width, float lengthScale) {
+  vec2 axis = normalize(direction);
+  vec2 normal = vec2(-axis.y, axis.x);
+  float along = abs(dot(delta, axis));
+  float across = abs(dot(delta, normal));
+
+  return cheapFalloff(across, width) * cheapFalloff(along, lengthScale);
+}
+
+vec3 renderSingleFlare(vec2 uv, vec4 data) {
+  vec2 lensUv = (data.xy * 0.5) + 0.5;
+  vec2 delta = uv - lensUv;
+  vec2 fromCenter = lensUv - vec2(0.5);
+  float sourceStrength = data.z;
+  float radius = length(delta);
+  float coreRadius = max(flareSize * 90.0, 0.001);
+  float core = cheapFalloff(radius, coreRadius) * cheapFalloff(radius, coreRadius * 0.45);
+  float glare = glareSize * cheapFalloff(radius, coreRadius * 7.0);
+  float halo = haloScale * cheapFalloff(abs(length(uv - vec2(0.5)) - length(fromCenter)), coreRadius * 18.0);
+  float anamorphic = 0.0;
+
+  if (anamorphicEnabled == 1) {
+    anamorphic = lineContribution(delta, vec2(1.0, 0.0), coreRadius * 0.18, coreRadius * 75.0) * max(flareShape, 0.0);
+  }
+
+  float ghosts = 0.0;
+  if (secondaryGhostsEnabled == 1 || ghostScale > 0.0) {
+    vec2 ghostAxis = fromCenter;
+    float ghostRadius = max(coreRadius * (12.0 + (ghostScale * 24.0)), 0.001);
+    ghosts += cheapFalloff(length(uv - (vec2(0.5) - ghostAxis * 0.45)), ghostRadius) * 0.18;
+    ghosts += cheapFalloff(length(uv - (vec2(0.5) + ghostAxis * 0.85)), ghostRadius) * 0.10;
+  }
+
+  float star = 0.0;
+  if (starBurstEnabled == 1 && starBurstIntensity > 0.0) {
+    int pointCount = clamp(starPoints, 2, 12);
+    for (int index = 0; index < 12; index += 1) {
+      if (index >= pointCount) {
+        break;
+      }
+      float angle = 3.14159265 * float(index) / float(pointCount);
+      star += lineContribution(delta, vec2(cos(angle), sin(angle)), coreRadius * 0.12, coreRadius * 48.0);
+    }
+    star *= starBurstIntensity / float(pointCount);
+  }
+
+  float signal =
+    (core * 0.28) +
+    (glare * 0.10) +
+    (halo * 0.04) +
+    (anamorphic * 0.16) +
+    (ghosts * ghostScale) +
+    (star * 0.18);
+
+  return colorGain * signal * sourceStrength * intensity * opacity;
+}
+
+void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
+  vec3 flare = vec3(0.0);
+
+  for (int index = 0; index < 5; index += 1) {
+    if (index >= lensCount) {
+      break;
+    }
+    flare += renderSingleFlare(uv, lensData[index]);
+  }
+
+  outputColor = vec4(inputColor.rgb + flare, inputColor.a);
 }
 `
 const fogVolumeEffectShader = `
@@ -2426,6 +2519,80 @@ class DitherEffectImpl extends Effect {
   }
 }
 
+class TorchMultiLensFlareEffectImpl extends Effect {
+  private readonly lensData: Vector4[]
+
+  constructor() {
+    const lensData = Array.from(
+      { length: MAX_SIMULTANEOUS_LENS_FLARES },
+      () => new Vector4(0, 0, 0, 0)
+    )
+
+    super('TorchMultiLensFlareEffect', torchMultiLensFlareEffectShader, {
+      blendFunction: BlendFunction.NORMAL,
+      uniforms: new Map([
+        ['lensData', new Uniform(lensData)],
+        ['lensCount', new Uniform(0)],
+        ['colorGain', new Uniform(FIRE_COLOR.clone())],
+        ['intensity', new Uniform(0)],
+        ['opacity', new Uniform(0)],
+        ['flareSize', new Uniform(0)],
+        ['flareShape', new Uniform(0)],
+        ['glareSize', new Uniform(0)],
+        ['ghostScale', new Uniform(0)],
+        ['haloScale', new Uniform(0)],
+        ['anamorphicEnabled', new Uniform(0)],
+        ['secondaryGhostsEnabled', new Uniform(0)],
+        ['starBurstEnabled', new Uniform(0)],
+        ['starBurstIntensity', new Uniform(0)],
+        ['starPoints', new Uniform(3)]
+      ])
+    })
+
+    this.lensData = lensData
+  }
+
+  setLens(index: number, ndcX: number, ndcY: number, intensity: number) {
+    if (index < 0 || index >= this.lensData.length) {
+      return
+    }
+
+    this.lensData[index].set(ndcX, ndcY, intensity, 1)
+  }
+
+  clearLens(index: number) {
+    if (index < 0 || index >= this.lensData.length) {
+      return
+    }
+
+    this.lensData[index].set(0, 0, 0, 0)
+  }
+
+  set lensCount(value: number) {
+    this.uniforms.get('lensCount').value = MathUtils.clamp(
+      Math.floor(value),
+      0,
+      MAX_SIMULTANEOUS_LENS_FLARES
+    )
+  }
+
+  applySettings(settings: LensFlareSettings) {
+    this.uniforms.get('colorGain').value.copy(FIRE_COLOR)
+    this.uniforms.get('intensity').value = settings.enabled ? settings.intensity : 0
+    this.uniforms.get('opacity').value = MathUtils.clamp(settings.opacity, 0, 1)
+    this.uniforms.get('flareSize').value = Math.max(0, settings.flareSize)
+    this.uniforms.get('flareShape').value = Math.max(0, settings.flareShape)
+    this.uniforms.get('glareSize').value = Math.max(0, settings.glareSize)
+    this.uniforms.get('ghostScale').value = Math.max(0, settings.ghostScale)
+    this.uniforms.get('haloScale').value = Math.max(0, settings.haloScale)
+    this.uniforms.get('anamorphicEnabled').value = settings.anamorphic ? 1 : 0
+    this.uniforms.get('secondaryGhostsEnabled').value = settings.secondaryGhosts ? 1 : 0
+    this.uniforms.get('starBurstEnabled').value = settings.starBurst ? 1 : 0
+    this.uniforms.get('starBurstIntensity').value = Math.max(0, settings.starBurstIntensity)
+    this.uniforms.get('starPoints').value = MathUtils.clamp(Math.round(settings.starPoints), 2, 12)
+  }
+}
+
 class FogVolumeEffectImpl extends Effect {
   constructor() {
     super('FogVolumeEffect', fogVolumeEffectShader, {
@@ -2611,10 +2778,10 @@ function createDefaultVisualSettings(): VisualSettings {
     ambientOcclusionIntensity: 1,
     ambientOcclusionRadius: DEFAULT_AO_RADIUS_METERS,
     ambientOcclusionMode: 'n8ao',
-    n8aoDenoiseIterations: 2,
-    n8aoDenoiseRadius: 8,
-    n8aoDenoiseSamples: 4,
-    n8aoSamples: 8,
+    n8aoDenoiseIterations: 1,
+    n8aoDenoiseRadius: 6,
+    n8aoDenoiseSamples: 2,
+    n8aoSamples: 4,
     cameraFov: 80,
     cameraTiltDegrees: MathUtils.radToDeg(DEFAULT_CAMERA_PITCH),
     exposureStops: DEFAULT_EXPOSURE_STOPS,
@@ -15906,11 +16073,6 @@ function DitherEffectPrimitive() {
   return <primitive object={effect as unknown as Effect} />
 }
 
-type MutableLensFlareEffect = Effect & {
-  getFragmentShader: () => string
-  setFragmentShader: (fragmentShader: string) => void
-}
-
 function isLensFlareOcclusionMaterial(material: Material | Material[] | null | undefined) {
   const materials = Array.isArray(material) ? material : [material]
 
@@ -15939,37 +16101,6 @@ function isLensFlareOcclusionMesh(object: Mesh) {
   return isLensFlareOcclusionMaterial(object.material)
 }
 
-function addLensFlareStarBurstIntensityUniform(effect: PostLensFlareEffect) {
-  const mutableEffect = effect as unknown as MutableLensFlareEffect
-  const starBurstUniform = effect.uniforms.get('starBurstIntensity')
-
-  if (starBurstUniform) {
-    return starBurstUniform as Uniform<number>
-  }
-
-  const fragmentShader = mutableEffect.getFragmentShader()
-  const uniform = new Uniform(1)
-
-  effect.uniforms.set('starBurstIntensity', uniform)
-  mutableEffect.setFragmentShader(
-    fragmentShader
-      .replace(
-        'uniform bool starBurst;',
-        'uniform bool starBurst;\nuniform float starBurstIntensity;'
-      )
-      .replace(
-        'finalColor += clamp((lensMod.rgb * getStartBurst().rgb ), 0.01, 1.0);',
-        [
-          'vec3 starBurstSignal = clamp((lensMod.rgb * getStartBurst().rgb ), 0.01, 1.0);',
-          'vec3 starBurstFloor = vec3(0.01);',
-          'finalColor += starBurstIntensity <= 0.0 ? vec3(0.0) : clamp(starBurstFloor + ((starBurstSignal - starBurstFloor) * starBurstIntensity), 0.0, 1.0);'
-        ].join('\n        ')
-      )
-  )
-
-  return uniform
-}
-
 function TorchLensFlare({
   settings
 }: {
@@ -15978,136 +16109,70 @@ function TorchLensFlare({
   const camera = useThree((state) => state.camera)
   const raycaster = useThree((state) => state.raycaster)
   const scene = useThree((state) => state.scene)
-  const size = useThree((state) => state.size)
-  const [visibleSlotCount, setVisibleSlotCount] = useState(0)
+  const effect = useMemo(() => new TorchMultiLensFlareEffectImpl(), [])
   const projectedPosition = useMemo(() => new Vector3(), [])
   const raycasterPosition = useMemo(() => new Vector2(), [])
   const scratchWorldPosition = useMemo(() => new Vector3(), [])
   const occlusionMeshes = useRef<Mesh[]>([])
-  const lensPositions = useRef<Array<{ monsterId?: string; position: Vector3 }>>([])
-  const flareSlots = useMemo(
-    () =>
-      Array.from({ length: MAX_SIMULTANEOUS_LENS_FLARES }, (_, index) => {
-        const effect = new PostLensFlareEffect({
-          aditionalStreaks: settings.aditionalStreaks,
-          animated: settings.animated,
-          anamorphic: settings.anamorphic,
-          blendFunction: BlendFunction.NORMAL,
-          colorGain: FIRE_COLOR.clone(),
-          enabled: settings.enabled,
-          flareShape: settings.flareShape,
-          flareSize: settings.flareSize,
-          flareSpeed: settings.flareSpeed,
-          ghostScale: settings.ghostScale,
-          glareSize: settings.glareSize,
-          haloScale: settings.haloScale,
-          lensDirtTexture: null,
-          lensPosition: new Vector3(),
-          opacity: 1,
-          screenRes: new Vector2(size.width, size.height),
-          secondaryGhosts: settings.secondaryGhosts,
-          starBurst: settings.starBurst,
-          starPoints: settings.starPoints
-        })
-        const starBurstIntensityUniform = addLensFlareStarBurstIntensityUniform(effect)
-        const pass = new EffectPass(camera as ThreeCamera, effect)
-        pass.name = 'TorchLensFlarePass'
-
-        return {
-          effect,
-          index,
-          lensPositionUniform: effect.uniforms.get('lensPosition') as Uniform<Vector3> | undefined,
-          occlusionOpacityUniform: effect.uniforms.get('opacity') as Uniform<number> | undefined,
-          pass,
-          screenResUniform: effect.uniforms.get('screenRes') as Uniform<Vector2> | undefined,
-          starBurstIntensityUniform
-        }
-      }),
-    [camera]
-  )
+  const lensSources = useRef<Array<{ monsterId?: string; object: Mesh }>>([])
+  const lensSourceRefreshElapsed = useRef(Number.POSITIVE_INFINITY)
 
   useEffect(() => {
-    for (const slot of flareSlots) {
-      const enabledUniform = slot.effect.uniforms.get('enabled')
-      const glareSizeUniform = slot.effect.uniforms.get('glareSize')
-      const flareSizeUniform = slot.effect.uniforms.get('flareSize')
-      const flareSpeedUniform = slot.effect.uniforms.get('flareSpeed')
-      const flareShapeUniform = slot.effect.uniforms.get('flareShape')
-      const animatedUniform = slot.effect.uniforms.get('animated')
-      const anamorphicUniform = slot.effect.uniforms.get('anamorphic')
-      const haloScaleUniform = slot.effect.uniforms.get('haloScale')
-      const secondaryGhostsUniform = slot.effect.uniforms.get('secondaryGhosts')
-      const aditionalStreaksUniform = slot.effect.uniforms.get('aditionalStreaks')
-      const ghostScaleUniform = slot.effect.uniforms.get('ghostScale')
-      const starBurstUniform = slot.effect.uniforms.get('starBurst')
-      const starPointsUniform = slot.effect.uniforms.get('starPoints')
-      const colorGainUniform = slot.effect.uniforms.get('colorGain')
-
-      slot.effect.blendMode.opacity.value = MathUtils.clamp(settings.opacity, 0, 1)
-      if (enabledUniform) enabledUniform.value = settings.enabled
-      if (glareSizeUniform) glareSizeUniform.value = settings.glareSize
-      if (flareSizeUniform) flareSizeUniform.value = settings.flareSize
-      if (flareSpeedUniform) flareSpeedUniform.value = settings.flareSpeed
-      if (flareShapeUniform) flareShapeUniform.value = settings.flareShape
-      if (animatedUniform) animatedUniform.value = settings.animated
-      if (anamorphicUniform) anamorphicUniform.value = settings.anamorphic
-      if (haloScaleUniform) haloScaleUniform.value = settings.haloScale
-      if (secondaryGhostsUniform) secondaryGhostsUniform.value = settings.secondaryGhosts
-      if (aditionalStreaksUniform) aditionalStreaksUniform.value = settings.aditionalStreaks
-      if (ghostScaleUniform) ghostScaleUniform.value = settings.ghostScale
-      if (starBurstUniform) starBurstUniform.value = settings.starBurst
-      if (starPointsUniform) starPointsUniform.value = settings.starPoints
-      if (colorGainUniform) {
-        colorGainUniform.value.copy(FIRE_COLOR)
-      }
-      if (slot.starBurstIntensityUniform) {
-        slot.starBurstIntensityUniform.value = settings.starBurstIntensity
-      }
-    }
-  }, [flareSlots, settings])
+    effect.applySettings(settings)
+  }, [effect, settings])
 
   useFrame((_, delta) => {
     const profileStartedAt = beginFrameProfileStep()
 
     try {
-      const nextOcclusionMeshes: Mesh[] = []
-      const nextLensPositions: Array<{ monsterId?: string; position: Vector3 }> = []
+      lensSourceRefreshElapsed.current += delta
+      if (lensSourceRefreshElapsed.current >= LENS_FLARE_SOURCE_REFRESH_SECONDS) {
+        const nextOcclusionMeshes: Mesh[] = []
+        const nextLensSources: Array<{ monsterId?: string; object: Mesh }> = []
 
-    scene.traverse((object) => {
-      if (!(object instanceof Mesh)) {
-        return
-      }
-      if (!isObjectEffectivelyVisible(object)) {
-        return
-      }
+        scene.traverse((object) => {
+          if (!(object instanceof Mesh)) {
+            return
+          }
+          if (!isObjectEffectivelyVisible(object)) {
+            return
+          }
 
-      if (isLensFlareOcclusionMesh(object)) {
-        nextOcclusionMeshes.push(object)
-      }
+          if (isLensFlareOcclusionMesh(object)) {
+            nextOcclusionMeshes.push(object)
+          }
 
-      if (
-        object.userData?.debugRole === 'torch-billboard' ||
-        object.userData?.debugRole === 'monster-eye'
-      ) {
-        object.getWorldPosition(scratchWorldPosition)
-        nextLensPositions.push({
-          monsterId: typeof object.userData?.monsterId === 'string'
-            ? object.userData.monsterId
-            : undefined,
-          position: scratchWorldPosition.clone()
+          if (
+            object.userData?.debugRole === 'torch-billboard' ||
+            object.userData?.debugRole === 'monster-eye'
+          ) {
+            nextLensSources.push({
+              monsterId: typeof object.userData?.monsterId === 'string'
+                ? object.userData.monsterId
+                : undefined,
+              object
+            })
+          }
         })
-      }
-    })
 
-    occlusionMeshes.current = nextOcclusionMeshes
-    lensPositions.current = nextLensPositions
+        occlusionMeshes.current = nextOcclusionMeshes
+        lensSources.current = nextLensSources
+        lensSourceRefreshElapsed.current = 0
+      }
+
     const visibleLensPositions: Array<{
+      intensity: number
       position: Vector3
       score: number
     }> = []
 
-    for (const lensSource of lensPositions.current) {
-      const lensPosition = lensSource.position
+    for (const lensSource of lensSources.current) {
+      if (!isObjectEffectivelyVisible(lensSource.object)) {
+        continue
+      }
+
+      const lensPosition = scratchWorldPosition
+      lensSource.object.getWorldPosition(lensPosition)
       projectedPosition.copy(lensPosition).project(camera)
 
       if (
@@ -16129,6 +16194,8 @@ function TorchLensFlare({
 
       raycasterPosition.set(projectedPosition.x, projectedPosition.y)
       raycaster.setFromCamera(raycasterPosition, camera)
+      raycaster.near = 0
+      raycaster.far = Math.max(0.001, distanceToLight - LENS_FLARE_OCCLUSION_MARGIN)
 
       const intersections = raycaster.intersectObjects(occlusionMeshes.current, false)
       let occluded = false
@@ -16141,13 +16208,10 @@ function TorchLensFlare({
           continue
         }
 
-        if (intersection.distance >= distanceToLight - LENS_FLARE_OCCLUSION_MARGIN) {
-          break
-        }
-
         occluded = true
         break
       }
+      raycaster.far = Infinity
 
       if (occluded) {
         continue
@@ -16155,7 +16219,7 @@ function TorchLensFlare({
 
       visibleLensPositions.push({
         intensity: distanceAttenuation,
-        position: lensPosition,
+        position: lensPosition.clone(),
         score: lensScore
       })
       visibleLensPositions.sort((left, right) => left.score - right.score)
@@ -16164,38 +16228,27 @@ function TorchLensFlare({
       }
     }
 
-    for (let slotIndex = 0; slotIndex < flareSlots.length; slotIndex += 1) {
-      const slot = flareSlots[slotIndex]
+    for (let slotIndex = 0; slotIndex < MAX_SIMULTANEOUS_LENS_FLARES; slotIndex += 1) {
       const visibleLens = visibleLensPositions[slotIndex]
-      const nextHasVisibleLens = Boolean(visibleLens) && settings.enabled
-      const visibilityTarget = nextHasVisibleLens ? 0 : 1
 
-      if (visibleLens && slot.lensPositionUniform) {
+      if (visibleLens && settings.enabled) {
         projectedPosition.copy(visibleLens.position).project(camera)
-        slot.lensPositionUniform.value.set(projectedPosition.x, projectedPosition.y, 0)
-      }
-
-      const colorGainUniform = slot.effect.uniforms.get('colorGain') as Uniform<Color> | undefined
-      if (colorGainUniform) {
-        colorGainUniform.value
-          .copy(FIRE_COLOR)
-          .multiplyScalar(settings.colorGain * (visibleLens?.intensity ?? 0))
-      }
-
-      if (slot.occlusionOpacityUniform) {
-        slot.occlusionOpacityUniform.value = MathUtils.damp(
-          slot.occlusionOpacityUniform.value,
-          visibilityTarget,
-          12,
-          delta
+        effect.setLens(
+          slotIndex,
+          projectedPosition.x,
+          projectedPosition.y,
+          visibleLens.intensity
         )
+      } else {
+        effect.clearLens(slotIndex)
       }
     }
+    effect.lensCount = settings.enabled ? visibleLensPositions.length : 0
 
     scene.userData.lensFlareState = {
       enabled: settings.enabled,
       intensity: settings.opacity,
-      totalLensCount: lensPositions.current.length,
+      totalLensCount: lensSources.current.length,
       visibleLensCount: visibleLensPositions.length,
       visibleLenses: visibleLensPositions.map((lens) => ({
         intensity: lens.intensity,
@@ -16203,45 +16256,14 @@ function TorchLensFlare({
         score: lens.score
       }))
     }
-
-      setVisibleSlotCount((currentCount) =>
-        currentCount === visibleLensPositions.length
-          ? currentCount
-          : visibleLensPositions.length
-      )
     } finally {
       endFrameProfileStep('lens flare source selection', profileStartedAt)
     }
   })
 
-  useEffect(() => {
-    for (const slot of flareSlots) {
-      if (!slot.screenResUniform) {
-        continue
-      }
-      slot.screenResUniform.value.set(size.width, size.height)
-    }
-  }, [flareSlots, size.height, size.width])
+  useEffect(() => () => effect.dispose(), [effect])
 
-  useEffect(() => {
-    return () => {
-      for (const slot of flareSlots) {
-        slot.pass.dispose()
-        slot.effect.dispose()
-      }
-    }
-  }, [flareSlots])
-
-  return (
-    <>
-      {flareSlots.slice(0, visibleSlotCount).map((slot) => (
-        <primitive
-          key={`torch-lens-flare-${slot.index}`}
-          object={slot.pass as unknown as Pass}
-        />
-      ))}
-    </>
-  )
+  return <primitive object={effect as unknown as Effect} />
 }
 
 function FlightRig({
@@ -18375,12 +18397,7 @@ function Scene({
     let geometryContractHandle = 0
 
     const compileScene = async () => {
-      if (!hasReportedBasicAssetsReady.current) {
-        hasReportedBasicAssetsReady.current = true
-        setStartupSceneReady(true)
-        onAssetsReady()
-        document.body.dataset.sceneProgramsReady = 'false'
-      }
+      document.body.dataset.sceneProgramsReady = 'false'
 
       recordStartupMarker('sceneResourceStabilityStartedAt')
       await waitForRendererResourceStability(gl, () => cancelled)
@@ -18403,7 +18420,7 @@ function Scene({
       }
 
       recordStartupMarker('sceneProgramWarmStartedAt')
-      await warmScenePrograms(gl, scene, camera, () => cancelled, true, false)
+      await warmScenePrograms(gl, scene, camera, () => cancelled, true, true)
 
       if (cancelled) {
         return
@@ -18419,14 +18436,21 @@ function Scene({
 
       recordStartupMarker('scenePostWarmCompleteAt')
 
-      if (hasReportedBasicAssetsReady.current) {
-        document.body.dataset.sceneProgramsReady = 'true'
-        geometryContractHandle = window.setTimeout(() => {
-          if (!cancelled) {
-            setStartupGeometryExpandedState(false)
-          }
-        }, 0)
+      if (cancelled) {
+        return
       }
+
+      if (!hasReportedBasicAssetsReady.current) {
+        hasReportedBasicAssetsReady.current = true
+        setStartupSceneReady(true)
+        onAssetsReady()
+      }
+      document.body.dataset.sceneProgramsReady = 'true'
+      geometryContractHandle = window.setTimeout(() => {
+        if (!cancelled) {
+          setStartupGeometryExpandedState(false)
+        }
+      }, 0)
     }
 
     const waitForSceneObjects = () => {
