@@ -16436,7 +16436,9 @@ function FlightRig({
     lastSyncedLayoutId.current = layout.maze.id
     turnStateRef.current = turnState
     if (layoutChanged) {
-      setDisplayedOpenGateIds(getOpenGateIds(layout.maze, turnState))
+      startTransition(() => {
+        setDisplayedOpenGateIds(getOpenGateIds(layout.maze, turnState))
+      })
     }
   }, [layout.maze, layout.maze.id, setDisplayedOpenGateIds, turnState])
 
@@ -16495,7 +16497,9 @@ function FlightRig({
       gameplayCameraPitch,
       false
     )
-    setDisplayedOpenGateIds([])
+    startTransition(() => {
+      setDisplayedOpenGateIds([])
+    })
     setTurnState(nextState)
     onReplayActiveChange(replayActive.current)
   }, [applyCameraRigPose, gameplayCameraPitch, layout.maze, levelTransform, onReplayActiveChange, replayRequestId, replayRequestMazeId, setDisplayedOpenGateIds, setTurnState])
@@ -17545,7 +17549,9 @@ function FlightRig({
           }
 
           if (action === 'move-forward' || action === 'move-backward') {
-            setDisplayedOpenGateIds(getOpenGateIds(layout.maze, turnStateRef.current))
+            startTransition(() => {
+              setDisplayedOpenGateIds(getOpenGateIds(layout.maze, turnStateRef.current))
+            })
           }
 
           const globalResult = applyTurnActionForLevel(layout.maze.id, action)
@@ -17725,7 +17731,9 @@ function FlightRig({
               activeAnimation.action === 'move-forward' ||
               activeAnimation.action === 'move-backward'
             ) {
-              setDisplayedOpenGateIds(getOpenGateIds(layout.maze, finalState))
+              startTransition(() => {
+                setDisplayedOpenGateIds(getOpenGateIds(layout.maze, finalState))
+              })
             }
 
             if (
@@ -17848,7 +17856,9 @@ function FlightRig({
       delete document.body.dataset.pendingLevelTransitionSince
       delete document.body.dataset.committingLevelTransitionId
       onReplayActiveChange(false)
-      setDisplayedOpenGateIds([])
+      startTransition(() => {
+        setDisplayedOpenGateIds([])
+      })
     }
   }, [onReplayActiveChange, setDisplayedOpenGateIds])
 
@@ -18113,6 +18123,18 @@ function Scene({
 }) {
   recordStartupMarker('sceneRenderStartedAt')
   const [displayedOpenGateIds, setDisplayedOpenGateIds] = useState<string[]>([])
+  const setDisplayedOpenGateIdsIfChanged = useCallback((nextGateIds: string[]) => {
+    setDisplayedOpenGateIds((currentGateIds) => {
+      if (
+        currentGateIds.length === nextGateIds.length &&
+        currentGateIds.every((gateId, index) => gateId === nextGateIds[index])
+      ) {
+        return currentGateIds
+      }
+
+      return nextGateIds
+    })
+  }, [])
   const [runtimeModelsEnabled, setRuntimeModelsEnabled] = useState(false)
   const [runtimeModelAssetsReady, setRuntimeModelAssetsReady] = useState(false)
   const [startupGeometryExpanded, setStartupGeometryExpanded] = useState(false)
@@ -19776,7 +19798,7 @@ function Scene({
             onReplayActiveChange={onReplayActiveChange}
             replayRequestId={replayRequestId}
             replayRequestMazeId={replayRequestMazeId}
-            setDisplayedOpenGateIds={setDisplayedOpenGateIds}
+            setDisplayedOpenGateIds={setDisplayedOpenGateIdsIfChanged}
             setTurnState={setTurnState}
             turnState={turnState}
           wallBounds={getWallBounds(layout)}
@@ -22390,13 +22412,13 @@ export default function App() {
   const setGlobalTurnState = useCallback((
     value: GlobalTurnState | null | ((current: GlobalTurnState | null) => GlobalTurnState | null)
   ) => {
-    setGlobalTurnStateRaw((current) => {
-      const next = typeof value === 'function'
-        ? (value as (current: GlobalTurnState | null) => GlobalTurnState | null)(current)
-        : value
+    const next = typeof value === 'function'
+      ? (value as (current: GlobalTurnState | null) => GlobalTurnState | null)(globalTurnStateRef.current)
+      : value
 
-      globalTurnStateRef.current = next
-      return next
+    globalTurnStateRef.current = next
+    startTransition(() => {
+      setGlobalTurnStateRaw(next)
     })
   }, [])
 

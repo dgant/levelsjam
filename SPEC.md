@@ -528,6 +528,9 @@
 - The frame-cost profile annotates long frames with resource-residency deltas so runtime probe, volumetric-lightmap, level, or scene-object churn is visible in the report.
 - The frame-cost profile waits for startup loading, adjacent level resources, lightmaps, volumetric probes, reflection probes, shader warmup, and deferred texture work, including the fire flipbook atlas, to cool down before starting the representative live traversal capture.
 - The performance profiler records normal gameplay traversal with active level walking and active scene resources so reported FPS is representative of player-visible stutter.
+- Automated performance coverage includes a repeated forward-run through Chamber 1 that records live `requestAnimationFrame` gaps during movement rather than only sampling a fixed camera after movement has stopped.
+- The Chamber 1 live-movement performance gate emits a timestamped log with player position, rendered levels, renderer stats, scene-object counts, probe residency, and shader-program churn for every hitch frame.
+- Chamber 1 live movement must not compile new shaders or produce frames over the live hitch budget after startup, probe residency, model residency, and shader warmup have cooled down.
 - The visual debug panel includes a `Performance` tab with a `Capture` button that records the next second of frames and displays the same kind of profile shown in `PERFORMANCE.md`.
 
 ## Loading And Startup
