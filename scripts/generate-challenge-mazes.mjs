@@ -812,10 +812,12 @@ function getRouteAnalysis(topology, swordCells, trophy) {
   }
 
   const toTrophy = shortestPathCells(topology, from, trophy)
-  const preTrophyCells = [
-    ...toSwords,
-    ...toTrophy.slice(1)
-  ]
+  const preTrophyCells = toSwords.length > 0
+    ? [
+      ...toSwords,
+      ...toTrophy.slice(1)
+    ]
+    : toTrophy
   const preTrophyKeys = new Set(preTrophyCells.map(cellKey))
   const toExit = shortestPathFavoringNovelCells(
     topology,
@@ -1130,7 +1132,6 @@ function classifyRejection(reason) {
     reason === 'pre-trophy-not-slower-than-monster-free' ||
     reason === 'post-trophy-not-slower-than-monster-free' ||
     reason === 'heuristic-static-return-overlaps-too-much' ||
-    reason === 'heuristic-static-route-has-no-detour' ||
     reason === 'heuristic-static-route-too-hidden' ||
     reason === 'heuristic-static-route-too-short' ||
     reason === 'sword-removal-still-solvable' ||
@@ -1511,11 +1512,11 @@ function createSmartParameterPool(weights = currentDifficultyWeights) {
           for (let spider = 0; spider <= 4; spider += 1) {
             const monsterCount = minotaur + werewolf + spider
 
-            if (monsterCount !== 3) {
+            if (monsterCount < 1 || monsterCount > 3) {
               continue
             }
 
-            for (let swordCount = 1; swordCount <= 3; swordCount += 1) {
+            for (let swordCount = 0; swordCount <= 3; swordCount += 1) {
               for (let gateCount = 0; gateCount <= 3; gateCount += 1) {
                 const plan = {
                   gateCount,
@@ -1765,10 +1766,6 @@ function createCandidate({ attempt, gateCount, height, index, monsterTypes, swor
     return { rejectedReason: 'heuristic-static-route-too-short' }
   }
 
-  if (routeAnalysis.preTrophyMoveCount <= routeAnalysis.directTrophyMoveCount) {
-    return { rejectedReason: 'heuristic-static-route-has-no-detour' }
-  }
-
   if (routeAnalysis.seenCellCount < Math.ceil(cellCount * minimumStaticSeenRatio)) {
     return { rejectedReason: 'heuristic-static-route-too-hidden' }
   }
@@ -1805,7 +1802,7 @@ function createCandidate({ attempt, gateCount, height, index, monsterTypes, swor
     })),
     monsters,
     seed,
-    sword: { cell: swordCells[0] },
+    sword: swordCells[0] ? { cell: swordCells[0] } : null,
     trophy: { cell: trophy }
   }
 }

@@ -392,6 +392,9 @@
 - Spiders initialize facing the next cell they would move into under their left-hand or right-hand wall-following rule.
 - Generated mazes are rectangular maze levels plus their authored transition cell; all maze border edges are walls except the transition-cell entrance door.
 - Generated mazes contain configured counts of minotaurs, spiders, werewolves, swords, gates, and exactly one trophy.
+- Generated challenge mazes may contain zero of any specific monster type, while containing at least one monster overall.
+- Generated challenge mazes may contain zero swords; sword relevance validation applies only to swords that are present.
+- Generated challenge mazes may contain zero gates; gate relevance validation applies only to gates that are present.
 - Maze validation requires a perfect-information shortest solution that acquires the trophy and exits the maze.
 - Maze validation requires an imperfect-information stochastic solver, using only cells seen from traversed cells including diagonals, to solve the maze in at least 80% of attempts.
 - Maze validation requires every monster, sword, and gate to be relevant: removing a monster makes the optimal solution faster, while removing any sword or gate makes the maze impossible.
@@ -402,6 +405,7 @@
 - Challenge-maze candidate validation short-circuits on the first failed criterion and may impose a strict per-candidate solver time budget during prefiltering.
 - Challenge-maze parameter scoring treats larger mazes as more likely to be solvable but also more likely to be trivial, treats monsters as added difficulty, and treats swords and gates as difficulty relief.
 - Challenge-maze smart generation initially scores parameters as `minotaur * 4 + werewolf * 3 + spider * 2 - sword * 7 - gate * 3 - area / 8`, prefers scores near `0`, and periodically adapts the scoring weights from accumulated too-easy and too-hard rejection data when the sample set is balanced enough to be useful.
+- Challenge-maze generation does not reject candidates merely because the sword route to the trophy is no longer than the direct trophy route; a sword may instead be relevant to escape or may be absent from the maze.
 - Challenge-maze generation may search candidates in parallel across worker threads and uses no more than half of the available CPU cores by default.
 - Boundary-spanning static and dynamic geometry uses the boundary volumetric-lightmap sampling path, which blends probe candidates on both sides of the boundary rather than aliasing to the ordinary single-cell sampler.
 - Awake minotaurs and werewolves face the player during idle, rotation, and movement animations.
