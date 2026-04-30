@@ -730,6 +730,70 @@ function shortestPathCells(topology, from, to) {
   return pathCells
 }
 
+function shortestPathFavoringNovelCells(topology, from, to, visitedKeys) {
+  const targetKey = cellKey(to)
+  const startKey = cellKey(from)
+  const costsByKey = new Map([[startKey, 0]])
+  const previousByKey = new Map([[startKey, null]])
+  const queue = [{ cell: from, cost: 0 }]
+  let readIndex = 0
+
+  while (readIndex < queue.length) {
+    let bestIndex = readIndex
+    for (let index = readIndex + 1; index < queue.length; index += 1) {
+      if (queue[index].cost < queue[bestIndex].cost) {
+        bestIndex = index
+      }
+    }
+
+    if (bestIndex !== readIndex) {
+      const current = queue[readIndex]
+      queue[readIndex] = queue[bestIndex]
+      queue[bestIndex] = current
+    }
+
+    const { cell: current, cost } = queue[readIndex]
+    readIndex += 1
+    const currentKey = cellKey(current)
+
+    if (cost !== costsByKey.get(currentKey)) {
+      continue
+    }
+    if (currentKey === targetKey) {
+      break
+    }
+
+    for (const neighbor of topology.neighborsByKey.get(currentKey) ?? []) {
+      const key = cellKey(neighbor)
+      const revisitPenalty = visitedKeys.has(key) && key !== targetKey ? 8 : 0
+      const nextCost = cost + 1 + revisitPenalty
+
+      if (nextCost >= (costsByKey.get(key) ?? Infinity)) {
+        continue
+      }
+
+      costsByKey.set(key, nextCost)
+      previousByKey.set(key, current)
+      queue.push({ cell: neighbor, cost: nextCost })
+    }
+  }
+
+  if (!previousByKey.has(targetKey)) {
+    return []
+  }
+
+  const pathCells = []
+  let current = to
+
+  while (current) {
+    pathCells.push(current)
+    current = previousByKey.get(cellKey(current))
+  }
+
+  pathCells.reverse()
+  return pathCells
+}
+
 function getRouteAnalysis(topology, swordCells, trophy) {
   const orderedSwordCells = [...swordCells]
     .sort((left, right) => (
@@ -746,16 +810,21 @@ function getRouteAnalysis(topology, swordCells, trophy) {
   }
 
   const toTrophy = shortestPathCells(topology, from, trophy)
-  const toExit = shortestPathCells(topology, trophy, topology.maze.opening.cell)
   const preTrophyCells = [
     ...toSwords,
     ...toTrophy.slice(1)
   ]
+  const preTrophyKeys = new Set(preTrophyCells.map(cellKey))
+  const toExit = shortestPathFavoringNovelCells(
+    topology,
+    trophy,
+    topology.maze.opening.cell,
+    preTrophyKeys
+  )
   const allRouteCells = [
     ...preTrophyCells,
     ...toExit.slice(1)
   ]
-  const preTrophyKeys = new Set(preTrophyCells.map(cellKey))
   const routeKeys = new Set(allRouteCells.map(cellKey))
   const postTrophyNewKeys = new Set(
     toExit
@@ -767,7 +836,9 @@ function getRouteAnalysis(topology, swordCells, trophy) {
     allRouteCells,
     moveCount: Math.max(0, allRouteCells.length - 1),
     orderedSwordCells,
+    postTrophyCells: toExit,
     postTrophyNewCellCount: postTrophyNewKeys.size,
+    preTrophyCells,
     routeKeys,
     uniqueCellCount: routeKeys.size
   }
@@ -813,6 +884,13 @@ function getRouteDistanceMap(topology, routeKeys) {
 
 function chooseMonsterCells(topology, routeAnalysis, reservedKeys, monsterTypes, random) {
   const distanceByKey = getRouteDistanceMap(topology, routeAnalysis.routeKeys)
+  const firstSwordKey = cellKey(routeAnalysis.orderedSwordCells[0] ?? topology.maze.opening.cell)
+  const firstSwordIndex = routeAnalysis.preTrophyCells.findIndex((cell) => cellKey(cell) === firstSwordKey)
+  const candidateRoutes = [
+    routeAnalysis.preTrophyCells.slice(Math.max(0, firstSwordIndex + 1), -1),
+    routeAnalysis.postTrophyCells.slice(1, -1),
+    routeAnalysis.allRouteCells
+  ]
   const candidates = topology.cells
     .filter((cell) => !reservedKeys.has(cellKey(cell)))
     .map((cell) => {
@@ -834,14 +912,18 @@ function chooseMonsterCells(topology, routeAnalysis, reservedKeys, monsterTypes,
 
   for (const type of monsterTypes) {
     let chosen = null
+    const routeCells = candidateRoutes[monsters.length % candidateRoutes.length]
+      .filter((cell) => !reservedOrSelected.has(cellKey(cell)))
+      .map((cell) => ({
+        cell,
+        score:
+          ((topology.distanceFromOpening.get(cellKey(cell)) ?? 0) * 0.15) +
+          random()
+      }))
+      .sort((left, right) => right.score - left.score)
 
-    for (const candidate of candidates) {
+    for (const candidate of routeCells) {
       const key = cellKey(candidate.cell)
-
-      if (reservedOrSelected.has(key)) {
-        continue
-      }
-
       const adjacentSelected = (topology.neighborsByKey.get(key) ?? [])
         .some((neighbor) => reservedOrSelected.has(cellKey(neighbor)) && !reservedKeys.has(cellKey(neighbor)))
 
@@ -851,6 +933,26 @@ function chooseMonsterCells(topology, routeAnalysis, reservedKeys, monsterTypes,
 
       chosen = candidate.cell
       break
+    }
+
+    if (!chosen) {
+      for (const candidate of candidates) {
+        const key = cellKey(candidate.cell)
+
+        if (reservedOrSelected.has(key)) {
+          continue
+        }
+
+        const adjacentSelected = (topology.neighborsByKey.get(key) ?? [])
+          .some((neighbor) => reservedOrSelected.has(cellKey(neighbor)) && !reservedKeys.has(cellKey(neighbor)))
+
+        if (adjacentSelected && monsters.length + 1 < monsterTypes.length) {
+          continue
+        }
+
+        chosen = candidate.cell
+        break
+      }
     }
 
     if (!chosen) {
@@ -1129,12 +1231,15 @@ function prevalidateCandidate(maze, frequency, timings) {
 
   if (perfect.metrics.walkedCellRatio < 0.75) {
     addFailure(frequency, 'walked-too-few-cells')
+    return false
   }
   if (perfect.metrics.seenCellRatio < 0.9) {
     addFailure(frequency, 'saw-too-few-cells')
+    return false
   }
   if (perfect.metrics.postTrophyNewCellRatio < 0.25) {
     addFailure(frequency, 'post-trophy-too-few-new-cells')
+    return false
   }
 
   const noMonsterResult = getPerfectResult({
@@ -1149,9 +1254,11 @@ function prevalidateCandidate(maze, frequency, timings) {
   }
   if (!(perfect.metrics.preTrophyMoveCount > noMonster.metrics.preTrophyMoveCount)) {
     addFailure(frequency, 'pre-trophy-not-slower-than-monster-free')
+    return false
   }
   if (!(perfect.metrics.postTrophyMoveCount > noMonster.metrics.postTrophyMoveCount)) {
     addFailure(frequency, 'post-trophy-not-slower-than-monster-free')
+    return false
   }
 
   for (const removal of getSwordRemovalCases(maze)) {
@@ -1172,10 +1279,11 @@ function prevalidateCandidate(maze, frequency, timings) {
 
     if (!withoutMonster) {
       addFailure(frequency, `monster-removal:${withoutMonsterResult.failureReason}`)
-      continue
+      return false
     }
     if (!(withoutMonster.moveCount < perfect.moveCount)) {
       addFailure(frequency, 'monster-removal-not-faster')
+      return false
     }
   }
 
@@ -1196,6 +1304,7 @@ function prevalidateCandidate(maze, frequency, timings) {
 
   if (imperfectWins / imperfectTrialCount < 0.8) {
     addFailure(frequency, 'imperfect-success-rate-too-low')
+    return false
   }
 
   return true

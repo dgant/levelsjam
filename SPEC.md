@@ -804,6 +804,7 @@
 ## Challenge Maze Library
 - The game targets thirty additional valid challenge mazes outside the normal story flow.
 - The checked-in challenge maze library contains only mazes that have passed the current advanced validation rules.
+- The checked-in challenge maze library may be temporarily empty after invalidated challenge mazes are removed and before replacement generation accepts new validated mazes.
 - Newly generated challenge mazes use independently generated maze geometry; rotations, flips, and other geometric transforms of an existing challenge maze are not accepted as new challenge mazes.
 - The thirty-maze challenge set uses a broad parameter distribution across minotaurs, spiders, werewolves, swords, and gates: each element appears in at least ten mazes, each element appears at least twice in at least five mazes, and each element appears at least three times in at least one maze.
 - Challenge maze generation covers rectangular dimensions from `3` through `8`, including narrow `3x5`, `3x6`, `3x7`, and `3x8` candidates when validation can produce playable puzzles for them.
