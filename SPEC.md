@@ -805,6 +805,10 @@
 - The game targets thirty additional valid challenge mazes outside the normal story flow.
 - The checked-in challenge maze library contains only mazes that have passed the current advanced validation rules.
 - Newly generated challenge mazes use independently generated maze geometry; rotations, flips, and other geometric transforms of an existing challenge maze are not accepted as new challenge mazes.
+- The thirty-maze challenge set uses a broad parameter distribution across minotaurs, spiders, werewolves, swords, and gates: each element appears in at least ten mazes, each element appears at least twice in at least five mazes, and each element appears at least three times in at least one maze.
+- Challenge maze generation covers rectangular dimensions from `3` through `8`, including narrow `3x5`, `3x6`, `3x7`, and `3x8` candidates when validation can produce playable puzzles for them.
+- Challenge maze names and descriptions state the maze dimensions and the counts of minotaurs, spiders, werewolves, swords, and gates.
+- Challenge maze generation publishes the currently accepted validated maze subset to the runtime playtest manifest whenever a new maze is accepted, so browser playtesting can begin before the full thirty-maze batch finishes.
 - Challenge mazes are selectable from the level menu without appearing in the default progression path.
 - The challenge maze menu and published runtime manifest expose every checked-in validated challenge maze and no unvalidated challenge maze.
 - The complete challenge maze set covers rectangular sizes from `5x5` through `9x9`.

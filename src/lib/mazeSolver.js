@@ -202,6 +202,10 @@ function serializeState(state, options = {}) {
     ].join(':'))
     .sort()
     .join('|')
+  const itemStates = Object.entries(state.itemStates ?? {})
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([itemId, itemState]) => `${itemId}:${itemState}`)
+    .join('|')
 
   return [
     cellKey(state.player.cell),
@@ -212,6 +216,7 @@ function serializeState(state, options = {}) {
     state.player.hasTrophy ? '1' : '0',
     state.swordState,
     state.trophyState,
+    itemStates,
     monsters
   ].join('||')
 }
@@ -414,6 +419,7 @@ function createBeliefState(actualState) {
     dead: actualState.dead,
     escaped: actualState.escaped,
     monsters: [],
+    itemStates: { ...(actualState.itemStates ?? {}) },
     player: {
       ...actualState.player,
       cell: cloneCell(actualState.player.cell)
@@ -453,6 +459,7 @@ function syncBeliefPlayer(actualState, beliefState) {
     ...actualState.player,
     cell: cloneCell(actualState.player.cell)
   }
+  beliefState.itemStates = { ...(actualState.itemStates ?? {}) }
   beliefState.swordState = actualState.swordState
   beliefState.trophyState = actualState.trophyState
   beliefState.turn = actualState.turn
@@ -1072,6 +1079,32 @@ function cloneMazeForValidation(maze, overrides = {}) {
   }))
 }
 
+function getSwordRemovalCases(maze) {
+  const cases = []
+
+  if (maze.sword?.cell) {
+    cases.push({
+      label: maze.sword.id ?? 'sword',
+      maze: cloneMazeForValidation(maze, { sword: null })
+    })
+  }
+
+  for (const item of maze.items ?? []) {
+    if (item.type !== 'sword') {
+      continue
+    }
+
+    cases.push({
+      label: item.id ?? `sword-${cases.length + 1}`,
+      maze: cloneMazeForValidation(maze, {
+        items: (maze.items ?? []).filter((candidate) => candidate !== item)
+      })
+    })
+  }
+
+  return cases
+}
+
 export function solveMazeWithPerfectInformation(maze, options = {}) {
   const result = solveMazeWithPerfectInformationResult(maze, options)
 
@@ -1227,22 +1260,24 @@ export function validateMazeAdvancedDifficulty(maze, options = {}) {
     }
   }
 
-  const withoutSwordResult = measure(
-    'without-sword-solution',
-    () => solveMazeWithPerfectInformationResult(
-      cloneMazeForValidation(maze, { sword: null }),
-      {
-        maxDurationMs: options.maxPerfectDurationMs,
-        maxExpansions: options.maxPerfectExpansions ?? 50_000
-      }
+  for (const removal of getSwordRemovalCases(maze)) {
+    const withoutSwordResult = measure(
+      'without-sword-solution',
+      () => solveMazeWithPerfectInformationResult(
+        removal.maze,
+        {
+          maxDurationMs: options.maxPerfectDurationMs,
+          maxExpansions: options.maxPerfectExpansions ?? 50_000
+        }
+      )
     )
-  )
-  const withoutSword = withoutSwordResult.solution
-  if (withoutSwordResult.failureReason === 'expansion-limit' || withoutSwordResult.failureReason === 'time-limit') {
-    errors.push(`Could not prove removing the sword makes the maze impossible because perfect-information search hit the ${withoutSwordResult.failureReason === 'time-limit' ? 'time limit' : 'expansion limit'}`)
-  }
-  if (withoutSword) {
-    errors.push('Removing the sword must make the maze impossible')
+    const withoutSword = withoutSwordResult.solution
+    if (withoutSwordResult.failureReason === 'expansion-limit' || withoutSwordResult.failureReason === 'time-limit') {
+      errors.push(`Could not prove removing sword ${removal.label} makes the maze impossible because perfect-information search hit the ${withoutSwordResult.failureReason === 'time-limit' ? 'time limit' : 'expansion limit'}`)
+    }
+    if (withoutSword) {
+      errors.push(`Removing sword ${removal.label} must make the maze impossible`)
+    }
   }
 
   for (const gate of maze.gates ?? []) {

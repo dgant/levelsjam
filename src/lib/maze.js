@@ -268,6 +268,48 @@ function getGateId(gate) {
   return gate.id ?? edgeKey(gate.from, gate.to)
 }
 
+function getMazeSwordPickups(maze) {
+  const pickups = []
+
+  if (maze.sword?.cell) {
+    pickups.push({
+      ...maze.sword,
+      id: maze.sword.id ?? 'maze-sword',
+      type: 'sword'
+    })
+  }
+
+  for (const item of maze.items ?? []) {
+    if (item.type === 'sword' && item.cell) {
+      pickups.push(item)
+    }
+  }
+
+  return pickups
+}
+
+function getMazePickupItems(maze) {
+  const pickups = [
+    ...getMazeSwordPickups(maze)
+  ]
+
+  if (maze.trophy?.cell) {
+    pickups.push({
+      ...maze.trophy,
+      id: maze.trophy.id ?? 'maze-trophy',
+      type: 'trophy'
+    })
+  }
+
+  for (const item of maze.items ?? []) {
+    if (item.type !== 'sword' && item.cell) {
+      pickups.push(item)
+    }
+  }
+
+  return pickups
+}
+
 function cloneMaze(maze) {
   return {
     ...maze,
@@ -279,6 +321,10 @@ function cloneMaze(maze) {
     lights: maze.lights.map((light) => ({
       cell: { ...light.cell },
       side: light.side
+    })),
+    items: (maze.items ?? []).map((item) => ({
+      ...item,
+      cell: { ...item.cell }
     })),
     monsters: (maze.monsters ?? []).map((monster) => ({
       ...monster,
@@ -872,12 +918,9 @@ function validateMazeLights(maze) {
     }
   }
 
-  for (const [label, pickup] of [
-    ['sword', maze.sword],
-    ['trophy', maze.trophy]
-  ]) {
+  for (const pickup of getMazePickupItems(maze)) {
     if (pickup?.cell && !lightCellKeys.has(cellKey(pickup.cell))) {
-      errors.push(`Maze ${label} cell ${cellKey(pickup.cell)} must contain a torch light`)
+      errors.push(`Maze ${pickup.type} cell ${cellKey(pickup.cell)} must contain a torch light`)
     }
   }
 
@@ -950,6 +993,9 @@ function validateMazeContent(maze) {
   const expectedGateCount = Number.isInteger(profile.gateCount)
     ? profile.gateCount
     : 4
+  const expectedSwordCount = Number.isInteger(profile.swordCount)
+    ? profile.swordCount
+    : 1
   const expectedMonsterTypes = Array.isArray(profile.monsterTypes) &&
     profile.monsterTypes.length > 0
     ? profile.monsterTypes
@@ -990,8 +1036,16 @@ function validateMazeContent(maze) {
     }
   }
 
-  if (!maze.sword?.cell || !isInsideMaze(maze.sword.cell, maze.width, maze.height)) {
-    errors.push('Maze must include a sword cell inside the maze')
+  const swordPickups = getMazeSwordPickups(maze)
+
+  if (swordPickups.length !== expectedSwordCount) {
+    errors.push(`Maze must include exactly ${expectedSwordCount} sword${expectedSwordCount === 1 ? '' : 's'}`)
+  }
+
+  for (const sword of swordPickups) {
+    if (!sword?.cell || !isInsideMaze(sword.cell, maze.width, maze.height)) {
+      errors.push('Maze sword cells must stay inside the maze')
+    }
   }
 
   if (!maze.trophy?.cell || !isInsideMaze(maze.trophy.cell, maze.width, maze.height)) {
@@ -1000,7 +1054,7 @@ function validateMazeContent(maze) {
 
   const occupiedCells = [
     maze.opening.cell,
-    ...(maze.sword?.cell ? [maze.sword.cell] : []),
+    ...swordPickups.map((sword) => sword.cell),
     ...(maze.trophy?.cell ? [maze.trophy.cell] : []),
     ...((maze.monsters ?? []).map((monster) => monster.cell))
   ]
@@ -1021,10 +1075,10 @@ function validateMazeContent(maze) {
     }
   }
 
-  if (maze.trophy?.cell && maze.sword?.cell) {
+  if (maze.trophy?.cell && swordPickups.length > 0) {
     const reservedKeys = new Set([
       cellKey(maze.opening.cell),
-      cellKey(maze.sword.cell)
+      ...swordPickups.map((sword) => cellKey(sword.cell))
     ])
     const expectedTrophyCell = chooseMazeTrophyCell(maze, adjacency, reservedKeys)
 
@@ -1185,7 +1239,7 @@ function generateMazeLights(maze, random) {
     return true
   }
 
-  for (const pickup of [maze.sword, maze.trophy]) {
+  for (const pickup of getMazePickupItems(maze)) {
     if (pickup?.cell) {
       addLightForCell(pickup.cell, null, { force: true })
     }
@@ -1262,12 +1316,14 @@ function getSolutionRouteCells(maze, adjacency) {
     }
   }
 
-  if (maze.sword?.cell) {
-    appendPath(shortestPathCells(adjacency, maze.opening.cell, maze.sword.cell))
+  const firstSword = getMazeSwordPickups(maze)[0] ?? null
+
+  if (firstSword?.cell) {
+    appendPath(shortestPathCells(adjacency, maze.opening.cell, firstSword.cell))
   }
 
-  if (maze.sword?.cell && maze.trophy?.cell) {
-    appendPath(shortestPathCells(adjacency, maze.sword.cell, maze.trophy.cell))
+  if (firstSword?.cell && maze.trophy?.cell) {
+    appendPath(shortestPathCells(adjacency, firstSword.cell, maze.trophy.cell))
   } else if (maze.trophy?.cell) {
     appendPath(shortestPathCells(adjacency, maze.opening.cell, maze.trophy.cell))
   }
@@ -1484,6 +1540,10 @@ export function getMazeSignature(maze) {
     .map((monster) => `${monster.type}:${cellKey(monster.cell)}:${monster.hand ?? ''}`)
     .sort()
     .join(',')
+  const items = (maze.items ?? [])
+    .map((item) => `${item.id ?? ''}:${item.type}:${cellKey(item.cell)}`)
+    .sort()
+    .join(',')
 
   return [
     maze.width,
@@ -1492,6 +1552,7 @@ export function getMazeSignature(maze) {
     maze.opening.side,
     edges,
     gates,
+    items,
     lights,
     monsters,
     maze.sword?.cell ? cellKey(maze.sword.cell) : '',
@@ -3563,6 +3624,25 @@ export function getMazeItemPlacements(maze) {
         z: center.z
       },
       type: 'sword'
+    })
+  }
+
+  for (const item of maze.items ?? []) {
+    if (!item.cell) {
+      continue
+    }
+
+    const center = getCellCenter(maze, item.cell)
+
+    items.push({
+      cell: { ...item.cell },
+      id: item.id ?? `maze-item-${items.length}`,
+      position: {
+        x: center.x,
+        y: GROUND_Y,
+        z: center.z
+      },
+      type: item.type
     })
   }
 

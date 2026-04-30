@@ -171,6 +171,12 @@ function getReservedCellKeys(maze) {
     reserved.add(cellKey(maze.trophy.cell))
   }
 
+  for (const item of maze.items ?? []) {
+    if (item.cell) {
+      reserved.add(cellKey(item.cell))
+    }
+  }
+
   for (const altar of maze.altars ?? []) {
     reserved.add(cellKey(altar.cell))
   }

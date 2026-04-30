@@ -171,6 +171,19 @@ export function buildWorldGridFromLayouts(layouts) {
       })
     }
 
+    for (const item of maze.items ?? []) {
+      if (!item.cell) {
+        continue
+      }
+
+      items.push({
+        ...item,
+        cell: localCellToWorldCellWithTransform(maze, transform, item.cell),
+        id: item.id ? `${levelId}:${item.id}` : `${levelId}:item:${items.length}`,
+        ownerLevelId: levelId
+      })
+    }
+
     if (maze.trophy?.cell) {
       items.push({
         cell: localCellToWorldCellWithTransform(maze, transform, maze.trophy.cell),

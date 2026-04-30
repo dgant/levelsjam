@@ -14154,8 +14154,11 @@ function MazeItems({
     <>
       {layout.items
         .filter((item) => (
-          (item.type === 'sword' && turnState.swordState === 'ground') ||
-          (item.type === 'trophy' && turnState.trophyState === 'ground')
+          item.id === 'maze-sword'
+            ? turnState.swordState === 'ground'
+            : item.id === 'maze-trophy'
+              ? turnState.trophyState === 'ground'
+              : (turnState.itemStates?.[item.id] ?? 'ground') === 'ground'
         ))
         .map((item, itemIndex) => (
           <MazeItemGroundActor

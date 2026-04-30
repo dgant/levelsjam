@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import { availableParallelism } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { execFileSync } from 'node:child_process'
 import {
   isMainThread,
   parentPort,
@@ -11,7 +12,6 @@ import {
 
 import {
   finalizeGeneratedMaze,
-  generateMaze,
   getMazeSignature,
   serializeMazeModule,
   validateMaze
@@ -23,10 +23,13 @@ import {
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const outputDirectory = path.join(rootDir, 'src', 'data', 'challenge-mazes')
+const publicMazeDataDirectory = path.join(rootDir, 'public', 'maze-data')
+const publishScriptPath = path.join(rootDir, 'scripts', 'publish-challenge-maze-playtest.cjs')
 const reportPath = path.join(rootDir, 'logs', 'latest-challenge-generation-report.json')
 const targetCount = Number(process.env.LEVELSJAM_CHALLENGE_TARGET_COUNT ?? '30')
 const maxAttemptsPerMaze = Number(process.env.LEVELSJAM_CHALLENGE_MAX_ATTEMPTS ?? '1200')
 const maxPerfectExpansions = Number(process.env.LEVELSJAM_CHALLENGE_MAX_PERFECT_EXPANSIONS ?? '50000')
+const maxPerfectSolveMs = Number(process.env.LEVELSJAM_CHALLENGE_MAX_PERFECT_SOLVE_MS ?? '1500')
 const searchPerfectExpansions = Number(process.env.LEVELSJAM_CHALLENGE_SEARCH_PERFECT_EXPANSIONS ?? '12000')
 const imperfectTrialCount = Number(process.env.LEVELSJAM_CHALLENGE_IMPERFECT_TRIALS ?? '5')
 const progressInterval = Number(process.env.LEVELSJAM_CHALLENGE_PROGRESS_INTERVAL ?? '50')
@@ -41,65 +44,43 @@ const workerCount = Math.max(
   Number(process.env.LEVELSJAM_CHALLENGE_WORKERS ?? Math.floor((availableParallelism?.() ?? 2) / 2))
 )
 
-const monsterProfiles = [
-  ['minotaur', 'werewolf', 'spider'],
-  ['minotaur', 'minotaur', 'werewolf'],
-  ['minotaur', 'spider', 'spider'],
-  ['werewolf', 'werewolf', 'spider'],
-  ['spider', 'spider', 'spider'],
-  ['minotaur', 'minotaur', 'spider']
-]
-const sizeProfileOrder = [
-  { size: 5, profileIndex: 0 },
-  { size: 5, profileIndex: 1 },
-  { size: 5, profileIndex: 5 },
-  { size: 6, profileIndex: 0 },
-  { size: 6, profileIndex: 1 },
-  { size: 6, profileIndex: 5 },
-  { size: 7, profileIndex: 0 },
-  { size: 6, profileIndex: 2 },
-  { size: 7, profileIndex: 1 },
-  { size: 8, profileIndex: 2 },
-  { size: 7, profileIndex: 5 },
-  { size: 8, profileIndex: 0 },
-  { size: 9, profileIndex: 1 },
-  { size: 8, profileIndex: 5 },
-  { size: 9, profileIndex: 2 },
-  { size: 9, profileIndex: 0 },
-  { size: 7, profileIndex: 2 }
-]
-
-const names = [
-  'Crossfire Loop',
-  'Long Way Home',
-  'Two-Step Ambush',
-  'Outer Spiral',
-  'Backtrack Trap',
-  'Bull Corridor',
-  'Wolf Return',
-  'Wolf Detour',
-  'Torchline',
-  'Hard Left',
-  'Trophy Sweep',
-  'Corner Pressure',
-  'Late Bite',
-  'Forked Return',
-  'North Hook',
-  'South Hook',
-  'Redoubt',
-  'Sidewind',
-  'Drawn Blade',
-  'Last Lap',
-  'Low Road',
-  'High Road',
-  'Sightline',
-  'Coil',
-  'Crosscut',
-  'Double Back',
-  'Red Path',
-  'Dark Circuit',
-  'Blade Tax',
-  'Final Loop'
+const challengePlans = [
+  { gateCount: 3, height: 6, minotaur: 3, spider: 0, swordCount: 3, werewolf: 0, width: 3 },
+  { gateCount: 2, height: 6, minotaur: 2, spider: 0, swordCount: 2, werewolf: 0, width: 3 },
+  { gateCount: 2, height: 7, minotaur: 2, spider: 0, swordCount: 2, werewolf: 0, width: 4 },
+  { gateCount: 2, height: 8, minotaur: 2, spider: 0, swordCount: 2, werewolf: 0, width: 3 },
+  { gateCount: 2, height: 5, minotaur: 2, spider: 0, swordCount: 2, werewolf: 0, width: 4 },
+  { gateCount: 1, height: 6, minotaur: 2, spider: 0, swordCount: 2, werewolf: 0, width: 4 },
+  { gateCount: 1, height: 7, minotaur: 1, spider: 0, swordCount: 1, werewolf: 0, width: 4 },
+  { gateCount: 1, height: 8, minotaur: 1, spider: 0, swordCount: 1, werewolf: 0, width: 4 },
+  { gateCount: 1, height: 6, minotaur: 1, spider: 0, swordCount: 1, werewolf: 0, width: 5 },
+  { gateCount: 1, height: 6, minotaur: 1, spider: 0, swordCount: 1, werewolf: 0, width: 5 },
+  { gateCount: 0, height: 7, minotaur: 0, spider: 3, swordCount: 1, werewolf: 0, width: 6 },
+  { gateCount: 0, height: 8, minotaur: 0, spider: 2, swordCount: 1, werewolf: 0, width: 5 },
+  { gateCount: 0, height: 5, minotaur: 0, spider: 2, swordCount: 1, werewolf: 0, width: 6 },
+  { gateCount: 0, height: 6, minotaur: 0, spider: 2, swordCount: 1, werewolf: 0, width: 6 },
+  { gateCount: 0, height: 7, minotaur: 0, spider: 2, swordCount: 1, werewolf: 0, width: 6 },
+  { gateCount: 0, height: 8, minotaur: 0, spider: 2, swordCount: 1, werewolf: 0, width: 6 },
+  { gateCount: 0, height: 6, minotaur: 0, spider: 1, swordCount: 1, werewolf: 0, width: 7 },
+  { gateCount: 0, height: 6, minotaur: 0, spider: 1, swordCount: 1, werewolf: 0, width: 7 },
+  { gateCount: 0, height: 7, minotaur: 0, spider: 1, swordCount: 1, werewolf: 0, width: 8 },
+  { gateCount: 0, height: 8, minotaur: 0, spider: 1, swordCount: 1, werewolf: 0, width: 7 },
+  { gateCount: 0, height: 5, minotaur: 0, spider: 0, swordCount: 1, werewolf: 3, width: 8 },
+  { gateCount: 0, height: 6, minotaur: 0, spider: 0, swordCount: 1, werewolf: 2, width: 8 },
+  { gateCount: 0, height: 7, minotaur: 0, spider: 0, swordCount: 1, werewolf: 2, width: 8 },
+  { gateCount: 0, height: 8, minotaur: 0, spider: 0, swordCount: 1, werewolf: 2, width: 8 },
+  { gateCount: 0, height: 4, minotaur: 0, spider: 0, swordCount: 1, werewolf: 2, width: 6 },
+  { gateCount: 0, height: 4, minotaur: 0, spider: 0, swordCount: 1, werewolf: 2, width: 7 },
+  { gateCount: 0, height: 4, minotaur: 0, spider: 0, swordCount: 1, werewolf: 1, width: 8 },
+  { gateCount: 0, height: 3, minotaur: 0, spider: 0, swordCount: 1, werewolf: 1, width: 8 },
+  { gateCount: 0, height: 6, minotaur: 0, spider: 0, swordCount: 1, werewolf: 1, width: 7 },
+  { gateCount: 0, height: 8, minotaur: 0, spider: 0, swordCount: 1, werewolf: 1, width: 8 },
+  { gateCount: 0, height: 5, minotaur: 2, spider: 1, swordCount: 1, werewolf: 0, width: 6 },
+  { gateCount: 0, height: 6, minotaur: 2, spider: 0, swordCount: 1, werewolf: 1, width: 6 },
+  { gateCount: 0, height: 5, minotaur: 1, spider: 1, swordCount: 1, werewolf: 1, width: 6 },
+  { gateCount: 0, height: 5, minotaur: 0, spider: 1, swordCount: 1, werewolf: 2, width: 6 },
+  { gateCount: 0, height: 6, minotaur: 1, spider: 2, swordCount: 1, werewolf: 0, width: 6 },
+  { gateCount: 0, height: 6, minotaur: 1, spider: 0, swordCount: 1, werewolf: 2, width: 6 }
 ]
 const topologyCache = new Map()
 
@@ -122,6 +103,282 @@ function cellKey(cell) {
 
 function edgeKey(edge) {
   return [cellKey(edge.from), cellKey(edge.to)].sort().join('|')
+}
+
+const cardinalDirections = [
+  { dx: 0, dy: -1 },
+  { dx: 1, dy: 0 },
+  { dx: 0, dy: 1 },
+  { dx: -1, dy: 0 }
+]
+
+function shuffleInPlace(values, random) {
+  for (let index = values.length - 1; index > 0; index -= 1) {
+    const swapIndex = integerFromRandom(random, index + 1)
+    const value = values[index]
+    values[index] = values[swapIndex]
+    values[swapIndex] = value
+  }
+
+  return values
+}
+
+function getBoundarySides(cell, width, height) {
+  const sides = []
+
+  if (cell.y === 0) sides.push('north')
+  if (cell.x === width - 1) sides.push('east')
+  if (cell.y === height - 1) sides.push('south')
+  if (cell.x === 0) sides.push('west')
+
+  return sides
+}
+
+function createChallengeTopology(width, height, seed) {
+  const random = createRandom(seed)
+  const makeCycleMaze = (cycleCells) => {
+    const openEdges = cycleCells.map((cell, index) => ({
+      from: { ...cell },
+      to: { ...cycleCells[(index + 1) % cycleCells.length] }
+    }))
+    const boundaryCells = cycleCells
+      .map((cell) => ({
+        ...cell,
+        sides: getBoundarySides(cell, width, height)
+      }))
+      .filter((cell) => cell.sides.length > 0)
+    const openingCell = boundaryCells[integerFromRandom(random, boundaryCells.length)]
+
+    return {
+      gates: [],
+      height,
+      id: `generated-${seed}`,
+      lights: [],
+      opening: {
+        cell: { x: openingCell.x, y: openingCell.y },
+        side: openingCell.sides[integerFromRandom(random, openingCell.sides.length)]
+      },
+      openEdges,
+      seed,
+      width
+    }
+  }
+
+  if (height % 2 === 0) {
+    const cycleCells = []
+    for (let y = 0; y < height; y += 1) {
+      cycleCells.push({ x: 0, y })
+    }
+    for (let y = height - 1; y >= 1; y -= 1) {
+      const offset = (height - 1) - y
+      if (offset % 2 === 0) {
+        for (let x = 1; x < width; x += 1) {
+          cycleCells.push({ x, y })
+        }
+      } else {
+        for (let x = width - 1; x >= 1; x -= 1) {
+          cycleCells.push({ x, y })
+        }
+      }
+    }
+    for (let x = width - 1; x >= 1; x -= 1) {
+      cycleCells.push({ x, y: 0 })
+    }
+
+    return makeCycleMaze(cycleCells)
+  }
+
+  if (width % 2 === 0) {
+    const transposed = createChallengeTopology(height, width, seed)
+    return {
+      ...transposed,
+      height,
+      opening: {
+        cell: {
+          x: transposed.opening.cell.y,
+          y: transposed.opening.cell.x
+        },
+        side: {
+          east: 'south',
+          north: 'west',
+          south: 'east',
+          west: 'north'
+        }[transposed.opening.side]
+      },
+      openEdges: transposed.openEdges.map((edge) => ({
+        from: { x: edge.from.y, y: edge.from.x },
+        to: { x: edge.to.y, y: edge.to.x }
+      })),
+      width
+    }
+  }
+
+  const start = {
+    x: integerFromRandom(random, width),
+    y: integerFromRandom(random, height)
+  }
+  const stack = [start]
+  const visited = new Set([cellKey(start)])
+  const openEdges = []
+
+  while (stack.length > 0) {
+    const current = stack[stack.length - 1]
+    const neighbors = shuffleInPlace(
+      cardinalDirections
+        .map((direction) => ({
+          x: current.x + direction.dx,
+          y: current.y + direction.dy
+        }))
+        .filter((cell) => (
+          cell.x >= 0 &&
+          cell.y >= 0 &&
+          cell.x < width &&
+          cell.y < height &&
+          !visited.has(cellKey(cell))
+        )),
+      random
+    )
+
+    if (neighbors.length === 0) {
+      stack.pop()
+      continue
+    }
+
+    const next = neighbors[0]
+    visited.add(cellKey(next))
+    openEdges.push({ from: { ...current }, to: { ...next } })
+    stack.push(next)
+  }
+
+  const openEdgeKeys = new Set(openEdges.map(edgeKey))
+  const extraEdgeCandidates = []
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      for (const direction of cardinalDirections.slice(0, 2)) {
+        const from = { x, y }
+        const to = { x: x + direction.dx, y: y + direction.dy }
+
+        if (to.x < 0 || to.y < 0 || to.x >= width || to.y >= height) {
+          continue
+        }
+
+        const candidate = { from, to }
+        if (!openEdgeKeys.has(edgeKey(candidate))) {
+          extraEdgeCandidates.push(candidate)
+        }
+      }
+    }
+  }
+
+  const treeNeighbors = new Map()
+  const addTreeNeighbor = (from, to) => {
+    const key = cellKey(from)
+    const neighbors = treeNeighbors.get(key) ?? []
+    neighbors.push(to)
+    treeNeighbors.set(key, neighbors)
+  }
+  for (const edge of openEdges) {
+    addTreeNeighbor(edge.from, edge.to)
+    addTreeNeighbor(edge.to, edge.from)
+  }
+  const getTreeDistance = (from, to) => {
+    const targetKey = cellKey(to)
+    const queue = [{ cell: from, distance: 0 }]
+    const visited = new Set([cellKey(from)])
+
+    for (let readIndex = 0; readIndex < queue.length; readIndex += 1) {
+      const current = queue[readIndex]
+
+      if (cellKey(current.cell) === targetKey) {
+        return current.distance
+      }
+
+      for (const neighbor of treeNeighbors.get(cellKey(current.cell)) ?? []) {
+        const key = cellKey(neighbor)
+
+        if (visited.has(key)) {
+          continue
+        }
+
+        visited.add(key)
+        queue.push({
+          cell: neighbor,
+          distance: current.distance + 1
+        })
+      }
+    }
+
+    return 0
+  }
+
+  const extraEdgeCount = Math.max(1, Math.floor(width * height / 24))
+  const scoredExtraEdges = extraEdgeCandidates
+    .map((edge) => ({
+      edge,
+      score: getTreeDistance(edge.from, edge.to) + random()
+    }))
+    .sort((left, right) => right.score - left.score)
+
+  for (const { edge } of scoredExtraEdges.slice(0, extraEdgeCount)) {
+    openEdgeKeys.add(edgeKey(edge))
+    openEdges.push(edge)
+  }
+
+  const boundaryCells = []
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const sides = getBoundarySides({ x, y }, width, height)
+      if (sides.length > 0) {
+        boundaryCells.push({ sides, x, y })
+      }
+    }
+  }
+  const openingCell = boundaryCells[integerFromRandom(random, boundaryCells.length)]
+
+  return {
+    gates: [],
+    height,
+    id: `generated-${seed}`,
+    lights: [],
+    opening: {
+      cell: { x: openingCell.x, y: openingCell.y },
+      side: openingCell.sides[integerFromRandom(random, openingCell.sides.length)]
+    },
+    openEdges,
+    seed,
+    width
+  }
+}
+
+function getPlanMonsterTypes(plan) {
+  return [
+    ...Array.from({ length: plan.minotaur }, () => 'minotaur'),
+    ...Array.from({ length: plan.spider }, () => 'spider'),
+    ...Array.from({ length: plan.werewolf }, () => 'werewolf')
+  ]
+}
+
+function pluralize(count, singular, plural = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : plural}`
+}
+
+function getPlanLabel(plan) {
+  return [
+    `${plan.width}x${plan.height}`,
+    pluralize(plan.minotaur, 'minotaur'),
+    pluralize(plan.spider, 'spider'),
+    pluralize(plan.werewolf, 'wolf', 'wolves'),
+    pluralize(plan.swordCount, 'sword'),
+    pluralize(plan.gateCount, 'gate')
+  ].join(', ')
+}
+
+function getPlanName(index, plan) {
+  return `Challenge ${String(index + 1).padStart(2, '0')}: ${getPlanLabel(plan)}`
+}
+
+function getPlanDescription(plan) {
+  return getPlanLabel(plan)
 }
 
 const geometryTransforms = [
@@ -313,24 +570,89 @@ function chooseFarthestTrophyCell(topology, reservedKeys) {
   return null
 }
 
-function chooseSwordAndTrophyCells(topology, reservedKeys, random) {
+function getDistanceFromCells(topology, sourceKeys) {
+  const distanceByKey = new Map()
+  const queue = []
+
+  for (const key of sourceKeys) {
+    const cell = topology.cells[topology.cellIndexByKey.get(key)]
+    if (cell) {
+      distanceByKey.set(key, 0)
+      queue.push(cell)
+    }
+  }
+
+  for (let readIndex = 0; readIndex < queue.length; readIndex += 1) {
+    const current = queue[readIndex]
+    const distance = distanceByKey.get(cellKey(current)) ?? 0
+
+    for (const neighbor of topology.neighborsByKey.get(cellKey(current)) ?? []) {
+      const key = cellKey(neighbor)
+      if (distanceByKey.has(key)) {
+        continue
+      }
+      distanceByKey.set(key, distance + 1)
+      queue.push(neighbor)
+    }
+  }
+
+  return distanceByKey
+}
+
+function chooseSwordCells(topology, reservedKeys, random, swordCount, trophy) {
+  const swordCells = []
+  const reservedOrSelected = new Set(reservedKeys)
+  const directPath = shortestPathCells(topology, topology.maze.opening.cell, trophy)
+  const distanceFromDirectPath = getDistanceFromCells(topology, new Set(directPath.map(cellKey)))
+  const candidatePool = topology.cells
+    .filter((cell) => !reservedOrSelected.has(cellKey(cell)) && cellKey(cell) !== cellKey(trophy))
+    .map((cell) => ({
+      cell,
+      score:
+        ((distanceFromDirectPath.get(cellKey(cell)) ?? 0) * 4) +
+        ((topology.distanceFromOpening.get(cellKey(cell)) ?? 0) * 0.25) +
+        random()
+    }))
+    .sort((left, right) => right.score - left.score)
+    .map((entry) => entry.cell)
+
+  for (let index = 0; index < swordCount; index += 1) {
+    const candidates = candidatePool.filter((cell) => !reservedOrSelected.has(cellKey(cell)))
+
+    if (candidates.length === 0) {
+      return null
+    }
+
+    const cell = candidates[integerFromRandom(random, Math.min(candidates.length, 6))]
+    swordCells.push(cell)
+    reservedOrSelected.add(cellKey(cell))
+  }
+
+  return swordCells
+}
+
+function chooseSwordAndTrophyCells(topology, reservedKeys, random, swordCount) {
   const scored = []
   const cellCount = topology.maze.width * topology.maze.height
+  const trophy = chooseFarthestTrophyCell(topology, reservedKeys)
 
-  for (const sword of topology.cellsByDescendingEntranceDistance) {
-    const swordKey = cellKey(sword)
+  if (!trophy) {
+    return null
+  }
 
-    if (reservedKeys.has(swordKey)) {
+  for (let attempt = 0; attempt < 16; attempt += 1) {
+    const swordCells = chooseSwordCells(topology, reservedKeys, random, swordCount, trophy)
+
+    if (!swordCells) {
       continue
     }
 
-    const trophy = chooseFarthestTrophyCell(topology, new Set([...reservedKeys, swordKey]))
-
-    if (!trophy) {
+    const swordKeys = swordCells.map(cellKey)
+    if (swordKeys.includes(cellKey(trophy))) {
       continue
     }
 
-    const routeAnalysis = getRouteAnalysis(topology, sword, trophy)
+    const routeAnalysis = getRouteAnalysis(topology, swordCells, trophy)
     const staticCoverage = routeAnalysis.uniqueCellCount / cellCount
     const staticReturnNovelty = routeAnalysis.postTrophyNewCellCount / cellCount
     const score =
@@ -342,7 +664,7 @@ function chooseSwordAndTrophyCells(topology, reservedKeys, random) {
     scored.push({
       routeAnalysis,
       score,
-      sword,
+      swordCells,
       trophy
     })
   }
@@ -408,12 +730,25 @@ function shortestPathCells(topology, from, to) {
   return pathCells
 }
 
-function getRouteAnalysis(topology, sword, trophy) {
-  const toSword = shortestPathCells(topology, topology.maze.opening.cell, sword)
-  const toTrophy = shortestPathCells(topology, sword, trophy)
+function getRouteAnalysis(topology, swordCells, trophy) {
+  const orderedSwordCells = [...swordCells]
+    .sort((left, right) => (
+      (topology.distanceFromOpening.get(cellKey(left)) ?? 0) -
+      (topology.distanceFromOpening.get(cellKey(right)) ?? 0)
+    ))
+  const toSwords = []
+  let from = topology.maze.opening.cell
+
+  for (const sword of orderedSwordCells) {
+    const path = shortestPathCells(topology, from, sword)
+    toSwords.push(...(toSwords.length === 0 ? path : path.slice(1)))
+    from = sword
+  }
+
+  const toTrophy = shortestPathCells(topology, from, trophy)
   const toExit = shortestPathCells(topology, trophy, topology.maze.opening.cell)
   const preTrophyCells = [
-    ...toSword,
+    ...toSwords,
     ...toTrophy.slice(1)
   ]
   const allRouteCells = [
@@ -431,6 +766,7 @@ function getRouteAnalysis(topology, sword, trophy) {
   return {
     allRouteCells,
     moveCount: Math.max(0, allRouteCells.length - 1),
+    orderedSwordCells,
     postTrophyNewCellCount: postTrophyNewKeys.size,
     routeKeys,
     uniqueCellCount: routeKeys.size
@@ -537,6 +873,65 @@ function chooseMonsterCells(topology, routeAnalysis, reservedKeys, monsterTypes,
   return monsters
 }
 
+function chooseGateEdges(topology, routeAnalysis, gateCount, random) {
+  if (gateCount <= 0) {
+    return []
+  }
+
+  const routeEdges = []
+  for (let index = 1; index < routeAnalysis.allRouteCells.length; index += 1) {
+    routeEdges.push({
+      from: routeAnalysis.allRouteCells[index - 1],
+      to: routeAnalysis.allRouteCells[index]
+    })
+  }
+  const routeEdgeKeys = new Set(routeEdges.map(edgeKey))
+  const candidates = [
+    ...routeEdges,
+    ...(topology.maze.openEdges ?? []).filter((edge) => !routeEdgeKeys.has(edgeKey(edge)))
+  ]
+  const chosen = []
+  const chosenKeys = new Set()
+
+  for (const edge of candidates) {
+    if (chosen.length >= gateCount) {
+      break
+    }
+
+    const key = edgeKey(edge)
+    if (chosenKeys.has(key) || random() < 0.25) {
+      continue
+    }
+
+    chosenKeys.add(key)
+    chosen.push({
+      from: { ...edge.from },
+      id: key,
+      to: { ...edge.to }
+    })
+  }
+
+  for (const edge of candidates) {
+    if (chosen.length >= gateCount) {
+      break
+    }
+
+    const key = edgeKey(edge)
+    if (chosenKeys.has(key)) {
+      continue
+    }
+
+    chosenKeys.add(key)
+    chosen.push({
+      from: { ...edge.from },
+      id: key,
+      to: { ...edge.to }
+    })
+  }
+
+  return chosen.length === gateCount ? chosen : null
+}
+
 function addFailure(frequency, reason) {
   frequency.set(reason, (frequency.get(reason) ?? 0) + 1)
 }
@@ -606,6 +1001,34 @@ function mergeTimingSummary(target, summary = {}) {
   }
 }
 
+function removeExistingChallengeArtifacts() {
+  for (const fileName of fs.readdirSync(outputDirectory, { withFileTypes: true })) {
+    if (fileName.isFile() && /^challenge-\d{3}\.js$/.test(fileName.name)) {
+      fs.unlinkSync(path.join(outputDirectory, fileName.name))
+    }
+  }
+
+  if (!fs.existsSync(publicMazeDataDirectory)) {
+    return
+  }
+
+  for (const entry of fs.readdirSync(publicMazeDataDirectory, { withFileTypes: true })) {
+    if (!/^challenge-\d{3}(?:\.json)?$/.test(entry.name)) {
+      continue
+    }
+
+    const fullPath = path.join(publicMazeDataDirectory, entry.name)
+    fs.rmSync(fullPath, { force: true, recursive: entry.isDirectory() })
+  }
+}
+
+function publishChallengePlaytestArtifacts() {
+  execFileSync(process.execPath, [publishScriptPath], {
+    cwd: rootDir,
+    stdio: 'inherit'
+  })
+}
+
 async function importMazeModule(filePath) {
   const moduleUrl = `${pathToFileURL(filePath).href}?challengeGen=${Date.now()}-${Math.random()}`
   const imported = await import(moduleUrl)
@@ -623,8 +1046,9 @@ function getMonsterDifficulty(monsterTypes) {
   return monsterTypes.reduce((sum, type) => sum + (weights[type] ?? 1), 0)
 }
 
-function scoreParameterDifficulty({ gateCount = 0, size, swordCount = 1, monsterTypes }) {
-  const cellCount = size * size
+function scoreParameterDifficulty({ gateCount = 0, height, swordCount = 1, monsterTypes, width }) {
+  const cellCount = width * height
+  const size = Math.sqrt(cellCount)
   const sizeSolvability = (size - 5) * 0.45
   const sizeTrivialityRisk = (size - 5) * 0.32
   const monsterDifficulty = getMonsterDifficulty(monsterTypes)
@@ -637,43 +1061,19 @@ function scoreParameterDifficulty({ gateCount = 0, size, swordCount = 1, monster
 }
 
 function chooseParameterSet(index, attempt) {
-  const parameterIndex = index % 6
-
-  for (let offset = 0; offset < sizeProfileOrder.length; offset += 1) {
-    const shift = Math.floor(attempt / Math.max(1, profileAttemptWindow)) + offset
-    const entry = sizeProfileOrder[(parameterIndex + shift) % sizeProfileOrder.length]
-    const monsterTypes = monsterProfiles[entry.profileIndex]
-    const score = scoreParameterDifficulty({
-      gateCount: 0,
-      monsterTypes,
-      size: entry.size,
-      swordCount: 1
-    })
-
-    if (
-      score.difficulty >= 1.25 &&
-      score.difficulty <= 2.8 &&
-      score.nonTriviality >= 1.8
-    ) {
-      return {
-        ...entry,
-        monsterTypes,
-        score
-      }
-    }
-  }
-
-  const entry = sizeProfileOrder[parameterIndex % sizeProfileOrder.length]
-  const monsterTypes = monsterProfiles[entry.profileIndex]
+  const shift = Math.floor(attempt / Math.max(1, profileAttemptWindow))
+  const plan = challengePlans[(index + shift) % challengePlans.length]
+  const monsterTypes = getPlanMonsterTypes(plan)
   const score = scoreParameterDifficulty({
-    gateCount: 0,
+    gateCount: plan.gateCount,
+    height: plan.height,
     monsterTypes,
-    size: entry.size,
-    swordCount: 1
+    swordCount: plan.swordCount,
+    width: plan.width
   })
 
   return {
-    ...entry,
+    ...plan,
     monsterTypes,
     score
   }
@@ -688,6 +1088,36 @@ function getPerfectResult(maze, timings, stage) {
   )
 }
 
+function getSwordRemovalCases(maze) {
+  const cases = []
+
+  if (maze.sword?.cell) {
+    cases.push({
+      label: maze.sword.id ?? 'sword',
+      maze: {
+        ...maze,
+        sword: null
+      }
+    })
+  }
+
+  for (const item of maze.items ?? []) {
+    if (item.type !== 'sword') {
+      continue
+    }
+
+    cases.push({
+      label: item.id,
+      maze: {
+        ...maze,
+        items: (maze.items ?? []).filter((candidate) => candidate.id !== item.id)
+      }
+    })
+  }
+
+  return cases
+}
+
 function prevalidateCandidate(maze, frequency, timings) {
   const perfectResult = getPerfectResult(maze, timings, 'prefilter.perfect')
   const perfect = perfectResult.solution
@@ -699,15 +1129,12 @@ function prevalidateCandidate(maze, frequency, timings) {
 
   if (perfect.metrics.walkedCellRatio < 0.75) {
     addFailure(frequency, 'walked-too-few-cells')
-    return false
   }
   if (perfect.metrics.seenCellRatio < 0.9) {
     addFailure(frequency, 'saw-too-few-cells')
-    return false
   }
   if (perfect.metrics.postTrophyNewCellRatio < 0.25) {
     addFailure(frequency, 'post-trophy-too-few-new-cells')
-    return false
   }
 
   const noMonsterResult = getPerfectResult({
@@ -722,21 +1149,18 @@ function prevalidateCandidate(maze, frequency, timings) {
   }
   if (!(perfect.metrics.preTrophyMoveCount > noMonster.metrics.preTrophyMoveCount)) {
     addFailure(frequency, 'pre-trophy-not-slower-than-monster-free')
-    return false
   }
   if (!(perfect.metrics.postTrophyMoveCount > noMonster.metrics.postTrophyMoveCount)) {
     addFailure(frequency, 'post-trophy-not-slower-than-monster-free')
-    return false
   }
 
-  const withoutSwordResult = getPerfectResult({
-    ...maze,
-    sword: null
-  }, timings, 'prefilter.without-sword')
+  for (const removal of getSwordRemovalCases(maze)) {
+    const withoutSwordResult = getPerfectResult(removal.maze, timings, 'prefilter.without-sword')
 
-  if (withoutSwordResult.failureReason !== 'unsolvable') {
-    addFailure(frequency, withoutSwordResult.solution ? 'sword-removal-still-solvable' : 'sword-removal-not-proven')
-    return false
+    if (withoutSwordResult.failureReason !== 'unsolvable') {
+      addFailure(frequency, withoutSwordResult.solution ? 'sword-removal-still-solvable' : 'sword-removal-not-proven')
+      return false
+    }
   }
 
   for (let index = 0; index < maze.monsters.length; index += 1) {
@@ -748,11 +1172,10 @@ function prevalidateCandidate(maze, frequency, timings) {
 
     if (!withoutMonster) {
       addFailure(frequency, `monster-removal:${withoutMonsterResult.failureReason}`)
-      return false
+      continue
     }
     if (!(withoutMonster.moveCount < perfect.moveCount)) {
       addFailure(frequency, 'monster-removal-not-faster')
-      return false
     }
   }
 
@@ -773,29 +1196,21 @@ function prevalidateCandidate(maze, frequency, timings) {
 
   if (imperfectWins / imperfectTrialCount < 0.8) {
     addFailure(frequency, 'imperfect-success-rate-too-low')
-    return false
   }
 
   return true
 }
 
-function createCandidate({ attempt, index, monsterTypes, size, timings }) {
+function createCandidate({ attempt, gateCount, height, index, monsterTypes, swordCount, timings, width }) {
   const baseSeed = 300000 + (index * 1009) + Math.floor(attempt / Math.max(1, topologyAttemptWindow))
   const seed = baseSeed + attempt
   const random = createRandom(777 + (index * 100003) + attempt)
-  const topologyKey = `${size}x${size}:${baseSeed}`
+  const topologyKey = `${width}x${height}:${baseSeed}`
   let topology = topologyCache.get(topologyKey)
 
   if (!topology) {
     const base = measureTiming(timings, 'candidate.generate-base', () =>
-      generateMaze(baseSeed, {
-        bakeLightmap: false,
-        gateCount: 0,
-        height: size,
-        monsterTypes,
-        populateContent: false,
-        width: size
-      })
+      createChallengeTopology(width, height, baseSeed)
     )
     topology = createTopologyContext(base)
     topologyCache.set(topologyKey, topology)
@@ -804,20 +1219,22 @@ function createCandidate({ attempt, index, monsterTypes, size, timings }) {
   }
   const base = topology.maze
   const reservedKeys = new Set([cellKey(base.opening.cell)])
-  const swordChoice = chooseSwordAndTrophyCells(topology, reservedKeys, random)
+  const swordChoice = chooseSwordAndTrophyCells(topology, reservedKeys, random, swordCount)
 
   if (!swordChoice) {
     return null
   }
-  const { routeAnalysis, sword, trophy } = swordChoice
+  const { routeAnalysis, swordCells, trophy } = swordChoice
 
-  reservedKeys.add(cellKey(sword))
+  for (const sword of swordCells) {
+    reservedKeys.add(cellKey(sword))
+  }
   reservedKeys.add(cellKey(trophy))
 
   const cellCount = base.width * base.height
-  const minimumStaticMoveRatio = base.width <= 5 ? 0.75 : base.width <= 6 ? 0.48 : 0.4
-  const minimumStaticUniqueRatio = base.width <= 5 ? 0.65 : base.width <= 6 ? 0.34 : 0.28
-  const minimumStaticReturnRatio = base.width <= 5 ? 0.22 : base.width <= 6 ? 0.08 : 0.05
+  const minimumStaticMoveRatio = cellCount <= 24 ? 0.55 : cellCount <= 36 ? 0.48 : 0.4
+  const minimumStaticUniqueRatio = cellCount <= 24 ? 0.48 : cellCount <= 36 ? 0.34 : 0.28
+  const minimumStaticReturnRatio = cellCount <= 24 ? 0.12 : cellCount <= 36 ? 0.08 : 0.05
 
   if (
     routeAnalysis.moveCount < Math.ceil(cellCount * minimumStaticMoveRatio) ||
@@ -836,18 +1253,29 @@ function createCandidate({ attempt, index, monsterTypes, size, timings }) {
   if (!monsters) {
     return { rejectedReason: 'candidate-construction-failed' }
   }
+  const gates = chooseGateEdges(topology, routeAnalysis, gateCount, random)
 
-    return {
+  if (!gates) {
+    return { rejectedReason: 'candidate-gate-placement-failed' }
+  }
+
+  return {
     ...base,
     contentProfile: {
-      gateCount: 0,
-      monsterTypes: [...monsterTypes]
+      gateCount,
+      monsterTypes: [...monsterTypes],
+      swordCount
     },
-    gates: [],
+    gates,
     generatedByChallengeTool: true,
+    items: swordCells.slice(1).map((cell, swordIndex) => ({
+      cell: { ...cell },
+      id: `extra-sword-${swordIndex + 1}`,
+      type: 'sword'
+    })),
     monsters,
     seed,
-    sword: { cell: sword },
+    sword: { cell: swordCells[0] },
     trophy: { cell: trophy }
   }
 }
@@ -870,13 +1298,16 @@ function searchChallengeCandidates({
     }
 
     const parameters = chooseParameterSet(index, attempt)
-    const { size, monsterTypes } = parameters
+    const { gateCount, height, monsterTypes, swordCount, width } = parameters
     const candidate = measureTiming(timingStats, 'candidate.create', () =>
       createCandidate({
         attempt,
+        gateCount,
+        height,
         index,
         monsterTypes,
-        size,
+        swordCount,
+        width,
         timings: timingStats
       })
     )
@@ -892,12 +1323,42 @@ function searchChallengeCandidates({
       continue
     }
 
+    measureTiming(timingStats, 'candidate.finalize', () =>
+      finalizeGeneratedMaze(candidate, {
+        seed: candidate.seed,
+        maxActionCount: 320,
+        maxPlanExpansions: 500
+      })
+    )
+
+    const validation = measureTiming(timingStats, 'candidate.full-validation', () =>
+      validateMaze(candidate, {
+        requireLightmap: false,
+        advancedDifficultyOptions: {
+          imperfectTrialCount,
+          maxImperfectActionCount: 320,
+          maxImperfectPlanExpansions: 500,
+          maxPerfectDurationMs: maxPerfectSolveMs,
+          maxPerfectExpansions
+        }
+      })
+    )
+
+    if (!validation.valid) {
+      for (const error of validation.errors) {
+        addFailure(failureFrequency, `full:${error}`)
+      }
+      continue
+    }
+
     return {
       attemptsChecked,
       candidate,
       failureFrequency: summarizeFailureFrequency(failureFrequency),
+      metrics: validation.metrics,
       status: 'accepted',
       timingSummary: summarizeTimingStats(timingStats),
+      validationDurationMs: validation.durationMs,
       winningAttempt: attempt
     }
   }
@@ -1058,14 +1519,17 @@ async function main() {
       activeAttempt: attempt + 1,
       activeParameters: {
         difficulty: parameters.score.difficulty,
+        gateCount: parameters.gateCount,
+        height: parameters.height,
         monsterTypes: parameters.monsterTypes,
         nonTriviality: parameters.score.nonTriviality,
-        size: parameters.size
+        swordCount: parameters.swordCount,
+        width: parameters.width
       }
     })
     console.log(
       `challenge-${String(index + 1).padStart(3, '0')} attempt ${attempt + 1}/${maxAttemptsPerMaze}; ` +
-      `size ${parameters.size}; difficulty ${parameters.score.difficulty.toFixed(2)}; ` +
+      `size ${parameters.width}x${parameters.height}; difficulty ${parameters.score.difficulty.toFixed(2)}; ` +
       `nontrivial ${parameters.score.nonTriviality.toFixed(2)}; ` +
       `avg generate ${baseAverage.toFixed(1)}ms; avg optimal ${perfectAverage.toFixed(1)}ms; ` +
       `top failures: ${topFailures || 'none'}`
@@ -1073,6 +1537,9 @@ async function main() {
   }
 
   fs.mkdirSync(outputDirectory, { recursive: true })
+  if (!keepExistingValid && isMainThread) {
+    removeExistingChallengeArtifacts()
+  }
 
   for (let index = 0; index < targetCount; index += 1) {
     if (stopIfBudgetExhausted({ activeChallengeIndex: index + 1 })) {
@@ -1101,9 +1568,10 @@ async function main() {
           name: existing.name,
           parameterScore: scoreParameterDifficulty({
             gateCount: existing.contentProfile?.gateCount ?? 0,
+            height: existing.height,
             monsterTypes: existing.contentProfile?.monsterTypes ?? [],
-            size: existing.width,
-            swordCount: existing.sword?.cell ? 1 : 0
+            swordCount: existing.contentProfile?.swordCount ?? (existing.sword?.cell ? 1 : 0),
+            width: existing.width
           }),
           profile: existing.contentProfile,
           seed: existing.seed,
@@ -1122,7 +1590,7 @@ async function main() {
             imperfectTrialCount,
             maxImperfectActionCount: 320,
             maxImperfectPlanExpansions: 500,
-            maxPerfectDurationMs: 5000,
+            maxPerfectDurationMs: maxPerfectSolveMs,
             maxPerfectExpansions
           }
         })
@@ -1140,9 +1608,10 @@ async function main() {
           name: existing.name,
           parameterScore: scoreParameterDifficulty({
             gateCount: existing.contentProfile?.gateCount ?? 0,
+            height: existing.height,
             monsterTypes: existing.contentProfile?.monsterTypes ?? [],
-            size: existing.width,
-            swordCount: existing.sword?.cell ? 1 : 0
+            swordCount: existing.contentProfile?.swordCount ?? (existing.sword?.cell ? 1 : 0),
+            width: existing.width
           }),
           profile: existing.contentProfile,
           seed: existing.seed,
@@ -1194,45 +1663,9 @@ async function main() {
 
     const candidate = searchResult.candidate
     candidate.id = path.basename(fileName, '.js')
-    candidate.name = names[index] ?? `Challenge ${index + 1}`
-    candidate.description = `${candidate.width}x${candidate.height} no-gate monster route challenge.`
-    measureTiming(timingStats, 'candidate.finalize', () =>
-      finalizeGeneratedMaze(candidate, {
-        seed: candidate.seed,
-        maxActionCount: 320,
-        maxPlanExpansions: 500
-      })
-    )
-
-    const validation = measureTiming(timingStats, 'candidate.full-validation', () =>
-      validateMaze(candidate, {
-        requireLightmap: false,
-        advancedDifficultyOptions: {
-          imperfectTrialCount,
-          maxImperfectActionCount: 320,
-          maxImperfectPlanExpansions: 500,
-          maxPerfectDurationMs: 5000,
-          maxPerfectExpansions,
-          onTiming(entry) {
-            recordTiming(timingStats, `full-validation.${entry.stage}`, entry.durationMs)
-          }
-        }
-      })
-    )
-
-    if (!validation.valid) {
-      for (const error of validation.errors) {
-        addFailure(failureFrequency, error)
-      }
-      writeReport('failed', {
-        failedChallengeIndex: index + 1,
-        failureReason: 'full-validation-rejected-worker-candidate',
-        validationErrors: validation.errors,
-        workerCount: searchResult.workerCount ?? 1
-      })
-      throw new Error(`Worker candidate for ${fileName} failed full validation: ${validation.errors.join('; ')}`)
-    }
-
+    const plan = chooseParameterSet(index, searchResult.winningAttempt ?? 0)
+    candidate.name = getPlanName(index, plan)
+    candidate.description = getPlanDescription(plan)
     const signature = getMazeSignature(candidate)
     const structuralSignature = getStructuralSignature(candidate)
 
@@ -1262,8 +1695,8 @@ async function main() {
       attemptCount: (searchResult.winningAttempt ?? 0) + 1,
       fileName,
       maze: candidate,
-      metrics: validation.metrics,
-      validationDurationMs: validation.durationMs,
+      metrics: searchResult.metrics,
+      validationDurationMs: searchResult.validationDurationMs,
       workerCount: searchResult.workerCount ?? 1
     }
 
@@ -1276,9 +1709,10 @@ async function main() {
       profile: accepted.maze.contentProfile,
       parameterScore: scoreParameterDifficulty({
         gateCount: accepted.maze.contentProfile.gateCount,
+        height: accepted.maze.height,
         monsterTypes: accepted.maze.contentProfile.monsterTypes,
-        size: accepted.maze.width,
-        swordCount: 1
+        swordCount: accepted.maze.contentProfile.swordCount,
+        width: accepted.maze.width
       }),
       seed: accepted.maze.seed,
       size: `${accepted.maze.width}x${accepted.maze.height}`,
@@ -1289,9 +1723,12 @@ async function main() {
       path.join(outputDirectory, accepted.fileName),
       serializeMazeModule(accepted.maze)
     )
+    publishChallengePlaytestArtifacts()
     console.log(
       `${accepted.fileName}: ${accepted.maze.name} ${accepted.maze.width}x${accepted.maze.height} ` +
-      `${accepted.maze.contentProfile.monsterTypes.join('/')} seed ${accepted.maze.seed} ` +
+      `${accepted.maze.contentProfile.monsterTypes.join('/')} ` +
+      `swords ${accepted.maze.contentProfile.swordCount} gates ${accepted.maze.contentProfile.gateCount} ` +
+      `seed ${accepted.maze.seed} ` +
       `attempts ${accepted.attemptCount}`
     )
   }
