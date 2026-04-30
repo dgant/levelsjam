@@ -7710,6 +7710,12 @@ function useRuntimeLevelLightingResources(
         }
 
         const manifest = await response.json() as RuntimeProbeAssetManifest
+
+        if (!Array.isArray(manifest.probes) || manifest.probes.length === 0) {
+          finishWithoutProbeAssets()
+          return
+        }
+
         const storeProbeCoefficients = (manifestProbe: RuntimeProbeAssetManifest['probes'][number]) => {
           const probeIndex = manifestProbe.index
 
@@ -9025,11 +9031,17 @@ function EnvironmentLighting({
             throw new Error(
               `Probe asset manifest for ${layout.maze.id} resolved to HTML instead of JSON`
             )
-          }
+        }
 
-          const manifest = await response.json() as RuntimeProbeAssetManifest
-          const storeProbeCoefficients = (manifestProbe: RuntimeProbeAssetManifest['probes'][number]) => {
-            const probeIndex = manifestProbe.index
+        const manifest = await response.json() as RuntimeProbeAssetManifest
+
+        if (!Array.isArray(manifest.probes) || manifest.probes.length === 0) {
+          finishWithoutProbeAssets()
+          return
+        }
+
+        const storeProbeCoefficients = (manifestProbe: RuntimeProbeAssetManifest['probes'][number]) => {
+          const probeIndex = manifestProbe.index
 
             nextProbeCoefficients[probeIndex] = (
               Array.isArray(manifestProbe.coefficients) &&

@@ -802,6 +802,9 @@
 - Challenge mazes pass the same structural and solution validation rules as normal persisted mazes before they are exposed in the menu.
 - Challenge maze source files are compact topology and content definitions without embedded baked-lightmap payloads.
 - Challenge maze runtime payloads, baked surface lightmaps, volumetric-lightmap data, and reflection-probe assets are emitted through the same public `maze-data` artifact path as story mazes.
+- Challenge maze compact runtime payloads can be published without baked-lighting assets for immediate local browser playtesting.
+- Non-story challenge and test levels may use dummy neutral lightmaps, empty probe manifests, or unlit visual mode during iteration.
+- Levels reachable through the directed main gameplay graph from `Entrance` use real baked lighting assets in normal gameplay.
 - Challenge mazes are graph-excluded: loading one from the menu does not add it to the authored story level graph or normal seamless traversal path.
 
 ## Testing Expectations

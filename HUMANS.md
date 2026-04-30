@@ -13,6 +13,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Start one reusable headless Vite instance with `npm run dev:bg`.
 - Check that background instance with `npm run dev:bg:status`.
 - Stop that background instance with `npm run dev:bg:stop`.
+- Publish compact challenge mazes for immediate browser playtesting with `npm run playtest:challenge-mazes`, then open the in-game menu with Escape and choose from the Challenge Mazes section. These playtest payloads use neutral dummy lighting, so turning off Lighting in the menu is acceptable when testing their gameplay.
 - The background dev-server helper refuses to start if `127.0.0.1:5173` is already occupied by an unmanaged process, because stale Vite instances can serve old builds while the repo appears current.
 - Open the local URL printed by the dev server.
 - For agent work, prefer one long-lived headless Vite instance instead of repeatedly opening new visible windows.

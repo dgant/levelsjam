@@ -16,6 +16,7 @@
     "build:assets:minotaur": "node scripts/simplify-minotaur.mjs",
     "ensure:mazes": "node scripts/ensure-mazes.cjs",
     "export:maze-probes": "node scripts/export-maze-reflection-artifacts.cjs",
+    "playtest:challenge-mazes": "node scripts/publish-challenge-maze-playtest.cjs",
     "preview": "npm run build:pages && node scripts/serve-root.cjs 4173",
     "test:unit": "node scripts/run-unit-tests.cjs",
     "test:smoke:runner": "playwright test tests/smoke.spec.cjs",
