@@ -131,6 +131,21 @@ test('runtime reflection-probe manifests match their maze dimensions', () => {
       fs.readFileSync(path.join(runtimeMazeDirectory, maze.id, 'probe-assets.json'), 'utf8')
     )
     const expectedProbeCount = maze.width * maze.height
+    const isChallengePlaytestMaze = maze.id.startsWith('challenge-')
+
+    if (isChallengePlaytestMaze) {
+      assert.equal(
+        manifest.probes.length,
+        0,
+        `${maze.id} playtest probe asset manifest should use the empty placeholder manifest`
+      )
+      assert.equal(
+        manifest.probeCount,
+        0,
+        `${maze.id} playtest manifest probeCount should use the empty placeholder manifest`
+      )
+      continue
+    }
 
     assert.equal(
       manifest.probes.length,

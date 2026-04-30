@@ -22446,13 +22446,19 @@ export default function App() {
   }, [])
 
   const setGlobalTurnState = useCallback((
-    value: GlobalTurnState | null | ((current: GlobalTurnState | null) => GlobalTurnState | null)
+    value: GlobalTurnState | null | ((current: GlobalTurnState | null) => GlobalTurnState | null),
+    options: { transition?: boolean } = {}
   ) => {
     const next = typeof value === 'function'
       ? (value as (current: GlobalTurnState | null) => GlobalTurnState | null)(globalTurnStateRef.current)
       : value
 
     globalTurnStateRef.current = next
+    if (options.transition === false) {
+      setGlobalTurnStateRaw(next)
+      return
+    }
+
     startTransition(() => {
       setGlobalTurnStateRaw(next)
     })
@@ -22559,7 +22565,10 @@ export default function App() {
     updateRenderedMazeLayouts(mazeId)
   }, [loadRuntimeLevelLayouts, updateRenderedMazeLayouts])
 
-  const instantiateLoadedMaze = (mazeId: string) => {
+  const instantiateLoadedMaze = (
+    mazeId: string,
+    options: { reset?: boolean } = {}
+  ) => {
     const nextLayout = loadedMazeLayoutsRef.current.get(mazeId)
 
     if (!nextLayout) {
@@ -22571,13 +22580,22 @@ export default function App() {
     setMazeLoadError(null)
     setInstantiatedMazeId(mazeId)
     setMazeSceneKey((current) => current + 1)
-    setMazeLayout(nextLayout)
-    setGlobalTurnState((current) => current
-      ? activateGlobalTurnStateLevel(current, nextLayout)
-      : createInitialGlobalTurnState(nextLayout, Array.from(loadedMazeLayoutsRef.current.values()))
-    )
+    setGlobalTurnState((current) => {
+      if (options.reset && mazeId.startsWith('challenge-')) {
+        return createInitialGlobalTurnState(nextLayout)
+      }
+
+      const nextState = current
+        ? activateGlobalTurnStateLevel(current, nextLayout)
+        : createInitialGlobalTurnState(nextLayout, Array.from(loadedMazeLayoutsRef.current.values()))
+
+      return options.reset
+        ? resetGlobalTurnStateLevel(nextState, nextLayout)
+        : nextState
+    }, { transition: false })
     document.body.dataset.loadedMazeId = mazeId
     updateRenderedMazeLayouts(mazeId)
+    setMazeLayout(nextLayout)
   }
 
   const uninstantiateMaze = () => {
@@ -22596,9 +22614,11 @@ export default function App() {
 
     setReplayActive(false)
     setSceneLoaded(false)
-    setGlobalTurnState((current) => current
-      ? activateGlobalTurnStateLevel(resetGlobalTurnStateLevel(current, mazeLayout), mazeLayout)
-      : createInitialGlobalTurnState(mazeLayout, Array.from(loadedMazeLayoutsRef.current.values()))
+    setGlobalTurnState(
+      (current) => current
+        ? resetGlobalTurnStateLevel(activateGlobalTurnStateLevel(current, mazeLayout), mazeLayout)
+        : createInitialGlobalTurnState(mazeLayout, Array.from(loadedMazeLayoutsRef.current.values())),
+      { transition: false }
     )
     setMazeSceneKey((current) => current + 1)
   }
@@ -22766,14 +22786,7 @@ export default function App() {
       }
 
       loadedMazeLayoutsRef.current.set(mazeId, nextLayout)
-      setGlobalTurnState((current) => {
-        const baseState = current
-          ? ensureGlobalTurnStateLevel(current, nextLayout)
-          : createInitialGlobalTurnState(nextLayout, Array.from(loadedMazeLayoutsRef.current.values()))
-
-        return resetGlobalTurnStateLevel(baseState, nextLayout)
-      })
-      instantiateLoadedMaze(mazeId)
+      instantiateLoadedMaze(mazeId, { reset: true })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
 

@@ -8,7 +8,8 @@ import {
   createInitialGlobalTurnState,
   ensureGlobalTurnStateLevel,
   getGlobalTurnStateForLevel,
-  replaceGlobalTurnStateForLevel
+  replaceGlobalTurnStateForLevel,
+  resetGlobalTurnStateLevel
 } from '../src/lib/globalTurnRules.js'
 import { localCellToWorldCell } from '../src/lib/worldGrid.js'
 
@@ -116,4 +117,71 @@ test('adding a loaded level does not reset existing global pickup state', () => 
   assert.equal(preservedSource.player.hasSword, true)
   assert.equal(preservedSource.swordState, 'held')
   assert.equal(preservedSource.turn, 2)
+})
+
+test('activating a reset side level uses that level player start', () => {
+  const sourceLayout = layout(testMaze())
+  const sideLayout = layout(testMaze({
+    id: 'side-level',
+    opening: { cell: { x: 0, y: 1 }, side: 'west' },
+    playerStart: {
+      cell: { x: 0, y: 1 },
+      direction: 'east'
+    },
+    sword: null
+  }))
+  const movedSourceState = applyGlobalTurnActionForLevel(
+    createInitialGlobalTurnState(sourceLayout),
+    sourceLayout.maze.id,
+    sourceLayout.maze,
+    'move-forward'
+  ).state
+  const activatedSideState = activateGlobalTurnStateLevel(
+    ensureGlobalTurnStateLevel(movedSourceState, sideLayout),
+    sideLayout
+  )
+  const resetSideState = resetGlobalTurnStateLevel(activatedSideState, sideLayout)
+  const sideTurnState = getGlobalTurnStateForLevel(
+    resetSideState,
+    sideLayout.maze.id,
+    sideLayout.maze
+  )
+
+  assert.equal(resetSideState.activeLevelId, 'side-level')
+  assert.deepEqual(sideTurnState.player.cell, { x: 0, y: 1 })
+  assert.equal(sideTurnState.player.direction, 'east')
+})
+
+test('graph-excluded side levels do not inherit overlapping story layouts', () => {
+  const sourceLayout = layout(testMaze())
+  const sideLayout = layout(testMaze({
+    id: 'challenge-001',
+    opening: { cell: { x: 0, y: 1 }, side: 'west' },
+    openEdges: [
+      { from: { x: 0, y: 1 }, to: { x: 1, y: 1 } }
+    ],
+    playerStart: {
+      cell: { x: 0, y: 1 },
+      direction: 'east'
+    },
+    sword: null,
+    width: 3
+  }))
+  const isolatedSideState = createInitialGlobalTurnState(sideLayout)
+  const result = applyGlobalTurnActionForLevel(
+    isolatedSideState,
+    sideLayout.maze.id,
+    sideLayout.maze,
+    'move-forward'
+  )
+  const sideTurnState = getGlobalTurnStateForLevel(
+    result.state,
+    sideLayout.maze.id,
+    sideLayout.maze
+  )
+
+  assert.equal(Object.keys(isolatedSideState.levelLayouts).includes(sourceLayout.maze.id), false)
+  assert.equal(result.outcome.levelTransition, null)
+  assert.deepEqual(sideTurnState.player.cell, { x: 1, y: 1 })
+  assert.equal(sideTurnState.turn, 1)
 })
