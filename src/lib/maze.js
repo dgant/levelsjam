@@ -502,6 +502,77 @@ function chooseMazeGates(maze, random, count = 4) {
   return chosen
 }
 
+function shuffleInPlace(items, random) {
+  for (let index = items.length - 1; index > 0; index -= 1) {
+    const otherIndex = integerFromRandom(random, index + 1)
+    const current = items[index]
+
+    items[index] = items[otherIndex]
+    items[otherIndex] = current
+  }
+
+  return items
+}
+
+function getAllInteriorGridEdges(width, height) {
+  const edges = []
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (x + 1 < width) {
+        edges.push(normalizeEdge({ x, y }, { x: x + 1, y }))
+      }
+      if (y + 1 < height) {
+        edges.push(normalizeEdge({ x, y }, { x, y: y + 1 }))
+      }
+    }
+  }
+
+  return edges
+}
+
+function chooseRandomBoundaryOpening(width, height, random) {
+  const cells = []
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const sides = getBoundarySides({ x, y }, width, height)
+
+      for (const side of sides) {
+        cells.push({
+          cell: { x, y },
+          side
+        })
+      }
+    }
+  }
+
+  return cells[integerFromRandom(random, cells.length)]
+}
+
+function generateMinimalGridOpenEdges(width, height, opening, random) {
+  let openEdges = getAllInteriorGridEdges(width, height)
+  const candidates = shuffleInPlace([...openEdges], random)
+
+  for (const edge of candidates) {
+    const candidateEdges = openEdges.filter(
+      (openEdge) => edgeKey(openEdge.from, openEdge.to) !== edgeKey(edge.from, edge.to)
+    )
+    const candidateMaze = {
+      height,
+      opening,
+      openEdges: candidateEdges,
+      width
+    }
+
+    if (validateMazeCore(candidateMaze).valid) {
+      openEdges = candidateEdges
+    }
+  }
+
+  return openEdges
+}
+
 function hasClosedWallSide(maze, adjacency, cell) {
   return getClosedSides(maze, adjacency, cell).length > 0
 }
@@ -855,8 +926,25 @@ function validateMazeContent(maze) {
   const gateEdges = new Set()
   const monsterTypes = new Set((maze.monsters ?? []).map((monster) => monster.type))
 
-  if (!Array.isArray(maze.gates) || maze.gates.length !== 4) {
-    errors.push('Maze must include exactly four gates')
+  const profile = maze.contentProfile ?? {}
+  const expectedGateCount = Number.isInteger(profile.gateCount)
+    ? profile.gateCount
+    : 4
+  const expectedMonsterTypes = Array.isArray(profile.monsterTypes) &&
+    profile.monsterTypes.length > 0
+    ? profile.monsterTypes
+    : ['minotaur', 'werewolf', 'spider']
+  const expectedMonsterCounts = expectedMonsterTypes.reduce((counts, type) => {
+    counts[type] = (counts[type] ?? 0) + 1
+    return counts
+  }, {})
+  const actualMonsterCounts = (maze.monsters ?? []).reduce((counts, monster) => {
+    counts[monster.type] = (counts[monster.type] ?? 0) + 1
+    return counts
+  }, {})
+
+  if (!Array.isArray(maze.gates) || maze.gates.length !== expectedGateCount) {
+    errors.push(`Maze must include exactly ${expectedGateCount} gates`)
   } else {
     for (const gate of maze.gates) {
       if (
@@ -901,13 +989,15 @@ function validateMazeContent(maze) {
     errors.push('Opening, items, and monsters must occupy distinct cells')
   }
 
-  if ((maze.monsters ?? []).length !== 3) {
-    errors.push('Maze must include exactly three monsters')
+  if ((maze.monsters ?? []).length !== expectedMonsterTypes.length) {
+    errors.push(`Maze must include exactly ${expectedMonsterTypes.length} monsters`)
   }
 
-  for (const requiredMonsterType of ['minotaur', 'werewolf', 'spider']) {
-    if (!monsterTypes.has(requiredMonsterType)) {
-      errors.push(`Maze must include a ${requiredMonsterType}`)
+  for (const [requiredMonsterType, expectedCount] of Object.entries(expectedMonsterCounts)) {
+    if ((actualMonsterCounts[requiredMonsterType] ?? 0) !== expectedCount) {
+      errors.push(
+        `Maze must include ${expectedCount} ${requiredMonsterType}${expectedCount === 1 ? '' : 's'}`
+      )
     }
   }
 
@@ -1147,7 +1237,12 @@ function getSolutionRouteCells(maze, adjacency) {
   return route
 }
 
-function generateMazeMonsters(maze, random, protectedCellKeys = new Set()) {
+function generateMazeMonsters(
+  maze,
+  random,
+  protectedCellKeys = new Set(),
+  monsterTypes = ['minotaur', 'werewolf', 'spider']
+) {
   const reserved = getReservedCellKeys(maze)
   const allCandidateCells = []
 
@@ -1163,7 +1258,7 @@ function generateMazeMonsters(maze, random, protectedCellKeys = new Set()) {
 
   let cells = allCandidateCells.filter((cell) => !protectedCellKeys.has(cellKey(cell)))
 
-  if (cells.length < 3) {
+  if (cells.length < monsterTypes.length) {
     cells = allCandidateCells
   }
 
@@ -1175,72 +1270,91 @@ function generateMazeMonsters(maze, random, protectedCellKeys = new Set()) {
     return cell
   }
 
-  return [
-    { cell: takeCell(), type: 'minotaur' },
-    { cell: takeCell(), type: 'werewolf' },
-    {
-      cell: takeCell(),
-      hand: random() < 0.5 ? 'left' : 'right',
-      type: 'spider'
-    }
-  ]
+  return monsterTypes.map((type) => ({
+    cell: takeCell(),
+    ...(type === 'spider'
+      ? { hand: random() < 0.5 ? 'left' : 'right' }
+      : {}),
+    type
+  }))
 }
 
 export function generateMaze(seed = Date.now(), options = {}) {
   const {
-    bakeLightmap = true
+    bakeLightmap = true,
+    gateCount = 4,
+    height = MAZE_HEIGHT,
+    monsterTypes = ['minotaur', 'werewolf', 'spider'],
+    name = null,
+    width = MAZE_WIDTH
   } = options
   const startTime = performance.now()
   const random = createRandom(seed)
-  const transforms = [
-    'identity',
-    'rotate-90',
-    'rotate-180',
-    'rotate-270',
-    'flip-x',
-    'flip-y',
-    'flip-diagonal',
-    'flip-antidiagonal'
-  ]
-  const transform = transforms[integerFromRandom(random, transforms.length)]
-  const transformedCycle = BASE_CYCLE.map((cell) =>
-    applyTransform(cell, transform, MAZE_WIDTH, MAZE_HEIGHT)
-  )
-  const transformedEar = BASE_EAR.map((cell) =>
-    applyTransform(cell, transform, MAZE_WIDTH, MAZE_HEIGHT)
-  )
-  const boundaryCells = transformedCycle.filter((cell) =>
-    getBoundarySides(cell, MAZE_WIDTH, MAZE_HEIGHT).length > 0
-  )
-  const openingCell =
-    boundaryCells[integerFromRandom(random, boundaryCells.length)]
-  const boundarySides = getBoundarySides(openingCell, MAZE_WIDTH, MAZE_HEIGHT)
-  const openingSide =
-    boundarySides[integerFromRandom(random, boundarySides.length)]
-  const openEdges = transformedCycle.map((cell, index) => {
-    const next = transformedCycle[(index + 1) % transformedCycle.length]
-    return normalizeEdge(cell, next)
-  })
-  openEdges.push(
-    normalizeEdge(transformedEar[0], transformedEar[1]),
-    normalizeEdge(transformedEar[1], transformedEar[2])
-  )
-  const maze = {
-    gates: [],
-    height: MAZE_HEIGHT,
-    id: `generated-${seed}`,
-    lights: [],
-    opening: {
+  const useLegacyTemplate = width === MAZE_WIDTH && height === MAZE_HEIGHT
+  let opening
+  let openEdges
+
+  if (useLegacyTemplate) {
+    const transforms = [
+      'identity',
+      'rotate-90',
+      'rotate-180',
+      'rotate-270',
+      'flip-x',
+      'flip-y',
+      'flip-diagonal',
+      'flip-antidiagonal'
+    ]
+    const transform = transforms[integerFromRandom(random, transforms.length)]
+    const transformedCycle = BASE_CYCLE.map((cell) =>
+      applyTransform(cell, transform, width, height)
+    )
+    const transformedEar = BASE_EAR.map((cell) =>
+      applyTransform(cell, transform, width, height)
+    )
+    const boundaryCells = transformedCycle.filter((cell) =>
+      getBoundarySides(cell, width, height).length > 0
+    )
+    const openingCell =
+      boundaryCells[integerFromRandom(random, boundaryCells.length)]
+    const boundarySides = getBoundarySides(openingCell, width, height)
+    const openingSide =
+      boundarySides[integerFromRandom(random, boundarySides.length)]
+
+    opening = {
       cell: openingCell,
       side: openingSide
+    }
+    openEdges = transformedCycle.map((cell, index) => {
+      const next = transformedCycle[(index + 1) % transformedCycle.length]
+      return normalizeEdge(cell, next)
+    })
+    openEdges.push(
+      normalizeEdge(transformedEar[0], transformedEar[1]),
+      normalizeEdge(transformedEar[1], transformedEar[2])
+    )
+  } else {
+    opening = chooseRandomBoundaryOpening(width, height, random)
+    openEdges = generateMinimalGridOpenEdges(width, height, opening, random)
+  }
+  const maze = {
+    contentProfile: {
+      gateCount,
+      monsterTypes: [...monsterTypes]
     },
+    gates: [],
+    height,
+    id: `generated-${seed}`,
+    lights: [],
+    ...(name ? { name } : {}),
+    opening,
     openEdges,
     seed,
-    width: MAZE_WIDTH
+    width
   }
   const adjacency = buildAdjacency(maze)
 
-  maze.gates = chooseMazeGates(maze, random)
+  maze.gates = chooseMazeGates(maze, random, gateCount)
   maze.sword = {
     cell: chooseMazeSwordCell(maze, random, adjacency)
   }
@@ -1261,7 +1375,8 @@ export function generateMaze(seed = Date.now(), options = {}) {
     maze.monsters = generateMazeMonsters(
       maze,
       random,
-      protectedMonsterCellKeys
+      protectedMonsterCellKeys,
+      monsterTypes
     )
     maze.lights = generateMazeLights(maze, random)
     maze.visibility = computeMazeCellVisibility(maze)
@@ -2531,6 +2646,10 @@ export async function bakeMazeLightmap(
   sconceRadius = MAZE_LIGHTMAP_DEFAULT_SCONCE_RADIUS,
   options = {}
 ) {
+  if (options.forceCpu === true) {
+    return bakeMazeLightmapCpu(maze, sconceRadius)
+  }
+
   const bakeStart = performance.now()
   const reportProgress = typeof options.onProgress === 'function'
     ? options.onProgress

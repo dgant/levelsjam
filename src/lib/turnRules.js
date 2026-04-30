@@ -796,11 +796,15 @@ function resolvePlayerPickups(maze, state, outcome) {
       cellKey(state.player.cell) === cellKey(item.cell)
     ) {
       state.itemStates ??= {}
-      state.itemStates[item.id] = 'held'
       if (item.type === 'sword') {
+        if (state.player.hasSword) {
+          continue
+        }
+        state.itemStates[item.id] = 'held'
         state.player.hasSword = true
         outcome.pickedUpSword = true
       } else if (item.type === 'trophy') {
+        state.itemStates[item.id] = 'held'
         state.player.hasTrophy = true
         outcome.pickedUpTrophy = true
       }
@@ -810,6 +814,7 @@ function resolvePlayerPickups(maze, state, outcome) {
   if (
     maze.sword?.cell &&
     state.swordState === 'ground' &&
+    !state.player.hasSword &&
     cellKey(state.player.cell) === cellKey(maze.sword.cell)
   ) {
     state.player.hasSword = true

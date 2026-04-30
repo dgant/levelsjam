@@ -413,6 +413,63 @@ bool segmentIntersectsLowerHemisphereCap(vec3 start, vec3 end, vec3 center, floa
   return false;
 }
 
+bool isAttachedWallFaceSample(vec3 samplePosition, vec3 sampleNormal, int torchIndex) {
+  vec3 torchNormal = readTorch(torchIndex, 3).xyz;
+  float normalDot = dot(sampleNormal.xz, torchNormal.xz);
+
+  if (normalDot < 0.99) {
+    return false;
+  }
+
+  vec4 wallData = readTorch(torchIndex, 2);
+  vec2 wallCenter = wallData.xy;
+  float wallAxis = wallData.z;
+  float acrossDistance = abs(dot(samplePosition.xz - wallCenter, torchNormal.xz));
+
+  if (acrossDistance > (uWallThickness + uSampleEpsilon)) {
+    return false;
+  }
+
+  float alongDistance = wallAxis < 0.5
+    ? abs(samplePosition.x - wallCenter.x)
+    : abs(samplePosition.z - wallCenter.y);
+
+  return alongDistance <= (uCellSize * 0.5) + uSampleEpsilon;
+}
+
+float smoothContactShadow(float edge0, float edge1, float value) {
+  float t = clamp((value - edge0) / max(edge1 - edge0, 0.000001), 0.0, 1.0);
+  return t * t * (3.0 - (2.0 * t));
+}
+
+float getAttachedSconceContactShadow(vec3 samplePosition, vec3 sampleNormal, int torchIndex) {
+  if (!isAttachedWallFaceSample(samplePosition, sampleNormal, torchIndex)) {
+    return 0.0;
+  }
+
+  vec3 sconcePosition = readTorch(torchIndex, 1).xyz;
+
+  if (samplePosition.y > sconcePosition.y + uSconceRadius) {
+    return 0.0;
+  }
+
+  vec4 wallData = readTorch(torchIndex, 2);
+  vec2 wallCenter = wallData.xy;
+  float wallAxis = wallData.z;
+  float horizontalDistance = wallAxis < 0.5
+    ? abs(samplePosition.x - wallCenter.x)
+    : abs(samplePosition.z - wallCenter.y);
+  float horizontalMask =
+    1.0 - smoothContactShadow(uSconceRadius * 0.55, uSconceRadius * 1.45, horizontalDistance);
+  float verticalMask = smoothContactShadow(
+    GROUND_Y,
+    sconcePosition.y + uSconceRadius,
+    samplePosition.y
+  );
+
+  return clamp(horizontalMask * (0.9 + (0.1 * verticalMask)), 0.0, 1.0);
+}
+
 bool isSegmentOccluded(vec3 samplePosition, vec3 targetPosition) {
   vec3 segmentMin = min(samplePosition, targetPosition);
   vec3 segmentMax = max(samplePosition, targetPosition);
@@ -647,7 +704,9 @@ vec3 accumulateTorchLighting(
       }
 
       float falloff = 1.0 / max(distanceToTorch * distanceToTorch, sourceRadius * sourceRadius);
-      torchAccumulated += uTorchLightColor * (lambert * falloff * uTorchStrength);
+      float contactShadow = getAttachedSconceContactShadow(samplePosition, sampleNormal, torchIndex);
+      float contactStrength = 1.0 - (0.98 * contactShadow);
+      torchAccumulated += uTorchLightColor * (lambert * falloff * uTorchStrength * contactStrength);
     }
 
     litColor += torchAccumulated / float(effectiveSphereSampleCount);
@@ -687,7 +746,9 @@ vec3 accumulateLegacyTorchLighting(vec3 samplePosition, vec3 sampleNormal) {
     }
 
     float falloff = 1.0 / max(distanceToTorch * distanceToTorch, sourceRadius * sourceRadius);
-    litColor += uTorchLightColor * (lambert * falloff * uTorchStrength);
+    float contactShadow = getAttachedSconceContactShadow(samplePosition, sampleNormal, torchIndex);
+    float contactStrength = 1.0 - (0.98 * contactShadow);
+    litColor += uTorchLightColor * (lambert * falloff * uTorchStrength * contactStrength);
   }
 
   return litColor;

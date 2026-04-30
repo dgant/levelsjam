@@ -38,21 +38,27 @@ test('blends across four probes at the midpoint between both axes', () => {
   assert.deepEqual(blend.weights, [0.25, 0.25, 0.25, 0.25])
 })
 
-test('builds one ground probe blend tile per maze cell', () => {
+test('builds one ground patch per probe-blend interval', () => {
   const rects = buildGroundReflectionProbeRects(layout)
 
-  assert.equal(rects.length, 9)
-  assert.equal(Math.min(...rects.map((rect) => rect.region.minX)), -3)
-  assert.equal(Math.min(...rects.map((rect) => rect.region.minZ)), -3)
-  assert.equal(Math.max(...rects.map((rect) => rect.region.minX + rect.region.sizeX)), 3)
-  assert.equal(Math.max(...rects.map((rect) => rect.region.minZ + rect.region.sizeZ)), 3)
+  assert.equal(rects.length, 16)
+  assert.equal(Math.min(...rects.map((rect) => rect.region.minX)), -2)
+  assert.equal(Math.min(...rects.map((rect) => rect.region.minZ)), -2)
+  assert.equal(Math.max(...rects.map((rect) => rect.region.minX + rect.region.sizeX)), 2)
+  assert.equal(Math.max(...rects.map((rect) => rect.region.minZ + rect.region.sizeZ)), 2)
   assert.deepEqual(rects[0].probeIndices, [0, 0, 0, 0])
   assert.deepEqual(rects[0].cell, { x: 0, y: 0 })
-  assert.deepEqual(rects[4].probeIndices, [4, 5, 7, 8])
-  assert.deepEqual(rects[4].cell, { x: 1, y: 1 })
-  assert.deepEqual(rects[4].region, {
-    minX: -1,
-    minZ: -1,
+  assert.deepEqual(
+    rects.find((rect) => rect.id === 'floor-blend-1-1')?.probeIndices,
+    [0, 1, 3, 4]
+  )
+  assert.deepEqual(
+    rects.find((rect) => rect.id === 'floor-blend-2-2')?.probeIndices,
+    [4, 5, 7, 8]
+  )
+  assert.deepEqual(rects.find((rect) => rect.id === 'floor-blend-2-2')?.region, {
+    minX: 0,
+    minZ: 0,
     sizeX: 2,
     sizeZ: 2
   })

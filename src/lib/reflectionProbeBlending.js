@@ -126,36 +126,74 @@ export function getReflectionProbeBlendForPosition(layout, position) {
 export function buildGroundReflectionProbeRects(layout) {
   const mazeMinX = -((layout.maze.width * MAZE_CELL_SIZE) / 2)
   const mazeMinZ = -((layout.maze.height * MAZE_CELL_SIZE) / 2)
+  const mazeMaxX = -mazeMinX
+  const mazeMaxZ = -mazeMinZ
+  const cells = getLayoutCells(layout)
+  const cellKeys = new Set(cells.map((cell) => `${cell.x},${cell.y}`))
+  const xEdges = [
+    mazeMinX,
+    ...Array.from({ length: layout.maze.width }, (_, index) =>
+      getProbeCenterCoordinate(index, layout.maze.width, MAZE_CELL_SIZE)
+    ),
+    mazeMaxX
+  ]
+  const zEdges = [
+    mazeMinZ,
+    ...Array.from({ length: layout.maze.height }, (_, index) =>
+      getProbeCenterCoordinate(index, layout.maze.height, MAZE_CELL_SIZE)
+    ),
+    mazeMaxZ
+  ]
   const rects = []
 
-  for (const { x, y } of getLayoutCells(layout)) {
-    const z0 = mazeMinZ + (y * MAZE_CELL_SIZE)
-    const z1 = z0 + MAZE_CELL_SIZE
-    const centerZ = (z0 + z1) / 2
+  for (let zIndex = 0; zIndex < zEdges.length - 1; zIndex += 1) {
+    const minZ = zEdges[zIndex]
+    const maxZ = zEdges[zIndex + 1]
+    const centerZ = (minZ + maxZ) / 2
 
-    const x0 = mazeMinX + (x * MAZE_CELL_SIZE)
-    const x1 = x0 + MAZE_CELL_SIZE
-    const centerX = (x0 + x1) / 2
-    const centerBlend = getReflectionProbeBlendForPosition(layout, {
-      x: centerX,
-      z: centerZ
-    })
+    for (let xIndex = 0; xIndex < xEdges.length - 1; xIndex += 1) {
+      const minX = xEdges[xIndex]
+      const maxX = xEdges[xIndex + 1]
+      const centerX = (minX + maxX) / 2
+      const overlappingCells = []
 
-    rects.push({
-      cell: { x, y },
-      centerX,
-      centerZ,
-      depth: z1 - z0,
-      id: `cell-floor-${x}-${y}`,
-      probeIndices: centerBlend.probeIndices,
-      region: {
-        minX: x0,
-        minZ: z0,
-        sizeX: x1 - x0,
-        sizeZ: z1 - z0
-      },
-      width: x1 - x0
-    })
+      for (
+        let cellY = Math.max(0, Math.floor((minZ - mazeMinZ) / MAZE_CELL_SIZE));
+        cellY <= Math.min(layout.maze.height - 1, Math.floor((maxZ - mazeMinZ - 1e-6) / MAZE_CELL_SIZE));
+        cellY += 1
+      ) {
+        for (
+          let cellX = Math.max(0, Math.floor((minX - mazeMinX) / MAZE_CELL_SIZE));
+          cellX <= Math.min(layout.maze.width - 1, Math.floor((maxX - mazeMinX - 1e-6) / MAZE_CELL_SIZE));
+          cellX += 1
+        ) {
+          if (cellKeys.has(`${cellX},${cellY}`)) {
+            overlappingCells.push({ x: cellX, y: cellY })
+          }
+        }
+      }
+
+      if (overlappingCells.length === 0) {
+        continue
+      }
+
+      const blend = getReflectionProbeBlendForPosition(layout, {
+        x: centerX,
+        z: centerZ
+      })
+
+      rects.push({
+        cell: overlappingCells[0],
+        cells: overlappingCells,
+        centerX,
+        centerZ,
+        depth: maxZ - minZ,
+        id: `floor-blend-${xIndex}-${zIndex}`,
+        probeIndices: blend.probeIndices,
+        region: blend.region,
+        width: maxX - minX
+      })
+    }
   }
 
   return rects

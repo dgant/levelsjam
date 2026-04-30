@@ -5,14 +5,15 @@ const { spawn } = require('node:child_process')
 const rootDir = path.resolve(__dirname, '..')
 const nodeCommand = process.execPath
 const profilePath = path.join(rootDir, 'logs', 'latest-maze-test-profile.json')
-const overallThresholdMs = 20_000
+const overallThresholdMs = 45_000
 const testFile = 'tests/maze.test.js'
 const testCases = [
   { name: 'generates valid mazes under 100ms', thresholdMs: 5_000 },
   { name: 'places initial torch lights on pickup cells', thresholdMs: 5_000 },
-  { name: 'initial monsters face legal movement cells', thresholdMs: 5_000 },
+  { name: 'initial monsters face legal movement cells or their backlight torches', thresholdMs: 5_000 },
   { name: 'generated wall decals avoid torch-bearing wall faces', thresholdMs: 5_000 },
   { name: 'persists at least five valid mazes', thresholdMs: 12_000 },
+  { name: 'persists thirty compact valid challenge mazes from 5x5 through 9x9', thresholdMs: 25_000 },
   { name: 'dumps persisted maze lightmap artifacts into the gitignored logs directory', thresholdMs: 5_000 },
   { name: 'deletes invalid maze files and regenerates replacements', thresholdMs: 5_000 },
   { name: 'converts persisted mazes into wall segments and torch placements', thresholdMs: 5_000 },
@@ -35,28 +36,50 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function parseReportedDuration(stdout) {
-  const matches = [...stdout.matchAll(/# duration_ms ([0-9.]+)/g)]
-  const lastMatch = matches.at(-1)
+function parseTestDurations(stdout) {
+  const durations = new Map()
+  const lines = stdout.split(/\r?\n/)
+  let currentName = null
 
-  if (!lastMatch) {
-    return null
+  for (const line of lines) {
+    const nameMatch = line.match(/# Subtest: (.+)$/)
+
+    if (nameMatch) {
+      currentName = nameMatch[1]
+      continue
+    }
+
+    const durationMatch = line.match(/duration_ms: ([0-9.]+)/)
+
+    if (!durationMatch || !currentName) {
+      continue
+    }
+
+    const durationMs = Number(durationMatch[1])
+
+    if (Number.isFinite(durationMs) && !durations.has(currentName)) {
+      durations.set(currentName, durationMs)
+    }
   }
 
-  const durationMs = Number(lastMatch[1])
-  return Number.isFinite(durationMs) ? durationMs : null
+  return durations
 }
 
-function runTestCase(testCase) {
+function runSelectedTests() {
   return new Promise((resolve) => {
     const startedAt = process.hrtime.bigint()
-    const timeoutMs = Math.max(testCase.thresholdMs * 4, 15_000)
+    const timeoutMs = Math.max(
+      testCases.reduce((sum, testCase) => sum + testCase.thresholdMs, 0) * 2,
+      60_000
+    )
+    const pattern = `^(${testCases.map((testCase) => escapeRegExp(testCase.name)).join('|')})$`
+
     console.log(
-      `starting: ${testCase.name} (timeout ${formatMilliseconds(timeoutMs)})`
+      `starting maze test batch: ${testCases.length} selected tests (timeout ${formatMilliseconds(timeoutMs)})`
     )
     const child = spawn(
       nodeCommand,
-      ['--test', '--test-name-pattern', `^${escapeRegExp(testCase.name)}$`, testFile],
+      ['--test', '--test-name-pattern', pattern, testFile],
       {
         cwd: rootDir,
         env: { ...process.env }
@@ -80,23 +103,23 @@ function runTestCase(testCase) {
     child.stderr.setEncoding('utf8')
     child.stdout.on('data', (chunk) => {
       stdout += chunk
+      process.stdout.write(chunk)
     })
     child.stderr.on('data', (chunk) => {
       stderr += chunk
+      process.stderr.write(chunk)
     })
     child.on('close', (code) => {
       settled = true
       clearTimeout(timeout)
       const wallDurationMs = Number(process.hrtime.bigint() - startedAt) / 1e6
+      const durations = parseTestDurations(stdout)
 
       resolve({
         code: timedOut ? 1 : code ?? 1,
-        durationMs: parseReportedDuration(stdout) ?? wallDurationMs,
-        name: testCase.name,
-        reportedDurationMs: parseReportedDuration(stdout),
+        durations,
         stderr,
         stdout,
-        thresholdMs: testCase.thresholdMs,
         timedOut,
         timeoutMs,
         wallDurationMs
@@ -112,15 +135,23 @@ function writeProfile(profile) {
 
 async function main() {
   const startedAt = Date.now()
-  const results = []
+  const batchResult = await runSelectedTests()
+  const results = testCases.map((testCase) => {
+    const durationMs = batchResult.durations.get(testCase.name)
 
-  for (const testCase of testCases) {
-    const result = await runTestCase(testCase)
-    results.push(result)
-    console.log(
-      `${testCase.name}: ${formatMilliseconds(result.durationMs)}`
-    )
-  }
+    return {
+      code: durationMs === undefined ? 1 : batchResult.code,
+      durationMs: durationMs ?? batchResult.wallDurationMs,
+      name: testCase.name,
+      reportedDurationMs: durationMs,
+      stderr: batchResult.stderr,
+      stdout: batchResult.stdout,
+      thresholdMs: testCase.thresholdMs,
+      timedOut: batchResult.timedOut,
+      timeoutMs: batchResult.timeoutMs,
+      wallDurationMs: batchResult.wallDurationMs
+    }
+  })
 
   const wallTotalDurationMs = Date.now() - startedAt
   const totalDurationMs = results.reduce((sum, result) => sum + result.durationMs, 0)
@@ -131,12 +162,10 @@ async function main() {
 
   for (const result of results) {
     if (result.code !== 0) {
-      process.stdout.write(result.stdout)
-      process.stderr.write(result.stderr)
       failures.push(
         result.timedOut
           ? `${result.name} timed out after ${formatMilliseconds(result.timeoutMs)}`
-          : `${result.name} exited with code ${result.code}`
+          : `${result.name} failed or did not report a duration`
       )
       continue
     }

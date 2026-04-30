@@ -201,3 +201,8 @@ export declare function getMazeLayoutById(id: string): MazeLayout | null
 export declare function getDebugMazeLayoutById(id: string): MazeLayout | null
 export declare function getWallBounds(layout?: MazeLayout): WallBounds[]
 export declare function resolveMazeDataUrl(relativePath: string): string
+export declare function getRuntimeLevelMenuEntries(): Promise<Array<{
+  description: string
+  name: string
+  runtimeLevelId: string
+}>>

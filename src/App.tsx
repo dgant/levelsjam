@@ -12,6 +12,7 @@ import {
   BasicShadowMap,
   Box3,
   BoxGeometry,
+  BufferGeometry,
   Camera as ThreeCamera,
   CanvasTexture,
   ClampToEdgeWrapping,
@@ -139,6 +140,7 @@ import {
   GROUND_Y,
   MAZE_CELL_SIZE,
   getAvailableMazeIds,
+  getRuntimeLevelMenuEntries,
   getLoadedMazeLayoutIds,
   getWallBounds,
   unloadMazeLayoutById,
@@ -190,7 +192,7 @@ import {
   readGameSave,
   writeGameSave
 } from './lib/saveGame.js'
-import { cloneCachedGltfRoot, getCachedGltfRootUrls } from './lib/gltfRuntimeCache'
+import { cloneCachedGltfRoot, getCachedGltfRootUrls, loadCachedGltfRoot } from './lib/gltfRuntimeCache'
 
 declare const __GIT_BRANCH__: string
 declare const __GIT_REVISION__: string
@@ -209,6 +211,21 @@ const GATE_MODEL_URL = `${assetBase}models/metal_gate_runtime/scene.gltf`
 const SWORD_MODEL_URL = `${assetBase}models/bronze_sword_mycean/scene.gltf`
 const TROPHY_MODEL_URL = `${assetBase}models/head_of_a_bull_runtime/scene.gltf`
 const DROOP_CUP_MODEL_URL = `${assetBase}models/droop_cup_runtime/scene.gltf`
+const RUNTIME_MODEL_URLS = [
+  GATE_MODEL_URL,
+  SWORD_MODEL_URL,
+  TROPHY_MODEL_URL,
+  DROOP_CUP_MODEL_URL,
+  MONSTER_MODEL_URLS.minotaur,
+  MONSTER_MODEL_URLS.spider,
+  MONSTER_MODEL_URLS.werewolf
+] as const
+const runtimeModelPreloadPromise = Promise.all(
+  RUNTIME_MODEL_URLS.map((url) => loadCachedGltfRoot(url))
+)
+void runtimeModelPreloadPromise.catch(() => {
+  // Scene readiness reports the actual load error from the component effect.
+})
 const PUDDLE_TEXTURE_URLS = {
   color: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_Diffuse.jpg`,
   gloss: `${assetBase}textures/puddle-ground/puddle_ground-1K/1K-puddle_Gloss.jpg`,
@@ -872,14 +889,19 @@ async function warmSceneTextures(
 ) {
   const textures = collectSceneMaterialTextures(scene)
 
-  for (const texture of textures) {
+  for (let index = 0; index < textures.length; index += 1) {
     if (isCancelled()) {
       return
     }
 
-    gl.initTexture(texture)
-    await waitForNextAnimationFrame()
+    gl.initTexture(textures[index])
+
+    if ((index + 1) % 16 === 0) {
+      await waitForNextAnimationFrame()
+    }
   }
+
+  await waitForNextAnimationFrame()
 }
 
 async function warmEffectComposer(
@@ -899,14 +921,20 @@ async function warmScenePrograms(
   scene: ThreeScene,
   camera: ThreeCamera,
   isCancelled: () => boolean,
-  allowSyncFallback = true
+  allowSyncFallback = true,
+  includeProbeBlendVariants = false
 ) {
   const hiddenObjects: Object3D[] = []
+  const frustumCulledObjects: Array<{ frustumCulled: boolean; object: Object3D }> = []
 
   scene.traverse((object) => {
     if (!object.visible) {
       hiddenObjects.push(object)
       object.visible = true
+    }
+    if (object.frustumCulled) {
+      frustumCulledObjects.push({ frustumCulled: object.frustumCulled, object })
+      object.frustumCulled = false
     }
   })
 
@@ -915,29 +943,26 @@ async function warmScenePrograms(
       return
     }
 
-    const asyncCompiler = (
-      gl as WebGLRenderer & {
-        compileAsync?: (
-          scene: ThreeScene,
-          camera: ThreeCamera
-        ) => Promise<unknown>
-      }
-    ).compileAsync
+    // In this app's full scene, Chromium/ANGLE's compileAsync path can stall
+    // longer than a direct compile while still blocking visible progress.
+    // A real render is also required: gl.compile can miss built-in material
+    // variants that R3F/three later compile on their first visible draw.
+    if (allowSyncFallback) {
+      const previousRenderTarget = gl.getRenderTarget()
 
-    if (asyncCompiler) {
-      try {
-        await asyncCompiler.call(gl, scene, camera)
-      } catch {
-        if (allowSyncFallback) {
-          gl.compile(scene, camera)
-        }
-      }
-    } else if (allowSyncFallback) {
       gl.compile(scene, camera)
+      gl.render(scene, camera)
+      if (includeProbeBlendVariants) {
+        warmProbeBlendMaterialVariants(gl, scene, camera)
+      }
+      gl.setRenderTarget(previousRenderTarget)
     }
   } finally {
     for (const object of hiddenObjects) {
       object.visible = false
+    }
+    for (const { frustumCulled, object } of frustumCulledObjects) {
+      object.frustumCulled = frustumCulled
     }
   }
 
@@ -991,7 +1016,7 @@ const REFLECTION_PROBE_STARTUP_CAPTURE_DELAY_MS = 250
 const REFLECTION_PROBE_BACKGROUND_CAPTURE_DELAY_MS = 1000
 const REFLECTION_PROBE_EMISSIVE_RADIUS = 0.16
 const REFLECTION_PROBE_EMISSIVE_SCALE = 2
-const STARTUP_VOLUMETRIC_PROBE_READY_RADIUS = 12
+const STARTUP_VOLUMETRIC_PROBE_READY_RADIUS = 6
 const FOG_VOLUME_HEIGHT = 6
 const FOG_EXTINCTION_SCALE = 1
 const MAX_ACTIVE_FOG_VLM_ATLASES = 4
@@ -2057,6 +2082,10 @@ type GroundPatchRect = {
     x: number
     y: number
   }
+  cells?: Array<{
+    x: number
+    y: number
+  }>
   centerX: number
   centerZ: number
   depth: number
@@ -4033,16 +4062,16 @@ function updateProbeBlendShaderUniforms(
     shader.uniforms.localProbeMaxMip3
   )
   if (shader.uniforms.localProbeEnvMap0) {
-    shader.uniforms.localProbeEnvMap0.value = probeBlend.probeTextures[0] ?? null
+    shader.uniforms.localProbeEnvMap0.value = probeBlend.probeTextures[0] ?? getDummyProbeEnvMapTexture()
   }
   if (shader.uniforms.localProbeEnvMap1) {
-    shader.uniforms.localProbeEnvMap1.value = probeBlend.probeTextures[1] ?? null
+    shader.uniforms.localProbeEnvMap1.value = probeBlend.probeTextures[1] ?? getDummyProbeEnvMapTexture()
   }
   if (shader.uniforms.localProbeEnvMap2) {
-    shader.uniforms.localProbeEnvMap2.value = probeBlend.probeTextures[2] ?? null
+    shader.uniforms.localProbeEnvMap2.value = probeBlend.probeTextures[2] ?? getDummyProbeEnvMapTexture()
   }
   if (shader.uniforms.localProbeEnvMap3) {
-    shader.uniforms.localProbeEnvMap3.value = probeBlend.probeTextures[3] ?? null
+    shader.uniforms.localProbeEnvMap3.value = probeBlend.probeTextures[3] ?? getDummyProbeEnvMapTexture()
   }
   applyProbeCoefficientUniforms(
     0,
@@ -4880,6 +4909,241 @@ function getDummyProbeEnvMapTexture() {
   texture.needsUpdate = true
   dummyProbeEnvMapTexture = texture
   return texture
+}
+
+let dummyTransparentTexture: Texture | null = null
+
+function getDummyTransparentTexture() {
+  if (dummyTransparentTexture) {
+    return dummyTransparentTexture
+  }
+
+  const texture = new DataTexture(new Uint8Array([0, 0, 0, 0]), 1, 1, RGBAFormat, UnsignedByteType)
+
+  texture.colorSpace = NoColorSpace
+  texture.flipY = false
+  texture.generateMipmaps = false
+  texture.magFilter = LinearFilter
+  texture.minFilter = LinearFilter
+  texture.needsUpdate = true
+  dummyTransparentTexture = texture
+  return texture
+}
+
+let dummyWhiteTexture: Texture | null = null
+
+function getDummyWhiteTexture() {
+  if (dummyWhiteTexture) {
+    return dummyWhiteTexture
+  }
+
+  const texture = new DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1, RGBAFormat, UnsignedByteType)
+
+  texture.colorSpace = SRGBColorSpace
+  texture.flipY = false
+  texture.generateMipmaps = false
+  texture.magFilter = LinearFilter
+  texture.minFilter = LinearFilter
+  texture.needsUpdate = true
+  dummyWhiteTexture = texture
+  return texture
+}
+
+function createProbeBlendWarmupConfig(vlmMode: ProbeVlmMode): ProbeBlendConfig {
+  const dummyProbeTexture = getDummyProbeEnvMapTexture()
+  const dummyDataTexture = getDummyTransparentTexture()
+
+  return {
+    diffuseIntensity: 1,
+    mode: 'disabled',
+    probeBoxes: Array.from({ length: 4 }, () => ({
+      max: DEFAULT_PROBE_BOX_MAX,
+      min: DEFAULT_PROBE_BOX_MIN
+    })),
+    probeCellSize: MAZE_CELL_SIZE,
+    probeCoeffTextureL0: dummyDataTexture,
+    probeCoeffTextureL1: dummyDataTexture,
+    probeCoeffTextureL2: dummyDataTexture,
+    probeCoeffTextureL3: dummyDataTexture,
+    probeConnectivityTexture: dummyDataTexture,
+    probeGridMin: new Vector2(0, 0),
+    probeGridSize: new Vector2(1, 1),
+    probeHeight: 1.25,
+    probePositions: Array.from({ length: 4 }, () => DEFAULT_PROBE_POSITION),
+    probeTextureInfos: Array.from({ length: 4 }, () => DEFAULT_PROBE_TEXTURE_INFO),
+    probeTextures: Array.from({ length: 4 }, () => dummyProbeTexture),
+    probeWorldOrigin: new Vector2(0, 0),
+    probeWorldRotationY: 0,
+    radianceIntensity: 1,
+    radianceMode: 'constant',
+    useProbeConnectivity: true,
+    vlmBoundaryNormal: vlmMode === 'boundary8'
+      ? { x: 1, z: 0 }
+      : undefined,
+    vlmMode,
+    weights: [1, 0, 0, 0]
+  }
+}
+
+function createUvLessTriangleGeometry() {
+  const geometry = new BufferGeometry()
+
+  geometry.setAttribute(
+    'position',
+    new Float32BufferAttribute([
+      -0.4, 0, 0,
+      0.4, 0, 0,
+      0, 0.6, 0
+    ], 3)
+  )
+  geometry.computeVertexNormals()
+  return geometry
+}
+
+function createUvWarmupGeometry(includeLightmapUv: boolean) {
+  const geometry = new PlaneGeometry(0.2, 0.2)
+
+  if (includeLightmapUv) {
+    const uv = geometry.getAttribute('uv')
+
+    if (uv) {
+      geometry.setAttribute('uv1', uv.clone())
+    }
+  }
+
+  return geometry
+}
+
+function createProbeBlendWarmupMaterial({
+  lightmapped,
+  mapped,
+  probeBlend
+}: {
+  lightmapped: boolean
+  mapped: boolean
+  probeBlend: ProbeBlendConfig
+}) {
+  const dummyTexture = getDummyWhiteTexture()
+  const material = new ThreeMeshStandardMaterial({
+    color: WHITE_COLOR.clone(),
+    envMap: getProbeBlendEnvMap(probeBlend),
+    envMapIntensity: 0,
+    lightMap: lightmapped ? dummyTexture : null,
+    lightMapIntensity: lightmapped ? 1 : 0,
+    map: mapped ? dummyTexture : null,
+    metalnessMap: mapped ? dummyTexture : null,
+    normalMap: mapped ? dummyTexture : null,
+    roughnessMap: mapped ? dummyTexture : null
+  })
+  const patchConfig: MaterialShaderPatchConfig = lightmapped
+    ? {
+        lightMapAmbientTint: LIGHTMAP_AMBIENT_TINT,
+        lightMapEncoding: 'rgbe8',
+        lightMapTorchTint: TORCH_LIGHTMAP_TINT
+      }
+    : {}
+
+  attachProbeBlendMaterialShader(material, probeBlend, patchConfig, { current: null })
+  return material
+}
+
+function warmProbeBlendMaterialVariants(
+  gl: WebGLRenderer,
+  scene: ThreeScene,
+  camera: ThreeCamera
+) {
+  const existingGroup = scene.userData.probeBlendWarmupGroup as Group | undefined
+
+  if (existingGroup) {
+    existingGroup.visible = true
+    try {
+      const previousRenderTarget = gl.getRenderTarget()
+      const warmupTarget = new WebGLRenderTarget(1, 1)
+
+      gl.compile(scene, camera)
+      gl.render(scene, camera)
+      gl.setRenderTarget(warmupTarget)
+      gl.render(scene, camera)
+      gl.setRenderTarget(previousRenderTarget)
+      warmupTarget.dispose()
+    } finally {
+      existingGroup.visible = false
+    }
+    return
+  }
+
+  const group = new Group()
+  const cell5ProbeBlend = createProbeBlendWarmupConfig('cell5')
+  const boundary8ProbeBlend = createProbeBlendWarmupConfig('boundary8')
+  const cases = [
+    {
+      geometry: createUvWarmupGeometry(false),
+      material: createProbeBlendWarmupMaterial({
+        lightmapped: false,
+        mapped: true,
+        probeBlend: cell5ProbeBlend
+      })
+    },
+    {
+      geometry: createUvLessTriangleGeometry(),
+      material: createProbeBlendWarmupMaterial({
+        lightmapped: false,
+        mapped: false,
+        probeBlend: cell5ProbeBlend
+      })
+    },
+    {
+      geometry: createUvWarmupGeometry(false),
+      material: createProbeBlendWarmupMaterial({
+        lightmapped: false,
+        mapped: true,
+        probeBlend: boundary8ProbeBlend
+      })
+    },
+    {
+      geometry: createUvWarmupGeometry(true),
+      material: createProbeBlendWarmupMaterial({
+        lightmapped: true,
+        mapped: true,
+        probeBlend: STATIC_SURFACE_LIGHTMAP_PROBE_BLEND
+      })
+    },
+    {
+      geometry: createUvWarmupGeometry(true),
+      material: createProbeBlendWarmupMaterial({
+        lightmapped: true,
+        mapped: false,
+        probeBlend: STATIC_SURFACE_LIGHTMAP_PROBE_BLEND
+      })
+    }
+  ]
+
+  cases.forEach(({ geometry, material }, index) => {
+    const mesh = new Mesh(geometry, material)
+
+    mesh.castShadow = true
+    mesh.frustumCulled = false
+    mesh.receiveShadow = true
+    mesh.position.set(index * 0.3, 0.1, -2)
+    group.add(mesh)
+  })
+
+  scene.add(group)
+  scene.userData.probeBlendWarmupGroup = group
+  try {
+    const previousRenderTarget = gl.getRenderTarget()
+    const warmupTarget = new WebGLRenderTarget(1, 1)
+
+    group.visible = true
+    gl.compile(scene, camera)
+    gl.render(scene, camera)
+    gl.setRenderTarget(warmupTarget)
+    gl.render(scene, camera)
+    gl.setRenderTarget(previousRenderTarget)
+    warmupTarget.dispose()
+  } finally {
+    group.visible = false
+  }
 }
 
 function getCubeUvTextureInfo(texture: Texture | null | undefined): ProbeTextureInfo | null {
@@ -6176,10 +6440,7 @@ function useFrescoDecalTextures() {
 function usesProbeBlendLocalRadiance(probeBlend: ProbeBlendConfig) {
   const radianceMode = probeBlend.radianceMode ?? probeBlend.mode
 
-  return (
-    (radianceMode === 'world' || radianceMode === 'constant') &&
-    (probeBlend.radianceIntensity ?? 1) > EFFECT_EPSILON
-  )
+  return radianceMode === 'world' || radianceMode === 'constant'
 }
 
 function getProbeBlendEnvMap(probeBlend: ProbeBlendConfig) {
@@ -6373,7 +6634,7 @@ function useAttachProbeBlendToModel(
     [basePatchConfig, runtimeLightmapSaturation, runtimeVolumetricSaturation]
   )
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!model) {
       return
     }
@@ -9426,9 +9687,7 @@ function Ground({
     () => buildGroundReflectionProbeRects(layout) as GroundPatchRect[],
     [layout]
   )
-  const mountedGroundPatchRects = mountAllGeometry
-    ? groundPatchRects
-    : groundPatchRects.filter((rect) => isCellVisible(visibilityState, rect.cell))
+  const mountedGroundPatchRects = groundPatchRects
 
   return (
     <>
@@ -9443,12 +9702,8 @@ function Ground({
           const probeCoefficients = rect.probeIndices.map(
             (probeIndex) => reflectionProbeCoefficients[probeIndex] ?? null
           )
-          const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
-          const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
           const surfaceLightmapsEnabled =
             lightmapContributionIntensity > EFFECT_EPSILON
-          const probeIblAvailable = hasProbeCoefficients
-          const reflectionAvailable = hasProbeTextures
 
           return (
             <GroundPatchMesh
@@ -9473,16 +9728,18 @@ function Ground({
           diffuseIntensity: iblContributionIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: reflectionAvailable ? 'world' : 'disabled',
+          radianceMode: 'world',
                   region: rect.region,
                   useProbeConnectivity: volumetricShadowsEnabled,
-                  vlmMode: probeIblAvailable ? 'cell5' : 'disabled',
+                  vlmMode: 'cell5',
                   worldTransform: levelWorldTransform
                 }
               )}
               rect={rect}
               surfaceLightmapsEnabled={surfaceLightmapsEnabled}
-              visible={isCellVisible(visibilityState, rect.cell)}
+              visible={(rect.cells ?? [rect.cell]).some((cell) =>
+                isCellVisible(visibilityState, cell)
+              )}
             />
           )
         })()
@@ -9510,6 +9767,7 @@ function TorchBillboard({
   const material = useRef<Mesh>(null)
   const parentWorldQuaternion = useMemo(() => new Quaternion(), [])
   const localBillboardQuaternion = useMemo(() => new Quaternion(), [])
+  const billboardTexture = texture ?? getDummyTransparentTexture()
 
   useFrame((state) => {
     const profileStartedAt = beginFrameProfileStep()
@@ -9539,9 +9797,9 @@ function TorchBillboard({
       }
 
       if (texture) {
-        texture.offset.x =
+        billboardTexture.offset.x =
           (column + FIRE_FLIPBOOK_FRAME_CROP.minX) / FIRE_FLIPBOOK_GRID
-        texture.offset.y =
+        billboardTexture.offset.y =
           1 -
           ((row + FIRE_FLIPBOOK_FRAME_CROP.maxY) / FIRE_FLIPBOOK_GRID)
       }
@@ -9559,10 +9817,6 @@ function TorchBillboard({
       )
     }
   })
-
-  if (!texture) {
-    return null
-  }
 
   return (
     <group
@@ -9589,7 +9843,7 @@ function TorchBillboard({
           alphaTest={0.03}
           color={new Color(1, 1, 1)}
           depthWrite
-          map={texture}
+          map={billboardTexture}
           side={DoubleSide}
           transparent
         />
@@ -9682,10 +9936,6 @@ function WallSconce({
       ),
     [reflectionProbeBlend.probeIndices, reflectionProbeTextures]
   )
-  const monsterRadianceProbeTextures = useMemo(
-    () => [probeTextures[0] ?? null, null, null, null] as [Texture | null, Texture | null, Texture | null, Texture | null],
-    [probeTextures]
-  )
   const probeDepthTextures = useMemo(
     () =>
       reflectionProbeBlend.probeIndices.map(
@@ -9700,8 +9950,6 @@ function WallSconce({
       ),
     [reflectionProbeBlend.probeIndices, reflectionProbeCoefficients]
   )
-  const hasProbeTextures = Boolean(monsterRadianceProbeTextures[0])
-  const reflectionAvailable = hasProbeTextures
   const probeBlend = useMemo(
     () => ({
       ...buildProbeBlendConfig(
@@ -9715,7 +9963,7 @@ function WallSconce({
         {
           diffuseIntensity: 0,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: reflectionAvailable ? 'constant' : 'disabled',
+          radianceMode: 'constant',
           vlmMode: 'disabled',
           weights: reflectionProbeBlend.weights as [number, number, number, number],
           worldTransform: levelWorldTransform
@@ -9730,7 +9978,6 @@ function WallSconce({
       probeDepthTextures,
       probeTextures,
       reflectionContributionIntensity,
-      reflectionAvailable,
       reflectionProbeBlend.probeIndices,
       reflectionProbeBlend.weights
     ]
@@ -11207,24 +11454,10 @@ function MazeWalls({
     () => new Set(visibleWalls.map((mazeWall) => mazeWall.id)),
     [visibleWalls]
   )
-  const visibleDecals = useMemo(
-    () => layout.decals.filter((decal) => visibleWallIds.has(decal.wallId)),
-    [layout.decals, visibleWallIds]
-  )
-  const visibleCornerFillers = useMemo(
-    () => layout.cornerFillers.filter((filler) =>
-      isPositionCellVisible(layout, visibilityState, filler.center)
-    ),
-    [layout, visibilityState]
-  )
-  const visibleLights = useMemo(
-    () => layout.lights.filter((mazeLight) => isCellVisible(visibilityState, mazeLight.cell)),
-    [layout.lights, visibilityState]
-  )
-  const mountedWalls = mountAllGeometry ? layout.walls : visibleWalls
-  const mountedDecals = mountAllGeometry ? layout.decals : visibleDecals
-  const mountedCornerFillers = mountAllGeometry ? layout.cornerFillers : visibleCornerFillers
-  const mountedLights = mountAllGeometry ? layout.lights : visibleLights
+  const mountedWalls = layout.walls
+  const mountedDecals = layout.decals
+  const mountedCornerFillers = layout.cornerFillers
+  const mountedLights = layout.lights
 
   return (
     <>
@@ -11252,24 +11485,25 @@ function MazeWalls({
         />
       ))}
       {mountedDecals.map((decal, decalIndex) => (
-        decalTextures[decal.textureIndex % decalTextures.length] ? (
-          <MazeWallDecal
-            decal={decal}
-            decalIndex={decalIndex}
-            decalTexture={decalTextures[decal.textureIndex % decalTextures.length]!}
-            iblContributionIntensity={staticVolumetricContributionIntensity}
-            key={decal.id}
-            layout={layout}
-            lightmap={layout.maze.lightmap}
-            lightmapContributionIntensity={lightmapContributionIntensity}
-            lightmapTexture={lightmapTexture}
-            lightmapTextureEncoding={lightmapTextureEncoding}
-            probeDepthAtlasTextures={probeDepthAtlasTextures}
-            probeCoefficientTextures={probeCoefficientTextures}
-            reflectionProbeCoefficients={reflectionProbeCoefficients}
-            visible={visibleWallIds.has(decal.wallId)}
-          />
-        ) : null
+        <MazeWallDecal
+          decal={decal}
+          decalIndex={decalIndex}
+          decalTexture={
+            decalTextures[decal.textureIndex % decalTextures.length] ??
+            getDummyTransparentTexture()
+          }
+          iblContributionIntensity={staticVolumetricContributionIntensity}
+          key={decal.id}
+          layout={layout}
+          lightmap={layout.maze.lightmap}
+          lightmapContributionIntensity={lightmapContributionIntensity}
+          lightmapTexture={lightmapTexture}
+          lightmapTextureEncoding={lightmapTextureEncoding}
+          probeDepthAtlasTextures={probeDepthAtlasTextures}
+          probeCoefficientTextures={probeCoefficientTextures}
+          reflectionProbeCoefficients={reflectionProbeCoefficients}
+          visible={visibleWallIds.has(decal.wallId)}
+        />
       ))}
       {mountedCornerFillers.map((filler, fillerIndex) => (
         <WallDetailMesh
@@ -11387,8 +11621,6 @@ function WallDetailMesh({
       ),
     [reflectionProbeBlend.probeIndices, reflectionProbeCoefficients]
   )
-  const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
-  const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
   const probeBlend = useMemo(
     () =>
       buildProbeBlendConfig(
@@ -11403,15 +11635,13 @@ function WallDetailMesh({
           diffuseIntensity: iblContributionIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: hasProbeTextures ? 'constant' : 'disabled',
+          radianceMode: 'constant',
           useProbeConnectivity: volumetricShadowsEnabled,
-          vlmMode: hasProbeCoefficients ? 'cell5' : 'disabled',
+          vlmMode: 'cell5',
           worldTransform: levelWorldTransform
         }
       ),
     [
-      hasProbeCoefficients,
-      hasProbeTextures,
       iblContributionIntensity,
       layout,
       levelWorldTransform,
@@ -11615,10 +11845,8 @@ function MazeWallDecal({
       ),
     [reflectionProbeBlend.probeIndices, reflectionProbeCoefficients]
   )
-  const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
   const surfaceLightmapsEnabled =
     lightmapContributionIntensity > EFFECT_EPSILON
-  const probeIblAvailable = hasProbeCoefficients
   const lightMapIntensity =
     surfaceLightmapsEnabled
       ? lightmapContributionIntensity * WALL_LIGHTMAP_INTENSITY_SCALE
@@ -11654,7 +11882,7 @@ function MazeWallDecal({
             Math.abs(decal.normal.x) > Math.abs(decal.normal.z)
               ? { x: 1, z: 0 }
               : { x: 0, z: 1 },
-          vlmMode: probeIblAvailable ? 'boundary8' : 'disabled',
+          vlmMode: 'boundary8',
           weights: reflectionProbeBlend.weights as [number, number, number, number],
           worldTransform: levelWorldTransform
         }
@@ -11668,7 +11896,6 @@ function MazeWallDecal({
       probeCoefficients,
       probeCoefficientTextures,
       probeDepthAtlasTextures,
-      probeIblAvailable,
       reflectionProbeBlend.probeIndices,
       reflectionProbeBlend.weights,
       volumetricShadowsEnabled
@@ -11787,11 +12014,8 @@ function MazeWallMesh({
       ),
     [reflectionProbeBlend.probeIndices, reflectionProbeCoefficients]
   )
-  const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
-  const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
   const surfaceLightmapsEnabled =
     lightmapContributionIntensity > EFFECT_EPSILON
-  const probeIblAvailable = hasProbeCoefficients
   const lightMapIntensity =
     surfaceLightmapsEnabled
       ? lightmapContributionIntensity * WALL_LIGHTMAP_INTENSITY_SCALE
@@ -11821,20 +12045,19 @@ function MazeWallMesh({
           diffuseIntensity: iblContributionIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: hasProbeTextures ? 'world' : 'disabled',
+          radianceMode: 'world',
           useProbeConnectivity: volumetricShadowsEnabled,
           vlmBoundaryNormal:
             mazeWall.axis === 'z'
               ? { x: 1, z: 0 }
               : { x: 0, z: 1 },
-          vlmMode: probeIblAvailable ? 'boundary8' : 'disabled',
+          vlmMode: 'boundary8',
           weights: reflectionProbeBlend.weights as [number, number, number, number],
           worldTransform: levelWorldTransform
         }
       ),
     [
       iblContributionIntensity,
-      hasProbeTextures,
       layout,
       levelWorldTransform,
       lightmapContributionIntensity,
@@ -11842,7 +12065,6 @@ function MazeWallMesh({
       probeDepthAtlasTextures,
       probeDepthTextures,
       probeTextures,
-      probeIblAvailable,
       reflectionContributionIntensity,
       reflectionProbeBlend.probeIndices,
       reflectionProbeBlend.weights,
@@ -12055,7 +12277,7 @@ function SceneGeometry({
             reflectionProbeCoefficients={reflectionProbeCoefficients}
             reflectionProbeDepthTextures={reflectionProbeDepthTextures}
             reflectionProbeTextures={reflectionProbeTextures}
-            renderHeldItems={isActive && !offeringAltarId}
+            renderHeldItems={!offeringAltarId}
             turnState={turnState}
             visibilityState={visibilityState}
           />
@@ -12141,8 +12363,6 @@ function GateActor({
       ),
     [reflectionProbeBlend.probeIndices, reflectionProbeCoefficients]
   )
-  const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
-  const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
   const openProgress = useRef(0)
   const probeBlend = useMemo(
     () =>
@@ -12158,21 +12378,19 @@ function GateActor({
           diffuseIntensity: iblContributionIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: hasProbeTextures ? 'constant' : 'disabled',
+          radianceMode: 'constant',
           useProbeConnectivity: volumetricShadowsEnabled,
           vlmBoundaryNormal:
             gate.axis === 'z'
               ? { x: 1, z: 0 }
               : { x: 0, z: 1 },
-          vlmMode: hasProbeCoefficients ? 'boundary8' : 'disabled',
+          vlmMode: 'boundary8',
           weights: reflectionProbeBlend.weights as [number, number, number, number],
           worldTransform: levelWorldTransform
         }
       ),
     [
       gate.axis,
-      hasProbeCoefficients,
-      hasProbeTextures,
       iblContributionIntensity,
       layout,
       levelWorldTransform,
@@ -12594,8 +12812,6 @@ function MazeDoorActor({
       ),
     [reflectionProbeBlend.probeIndices, reflectionProbeCoefficients]
   )
-  const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
-  const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
   const diffuseProbeIntensity =
     iblContributionIntensity + lightmapContributionIntensity
   const probeBlend = useMemo(
@@ -12612,10 +12828,10 @@ function MazeDoorActor({
           diffuseIntensity: diffuseProbeIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: hasProbeTextures ? 'constant' : 'disabled',
+          radianceMode: 'constant',
           useProbeConnectivity: volumetricShadowsEnabled,
           vlmBoundaryNormal: getDoorBoundaryNormal(door.side),
-          vlmMode: hasProbeCoefficients ? 'boundary8' : 'disabled',
+          vlmMode: 'boundary8',
           weights: reflectionProbeBlend.weights as [number, number, number, number],
           worldTransform: levelWorldTransform
         }
@@ -12623,8 +12839,6 @@ function MazeDoorActor({
     [
       diffuseProbeIntensity,
       door.side,
-      hasProbeCoefficients,
-      hasProbeTextures,
       layout,
       levelWorldTransform,
       probeCoefficientTextures,
@@ -13050,8 +13264,6 @@ function MazeAltarActor({
       ),
     [reflectionProbeBlend.probeIndices, reflectionProbeCoefficients]
   )
-  const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
-  const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
   const offeringProbeBlend = useMemo(
     () =>
       buildProbeBlendConfig(
@@ -13066,15 +13278,13 @@ function MazeAltarActor({
           diffuseIntensity: iblContributionIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: hasProbeTextures ? 'constant' : 'disabled',
+          radianceMode: 'constant',
           useProbeConnectivity: volumetricShadowsEnabled,
-          vlmMode: hasProbeCoefficients ? 'cell5' : 'disabled',
+          vlmMode: 'cell5',
           worldTransform: levelWorldTransform
         }
       ),
     [
-      hasProbeCoefficients,
-      hasProbeTextures,
       iblContributionIntensity,
       layout,
       levelWorldTransform,
@@ -13366,8 +13576,6 @@ function MazeItemGroundActor({
       ),
     [reflectionProbeBlend.probeIndices, reflectionProbeCoefficients]
   )
-  const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
-  const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
   const probeBlend = useMemo(
     () =>
       buildProbeBlendConfig(
@@ -13382,15 +13590,13 @@ function MazeItemGroundActor({
           diffuseIntensity: iblContributionIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: hasProbeTextures ? 'constant' : 'disabled',
+          radianceMode: 'constant',
           useProbeConnectivity: volumetricShadowsEnabled,
-          vlmMode: hasProbeCoefficients ? 'cell5' : 'disabled',
+          vlmMode: 'cell5',
           worldTransform: levelWorldTransform
         }
       ),
     [
-      hasProbeCoefficients,
-      hasProbeTextures,
       iblContributionIntensity,
       layout,
       levelWorldTransform,
@@ -13557,8 +13763,6 @@ function HeldItemView({
       ),
     [reflectionProbeBlend.probeIndices, reflectionProbeCoefficients]
   )
-  const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
-  const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
   const diffuseIntensity = iblContributionIntensity
   const probeBlend = useMemo(
     () =>
@@ -13574,16 +13778,14 @@ function HeldItemView({
           diffuseIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: hasProbeTextures ? 'constant' : 'disabled',
+          radianceMode: 'constant',
           useProbeConnectivity: volumetricShadowsEnabled,
-          vlmMode: hasProbeCoefficients ? 'cell5' : 'disabled',
+          vlmMode: 'cell5',
           worldTransform: levelWorldTransform
         }
       ),
     [
       diffuseIntensity,
-      hasProbeCoefficients,
-      hasProbeTextures,
       layout,
       levelWorldTransform,
       probeCoefficientTextures,
@@ -13911,10 +14113,7 @@ function MonsterModel({
       ),
     [reflectionProbeBlend.probeIndices, reflectionProbeCoefficients]
   )
-  const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
-  const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
   const diffuseProbeIntensity = iblContributionIntensity
-  const diffuseProbeAvailable = hasProbeCoefficients
   const probeBlend = useMemo(
     () =>
       buildProbeBlendConfig(
@@ -13929,16 +14128,14 @@ function MonsterModel({
           diffuseIntensity: diffuseProbeIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: hasProbeTextures ? 'constant' : 'disabled',
+          radianceMode: 'constant',
           useProbeConnectivity: volumetricShadowsEnabled,
-          vlmMode: diffuseProbeAvailable ? 'cell5' : 'disabled',
+          vlmMode: 'cell5',
           worldTransform: levelWorldTransform
         }
       ),
     [
-      diffuseProbeAvailable,
       diffuseProbeIntensity,
-      hasProbeTextures,
       layout,
       levelWorldTransform,
       probeCoefficientTextures,
@@ -14846,7 +15043,9 @@ function TunedN8AO({
       color="#000000"
       denoiseSamples={denoiseSamples}
       denoiseRadius={denoiseRadius}
+      depthAwareUpsampling
       distanceFalloff={1}
+      halfRes
       intensity={intensity}
       ref={passRef}
     />
@@ -15098,6 +15297,7 @@ function PerformanceBenchmarkBridge() {
       return {
         rendererGeometries: gl.info.memory.geometries,
         rendererPrograms: gl.info.programs?.length ?? 0,
+        shaderProgramIncreaseCount: Number(document.body.dataset.shaderProgramIncreaseCount ?? '0'),
         rendererTextures: gl.info.memory.textures,
         mountedLevels: Object.keys(levelLightingStates).length,
         residentReflectionProbes: reflectionProbeStates.reduce(
@@ -15421,7 +15621,7 @@ function PerformanceBenchmarkBridge() {
       await loadSharedFireFlipbookTexture(gl.capabilities.getMaxAnisotropy())
       document.body.dataset.fireFlipbookReady = 'true'
       await warmSceneTextures(gl, scene, () => false)
-      await warmScenePrograms(gl, scene, camera, () => false)
+      await warmScenePrograms(gl, scene, camera, () => false, true, true)
       recordStartupMarker('performanceSceneWarmCompleteAt')
       document.body.dataset.sceneProgramsReady = 'true'
 
@@ -17914,6 +18114,7 @@ function Scene({
   recordStartupMarker('sceneRenderStartedAt')
   const [displayedOpenGateIds, setDisplayedOpenGateIds] = useState<string[]>([])
   const [runtimeModelsEnabled, setRuntimeModelsEnabled] = useState(false)
+  const [runtimeModelAssetsReady, setRuntimeModelAssetsReady] = useState(false)
   const [startupGeometryExpanded, setStartupGeometryExpanded] = useState(false)
   const [startupSceneReady, setStartupSceneReady] = useState(false)
   const runtimeModelsEnabledRef = useRef(false)
@@ -17940,6 +18141,27 @@ function Scene({
     )
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+
+    setRuntimeModelAssetsReady(false)
+    void runtimeModelPreloadPromise
+      .then(() => {
+        if (!cancelled) {
+          setRuntimeModelAssetsReady(true)
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.error(error)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const gl = useThree((state) => state.gl)
   const camera = useThree((state) => state.camera)
   const scene = useThree((state) => state.scene)
@@ -17961,6 +18183,16 @@ function Scene({
     activeLightingResources?.probeCoefficientTextures ?? fallbackProbeCoefficientTextures
   const probeDepthAtlasTextures =
     activeLightingResources?.probeDepthAtlasTextures ?? EMPTY_PROBE_DEPTH_ATLAS_TEXTURES
+  const postReadyProgramBaselineRef = useRef<number | null>(null)
+  const postReadyProgramIncreaseCountRef = useRef(0)
+  const postReadyProgramHistoryRef = useRef<Array<{
+    atMs: number
+    from: number
+    loadedMazeId: string | null
+    programs: string[]
+    to: number
+  }>>([])
+  const postReadyProgramNamesRef = useRef<Set<string>>(new Set())
   const activeOpenGateIds = useMemo(
     () => new Set(displayedOpenGateIds),
     [displayedOpenGateIds]
@@ -17970,6 +18202,63 @@ function Scene({
     scene.backgroundIntensity = environmentIntensity
     scene.environmentIntensity = 0
   }, [environmentIntensity, scene])
+
+  useFrame(() => {
+    const currentProgramCount = gl.info.programs?.length ?? 0
+    const sceneProgramsReady = document.body.dataset.sceneProgramsReady === 'true'
+
+    if (!sceneProgramsReady) {
+      postReadyProgramBaselineRef.current = null
+      postReadyProgramIncreaseCountRef.current = 0
+      postReadyProgramHistoryRef.current = []
+      postReadyProgramNamesRef.current = new Set()
+      document.body.dataset.shaderProgramsAtReady = String(currentProgramCount)
+      document.body.dataset.shaderProgramsAfterReady = String(currentProgramCount)
+      document.body.dataset.shaderProgramIncreaseHistory = '[]'
+      document.body.dataset.shaderProgramIncreaseCount = '0'
+      return
+    }
+
+    if (postReadyProgramBaselineRef.current === null) {
+      postReadyProgramBaselineRef.current = currentProgramCount
+      postReadyProgramNamesRef.current = new Set(
+        ((gl.info.programs ?? []) as Array<{ cacheKey?: string; id?: number | string; name?: string }>).map(
+          (program, index) => program.cacheKey ?? program.name ?? String(program.id ?? index)
+        )
+      )
+      document.body.dataset.shaderProgramsAtReady = String(currentProgramCount)
+      document.body.dataset.shaderProgramsAfterReady = String(currentProgramCount)
+      document.body.dataset.shaderProgramIncreaseHistory = '[]'
+      document.body.dataset.shaderProgramIncreaseCount = '0'
+      return
+    }
+
+    if (currentProgramCount > postReadyProgramBaselineRef.current) {
+      const programNames = (
+        (gl.info.programs ?? []) as Array<{ cacheKey?: string; id?: number | string; name?: string }>
+      ).map((program, index) => program.cacheKey ?? program.name ?? String(program.id ?? index))
+      const newPrograms = programNames.filter(
+        (programName) => !postReadyProgramNamesRef.current.has(programName)
+      )
+      postReadyProgramNamesRef.current = new Set(programNames)
+      if (newPrograms.length > 0) {
+        postReadyProgramHistoryRef.current.push({
+          atMs: Math.round(performance.now()),
+          from: postReadyProgramBaselineRef.current,
+          loadedMazeId: document.body.dataset.loadedMazeId ?? null,
+          programs: newPrograms.slice(0, 20),
+          to: currentProgramCount
+        })
+        postReadyProgramIncreaseCountRef.current += newPrograms.length
+      }
+      postReadyProgramBaselineRef.current = currentProgramCount
+      document.body.dataset.shaderProgramsAfterReady = String(currentProgramCount)
+      document.body.dataset.shaderProgramIncreaseHistory =
+        JSON.stringify(postReadyProgramHistoryRef.current.slice(-20))
+      document.body.dataset.shaderProgramIncreaseCount =
+        String(postReadyProgramIncreaseCountRef.current)
+    }
+  })
 
   const closedGateIds = useMemo(() => new Set<string>(), [])
   const stagedRenderedLayouts = useMemo(
@@ -18064,6 +18353,13 @@ function Scene({
     let geometryContractHandle = 0
 
     const compileScene = async () => {
+      if (!hasReportedBasicAssetsReady.current) {
+        hasReportedBasicAssetsReady.current = true
+        setStartupSceneReady(true)
+        onAssetsReady()
+        document.body.dataset.sceneProgramsReady = 'false'
+      }
+
       recordStartupMarker('sceneResourceStabilityStartedAt')
       await waitForRendererResourceStability(gl, () => cancelled)
 
@@ -18084,20 +18380,25 @@ function Scene({
         return
       }
 
-      if (!hasReportedBasicAssetsReady.current) {
-        hasReportedBasicAssetsReady.current = true
-        setStartupSceneReady(true)
-        onAssetsReady()
-        recordStartupMarker('sceneProgramWarmSkippedAt')
-        document.body.dataset.sceneProgramsReady = 'true'
-        void (async () => {
-          recordStartupMarker('scenePostWarmStartedAt')
-          await warmEffectComposer(composerRef.current, () => cancelled)
+      recordStartupMarker('sceneProgramWarmStartedAt')
+      await warmScenePrograms(gl, scene, camera, () => cancelled, true, false)
 
-          if (!cancelled) {
-            recordStartupMarker('scenePostWarmCompleteAt')
-          }
-        })()
+      if (cancelled) {
+        return
+      }
+
+      recordStartupMarker('sceneProgramWarmCompleteAt')
+      recordStartupMarker('scenePostWarmStartedAt')
+      await warmEffectComposer(composerRef.current, () => cancelled)
+
+      if (cancelled) {
+        return
+      }
+
+      recordStartupMarker('scenePostWarmCompleteAt')
+
+      if (hasReportedBasicAssetsReady.current) {
+        document.body.dataset.sceneProgramsReady = 'true'
         geometryContractHandle = window.setTimeout(() => {
           if (!cancelled) {
             setStartupGeometryExpandedState(false)
@@ -18114,9 +18415,7 @@ function Scene({
       const levelLightingStates = scene.userData.levelLightingStatesByLevel as
         | Record<string, { ready?: boolean; surfaceLightmapReady?: boolean }>
         | undefined
-      const expectedLightingLayouts = stagedRenderedLayouts.length > 0
-        ? stagedRenderedLayouts
-        : [layout]
+      const expectedLightingLayouts = [layout]
       const renderedLightingReady = expectedLightingLayouts.every(
         (renderedLayout) => {
           const lightingState = levelLightingStates?.[renderedLayout.maze.id]
@@ -18132,6 +18431,10 @@ function Scene({
         !getReflectionCaptureSceneState(scene, layout).ready ||
         !renderedLightingReady
       ) {
+        rafId = window.requestAnimationFrame(waitForSceneObjects)
+        return
+      }
+      if (!runtimeModelAssetsReady) {
         rafId = window.requestAnimationFrame(waitForSceneObjects)
         return
       }
@@ -18162,10 +18465,10 @@ function Scene({
     gl,
     layout,
     onAssetsReady,
+    runtimeModelAssetsReady,
     scene,
     setRuntimeModelsEnabledState,
-    setStartupGeometryExpandedState,
-    stagedRenderedLayouts
+    setStartupGeometryExpandedState
   ])
 
   useEffect(() => {
@@ -18229,6 +18532,10 @@ function Scene({
           visible: boolean
         ) => void
         isolateDebugRole?: (role: string, index: number) => void
+        resetShaderProgramMonitor?: () => {
+          baseline: number
+        }
+        getShaderProgramKeys?: () => string[]
         captureReflectionProbeAtlas?: (
           probeIndex: number,
           size?: number
@@ -19078,10 +19385,31 @@ function Scene({
         points: gl.info.render.points,
         triangles: gl.info.render.triangles
       }),
+      getShaderProgramKeys: () => (
+        ((gl.info.programs ?? []) as Array<{ cacheKey?: string; id?: number | string; name?: string }>).map(
+          (program, index) => program.cacheKey ?? program.name ?? String(program.id ?? index)
+        )
+      ),
       getSceneObjectStats,
       getRuntimeMemoryState,
       getReflectionProbeTextureState,
       isolateDebugRole,
+      resetShaderProgramMonitor: () => {
+        const currentProgramCount = gl.info.programs?.length ?? 0
+        postReadyProgramBaselineRef.current = currentProgramCount
+        postReadyProgramIncreaseCountRef.current = 0
+        postReadyProgramHistoryRef.current = []
+        postReadyProgramNamesRef.current = new Set(
+          ((gl.info.programs ?? []) as Array<{ cacheKey?: string; id?: number | string; name?: string }>).map(
+            (program, index) => program.cacheKey ?? program.name ?? String(program.id ?? index)
+          )
+        )
+        document.body.dataset.shaderProgramsAtReady = String(currentProgramCount)
+        document.body.dataset.shaderProgramsAfterReady = String(currentProgramCount)
+        document.body.dataset.shaderProgramIncreaseHistory = '[]'
+        document.body.dataset.shaderProgramIncreaseCount = '0'
+        return { baseline: currentProgramCount }
+      },
       setDebugVisible
     }
 
@@ -19104,9 +19432,11 @@ function Scene({
       delete globalWindow.__levelsjamDebug.getWorldLightingState
       delete globalWindow.__levelsjamDebug.getReflectionCaptureSceneState
       delete globalWindow.__levelsjamDebug.getRendererStats
+      delete globalWindow.__levelsjamDebug.getShaderProgramKeys
       delete globalWindow.__levelsjamDebug.getSceneObjectStats
       delete globalWindow.__levelsjamDebug.getRuntimeMemoryState
       delete globalWindow.__levelsjamDebug.getReflectionProbeTextureState
+      delete globalWindow.__levelsjamDebug.resetShaderProgramMonitor
       delete globalWindow.__levelsjamDebug.setDebugVisible
       delete globalWindow.__levelsjamDebug.isolateDebugRole
       if (Object.keys(globalWindow.__levelsjamDebug).length === 0) {
@@ -21663,6 +21993,7 @@ function CreditsModal({
 }
 
 function LevelMenuModal({
+  challengeLevels,
   levels,
   onAmbientOcclusionModeChange,
   onBooleanSettingChange,
@@ -21672,6 +22003,7 @@ function LevelMenuModal({
   open,
   visualSettings
 }: {
+  challengeLevels: Array<AuthoredLevel & { runtimeLevelId: string }>
   levels: AuthoredLevel[]
   onAmbientOcclusionModeChange: (mode: AmbientOcclusionMode) => void
   onBooleanSettingChange: (key: BooleanSettingKey, value: boolean) => void
@@ -21766,6 +22098,20 @@ function LevelMenuModal({
                 className="level-menu-button"
                 key={`${level.name}:${index}`}
                 onClick={() => onSelectLevel(level, index)}
+                type="button"
+              >
+                <span>{level.name}</span>
+                {level.description ? <small>{level.description}</small> : null}
+              </button>
+            ))}
+            {challengeLevels.length > 0 ? (
+              <div className="level-menu-section-label">Challenge Mazes</div>
+            ) : null}
+            {challengeLevels.map((level, index) => (
+              <button
+                className="level-menu-button"
+                key={level.runtimeLevelId}
+                onClick={() => onSelectLevel(level, levels.length + index)}
                 type="button"
               >
                 <span>{level.name}</span>
@@ -21981,6 +22327,9 @@ export default function App() {
   } | null>(null)
   const composerEnabled = true
   const authoredLevels = useMemo(() => parseLevelSpec(levelsMarkdown), [])
+  const [challengeLevelEntries, setChallengeLevelEntries] = useState<
+    Array<AuthoredLevel & { runtimeLevelId: string }>
+  >([])
 
   useEffect(() => {
     document.getElementById('bootstrap-loading-shell')?.remove()
@@ -22022,6 +22371,16 @@ export default function App() {
     void getAvailableMazeIds()
       .then((mazeIds) => {
         availableMazeIdsRef.current = mazeIds
+      })
+      .catch((error) => {
+        console.error(error)
+      })
+  }, [])
+
+  useEffect(() => {
+    void getRuntimeLevelMenuEntries()
+      .then((entries) => {
+        setChallengeLevelEntries(entries)
       })
       .catch((error) => {
         console.error(error)
@@ -22317,7 +22676,11 @@ export default function App() {
 
     availableMazeIdsRef.current = mazeIds
 
-    const mazeId = resolveRuntimeMazeIdForLevel(
+    const explicitRuntimeLevelId =
+      'runtimeLevelId' in level && typeof level.runtimeLevelId === 'string'
+        ? level.runtimeLevelId
+        : null
+    const mazeId = explicitRuntimeLevelId ?? resolveRuntimeMazeIdForLevel(
       level.name,
       index,
       mazeIds,
@@ -23391,6 +23754,7 @@ export default function App() {
       <AltarCutsceneOverlay active={activeAltarCutscene} />
       <CreditsModal open={creditsOpen} />
       <LevelMenuModal
+        challengeLevels={challengeLevelEntries}
         levels={authoredLevels}
         onAmbientOcclusionModeChange={onAmbientOcclusionModeChange}
         onBooleanSettingChange={onBooleanSettingChange}

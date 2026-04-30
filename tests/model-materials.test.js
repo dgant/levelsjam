@@ -159,13 +159,13 @@ test('doors use generated Minoan-door ORM textures and baked dynamic lighting', 
   )
   assert.match(
     appSource,
-    /vlmMode: hasProbeCoefficients \? 'boundary8' : 'disabled'/,
-    'doors should receive volumetric-lightmap diffuse lighting'
+    /vlmMode: 'boundary8'/,
+    'doors should receive volumetric-lightmap diffuse lighting without changing shader shape when probes stream'
   )
   assert.match(
     appSource,
-    /radianceMode: hasProbeTextures \? 'constant' : 'disabled'/,
-    'doors should receive local reflection-probe radiance'
+    /radianceMode: 'constant'/,
+    'doors should receive local reflection-probe radiance without changing shader shape when probes stream'
   )
   assert.match(
     appSource,
@@ -341,7 +341,7 @@ test('debug visual defaults live in the editable source config', () => {
   assert.equal(defaults.lightmapSaturation, 1)
   assert.equal(defaults.volumetricSaturation, 1)
   assert.equal(defaults.torchBillboardIntensity, 1)
-  assert.equal(defaults.depthOfField.focusRange, 0.03)
+  assert.equal(defaults.depthOfField.focusRange, 8)
   assert.equal(defaults.chromaticAberration.enabled, false)
   assert.match(appSource, /link\.download = 'visual-settings\.defaults\.json'/)
 })

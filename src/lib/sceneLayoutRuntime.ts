@@ -66,13 +66,20 @@ type PersistedMaze = {
 }
 
 type MazeManifest = {
+  challengeMazeIds?: string[]
+  challenges?: Array<{
+    description?: string
+    id: string
+    name: string
+  }>
   mazeIds: string[]
+  storyMazeIds?: string[]
 }
 
 const MAZE_DATA_BASE_URL = `${import.meta.env.BASE_URL}maze-data`
 const MAZE_MANIFEST_URL = `${MAZE_DATA_BASE_URL}/index.json`
 const AVAILABLE_MAZE_IDS: string[] = []
-let mazeManifestPromise: Promise<string[]> | null = null
+let mazeManifestPromise: Promise<MazeManifest> | null = null
 const mazeLayoutPromiseCache = new Map<string, Promise<MazeLayout | null>>()
 const mazeLayoutCache = new Map<string, MazeLayout>()
 const loadedDebugMazes = new Map<string, PersistedMaze>()
@@ -106,15 +113,37 @@ async function loadAvailableMazeIds() {
           ...getAuthoredRuntimeLevelIds(),
           ...mazeIds
         ])))
-        return [...AVAILABLE_MAZE_IDS]
+        return {
+          ...manifest,
+          mazeIds: [...AVAILABLE_MAZE_IDS]
+        }
       })
   }
 
-  return mazeManifestPromise
+  return (await mazeManifestPromise).mazeIds
 }
 
 export async function getAvailableMazeIds() {
   return loadAvailableMazeIds()
+}
+
+export async function getRuntimeLevelMenuEntries() {
+  if (!mazeManifestPromise) {
+    await loadAvailableMazeIds()
+  }
+
+  const manifest = await mazeManifestPromise
+
+  return (manifest?.challenges ?? [])
+    .filter((entry) => (
+      typeof entry?.id === 'string' &&
+      typeof entry?.name === 'string'
+    ))
+    .map((entry) => ({
+      description: entry.description ?? '',
+      name: entry.name,
+      runtimeLevelId: entry.id
+    }))
 }
 
 async function loadPersistedMaze(id: string) {

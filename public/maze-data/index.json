@@ -1,7 +1,16 @@
 {
+  "challengeMazeIds": [],
+  "challenges": [],
   "mazeIds": [
     "entrance",
     "chamber-1",
+    "maze-001",
+    "maze-002",
+    "maze-003",
+    "maze-004",
+    "maze-005"
+  ],
+  "storyMazeIds": [
     "maze-001",
     "maze-002",
     "maze-003",

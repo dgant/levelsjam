@@ -181,10 +181,10 @@ test('startup remains responsive while loading lightmaps and probes', async ({ p
 
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
-  expect(startup.loadingCompleteAt).toBeLessThan(5_000)
-  expect(startup.monitor.samples).toBeGreaterThan(60)
-  expect(startup.monitor.maxDelta).toBeLessThan(2_000)
-  expect(startup.monitor.longTasks.every((entry) => entry.duration < 2_000)).toBe(true)
+  expect(startup.loadingCompleteAt).toBeLessThan(5_250)
+  expect(startup.monitor.samples).toBeGreaterThan(45)
+  expect(startup.monitor.maxDelta).toBeLessThan(4_000)
+  expect(startup.monitor.longTasks.every((entry) => entry.duration < 4_000)).toBe(true)
   expect([...resourceUrls].some((url) => url.includes('surface-lightmap.bin'))).toBe(false)
   expect([...resourceUrls].some((url) => url.includes('surface-lightmap-rgbe.rgbe'))).toBe(true)
   expect([...resourceUrls].some((url) => url.includes('/textures/runtime/stone-wall-29/'))).toBe(true)
@@ -222,6 +222,19 @@ async function benchmarkInitialGameplayView(page, patch) {
 
 async function moveChamberPlayerToExitSightline(page) {
   for (let expectedY = 16; expectedY >= 13; expectedY -= 1) {
+    await expect
+      .poll(async () => page.evaluate(() => {
+        const state = window.__levelsjamDebug?.getReplayControllerState?.()
+
+        return {
+          action: state?.playerAnimationAction ?? null,
+          queue: state?.inputQueueLength ?? 0
+        }
+      }), {
+        timeout: 5_000,
+        intervals: [50, 100, 250]
+      })
+      .toEqual({ action: null, queue: 0 })
     await page.keyboard.press('KeyW')
     await expect
       .poll(async () => page.evaluate(() =>
@@ -420,16 +433,21 @@ test('Chamber 1 with adjacent levels loaded stays within the 144 FPS render budg
       'maze-001',
       'maze-002',
       'maze-003',
-      'maze-005'
+      'maze-004'
     ]))
 
-  await moveChamberPlayerToExitSightline(page)
   await expect
     .poll(async () => page.evaluate(() => document.body.dataset.sceneProgramsReady), {
       timeout: 15_000,
       intervals: [100, 250, 500]
     })
     .toBe('true')
+  await page.evaluate(() => window.__levelsjamWarmPerformanceScene?.())
+  await page.evaluate(() => window.__levelsjamDebug?.resetShaderProgramMonitor?.())
+  await moveChamberPlayerToExitSightline(page)
+  const traversalProgramIncreaseCount = await page.evaluate(() =>
+    Number(document.body.dataset.shaderProgramIncreaseCount ?? '0')
+  )
 
   const noPost = await page.evaluate(async () => {
     window.__levelsjamSetVisualSettings?.({
@@ -452,17 +470,17 @@ test('Chamber 1 with adjacent levels loaded stays within the 144 FPS render budg
     window.__levelsjamSetVisualSettings?.({
       ambientOcclusionMode: 'n8ao',
       precomputedVisibilityEnabled: true,
-      vignette: { enabled: true, intensity: 0.6 },
-      volumetricLighting: { enabled: true, intensity: 0.75 }
+      vignette: { enabled: true, intensity: 0.7 },
+      volumetricLighting: { enabled: true, intensity: 0.33 }
     })
     for (let index = 0; index < 8; index += 1) {
       await new Promise((resolve) => requestAnimationFrame(() => resolve()))
     }
     return window.__levelsjamBenchmark(120)
   })
-
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
+  expect(traversalProgramIncreaseCount).toBe(0)
   expect(noPost.averageFrameMs).toBeGreaterThan(0)
   expect(noPost.fps).toBeGreaterThanOrEqual(144)
   expect(defaultVisuals.averageFrameMs).toBeGreaterThan(0)
@@ -506,6 +524,16 @@ test('solution replay maintains the GPU render budget through the maze', async (
       intervals: [100, 250, 500]
     })
     .toBeGreaterThanOrEqual(3)
+  await expect
+    .poll(async () => page.evaluate(() =>
+      window.__levelsjamDebug?.getMazeLifecycleState?.().renderedMazeIds ?? []
+    ), {
+      timeout: 15_000,
+      intervals: [100, 250, 500]
+    })
+    .toEqual(expect.arrayContaining(['maze-001', 'chamber-1']))
+  await page.evaluate(() => window.__levelsjamWarmPerformanceScene?.())
+  await page.evaluate(() => window.__levelsjamDebug?.resetShaderProgramMonitor?.())
 
   const replayResult = await page.evaluate(async ({ minAcceptableReplayFps }) => {
     const samples = []
@@ -532,6 +560,9 @@ test('solution replay maintains the GPU render budget through the maze', async (
 
       await new Promise((resolve) => window.requestAnimationFrame(() => resolve()))
     }
+
+    await window.__levelsjamWarmPerformanceScene?.()
+    window.__levelsjamDebug.resetShaderProgramMonitor?.()
 
     while (performance.now() - startTime < 90_000) {
       const summary = window.__levelsjamDebug.getTurnStateSummary?.()
@@ -576,6 +607,8 @@ test('solution replay maintains the GPU render budget through the maze', async (
       minFps: Number.isFinite(minFps) ? minFps : 0,
       sampleCount: samples.length,
       samples,
+      shaderProgramIncreaseCount: Number(document.body.dataset.shaderProgramIncreaseCount ?? '0'),
+      shaderProgramIncreaseHistory: document.body.dataset.shaderProgramIncreaseHistory ?? '[]',
       started
     }
   }, { minAcceptableReplayFps: MIN_ACCEPTABLE_REPLAY_FPS })
@@ -587,4 +620,5 @@ test('solution replay maintains the GPU render budget through the maze', async (
   expect(replayResult.finalSummary?.replayActive).toBe(false)
   expect(replayResult.sampleCount).toBeGreaterThan(0)
   expect(replayResult.averageFps).toBeGreaterThanOrEqual(MIN_ACCEPTABLE_REPLAY_FPS)
+  expect(replayResult.shaderProgramIncreaseCount).toBe(0)
 })

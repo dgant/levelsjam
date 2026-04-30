@@ -571,3 +571,37 @@ Go implement this. We need robust central camera control with an architecture th
 [x] Only show debug probes when in detached floating camera mode (they surround your camera perspective when in first person mode)
 [x] From Chamber 1, the door of maze-004 is pitch black. That shouldn't be the case
 [x] Increase the allowed range of eye XYZ to +/- 4
+[x] The player can only hold up to one sword at a time. If the player walks over another sword, they don't pick that one up.
+[] Replace the current mazes with new ones to prove that the 
+[x] Page title: MINOTAUR
+[x] The game loads, the intro screen starts to fade, but then fades back to black. It's the lens flares. They're totally broken somehow
+[] In the entrance (and likely many other places), the reflection contribution looks very different in each cell. There is a hard seam in the reflection response, as if the cubemaps were not being weighed smoothly. They must be weighed smoothly so there is no obvious seam in the reflections
+[x] "Altar blocks, altar bowls, and sconces should use the static material, and receive and use surface lightmaps" was checked off but never actually done. Whatever thought process allows you to check off things that aren't done has to stop. It's been a recurring problem. Go actually do it this time.
+[] The FPS drops are a crisis. We need to fix this before the game jam deadline in 24h. Act as an angry righteous Performance Czar with high agency over demanding that performance must be good and making it happen. Just walking forward from the entrance through chamber 1 leads to massive FPS drops at multiple points. The stable FPS is below the 144 baseline. Here's some starting points:
+  [] Require, forever, that PERFORMANCE.md have enough detail to explain exactly what is happening for anything that takes more than 1ms. SOmetime takes more than 1ms and you can't say confidently, exactly why? You must break it down further until you do.
+  [x] Any part of ordinary gameplay (ie. not debug menu changes) that triggers shader recompilation is absolutely terrible and must be eliminated.
+    [x] Finish all shader compilation before leaving the intro screen
+    [] Reduce the number of shaders if possible. All the geometry in the game should AFAIK use one of three shaders: static lit, dynamic lit, torch billboard. All the different objects I presume can simply be represented by different uniforms.
+    [x] Force all shaders we need to get compiled up-front before leaving the loading screen. Each type material? If there isn't a more idiomatic way to do it, put one of every mesh below the floor and force them to render.
+    [x] Monitor shader compilation somehow and verify that it never happens after the loading screen
+    [] As you wrote:
+      Yes. For the current game, all non-debug shader-shape changes should be eliminated or moved behind the loading overlay.
+
+    The right fixes:
+
+    - Probe loading must not change shader shape. Compile intended probe/VLM variants up front with dummy textures/coefs, then replace uniforms as real probes load. Probe availability should never choose radianceMode or vlmMode.
+    - All mounted gameplay geometry should be compiled before fade-in. Temporarily force visibility/open culling during warmup, call gl.compile(...), render the composer once, then restore visibility.
+    - Runtime models should be enabled before scene-ready. Gates, monsters, pickups, altar cups, held objects, and offering models should all mount and compile during loading, not on first encounter.
+    - Fire billboard textured/untextured variant should not swap after fade. Either load the fire texture before fade or always compile the textured shader with a dummy texture.
+    - Postprocess default passes should be mounted/warmed before fade. If an effect starts enabled by default, its shader must compile during loading. If disabled, first enabling via debug can compile, but that is debug-menu interaction and acceptable.
+    - Background probe texture uploads should not publish directly into live materials until initialized. If we keep deferred probe loading, each texture should be gl.initTexture(...)/warmed before React state publishes it to materials.
+
+    So yes: shader compilation during ordinary walking should be treated as a bug. The loading screen should not fade until renderer.info.programs.length has stabilized after an all-geometry/all-default-effects warmup, and later walking should not increase program count.
+  [x] Step through the whole code base line by line and assemble a list of every single place that is loading data from the network, sending data to the GPU, allocating nontrivial amounts of memory (like a whole list or array of things), making sweeping changes to the contents of a data structure, causing shaders to be compiled, or anything else that sounds like "this might be expensive". Put that list in logs/  
+  [x] For every single item on that list, explain why the operation is necessary, and how we can be certain that it is not responsible for stutters or FPS drops. If you are unable to honestly say that it is necessary or clearly not responsible for stutters or FPS drops, put it on a list of suspects
+  [] Instrument every suspect and monitor its performance over an e2e test run until you can confidently declare it off the list of suspects
+  [] Anything that is provably expensive, find a way to fix. We know the game is, at its core, asking very little of the hardware (not much in the way of textures, simple rendering, minimal geometry), and thus anything that is expensive is probably a mistake to be so expensive.
+  [x] Do not stop until 144 FPS is reliably maintained at 1440p and there are no drops below 120 FPS in the E2E test
+  [] Double check the complexity of our meshes. Anything over 30k triangles must be simplified to under that limit. 
+  [] Double check the size of our textures. No PBR texture should be over 1k including the ones on models.
+[] Generate thirty valid mazes, not included in the normal flow but available from the menu, of a variety of sizes, from 5x5 to 9x9, with different numbers of things in them. Try to get a good diversity of mazes featuring different combinations of puzzle elements. Some with a mix, some featuring one kind of element multiple times (multiple spiders, multiple minotaurs, etc.). Give the mazes names that describe what their deal is.

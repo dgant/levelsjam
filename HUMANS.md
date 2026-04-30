@@ -169,7 +169,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Keep `npm run test:unit` under 20 seconds.
 - Keep `npm run test:perf:runner` under 1 minute, and expect it to benchmark the initial gameplay view after all monsters have rendered and the recorded solution replay rather than only a cheap static camera angle.
 - Keep the prepared smoke startup phase under 1 minute after a single `npm run build:pages`, and keep the total benchmarked smoke runner under 3 minutes while deeper render assertions remain split into slower integration specs.
-- Latest measured benchmark on April 24, 2026: `npm run build:pages` took about `19.2s`; `npm run test:unit` reported about `2.2s`; `npm run test:perf:runner` reported about `42.5s`; `npm run test:smoke:runner` reported about `37.5s`; `npm run test:render:integration:runner` reported about `10.0s`; `npm run test:maze:runner` previously reported about `11.5s` with an `11.9s` wall total; and `npm run ensure:mazes` previously took about `4.9m`, dominated by `export:maze-probes` at about `4.5m` for all 245 persisted probe captures.
+- Latest measured benchmark on April 30, 2026: `npm run build:pages` took about `44s`; `npm run test:unit` reported about `3.5s`; `npm run test:perf:runner` passed in about `36.4s`; `npm run test:maze:runner` reported about `30.3s` with a `30.5s` wall total after adding validation for thirty compact challenge-maze sources; and `npm run ensure:mazes` previously took about `4.9m`, dominated by `export:maze-probes` at about `4.5m` for all 245 persisted probe captures.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.

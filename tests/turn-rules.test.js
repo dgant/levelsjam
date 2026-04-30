@@ -513,6 +513,37 @@ test('player picks up the sword and kills a monster instead of dying', () => {
   assert.deepEqual(strike.state.player.cell, { x: 2, y: 1 })
 })
 
+test('player leaves additional swords grounded while already holding one', () => {
+  const maze = testMaze({
+    gates: [],
+    items: [
+      { cell: { x: 1, y: 1 }, id: 'sword-a', type: 'sword' },
+      { cell: { x: 2, y: 1 }, id: 'sword-b', type: 'sword' }
+    ],
+    monsters: [],
+    openEdges: [
+      { from: { x: 0, y: 1 }, to: { x: 1, y: 1 } },
+      { from: { x: 1, y: 1 }, to: { x: 2, y: 1 } }
+    ],
+    sword: null,
+    trophy: null
+  })
+  const initial = createInitialTurnState(maze)
+  const firstPickup = applyTurnAction(maze, initial, 'move-forward')
+
+  assert.equal(firstPickup.pickedUpSword, true)
+  assert.equal(firstPickup.state.player.hasSword, true)
+  assert.equal(firstPickup.state.itemStates['sword-a'], 'held')
+  assert.equal(firstPickup.state.itemStates['sword-b'], 'ground')
+
+  const secondPickup = applyTurnAction(maze, firstPickup.state, 'move-forward')
+
+  assert.equal(secondPickup.pickedUpSword, false)
+  assert.equal(secondPickup.state.player.hasSword, true)
+  assert.equal(secondPickup.state.itemStates['sword-a'], 'held')
+  assert.equal(secondPickup.state.itemStates['sword-b'], 'ground')
+})
+
 test('player can escape only while holding the trophy', () => {
   const maze = testMaze({
     gates: [],

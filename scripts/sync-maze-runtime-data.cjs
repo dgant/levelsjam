@@ -5,8 +5,12 @@ const { pathToFileURL } = require('node:url')
 const rootDir = path.resolve(__dirname, '..')
 const authoredMazeDirectory = path.join(rootDir, 'maze-data')
 const sourceDirectory = path.join(rootDir, 'src', 'data', 'mazes')
+const challengeSourceDirectory = path.join(rootDir, 'src', 'data', 'challenge-mazes')
 const outputDirectory = path.join(rootDir, 'public', 'maze-data')
 const mazeFilePattern = /^maze-\d{3}\.js$/
+const challengeMazeFilePattern = /^challenge-\d{3}\.js$/
+const bakeChallengeMazes = process.env.LEVELSJAM_SYNC_CHALLENGE_LIGHTMAPS === '1'
+const bakeChallengeMazesCpu = process.env.LEVELSJAM_SYNC_CHALLENGE_LIGHTMAPS_CPU === '1'
 
 async function importMazeModule(filePath) {
   const moduleUrl = `${pathToFileURL(filePath).href}?cacheBust=${Date.now()}-${Math.random()}`
@@ -77,22 +81,28 @@ async function main() {
     createAuthoredRuntimeMaze,
     getAuthoredRuntimeLevelIds
   } = await import('../src/lib/levels.js')
+  const {
+    bakeMazeLightmap,
+    computeMazeCellVisibility,
+    getMazeSignature
+  } = await import('../src/lib/maze.js')
 
   fs.mkdirSync(outputDirectory, { recursive: true })
-
-  for (const fileName of fs.readdirSync(outputDirectory)) {
-    if (fileName.endsWith('.json')) {
-      fs.rmSync(path.join(outputDirectory, fileName), {
-        force: true
-      })
-    }
-  }
 
   const authoredLevelIds = getAuthoredRuntimeLevelIds()
   const mazeFileNames = fs.readdirSync(sourceDirectory)
     .filter((fileName) => mazeFilePattern.test(fileName))
     .sort()
+  const challengeMazeFileNames = fs.existsSync(challengeSourceDirectory)
+    ? fs.readdirSync(challengeSourceDirectory)
+      .filter((fileName) => challengeMazeFilePattern.test(fileName))
+      .sort()
+    : []
   const mazeIds = []
+  const storyMazeIds = []
+  const challengeMazeIds = []
+  const challenges = []
+  const skippedChallengeMazeIds = []
 
   const writeRuntimeMaze = (maze, mazeId, position, total) => {
     const mazeOutputDirectory = path.join(outputDirectory, mazeId)
@@ -151,7 +161,57 @@ async function main() {
     mazeIds.push(mazeId)
   }
 
-  const totalPayloads = authoredLevelIds.length + mazeFileNames.length
+  const ensureMazeHasRuntimeLightmap = async (maze, mazeId) => {
+    const runtimePayloadPath = path.join(outputDirectory, `${mazeId}.json`)
+    const sourceSignature = getMazeSignature(maze)
+
+    if (maze.lightmap?.dataBase64) {
+      return maze
+    }
+
+    if (fs.existsSync(runtimePayloadPath)) {
+      try {
+        const existing = JSON.parse(fs.readFileSync(runtimePayloadPath, 'utf8'))
+
+        if (
+          existing.sourceSignature === sourceSignature &&
+          existing.lightmap?.atlasUrl
+        ) {
+          return {
+            ...maze,
+            lightmap: existing.lightmap,
+            sourceSignature
+          }
+        }
+      } catch {
+        // A corrupt runtime payload will be overwritten by a fresh bake below.
+      }
+    }
+
+    const mazeWithVisibility = maze.visibility
+      ? maze
+      : {
+          ...maze,
+          visibility: computeMazeCellVisibility(maze)
+        }
+
+    if (!bakeChallengeMazes) {
+      return null
+    }
+
+    return {
+      ...mazeWithVisibility,
+      lightmap: await bakeMazeLightmap(mazeWithVisibility, undefined, {
+        forceCpu: bakeChallengeMazesCpu
+      }),
+      sourceSignature
+    }
+  }
+
+  const totalPayloads =
+    authoredLevelIds.length +
+    mazeFileNames.length +
+    (bakeChallengeMazes ? challengeMazeFileNames.length : 0)
 
   for (let index = 0; index < authoredLevelIds.length; index += 1) {
     const authoredLevelId = authoredLevelIds[index]
@@ -188,16 +248,59 @@ async function main() {
       authoredLevelIds.length + index + 1,
       totalPayloads
     )
+    storyMazeIds.push(mazeId)
+  }
+
+  for (let index = 0; index < challengeMazeFileNames.length; index += 1) {
+    const fileName = challengeMazeFileNames[index]
+    const filePath = path.join(challengeSourceDirectory, fileName)
+    const sourceMaze = await importMazeModule(filePath)
+    const mazeId = path.basename(fileName, '.js')
+    const maze = await ensureMazeHasRuntimeLightmap(
+      {
+        ...sourceMaze,
+        id: mazeId
+      },
+      mazeId
+    )
+
+    if (!maze) {
+      skippedChallengeMazeIds.push(mazeId)
+      continue
+    }
+
+    writeRuntimeMaze(
+      maze,
+      mazeId,
+      authoredLevelIds.length + mazeFileNames.length + index + 1,
+      totalPayloads
+    )
+    challengeMazeIds.push(mazeId)
+    challenges.push({
+      description: sourceMaze.description ?? '',
+      id: mazeId,
+      name: sourceMaze.name ?? mazeId
+    })
   }
 
   fs.writeFileSync(
     path.join(outputDirectory, 'index.json'),
-    JSON.stringify({ mazeIds }, null, 2)
+    JSON.stringify({
+      challengeMazeIds,
+      challenges,
+      mazeIds,
+      storyMazeIds
+    }, null, 2)
   )
 
   console.log(
     `[sync-maze-runtime-data] wrote ${mazeIds.length} maze payloads to ${outputDirectory}`
   )
+  if (skippedChallengeMazeIds.length > 0) {
+    console.log(
+      `[sync-maze-runtime-data] skipped ${skippedChallengeMazeIds.length} challenge payloads without existing baked artifacts; set LEVELSJAM_SYNC_CHALLENGE_LIGHTMAPS=1 to bake them`
+    )
+  }
 }
 
 main().catch((error) => {

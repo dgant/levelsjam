@@ -3,6 +3,10 @@ export type AuthoredLevel = {
   name: string
 }
 
+export type RuntimeLevelMenuEntry = AuthoredLevel & {
+  runtimeLevelId: string
+}
+
 export function parseLevelSpec(markdown: string): AuthoredLevel[]
 
 export function getDefaultRuntimeLevelId(): string
