@@ -7,7 +7,7 @@ export default {
       "werewolf"
     ]
   },
-  "description": "6x6 transformed validated challenge.",
+  "description": "6x6 no-gate monster route challenge.",
   "gates": [],
   "height": 6,
   "id": "challenge-012",

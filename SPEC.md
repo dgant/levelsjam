@@ -804,6 +804,7 @@
 ## Challenge Maze Library
 - The game targets thirty additional valid challenge mazes outside the normal story flow.
 - The checked-in challenge maze library contains only mazes that have passed the current advanced validation rules.
+- Newly generated challenge mazes use independently generated maze geometry; rotations, flips, and other geometric transforms of an existing challenge maze are not accepted as new challenge mazes.
 - Challenge mazes are selectable from the level menu without appearing in the default progression path.
 - The challenge maze menu and published runtime manifest expose every checked-in validated challenge maze and no unvalidated challenge maze.
 - The complete challenge maze set covers rectangular sizes from `5x5` through `9x9`.

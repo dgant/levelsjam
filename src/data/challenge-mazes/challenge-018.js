@@ -7,7 +7,7 @@ export default {
       "spider"
     ]
   },
-  "description": "5x5 transformed validated challenge.",
+  "description": "5x5 no-gate monster route challenge.",
   "gates": [],
   "height": 5,
   "id": "challenge-018",

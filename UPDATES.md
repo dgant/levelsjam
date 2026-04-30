@@ -138,3 +138,4 @@
 - Do not let a maze-generation experiment run longer than one minute before inspecting its metrics and improving the generator or validator. A timeout without a useful interim report is a process failure.
 - Maze candidate rejection should short-circuit immediately on the first proven failed criterion, and hot generation/validation loops should reuse fixed-size or growing containers instead of allocating fresh queues, maps, and sorted arrays where practical.
 - Challenge-maze candidate search can use worker-thread parallelism, capped at half the available CPU cores, so one-minute experiments cover more parameter candidates without monopolizing the machine.
+- Do not recycle challenge-maze geometry by rotating, flipping, or otherwise transforming an existing maze and counting it as a new challenge. Generate independent topology and vary puzzle difficulty through monster, sword, gate, and route interplay.

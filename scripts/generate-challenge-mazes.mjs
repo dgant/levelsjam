@@ -76,7 +76,7 @@ const names = [
   'Outer Spiral',
   'Backtrack Trap',
   'Bull Corridor',
-  'Spider Return',
+  'Wolf Return',
   'Wolf Detour',
   'Torchline',
   'Hard Left',
@@ -124,39 +124,36 @@ function edgeKey(edge) {
   return [cellKey(edge.from), cellKey(edge.to)].sort().join('|')
 }
 
-function getStructuralSignature(maze) {
-  return JSON.stringify({
-    gates: (maze.gates ?? []).map(edgeKey).sort(),
-    height: maze.height,
-    monsters: (maze.monsters ?? [])
-      .map((monster) => `${monster.type}:${cellKey(monster.cell)}:${monster.hand ?? ''}:${monster.direction ?? ''}`)
-      .sort(),
-    openEdges: (maze.openEdges ?? []).map(edgeKey).sort(),
-    opening: `${cellKey(maze.opening.cell)}:${maze.opening.side}`,
-    sword: maze.sword?.cell ? cellKey(maze.sword.cell) : null,
-    trophy: maze.trophy?.cell ? cellKey(maze.trophy.cell) : null,
-    width: maze.width
-  })
-}
+const geometryTransforms = [
+  'identity',
+  'rotate-90',
+  'rotate-180',
+  'rotate-270',
+  'flip-x',
+  'flip-y',
+  'flip-diagonal',
+  'flip-antidiagonal'
+]
 
-function transformCell(cell, size, transform) {
-  const max = size - 1
+function transformGeometryCell(cell, width, height, transform) {
+  const maxX = width - 1
+  const maxY = height - 1
 
   switch (transform) {
     case 'rotate-90':
-      return { x: max - cell.y, y: cell.x }
+      return { x: maxY - cell.y, y: cell.x }
     case 'rotate-180':
-      return { x: max - cell.x, y: max - cell.y }
+      return { x: maxX - cell.x, y: maxY - cell.y }
     case 'rotate-270':
-      return { x: cell.y, y: max - cell.x }
+      return { x: cell.y, y: maxX - cell.x }
     case 'flip-x':
-      return { x: max - cell.x, y: cell.y }
+      return { x: maxX - cell.x, y: cell.y }
     case 'flip-y':
-      return { x: cell.x, y: max - cell.y }
+      return { x: cell.x, y: maxY - cell.y }
     case 'flip-diagonal':
       return { x: cell.y, y: cell.x }
     case 'flip-antidiagonal':
-      return { x: max - cell.y, y: max - cell.x }
+      return { x: maxY - cell.y, y: maxX - cell.x }
     default:
       return { ...cell }
   }
@@ -179,7 +176,7 @@ function deltaToDirection(delta) {
   return null
 }
 
-function transformDirection(direction, size, transform) {
+function transformGeometryDirection(direction, width, height, transform) {
   const delta = directionToDelta(direction)
 
   if (!delta) {
@@ -188,8 +185,8 @@ function transformDirection(direction, size, transform) {
 
   const center = { x: 1, y: 1 }
   const moved = { x: center.x + delta.x, y: center.y + delta.y }
-  const transformedCenter = transformCell(center, size + 2, transform)
-  const transformedMoved = transformCell(moved, size + 2, transform)
+  const transformedCenter = transformGeometryCell(center, width + 2, height + 2, transform)
+  const transformedMoved = transformGeometryCell(moved, width + 2, height + 2, transform)
 
   return deltaToDirection({
     x: transformedMoved.x - transformedCenter.x,
@@ -197,50 +194,51 @@ function transformDirection(direction, size, transform) {
   }) ?? direction
 }
 
-function transformMazeCandidate(sourceMaze, transform, id, name) {
-  if (sourceMaze.width !== sourceMaze.height) {
-    return null
+function getTransformedGeometrySize(maze, transform) {
+  if (
+    transform === 'rotate-90' ||
+    transform === 'rotate-270' ||
+    transform === 'flip-diagonal' ||
+    transform === 'flip-antidiagonal'
+  ) {
+    return {
+      height: maze.width,
+      width: maze.height
+    }
   }
-
-  const size = sourceMaze.width
-  const transformEdge = (edge) => ({
-    from: transformCell(edge.from, size, transform),
-    to: transformCell(edge.to, size, transform)
-  })
 
   return {
-    contentProfile: JSON.parse(JSON.stringify(sourceMaze.contentProfile ?? {})),
-    description: `${size}x${size} transformed validated challenge.`,
-    gates: (sourceMaze.gates ?? []).map((gate) => ({
-      ...transformEdge(gate),
-      id: edgeKey(transformEdge(gate))
-    })),
-    height: sourceMaze.height,
-    id,
-    generatedByChallengeTool: true,
-    lights: [],
-    monsters: (sourceMaze.monsters ?? []).map((monster) => ({
-      ...monster,
-      cell: transformCell(monster.cell, size, transform),
-      ...(monster.direction
-        ? { direction: transformDirection(monster.direction, size, transform) }
-        : {})
-    })),
-    name,
-    opening: {
-      cell: transformCell(sourceMaze.opening.cell, size, transform),
-      side: transformDirection(sourceMaze.opening.side, size, transform)
-    },
-    openEdges: (sourceMaze.openEdges ?? []).map(transformEdge),
-    seed: Number(sourceMaze.seed ?? 0) + transform.length + id.length,
-    sword: sourceMaze.sword?.cell
-      ? { cell: transformCell(sourceMaze.sword.cell, size, transform) }
-      : null,
-    trophy: sourceMaze.trophy?.cell
-      ? { cell: transformCell(sourceMaze.trophy.cell, size, transform) }
-      : null,
-    width: sourceMaze.width
+    height: maze.height,
+    width: maze.width
   }
+}
+
+function getGeometrySignatureForTransform(maze, transform) {
+  const size = getTransformedGeometrySize(maze, transform)
+  const openingCell = transformGeometryCell(
+    maze.opening.cell,
+    maze.width,
+    maze.height,
+    transform
+  )
+
+  return JSON.stringify({
+    height: size.height,
+    openEdges: (maze.openEdges ?? [])
+      .map((edge) => edgeKey({
+        from: transformGeometryCell(edge.from, maze.width, maze.height, transform),
+        to: transformGeometryCell(edge.to, maze.width, maze.height, transform)
+      }))
+      .sort(),
+    opening: `${cellKey(openingCell)}:${transformGeometryDirection(maze.opening.side, maze.width, maze.height, transform)}`,
+    width: size.width
+  })
+}
+
+function getStructuralSignature(maze) {
+  return geometryTransforms
+    .map((transform) => getGeometrySignatureForTransform(maze, transform))
+    .sort()[0]
 }
 
 function allCells(maze) {
@@ -1007,141 +1005,8 @@ function searchChallengeCandidatesInParallel({
   })
 }
 
-function tryTransformedCandidates({
-  deadlineMs,
-  fileName,
-  failureFrequency,
-  generated,
-  index,
-  signatures,
-  structuralSignatures,
-  timingStats
-}) {
-  const transforms = [
-    'rotate-90',
-    'rotate-180',
-    'rotate-270',
-    'flip-x',
-    'flip-y',
-    'flip-diagonal',
-    'flip-antidiagonal'
-  ]
-
-  for (const source of generated) {
-    if (!source.maze || source.maze.width !== source.maze.height) {
-      continue
-    }
-
-    for (const transform of transforms) {
-      if (Date.now() > deadlineMs) {
-        return null
-      }
-
-      const candidate = transformMazeCandidate(
-        source.maze,
-        transform,
-        path.basename(fileName, '.js'),
-        names[index] ?? `Challenge ${index + 1}`
-      )
-
-      if (!candidate) {
-        continue
-      }
-
-      const variants = [candidate]
-
-      for (const monsterTypes of monsterProfiles) {
-        if (monsterTypes.length !== candidate.monsters.length) {
-          continue
-        }
-
-        const variant = JSON.parse(JSON.stringify(candidate))
-        variant.contentProfile = {
-          gateCount: variant.gates.length,
-          monsterTypes: [...monsterTypes]
-        }
-        variant.monsters = variant.monsters.map((monster, monsterIndex) => {
-          const type = monsterTypes[monsterIndex]
-          const nextMonster = {
-            ...monster,
-            type
-          }
-
-          if (type === 'spider') {
-            nextMonster.hand ??= monsterIndex % 2 === 0 ? 'left' : 'right'
-          } else {
-            delete nextMonster.hand
-          }
-
-          return nextMonster
-        })
-        variants.push(variant)
-      }
-
-      for (const variant of variants) {
-      const structuralSignature = getStructuralSignature(variant)
-
-      if (structuralSignatures.has(structuralSignature)) {
-        continue
-      }
-
-      if (!prevalidateCandidate(variant, failureFrequency, timingStats)) {
-        continue
-      }
-
-      measureTiming(timingStats, 'transform.finalize', () =>
-        finalizeGeneratedMaze(variant, {
-          seed: variant.seed,
-          maxActionCount: 320,
-          maxPlanExpansions: 500
-        })
-      )
-
-      const validation = measureTiming(timingStats, 'transform.validation', () =>
-        validateMaze(variant, {
-          requireLightmap: false,
-          advancedDifficultyOptions: {
-            imperfectTrialCount,
-            maxImperfectActionCount: 320,
-            maxImperfectPlanExpansions: 500,
-            maxPerfectDurationMs: 5000,
-            maxPerfectExpansions,
-            onTiming(entry) {
-              recordTiming(timingStats, `transform-validation.${entry.stage}`, entry.durationMs)
-            }
-          }
-        })
-      )
-
-      if (!validation.valid) {
-        continue
-      }
-
-      const signature = getMazeSignature(candidate)
-
-      if (signatures.has(signature)) {
-        continue
-      }
-
-      return {
-        attemptCount: 0,
-        fileName,
-        maze: variant,
-        metrics: validation.metrics,
-        structuralSignature,
-        transform,
-        validationDurationMs: validation.durationMs
-      }
-      }
-    }
-  }
-
-  return null
-}
-
 async function main() {
   const generated = []
-  const validSourceMazes = []
   const signatures = new Set()
   const structuralSignatures = new Set()
   const failureFrequency = new Map()
@@ -1221,14 +1086,12 @@ async function main() {
       const existing = await importMazeModule(filePath)
       const trustedGenerated = trustGeneratedExisting && (
         existing.generatedByChallengeTool === true ||
-        existing.description === `${existing.width}x${existing.height} no-gate monster route challenge.` ||
-        existing.description === `${existing.width}x${existing.height} transformed validated challenge.`
+        existing.description === `${existing.width}x${existing.height} no-gate monster route challenge.`
       )
 
       if (trustedGenerated) {
         signatures.add(getMazeSignature(existing))
         structuralSignatures.add(getStructuralSignature(existing))
-        validSourceMazes.push(existing)
         generated.push({
           attemptCount: 0,
           durationMs: 0,
@@ -1268,7 +1131,6 @@ async function main() {
       if (validation.valid) {
         signatures.add(getMazeSignature(existing))
         structuralSignatures.add(getStructuralSignature(existing))
-        validSourceMazes.push(existing)
         generated.push({
           attemptCount: 0,
           durationMs: 0,
@@ -1296,29 +1158,7 @@ async function main() {
       }
     }
 
-    let accepted = null
     const mazeStartedAt = performance.now()
-    const transformed = tryTransformedCandidates({
-      deadlineMs: Date.now() + Math.max(1, maxRunMs - (performance.now() - startedAt)),
-      fileName,
-      failureFrequency,
-      generated: validSourceMazes.map((maze) => ({ maze })),
-      index,
-      signatures,
-      structuralSignatures,
-      timingStats
-    })
-
-    if (transformed) {
-      const signature = getMazeSignature(transformed.maze)
-
-      signatures.add(signature)
-      structuralSignatures.add(transformed.structuralSignature)
-      validSourceMazes.push(transformed.maze)
-      accepted = transformed
-    }
-
-    if (!accepted) {
     if (stopIfBudgetExhausted({ activeChallengeIndex: index + 1 })) {
       return
     }
@@ -1394,6 +1234,7 @@ async function main() {
     }
 
     const signature = getMazeSignature(candidate)
+    const structuralSignature = getStructuralSignature(candidate)
 
     if (signatures.has(signature)) {
       addFailure(failureFrequency, 'duplicate-signature')
@@ -1405,17 +1246,25 @@ async function main() {
       throw new Error(`Worker candidate for ${fileName} duplicated an existing challenge signature`)
     }
 
+    if (structuralSignatures.has(structuralSignature)) {
+      addFailure(failureFrequency, 'duplicate-geometry')
+      writeReport('failed', {
+        failureReason: 'duplicate-geometry',
+        failedChallengeIndex: index + 1,
+        workerCount: searchResult.workerCount ?? 1
+      })
+      throw new Error(`Worker candidate for ${fileName} duplicated an existing challenge geometry`)
+    }
+
     signatures.add(signature)
-    structuralSignatures.add(getStructuralSignature(candidate))
-    accepted = {
+    structuralSignatures.add(structuralSignature)
+    const accepted = {
       attemptCount: (searchResult.winningAttempt ?? 0) + 1,
       fileName,
       maze: candidate,
       metrics: validation.metrics,
       validationDurationMs: validation.durationMs,
       workerCount: searchResult.workerCount ?? 1
-    }
-    validSourceMazes.push(candidate)
     }
 
     generated.push({
