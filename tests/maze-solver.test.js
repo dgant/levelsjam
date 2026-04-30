@@ -160,7 +160,7 @@ test('advanced maze validation reports difficulty failures as diagnostics', () =
   assert.equal(validation.valid, false)
   assert.ok(validation.perfect)
   assert.ok(validation.timings.some((entry) => entry.stage === 'perfect-solution'))
-  assert.ok(validation.errors.some((error) => error.includes('65%') || error.includes('monster-free')))
+  assert.ok(validation.errors.some((error) => error.includes('50%') || error.includes('monster-free')))
 })
 
 test('advanced maze validation reports solver budget failures separately from impossibility', () => {

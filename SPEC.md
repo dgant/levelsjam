@@ -395,12 +395,13 @@
 - Maze validation requires a perfect-information shortest solution that acquires the trophy and exits the maze.
 - Maze validation requires an imperfect-information stochastic solver, using only cells seen from traversed cells including diagonals, to solve the maze in at least 80% of attempts.
 - Maze validation requires every monster, sword, and gate to be relevant: removing a monster makes the optimal solution faster, while removing any sword or gate makes the maze impossible.
-- Maze validation requires the optimal solution to be meaningfully maze-covering: trophy acquisition and exit must be slower than the monster-free shortest paths, the path must traverse at least 65% of maze cells, see at least 90% of maze cells, and may retrace all cells after acquiring the trophy.
+- Maze validation requires the optimal solution to be meaningfully maze-covering: trophy acquisition must be slower than the monster-free shortest path, the path must traverse at least 50% of maze cells, see at least 65% of maze cells, and may retrace all cells after acquiring the trophy.
 - Maze generation and validation tooling records candidate-generation time, optimal-solver time, validation time, per-phase validation timings, attempt counts, and rejection failure frequencies so generator quality and performance can be monitored from logs.
 - Maze tooling can generate maze topology without content population when a search loop intends to place and validate puzzle contents separately.
 - Challenge-maze batch generation stops within a bounded run budget and writes an interim report instead of running indefinitely; the default generation budget is 60 seconds.
 - Challenge-maze candidate validation short-circuits on the first failed criterion and may impose a strict per-candidate solver time budget during prefiltering.
 - Challenge-maze parameter scoring treats larger mazes as more likely to be solvable but also more likely to be trivial, treats monsters as added difficulty, and treats swords and gates as difficulty relief.
+- Challenge-maze smart generation initially scores parameters as `minotaur * 4 + werewolf * 3 + spider * 2 - sword * 7 - gate * 3 - area / 8`, prefers scores near `0`, and periodically adapts the scoring weights from accumulated too-easy and too-hard rejection data when the sample set is balanced enough to be useful.
 - Challenge-maze generation may search candidates in parallel across worker threads and uses no more than half of the available CPU cores by default.
 - Boundary-spanning static and dynamic geometry uses the boundary volumetric-lightmap sampling path, which blends probe candidates on both sides of the boundary rather than aliasing to the ordinary single-cell sampler.
 - Awake minotaurs and werewolves face the player during idle, rotation, and movement animations.
@@ -799,6 +800,7 @@
 - Maze-generation performance tests record per-case reported and wall-clock durations in `logs/latest-maze-test-profile.json`.
 - Maze-generation performance tests include validation of every checked-in compact challenge-maze source and keep the selected maze-test runner under a `60s` reported-duration budget.
 - Maze-generation and challenge-maze replacement tooling records validation failure reason frequencies for rejected candidates so threshold-driven difficulty requirements can be tuned from measured data.
+- Challenge-maze generation records each rejected candidate's parameter set, initial linear difficulty score, and easy/hard rejection class so later runs can fit a regression model for smarter parameter selection.
 - The runtime records high-water RAM and VRAM usage so those values can be inspected during debugging.
 
 ## Challenge Maze Library

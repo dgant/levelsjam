@@ -140,3 +140,4 @@
 - Challenge-maze candidate search can use worker-thread parallelism, capped at half the available CPU cores, so one-minute experiments cover more parameter candidates without monopolizing the machine.
 - Do not recycle challenge-maze geometry by rotating, flipping, or otherwise transforming an existing maze and counting it as a new challenge. Generate independent topology and vary puzzle difficulty through monster, sword, gate, and route interplay.
 - When challenge generation is dominated by a validation requirement that appears tunable rather than core to puzzle integrity, report the measured failure frequency and identify the requirement as a candidate for elimination or relaxation before spending more long runs on it.
+- 2026-04-30: For challenge maze generation, log each rejected candidate's parameters, easy/hard rejection class, and difficulty score, then periodically use the accumulated data to adjust the parameter-selection heuristic.
