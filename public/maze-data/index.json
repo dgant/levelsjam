@@ -1,6 +1,188 @@
 {
-  "challengeMazeIds": [],
-  "challenges": [],
+  "challengeMazeIds": [
+    "challenge-001",
+    "challenge-002",
+    "challenge-003",
+    "challenge-004",
+    "challenge-005",
+    "challenge-006",
+    "challenge-007",
+    "challenge-008",
+    "challenge-009",
+    "challenge-010",
+    "challenge-011",
+    "challenge-012",
+    "challenge-013",
+    "challenge-014",
+    "challenge-015",
+    "challenge-016",
+    "challenge-017",
+    "challenge-018",
+    "challenge-019",
+    "challenge-020",
+    "challenge-021",
+    "challenge-022",
+    "challenge-023",
+    "challenge-024",
+    "challenge-025",
+    "challenge-026",
+    "challenge-027",
+    "challenge-028",
+    "challenge-029",
+    "challenge-030"
+  ],
+  "challenges": [
+    {
+      "description": "3x6, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-001",
+      "name": "Challenge 01: 3x6, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "3x6, 2 minotaurs, 0 spiders, 0 wolves, 1 sword, 0 gates",
+      "id": "challenge-002",
+      "name": "Challenge 02: 3x6, 2 minotaurs, 0 spiders, 0 wolves, 1 sword, 0 gates"
+    },
+    {
+      "description": "3x8, 2 minotaurs, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-003",
+      "name": "Challenge 03: 3x8, 2 minotaurs, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "3x8, 2 minotaurs, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-004",
+      "name": "Challenge 04: 3x8, 2 minotaurs, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "4x7, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-005",
+      "name": "Challenge 05: 4x7, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "4x4, 0 minotaurs, 1 spider, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-006",
+      "name": "Challenge 06: 4x4, 0 minotaurs, 1 spider, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "5x3, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-007",
+      "name": "Challenge 07: 5x3, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "4x8, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-008",
+      "name": "Challenge 08: 4x8, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "7x3, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-009",
+      "name": "Challenge 09: 7x3, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "5x6, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-010",
+      "name": "Challenge 10: 5x6, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "3x6, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-011",
+      "name": "Challenge 11: 3x6, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "7x3, 1 minotaur, 1 spider, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-012",
+      "name": "Challenge 12: 7x3, 1 minotaur, 1 spider, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "3x8, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-013",
+      "name": "Challenge 13: 3x8, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "4x5, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-014",
+      "name": "Challenge 14: 4x5, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "4x6, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-015",
+      "name": "Challenge 15: 4x6, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "3x6, 1 minotaur, 1 spider, 0 wolves, 0 swords, 1 gate",
+      "id": "challenge-016",
+      "name": "Challenge 16: 3x6, 1 minotaur, 1 spider, 0 wolves, 0 swords, 1 gate"
+    },
+    {
+      "description": "4x8, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-017",
+      "name": "Challenge 17: 4x8, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "5x6, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-018",
+      "name": "Challenge 18: 5x6, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "3x6, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-019",
+      "name": "Challenge 19: 3x6, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "3x6, 2 minotaurs, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-020",
+      "name": "Challenge 20: 3x6, 2 minotaurs, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "4x7, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-021",
+      "name": "Challenge 21: 4x7, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "3x8, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-022",
+      "name": "Challenge 22: 3x8, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "4x5, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-023",
+      "name": "Challenge 23: 4x5, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "4x6, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-024",
+      "name": "Challenge 24: 4x6, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "4x7, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-025",
+      "name": "Challenge 25: 4x7, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "5x6, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-026",
+      "name": "Challenge 26: 5x6, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "5x6, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-027",
+      "name": "Challenge 27: 5x6, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "8x3, 0 minotaurs, 0 spiders, 1 wolf, 0 swords, 0 gates",
+      "id": "challenge-028",
+      "name": "Challenge 28: 8x3, 0 minotaurs, 0 spiders, 1 wolf, 0 swords, 0 gates"
+    },
+    {
+      "description": "3x6, 2 minotaurs, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-029",
+      "name": "Challenge 29: 3x6, 2 minotaurs, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "4x7, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-030",
+      "name": "Challenge 30: 4x7, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    }
+  ],
   "mazeIds": [
     "entrance",
     "chamber-1",
@@ -8,7 +190,37 @@
     "maze-002",
     "maze-003",
     "maze-004",
-    "maze-005"
+    "maze-005",
+    "challenge-001",
+    "challenge-002",
+    "challenge-003",
+    "challenge-004",
+    "challenge-005",
+    "challenge-006",
+    "challenge-007",
+    "challenge-008",
+    "challenge-009",
+    "challenge-010",
+    "challenge-011",
+    "challenge-012",
+    "challenge-013",
+    "challenge-014",
+    "challenge-015",
+    "challenge-016",
+    "challenge-017",
+    "challenge-018",
+    "challenge-019",
+    "challenge-020",
+    "challenge-021",
+    "challenge-022",
+    "challenge-023",
+    "challenge-024",
+    "challenge-025",
+    "challenge-026",
+    "challenge-027",
+    "challenge-028",
+    "challenge-029",
+    "challenge-030"
   ],
   "storyMazeIds": [
     "maze-001",

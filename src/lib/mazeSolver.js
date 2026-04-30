@@ -145,33 +145,49 @@ function getRotationActions(fromDirection, toDirection) {
   return ['rotate-left']
 }
 
-function applyActionSequence(maze, state, actions) {
-  let currentState = state
-  let lastResult = null
-
-  for (const action of actions) {
-    lastResult = applyTurnAction(maze, currentState, action)
-
-    if (lastResult.blocked || lastResult.killed) {
-      return lastResult
-    }
-
-    currentState = lastResult.state
-  }
-
-  return lastResult ?? {
-    blocked: false,
-    killed: false,
-    outcome: {},
-    state
-  }
-}
-
-function getMovementActionSequences(state) {
-  return CARDINAL_DIRECTIONS.map((direction) => [
+function getMovementActionSequence(state, direction) {
+  return [
     ...getRotationActions(state.player.direction, direction),
     'move-forward'
-  ])
+  ]
+}
+
+function applyDirectionalMove(maze, state, direction) {
+  if (state.player.direction === direction) {
+    return applyTurnAction(maze, state, 'move-forward')
+  }
+
+  return applyTurnAction(maze, {
+    ...state,
+    player: {
+      ...state.player,
+      direction
+    }
+  }, 'move-forward')
+}
+
+function reconstructSearchActions(node) {
+  const chunks = []
+  let current = node
+  let actionCount = 0
+
+  while (current?.actionSequence) {
+    chunks.push(current.actionSequence)
+    actionCount += current.actionSequence.length
+    current = current.parent
+  }
+
+  const actions = new Array(actionCount)
+  let writeIndex = actionCount
+
+  for (const chunk of chunks) {
+    writeIndex -= chunk.length
+    for (let index = 0; index < chunk.length; index += 1) {
+      actions[writeIndex + index] = chunk[index]
+    }
+  }
+
+  return actions
 }
 
 export function getMazeSolutionMoveBound(maze) {
@@ -180,10 +196,32 @@ export function getMazeSolutionMoveBound(maze) {
   }
 
   const toTrophy = shortestPathLength(maze, maze.opening.cell, maze.trophy.cell)
+  const returnToOpening = shortestPathLength(maze, maze.trophy.cell, maze.opening.cell)
 
-  return Number.isFinite(toTrophy)
-    ? toTrophy * 4
+  return Number.isFinite(toTrophy) && Number.isFinite(returnToOpening)
+    ? (toTrophy * 4) + ((returnToOpening + 1) * 4)
     : Number.POSITIVE_INFINITY
+}
+
+function getMazeSolutionLegBounds(maze) {
+  if (!maze.trophy?.cell) {
+    return {
+      postTrophyMoveBound: Number.POSITIVE_INFINITY,
+      preTrophyMoveBound: Number.POSITIVE_INFINITY
+    }
+  }
+
+  const toTrophy = shortestPathLength(maze, maze.opening.cell, maze.trophy.cell)
+  const returnToOpening = shortestPathLength(maze, maze.trophy.cell, maze.opening.cell)
+
+  return {
+    postTrophyMoveBound: Number.isFinite(returnToOpening)
+      ? (returnToOpening + 1) * 4
+      : Number.POSITIVE_INFINITY,
+    preTrophyMoveBound: Number.isFinite(toTrophy)
+      ? toTrophy * 4
+      : Number.POSITIVE_INFINITY
+  }
 }
 
 function serializeState(state, options = {}) {
@@ -369,6 +407,8 @@ function searchTurnState(maze, initialState, options) {
   ))
   const estimateRemainingCost = options.estimateRemainingCost ?? (() => 0)
   const moveBound = options.moveBound ?? Number.POSITIVE_INFINITY
+  const postTrophyMoveBound = options.postTrophyMoveBound ?? Number.POSITIVE_INFINITY
+  const preTrophyMoveBound = options.preTrophyMoveBound ?? Number.POSITIVE_INFINITY
   const maxExpansions = options.maxExpansions ?? 20_000
   const maxDurationMs = options.maxDurationMs ?? Number.POSITIVE_INFINITY
   const startedAt = Number.isFinite(maxDurationMs) ? Date.now() : 0
@@ -382,13 +422,14 @@ function searchTurnState(maze, initialState, options) {
   let expansions = 0
   const initialNode = {
     actionCount: 0,
-    actions: [],
     coverageScore: initialCoverageScore,
     cost: 0,
     moveCount: 0,
+    parent: null,
     priority: estimateRemainingCost(initialState),
     seenMask: initialSeenMask,
     state: initialState,
+    trophyMoveCount: initialState.player.hasTrophy ? 0 : null,
     walkedMask: initialWalkedMask
   }
 
@@ -405,7 +446,7 @@ function searchTurnState(maze, initialState, options) {
 
     if (bestGoal && current.priority > bestGoal.cost) {
       return {
-        actions: bestGoal.actions,
+        actions: reconstructSearchActions(bestGoal),
         moveCount: bestGoal.moveCount
       }
     }
@@ -413,7 +454,7 @@ function searchTurnState(maze, initialState, options) {
     if (goal(current.state)) {
       if (!coverageTracker) {
         return {
-          actions: current.actions,
+          actions: reconstructSearchActions(current),
           moveCount: current.moveCount
         }
       }
@@ -441,25 +482,34 @@ function searchTurnState(maze, initialState, options) {
         : null
     }
 
-    for (const actionSequence of getMovementActionSequences(current.state)) {
-      const result = applyActionSequence(maze, current.state, actionSequence)
+    for (const direction of CARDINAL_DIRECTIONS) {
+      const result = applyDirectionalMove(maze, current.state, direction)
 
       if (result.blocked || result.killed) {
         continue
       }
 
       const nextMoveCount = current.moveCount + 1
+      const nextTrophyMoveCount = current.trophyMoveCount === null && result.state.player.hasTrophy
+        ? nextMoveCount
+        : current.trophyMoveCount
 
       if (nextMoveCount > moveBound) {
         continue
       }
+      if (current.trophyMoveCount === null && nextMoveCount > preTrophyMoveBound) {
+        continue
+      }
+      if (
+        nextTrophyMoveCount !== null &&
+        nextMoveCount - nextTrophyMoveCount > postTrophyMoveBound
+      ) {
+        continue
+      }
 
+      const actionSequence = getMovementActionSequence(current.state, direction)
       const nextActionCount = current.actionCount + actionSequence.length
-      const nextActions = [...current.actions, ...actionSequence]
-      const nextCost = current.cost + actionSequence.reduce(
-        (sum, action) => sum + getActionCost(current.state, result.state, action, result),
-        0
-      )
+      const nextCost = current.cost + getActionCost(current.state, result.state, 'move-forward', result)
       const nextState = result.state
       const nextWalkedMask = coverageTracker
         ? current.walkedMask | coverageTracker.getCellMask(nextState.player.cell)
@@ -507,13 +557,15 @@ function searchTurnState(maze, initialState, options) {
 
       pushSearchNode(queue, {
         actionCount: nextActionCount,
-        actions: nextActions,
+        actionSequence,
         coverageScore: nextCoverageScore,
         cost: nextCost,
         moveCount: nextMoveCount,
+        parent: current,
         priority: nextCost + estimateRemainingCost(nextState),
         seenMask: nextSeenMask,
         state: nextState,
+        trophyMoveCount: nextTrophyMoveCount,
         walkedMask: nextWalkedMask
       })
     }
@@ -521,7 +573,7 @@ function searchTurnState(maze, initialState, options) {
 
   if (bestGoal) {
     return {
-      actions: bestGoal.actions,
+      actions: reconstructSearchActions(bestGoal),
       moveCount: bestGoal.moveCount
     }
   }
@@ -1236,6 +1288,7 @@ export function solveMazeWithPerfectInformationResult(maze, options = {}) {
   const moveBound = options.moveBound ?? getMazeSolutionMoveBound(maze)
   const initialState = options.initialState ?? createInitialTurnState(maze)
   const distanceBetween = createDistanceLookup(maze)
+  const legBounds = getMazeSolutionLegBounds(maze)
   const searchResult = searchTurnState(
     maze,
     cloneState(initialState),
@@ -1255,6 +1308,8 @@ export function solveMazeWithPerfectInformationResult(maze, options = {}) {
       maxDurationMs: options.maxDurationMs,
       maxExpansions: options.maxExpansions ?? 50_000,
       moveBound,
+      postTrophyMoveBound: options.postTrophyMoveBound ?? legBounds.postTrophyMoveBound,
+      preTrophyMoveBound: options.preTrophyMoveBound ?? legBounds.preTrophyMoveBound,
       preferCoverage: options.preferCoverage !== false,
       returnFailure: true
     }

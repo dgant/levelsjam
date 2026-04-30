@@ -396,16 +396,19 @@
 - Generated challenge mazes may contain zero swords; sword relevance validation applies only to swords that are present.
 - Generated challenge mazes may contain zero gates; gate relevance validation applies only to gates that are present.
 - Maze validation requires a perfect-information shortest solution that acquires the trophy and exits the maze.
+- Perfect-information solving prunes any branch that has not reached the trophy within four times the static shortest entrance-to-trophy distance, and prunes any branch that has not escaped after trophy pickup within four times the static shortest trophy-to-exit distance.
 - Maze validation requires an imperfect-information stochastic solver, using only cells seen from traversed cells including diagonals, to solve the maze in at least 80% of attempts.
 - Maze validation requires every monster, sword, and gate to be relevant: removing a monster makes the optimal solution faster, while removing any sword or gate makes the maze impossible.
 - Maze validation requires the optimal solution to be meaningfully maze-covering: trophy acquisition must be slower than the monster-free shortest path, the path must traverse at least 50% of maze cells, see at least 65% of maze cells, and may retrace all cells after acquiring the trophy.
 - Maze generation and validation tooling records candidate-generation time, optimal-solver time, validation time, per-phase validation timings, attempt counts, and rejection failure frequencies so generator quality and performance can be monitored from logs.
+- Perfect-information solving keeps one best search record for each serialized gameplay state, ignoring player facing direction, and prunes repeated states that cannot improve the movement-cost optimum.
 - Maze tooling can generate maze topology without content population when a search loop intends to place and validate puzzle contents separately.
 - Challenge-maze batch generation stops within a bounded run budget and writes an interim report instead of running indefinitely; the default generation budget is 60 seconds.
-- Challenge-maze candidate validation short-circuits on the first failed criterion and may impose a strict per-candidate solver time budget during prefiltering.
+- Challenge-maze candidate validation short-circuits on the first failed criterion and may impose a strict per-candidate solver time budget during prefiltering; the default prefilter perfect-solver wall-clock budget is 500ms.
 - Challenge-maze parameter scoring treats larger mazes as more likely to be solvable but also more likely to be trivial, treats monsters as added difficulty, and treats swords and gates as difficulty relief.
 - Challenge-maze smart generation initially scores parameters as `minotaur * 4 + werewolf * 3 + spider * 2 - sword * 7 - gate * 3 - area / 8`, prefers scores near `0`, and periodically adapts the scoring weights from accumulated too-easy and too-hard rejection data when the sample set is balanced enough to be useful.
 - Challenge-maze generation does not reject candidates merely because the sword route to the trophy is no longer than the direct trophy route; a sword may instead be relevant to escape or may be absent from the maze.
+- Challenge-maze generation may salvage a candidate that fails only because a sword, gate, or monster is unnecessary by repeatedly removing the unnecessary element, updating the maze content profile to the reduced parameters, and accepting the reduced maze when it passes full validation.
 - Challenge-maze generation may search candidates in parallel across worker threads and uses no more than half of the available CPU cores by default.
 - Boundary-spanning static and dynamic geometry uses the boundary volumetric-lightmap sampling path, which blends probe candidates on both sides of the boundary rather than aliasing to the ordinary single-cell sampler.
 - Awake minotaurs and werewolves face the player during idle, rotation, and movement animations.
@@ -818,7 +821,7 @@
 - Challenge maze generation publishes the currently accepted validated maze subset to the runtime playtest manifest whenever a new maze is accepted, so browser playtesting can begin before the full thirty-maze batch finishes.
 - Challenge mazes are selectable from the level menu without appearing in the default progression path.
 - The challenge maze menu and published runtime manifest expose every checked-in validated challenge maze and no unvalidated challenge maze.
-- The complete challenge maze set covers rectangular sizes from `5x5` through `9x9`.
+- The complete challenge maze set covers rectangular sizes from `3x3` through `8x8`, with narrow rectangular candidates such as `3x5`, `3x6`, `3x7`, and `3x8` used when validation can produce playable puzzles for them.
 - Challenge maze names plainly describe their defining puzzle emphasis, such as spider-heavy, minotaur-heavy, gate-and-sword, or mixed-threat layouts.
 - Challenge mazes pass the same structural and solution validation rules as normal persisted mazes before they are exposed in the menu.
 - Persisted normal mazes and challenge mazes pass advanced difficulty validation before they are accepted by tests or publishing scripts.

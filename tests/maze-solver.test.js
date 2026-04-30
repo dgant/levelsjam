@@ -7,6 +7,7 @@ import {
   getSolutionRouteMetrics,
   solveMaze,
   solveMazeWithPerfectInformation,
+  solveMazeWithPerfectInformationResult,
   validateMazeAdvancedDifficulty,
   validateRecordedSolution
 } from '../src/lib/mazeSolver.js'
@@ -63,6 +64,40 @@ test('solver finds a winning route for a simple trophy-and-exit maze', () => {
 
   assert.equal(replay.escaped, true)
   assert.ok(solution.actions.length >= 3)
+})
+
+test('perfect-information solver enforces trophy and return leg move bounds', () => {
+  const maze = {
+    gates: [],
+    height: 1,
+    id: 'solver-leg-bound-test',
+    lights: [],
+    monsters: [],
+    opening: { cell: { x: 0, y: 0 }, side: 'west' },
+    openEdges: [
+      { from: { x: 0, y: 0 }, to: { x: 1, y: 0 } }
+    ],
+    sword: null,
+    trophy: { cell: { x: 1, y: 0 } },
+    width: 2
+  }
+  const normal = solveMazeWithPerfectInformationResult(maze, {
+    maxExpansions: 1_000
+  })
+  const preTrophyTooStrict = solveMazeWithPerfectInformationResult(maze, {
+    maxExpansions: 1_000,
+    preTrophyMoveBound: 0
+  })
+  const postTrophyTooStrict = solveMazeWithPerfectInformationResult(maze, {
+    maxExpansions: 1_000,
+    postTrophyMoveBound: 0
+  })
+
+  assert.equal(normal.solution?.moveCount, 3)
+  assert.equal(preTrophyTooStrict.solution, null)
+  assert.equal(preTrophyTooStrict.failureReason, 'unsolvable')
+  assert.equal(postTrophyTooStrict.solution, null)
+  assert.equal(postTrophyTooStrict.failureReason, 'unsolvable')
 })
 
 test('solver does not use hidden trophy placement before it becomes visible', () => {

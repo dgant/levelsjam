@@ -271,8 +271,8 @@ test('persists only compact valid challenge mazes exposed by the playtest manife
     assert.equal(validation.valid, true, `${fileName}: ${validation.errors.join('\n')}`)
     assert.equal(Boolean(maze.lightmap?.dataBase64), false, `${fileName} must stay compact`)
     assert.equal(source.includes('dataBase64'), false, `${fileName} must not embed baked lightmaps`)
-    assert.ok(maze.width >= 5 && maze.width <= 9, `${fileName} width ${maze.width}`)
-    assert.ok(maze.height >= 5 && maze.height <= 9, `${fileName} height ${maze.height}`)
+    assert.ok(maze.width >= 3 && maze.width <= 8, `${fileName} width ${maze.width}`)
+    assert.ok(maze.height >= 3 && maze.height <= 8, `${fileName} height ${maze.height}`)
     assert.ok(maze.name && !seenNames.has(maze.name), `${fileName} has a unique descriptive name`)
     seenNames.add(maze.name)
   }
