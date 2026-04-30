@@ -6,13 +6,6 @@ import {
   getVisibleCells
 } from './turnRules.js'
 
-const SEARCH_ACTIONS = [
-  'move-forward',
-  'move-backward',
-  'rotate-left',
-  'rotate-right'
-]
-
 const CARDINAL_DIRECTIONS = ['north', 'east', 'south', 'west']
 
 function cellKey(cell) {
@@ -23,27 +16,6 @@ function parseCellKey(key) {
   const [x, y] = key.split(',').map(Number)
 
   return { x, y }
-}
-
-function normalizeBackwardActions(actions) {
-  const normalized = []
-
-  for (const action of actions) {
-    if (action === 'move-backward') {
-      normalized.push(
-        'rotate-right',
-        'rotate-right',
-        'move-forward',
-        'rotate-right',
-        'rotate-right'
-      )
-      continue
-    }
-
-    normalized.push(action)
-  }
-
-  return normalized
 }
 
 function cloneCell(cell) {
@@ -153,6 +125,55 @@ function createDistanceLookup(maze) {
   }
 }
 
+function getRotationActions(fromDirection, toDirection) {
+  const fromIndex = CARDINAL_DIRECTIONS.indexOf(fromDirection)
+  const toIndex = CARDINAL_DIRECTIONS.indexOf(toDirection)
+
+  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
+    return []
+  }
+
+  const clockwiseSteps = (toIndex - fromIndex + CARDINAL_DIRECTIONS.length) % CARDINAL_DIRECTIONS.length
+
+  if (clockwiseSteps === 1) {
+    return ['rotate-right']
+  }
+  if (clockwiseSteps === 2) {
+    return ['rotate-right', 'rotate-right']
+  }
+
+  return ['rotate-left']
+}
+
+function applyActionSequence(maze, state, actions) {
+  let currentState = state
+  let lastResult = null
+
+  for (const action of actions) {
+    lastResult = applyTurnAction(maze, currentState, action)
+
+    if (lastResult.blocked || lastResult.killed) {
+      return lastResult
+    }
+
+    currentState = lastResult.state
+  }
+
+  return lastResult ?? {
+    blocked: false,
+    killed: false,
+    outcome: {},
+    state
+  }
+}
+
+function getMovementActionSequences(state) {
+  return CARDINAL_DIRECTIONS.map((direction) => [
+    ...getRotationActions(state.player.direction, direction),
+    'move-forward'
+  ])
+}
+
 export function getMazeSolutionMoveBound(maze) {
   if (!maze.trophy?.cell) {
     return Number.POSITIVE_INFINITY
@@ -165,7 +186,7 @@ export function getMazeSolutionMoveBound(maze) {
     : Number.POSITIVE_INFINITY
 }
 
-function serializeState(state) {
+function serializeState(state, options = {}) {
   const monsters = state.monsters
     .map((monster) => [
       monster.id,
@@ -184,7 +205,7 @@ function serializeState(state) {
 
   return [
     cellKey(state.player.cell),
-    state.player.direction,
+    options.ignorePlayerDirection ? '*' : state.player.direction,
     state.dead ? '1' : '0',
     state.escaped ? '1' : '0',
     state.player.hasSword ? '1' : '0',
@@ -195,35 +216,84 @@ function serializeState(state) {
   ].join('||')
 }
 
-function insertByPriority(queue, node) {
-  let insertIndex = queue.length
+function compareSearchNodes(left, right) {
+  if (left.priority !== right.priority) {
+    return left.priority - right.priority
+  }
 
-  while (insertIndex > 0) {
-    const previous = queue[insertIndex - 1]
+  return left.actionCount - right.actionCount
+}
 
-    if (
-      previous.priority < node.priority ||
-      (previous.priority === node.priority && previous.actionCount <= node.actionCount)
-    ) {
+function pushSearchNode(heap, node) {
+  heap.push(node)
+
+  let index = heap.length - 1
+  while (index > 0) {
+    const parentIndex = Math.floor((index - 1) / 2)
+
+    if (compareSearchNodes(heap[parentIndex], heap[index]) <= 0) {
       break
     }
 
-    insertIndex -= 1
+    const parent = heap[parentIndex]
+    heap[parentIndex] = heap[index]
+    heap[index] = parent
+    index = parentIndex
+  }
+}
+
+function popSearchNode(heap) {
+  if (heap.length <= 1) {
+    return heap.pop() ?? null
   }
 
-  queue.splice(insertIndex, 0, node)
+  const result = heap[0]
+  heap[0] = heap.pop()
+
+  let index = 0
+  while (true) {
+    const leftIndex = (index * 2) + 1
+    const rightIndex = leftIndex + 1
+    let smallestIndex = index
+
+    if (
+      leftIndex < heap.length &&
+      compareSearchNodes(heap[leftIndex], heap[smallestIndex]) < 0
+    ) {
+      smallestIndex = leftIndex
+    }
+    if (
+      rightIndex < heap.length &&
+      compareSearchNodes(heap[rightIndex], heap[smallestIndex]) < 0
+    ) {
+      smallestIndex = rightIndex
+    }
+
+    if (smallestIndex === index) {
+      break
+    }
+
+    const current = heap[index]
+    heap[index] = heap[smallestIndex]
+    heap[smallestIndex] = current
+    index = smallestIndex
+  }
+
+  return result
 }
 
 function searchTurnState(maze, initialState, options) {
   const goal = options.goal
   const getActionCost = options.getActionCost ?? ((_, __, action) => (
-    action === 'move-forward' || action === 'move-backward'
+    action === 'move-forward'
       ? 1
-      : 0.25
+      : 0
   ))
   const estimateRemainingCost = options.estimateRemainingCost ?? (() => 0)
   const moveBound = options.moveBound ?? Number.POSITIVE_INFINITY
   const maxExpansions = options.maxExpansions ?? 20_000
+  const maxDurationMs = options.maxDurationMs ?? Number.POSITIVE_INFINITY
+  const startedAt = Number.isFinite(maxDurationMs) ? Date.now() : 0
   const visited = new Map()
   const queue = []
   let expansions = 0
@@ -236,15 +306,15 @@ function searchTurnState(maze, initialState, options) {
     state: initialState
   }
 
-  insertByPriority(queue, initialNode)
-  visited.set(serializeState(initialState), {
+  pushSearchNode(queue, initialNode)
+  visited.set(serializeState(initialState, { ignorePlayerDirection: true }), {
     actionCount: 0,
     cost: 0,
     moveCount: 0
   })
 
   while (queue.length > 0) {
-    const current = queue.shift()
+    const current = popSearchNode(queue)
 
     if (goal(current.state)) {
       return {
@@ -255,35 +325,43 @@ function searchTurnState(maze, initialState, options) {
 
     expansions += 1
 
-    if (expansions > maxExpansions) {
-      return null
+    if (
+      Number.isFinite(maxDurationMs) &&
+      (expansions & 127) === 0 &&
+      Date.now() - startedAt > maxDurationMs
+    ) {
+      return options.returnFailure
+        ? { failureReason: 'time-limit' }
+        : null
     }
 
-    for (const action of SEARCH_ACTIONS) {
-      const result = applyTurnAction(maze, current.state, action)
+    if (expansions > maxExpansions) {
+      return options.returnFailure
+        ? { failureReason: 'expansion-limit' }
+        : null
+    }
+
+    for (const actionSequence of getMovementActionSequences(current.state)) {
+      const result = applyActionSequence(maze, current.state, actionSequence)
 
       if (result.blocked || result.killed) {
         continue
       }
 
-      const nextMoveCount = current.moveCount + Number(
-        action === 'move-forward' || action === 'move-backward'
-      )
+      const nextMoveCount = current.moveCount + 1
 
       if (nextMoveCount > moveBound) {
         continue
       }
 
-      const nextActionCount = current.actionCount + 1
-      const nextActions = [...current.actions, action]
-      const nextCost = current.cost + getActionCost(
-        current.state,
-        result.state,
-        action,
-        result
+      const nextActionCount = current.actionCount + actionSequence.length
+      const nextActions = [...current.actions, ...actionSequence]
+      const nextCost = current.cost + actionSequence.reduce(
+        (sum, action) => sum + getActionCost(current.state, result.state, action, result),
+        0
       )
       const nextState = result.state
-      const nextKey = serializeState(nextState)
+      const nextKey = serializeState(nextState, { ignorePlayerDirection: true })
       const bestVisited = visited.get(nextKey)
 
       if (
@@ -311,7 +389,7 @@ function searchTurnState(maze, initialState, options) {
         moveCount: nextMoveCount
       })
 
-      insertByPriority(queue, {
+      pushSearchNode(queue, {
         actionCount: nextActionCount,
         actions: nextActions,
         cost: nextCost,
@@ -322,7 +400,9 @@ function searchTurnState(maze, initialState, options) {
     }
   }
 
-  return null
+  return options.returnFailure
+    ? { failureReason: 'unsolvable' }
+    : null
 }
 
 function createBeliefState(actualState) {
@@ -434,7 +514,7 @@ function updateKnownItems(maze, actualState, memory, visibleCells) {
 }
 
 function observeState(maze, actualState, memory) {
-  const visibleCells = getVisibleCells(maze, actualState)
+  const visibleCells = getVisibleCellsIncludingDiagonals(maze, actualState)
 
   for (const key of visibleCells) {
     memory.observedCells.add(key)
@@ -501,11 +581,11 @@ function estimateEscapeCost(distanceBetween, maze, state) {
 }
 
 function getPlanningActionCost(previousState, nextState, action) {
-  const baseCost = action === 'move-forward' || action === 'move-backward'
+  const baseCost = action === 'move-forward'
     ? 1
-    : 0.25
+    : 0
 
-  if (previousState.player.hasSword && !nextState.player.hasSword) {
+  if (action === 'move-forward' && previousState.player.hasSword && !nextState.player.hasSword) {
     return baseCost + 8
   }
 
@@ -825,10 +905,8 @@ export function solveMaze(maze, options = {}) {
     })
 
     if (actualState.escaped) {
-      const normalizedActions = normalizeBackwardActions(actions)
-
       return {
-        actions: normalizedActions,
+        actions,
         moveCount: memory.moveCount,
         observedCellCount: memory.observedCells.size,
         visibilityLimited: true
@@ -921,7 +999,7 @@ export function solveMaze(maze, options = {}) {
 export function getSolutionRouteMetrics(maze, actions = []) {
   let state = createInitialTurnState(maze)
   const walkedCells = new Set([cellKey(state.player.cell)])
-  const seenCells = new Set(getVisibleCellsIncludingDiagonals(maze, state))
+  const seenCells = new Set(getVisibleCells(maze, state))
   const preTrophyWalkedCells = new Set([cellKey(state.player.cell)])
   const postTrophyNewWalkedCells = new Set()
   let moveCount = 0
@@ -956,7 +1034,7 @@ export function getSolutionRouteMetrics(maze, actions = []) {
       }
     }
 
-    for (const key of getVisibleCellsIncludingDiagonals(maze, state)) {
+    for (const key of getVisibleCells(maze, state)) {
       seenCells.add(key)
     }
 
@@ -995,10 +1073,16 @@ function cloneMazeForValidation(maze, overrides = {}) {
 }
 
 export function solveMazeWithPerfectInformation(maze, options = {}) {
+  const result = solveMazeWithPerfectInformationResult(maze, options)
+
+  return result.solution
+}
+
+export function solveMazeWithPerfectInformationResult(maze, options = {}) {
   const moveBound = options.moveBound ?? getMazeSolutionMoveBound(maze)
   const initialState = options.initialState ?? createInitialTurnState(maze)
   const distanceBetween = createDistanceLookup(maze)
-  const solution = searchTurnState(
+  const searchResult = searchTurnState(
     maze,
     cloneState(initialState),
     {
@@ -1014,47 +1098,79 @@ export function solveMazeWithPerfectInformation(maze, options = {}) {
         )
       },
       goal: (state) => state.escaped && state.player.hasTrophy,
+      maxDurationMs: options.maxDurationMs,
       maxExpansions: options.maxExpansions ?? 50_000,
-      moveBound
+      moveBound,
+      returnFailure: true
     }
   )
 
-  if (!solution) {
-    return null
+  if (searchResult?.failureReason) {
+    return {
+      failureReason: searchResult.failureReason,
+      solution: null
+    }
   }
 
   return {
-    ...solution,
-    metrics: getSolutionRouteMetrics(maze, solution.actions),
-    perfectInformation: true
+    failureReason: null,
+    solution: {
+      ...searchResult,
+      metrics: getSolutionRouteMetrics(maze, searchResult.actions),
+      perfectInformation: true
+    }
   }
 }
 
 export function validateMazeAdvancedDifficulty(maze, options = {}) {
   const errors = []
+  const timings = []
+  const measure = (stage, work) => {
+    const startedAt = performance.now()
+    const result = work()
+    const durationMs = performance.now() - startedAt
+    const entry = { durationMs, stage }
+
+    timings.push(entry)
+    options.onTiming?.(entry)
+    return result
+  }
   const imperfectTrialCount = options.imperfectTrialCount ?? 5
   const requiredImperfectSuccessRate = options.requiredImperfectSuccessRate ?? 0.8
-  const perfect = solveMazeWithPerfectInformation(maze, {
-    maxExpansions: options.maxPerfectExpansions ?? 50_000
-  })
+  const perfectResult = measure('perfect-solution', () =>
+    solveMazeWithPerfectInformationResult(maze, {
+      maxDurationMs: options.maxPerfectDurationMs,
+      maxExpansions: options.maxPerfectExpansions ?? 50_000
+    })
+  )
+  const perfect = perfectResult.solution
 
   if (!perfect) {
+    const reason = perfectResult.failureReason === 'expansion-limit'
+      ? 'Advanced validation hit the perfect-information expansion limit before proving optimality'
+      : perfectResult.failureReason === 'time-limit'
+        ? 'Advanced validation hit the perfect-information time limit before proving optimality'
+        : 'Advanced validation requires a perfect-information winning solution'
+
     return {
-      errors: ['Advanced validation requires a perfect-information winning solution'],
+      errors: [reason],
       imperfectSuccessRate: 0,
       metrics: null,
       perfect: null,
+      timings,
       valid: false
     }
   }
 
   const imperfectSolutions = []
   for (let trial = 0; trial < imperfectTrialCount; trial += 1) {
-    const solution = solveMaze(maze, {
-      explorationSeed: (Number(maze.seed ?? 0) + (trial * 977)) >>> 0,
-      maxActionCount: options.maxImperfectActionCount ?? 320,
-      maxPlanExpansions: options.maxImperfectPlanExpansions ?? 500
-    })
+    const solution = measure('imperfect-solution-trial', () =>
+      solveMaze(maze, {
+        explorationSeed: (Number(maze.seed ?? 0) + (trial * 977)) >>> 0,
+        maxActionCount: options.maxImperfectActionCount ?? 320,
+        maxPlanExpansions: options.maxImperfectPlanExpansions ?? 500
+      })
+    )
 
     if (solution) {
       imperfectSolutions.push(solution)
@@ -1069,11 +1185,17 @@ export function validateMazeAdvancedDifficulty(maze, options = {}) {
   }
 
   const noMonsterMaze = cloneMazeForValidation(maze, { monsters: [] })
-  const noMonster = solveMazeWithPerfectInformation(noMonsterMaze, {
-    maxExpansions: options.maxPerfectExpansions ?? 50_000
-  })
+  const noMonsterResult = measure('monster-free-solution', () =>
+    solveMazeWithPerfectInformationResult(noMonsterMaze, {
+      maxDurationMs: options.maxPerfectDurationMs,
+      maxExpansions: options.maxPerfectExpansions ?? 50_000
+    })
+  )
+  const noMonster = noMonsterResult.solution
 
-  if (!noMonster) {
+  if (noMonsterResult.failureReason === 'expansion-limit' || noMonsterResult.failureReason === 'time-limit') {
+    errors.push(`Could not prove the monster-free baseline because perfect-information search hit the ${noMonsterResult.failureReason === 'time-limit' ? 'time limit' : 'expansion limit'}`)
+  } else if (!noMonster) {
     errors.push('Monster-free baseline must be solvable')
   } else {
     if (!(perfect.metrics.preTrophyMoveCount > noMonster.metrics.preTrophyMoveCount)) {
@@ -1088,19 +1210,37 @@ export function validateMazeAdvancedDifficulty(maze, options = {}) {
     const withoutMonster = cloneMazeForValidation(maze, {
       monsters: (maze.monsters ?? []).filter((_, candidateIndex) => candidateIndex !== monsterIndex)
     })
-    const solution = solveMazeWithPerfectInformation(withoutMonster, {
-      maxExpansions: options.maxPerfectExpansions ?? 50_000
-    })
+    const result = measure('without-monster-solution', () =>
+      solveMazeWithPerfectInformationResult(withoutMonster, {
+        maxDurationMs: options.maxPerfectDurationMs,
+        maxExpansions: options.maxPerfectExpansions ?? 50_000
+      })
+    )
+    const solution = result.solution
 
-    if (solution && !(solution.moveCount < perfect.moveCount)) {
+    if (result.failureReason === 'expansion-limit' || result.failureReason === 'time-limit') {
+      errors.push(`Could not prove removing monster ${monster.id ?? monster.type} makes a faster solution because perfect-information search hit the ${result.failureReason === 'time-limit' ? 'time limit' : 'expansion limit'}`)
+    } else if (!solution) {
+      errors.push(`Removing monster ${monster.id ?? monster.type} must leave a faster optimal solution, but no solution was found`)
+    } else if (!(solution.moveCount < perfect.moveCount)) {
       errors.push(`Removing monster ${monster.id ?? monster.type} must produce a faster optimal solution`)
     }
   }
 
-  const withoutSword = solveMazeWithPerfectInformation(
-    cloneMazeForValidation(maze, { sword: null }),
-    { maxExpansions: options.maxPerfectExpansions ?? 50_000 }
+  const withoutSwordResult = measure(
+    'without-sword-solution',
+    () => solveMazeWithPerfectInformationResult(
+      cloneMazeForValidation(maze, { sword: null }),
+      {
+        maxDurationMs: options.maxPerfectDurationMs,
+        maxExpansions: options.maxPerfectExpansions ?? 50_000
+      }
+    )
   )
+  const withoutSword = withoutSwordResult.solution
+  if (withoutSwordResult.failureReason === 'expansion-limit' || withoutSwordResult.failureReason === 'time-limit') {
+    errors.push(`Could not prove removing the sword makes the maze impossible because perfect-information search hit the ${withoutSwordResult.failureReason === 'time-limit' ? 'time limit' : 'expansion limit'}`)
+  }
   if (withoutSword) {
     errors.push('Removing the sword must make the maze impossible')
   }
@@ -1110,17 +1250,20 @@ export function validateMazeAdvancedDifficulty(maze, options = {}) {
     const withoutGate = cloneMazeForValidation(maze, {
       gates: (maze.gates ?? []).filter((candidate) => {
         return [cellKey(candidate.from), cellKey(candidate.to)].sort().join('|') !== gateEdgeKey
-      }),
-      openEdges: (maze.openEdges ?? []).filter((edge) => {
-        return [cellKey(edge.from), cellKey(edge.to)].sort().join('|') !== gateEdgeKey
       })
     })
-    const solution = solveMazeWithPerfectInformation(withoutGate, {
-      maxExpansions: options.maxPerfectExpansions ?? 50_000
-    })
+    const result = measure('without-gate-solution', () =>
+      solveMazeWithPerfectInformationResult(withoutGate, {
+        maxDurationMs: options.maxPerfectDurationMs,
+        maxExpansions: options.maxPerfectExpansions ?? 50_000
+      })
+    )
+    const solution = result.solution
 
-    if (solution) {
-      errors.push(`Sealing gate edge ${gateEdgeKey} must make the maze impossible`)
+    if (result.failureReason === 'expansion-limit' || result.failureReason === 'time-limit') {
+      errors.push(`Could not prove removing gate edge ${gateEdgeKey} makes the maze impossible because perfect-information search hit the ${result.failureReason === 'time-limit' ? 'time limit' : 'expansion limit'}`)
+    } else if (solution) {
+      errors.push(`Removing gate edge ${gateEdgeKey} as a monster-blocking gate must make the maze impossible`)
     }
   }
 
@@ -1141,6 +1284,7 @@ export function validateMazeAdvancedDifficulty(maze, options = {}) {
     metrics: perfect.metrics,
     monsterFree: noMonster,
     perfect,
+    timings,
     valid: errors.length === 0
   }
 }

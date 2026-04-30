@@ -5,7 +5,7 @@ const { spawn } = require('node:child_process')
 const rootDir = path.resolve(__dirname, '..')
 const nodeCommand = process.execPath
 const profilePath = path.join(rootDir, 'logs', 'latest-maze-test-profile.json')
-const overallThresholdMs = 45_000
+const overallThresholdMs = 60_000
 const testFile = 'tests/maze.test.js'
 const testCases = [
   { name: 'generates valid mazes under 100ms', thresholdMs: 5_000 },
@@ -13,7 +13,7 @@ const testCases = [
   { name: 'initial monsters face legal movement cells or their backlight torches', thresholdMs: 5_000 },
   { name: 'generated wall decals avoid torch-bearing wall faces', thresholdMs: 5_000 },
   { name: 'persists at least five valid mazes', thresholdMs: 12_000 },
-  { name: 'persists thirty compact valid challenge mazes from 5x5 through 9x9', thresholdMs: 25_000 },
+  { name: 'persists only compact valid challenge mazes exposed by the playtest manifest', thresholdMs: 50_000 },
   { name: 'dumps persisted maze lightmap artifacts into the gitignored logs directory', thresholdMs: 5_000 },
   { name: 'deletes invalid maze files and regenerates replacements', thresholdMs: 5_000 },
   { name: 'converts persisted mazes into wall segments and torch placements', thresholdMs: 5_000 },

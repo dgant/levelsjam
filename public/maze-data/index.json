@@ -17,170 +17,98 @@
     "challenge-015",
     "challenge-016",
     "challenge-017",
-    "challenge-018",
-    "challenge-019",
-    "challenge-020",
-    "challenge-021",
-    "challenge-022",
-    "challenge-023",
-    "challenge-024",
-    "challenge-025",
-    "challenge-026",
-    "challenge-027",
-    "challenge-028",
-    "challenge-029",
-    "challenge-030"
+    "challenge-018"
   ],
   "challenges": [
     {
-      "description": "5x5 spider-focused maze with tight wall-following pressure.",
+      "description": "5x5 no-gate monster route challenge.",
       "id": "challenge-001",
-      "name": "Spider Gallery"
+      "name": "Crossfire Loop"
     },
     {
-      "description": "5x6 maze with two minotaurs and a spider.",
+      "description": "6x6 no-gate monster route challenge.",
       "id": "challenge-002",
-      "name": "Twin Bulls"
+      "name": "Long Way Home"
     },
     {
-      "description": "6x5 maze emphasizing werewolf path pressure.",
+      "description": "5x5 transformed validated challenge.",
       "id": "challenge-003",
-      "name": "Wolf Run"
+      "name": "Two-Step Ambush"
     },
     {
-      "description": "6x6 compact gate-and-sword maze.",
+      "description": "5x5 transformed validated challenge.",
       "id": "challenge-004",
-      "name": "Gate Primer"
+      "name": "Outer Spiral"
     },
     {
-      "description": "6x7 maze with multiple wall-following spiders.",
+      "description": "5x5 transformed validated challenge.",
       "id": "challenge-005",
-      "name": "Web Circuit"
+      "name": "Backtrack Trap"
     },
     {
-      "description": "7x5 minotaur-heavy sightline maze.",
+      "description": "6x6 transformed validated challenge.",
       "id": "challenge-006",
       "name": "Bull Corridor"
     },
     {
-      "description": "7x6 mixed monster and gate maze.",
+      "description": "6x6 transformed validated challenge.",
       "id": "challenge-007",
-      "name": "Mixed Crossroads"
+      "name": "Spider Return"
     },
     {
-      "description": "7x7 maze with two werewolves and a minotaur.",
+      "description": "6x6 transformed validated challenge.",
       "id": "challenge-008",
-      "name": "Wolf Lattice"
+      "name": "Wolf Detour"
     },
     {
-      "description": "7x8 maze with two spiders and one minotaur.",
+      "description": "6x6 transformed validated challenge.",
       "id": "challenge-009",
-      "name": "Spider Lattice"
+      "name": "Torchline"
     },
     {
-      "description": "8x5 elongated mixed-threat maze.",
+      "description": "6x6 transformed validated challenge.",
       "id": "challenge-010",
-      "name": "Long Hunt"
+      "name": "Hard Left"
     },
     {
-      "description": "8x6 maze with extra gates.",
+      "description": "6x6 transformed validated challenge.",
       "id": "challenge-011",
-      "name": "Gate Run"
+      "name": "Trophy Sweep"
     },
     {
-      "description": "8x7 werewolf-heavy maze.",
+      "description": "6x6 transformed validated challenge.",
       "id": "challenge-012",
-      "name": "Wolf Den"
+      "name": "Corner Pressure"
     },
     {
-      "description": "8x8 minotaur-heavy maze.",
+      "description": "5x5 transformed validated challenge.",
       "id": "challenge-013",
-      "name": "Bull Den"
+      "name": "Late Bite"
     },
     {
-      "description": "8x9 large spider-heavy maze.",
+      "description": "5x5 transformed validated challenge.",
       "id": "challenge-014",
-      "name": "Webbed Vault"
+      "name": "Forked Return"
     },
     {
-      "description": "9x5 wide mixed-threat maze.",
+      "description": "5x5 transformed validated challenge.",
       "id": "challenge-015",
-      "name": "Grand Mix"
+      "name": "North Hook"
     },
     {
-      "description": "9x6 wide spider pressure maze.",
+      "description": "5x5 transformed validated challenge.",
       "id": "challenge-016",
-      "name": "South Web"
+      "name": "South Hook"
     },
     {
-      "description": "9x7 wide werewolf pressure maze.",
+      "description": "5x5 transformed validated challenge.",
       "id": "challenge-017",
-      "name": "Wolf Hall"
+      "name": "Redoubt"
     },
     {
-      "description": "9x8 wide minotaur pressure maze.",
+      "description": "5x5 transformed validated challenge.",
       "id": "challenge-018",
-      "name": "Bull Hall"
-    },
-    {
-      "description": "9x9 large mixed gauntlet.",
-      "id": "challenge-019",
-      "name": "Grand Gauntlet"
-    },
-    {
-      "description": "5x7 compact mixed maze.",
-      "id": "challenge-020",
-      "name": "Small Mix"
-    },
-    {
-      "description": "5x8 compact werewolf maze.",
-      "id": "challenge-021",
-      "name": "Small Wolves"
-    },
-    {
-      "description": "5x9 compact minotaur maze.",
-      "id": "challenge-022",
-      "name": "Small Bulls"
-    },
-    {
-      "description": "6x6 spider square.",
-      "id": "challenge-023",
-      "name": "Square Web"
-    },
-    {
-      "description": "7x7 minotaur square.",
-      "id": "challenge-024",
-      "name": "Square Bulls"
-    },
-    {
-      "description": "8x8 werewolf square.",
-      "id": "challenge-025",
-      "name": "Square Wolves"
-    },
-    {
-      "description": "9x9 spider-heavy large maze.",
-      "id": "challenge-026",
-      "name": "Huge Web"
-    },
-    {
-      "description": "6x8 extra-gated mixed maze.",
-      "id": "challenge-027",
-      "name": "Mixed Gatehouse"
-    },
-    {
-      "description": "7x9 tall two-werewolf maze.",
-      "id": "challenge-028",
-      "name": "Twin Wolves"
-    },
-    {
-      "description": "8x6 wide two-spider maze.",
-      "id": "challenge-029",
-      "name": "Twin Spiders"
-    },
-    {
-      "description": "9x9 balanced high-gate challenge.",
-      "id": "challenge-030",
-      "name": "Final Trial"
+      "name": "Sidewind"
     }
   ],
   "mazeIds": [
@@ -208,19 +136,7 @@
     "challenge-015",
     "challenge-016",
     "challenge-017",
-    "challenge-018",
-    "challenge-019",
-    "challenge-020",
-    "challenge-021",
-    "challenge-022",
-    "challenge-023",
-    "challenge-024",
-    "challenge-025",
-    "challenge-026",
-    "challenge-027",
-    "challenge-028",
-    "challenge-029",
-    "challenge-030"
+    "challenge-018"
   ],
   "storyMazeIds": [
     "maze-001",

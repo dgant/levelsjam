@@ -16,17 +16,5 @@ import maze14 from './challenge-015.js'
 import maze15 from './challenge-016.js'
 import maze16 from './challenge-017.js'
 import maze17 from './challenge-018.js'
-import maze18 from './challenge-019.js'
-import maze19 from './challenge-020.js'
-import maze20 from './challenge-021.js'
-import maze21 from './challenge-022.js'
-import maze22 from './challenge-023.js'
-import maze23 from './challenge-024.js'
-import maze24 from './challenge-025.js'
-import maze25 from './challenge-026.js'
-import maze26 from './challenge-027.js'
-import maze27 from './challenge-028.js'
-import maze28 from './challenge-029.js'
-import maze29 from './challenge-030.js'
 
-export const CHALLENGE_MAZES = [maze0, maze1, maze2, maze3, maze4, maze5, maze6, maze7, maze8, maze9, maze10, maze11, maze12, maze13, maze14, maze15, maze16, maze17, maze18, maze19, maze20, maze21, maze22, maze23, maze24, maze25, maze26, maze27, maze28, maze29]
+export const CHALLENGE_MAZES = [maze0, maze1, maze2, maze3, maze4, maze5, maze6, maze7, maze8, maze9, maze10, maze11, maze12, maze13, maze14, maze15, maze16, maze17]

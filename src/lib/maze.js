@@ -488,9 +488,29 @@ function listInteriorOpenEdges(maze) {
     }))
 }
 
-function chooseMazeGates(maze, random, count = 4) {
+function chooseMazeGates(maze, random, count = 4, preferredEdges = []) {
   const candidates = listInteriorOpenEdges(maze)
   const chosen = []
+  const takeCandidateByKey = (candidateKey) => {
+    const index = candidates.findIndex((candidate) => candidate.id === candidateKey)
+
+    if (index < 0) {
+      return false
+    }
+
+    const [candidate] = candidates.splice(index, 1)
+
+    chosen.push(candidate)
+    return true
+  }
+
+  for (const preferredEdge of preferredEdges) {
+    if (chosen.length >= count) {
+      break
+    }
+
+    takeCandidateByKey(edgeKey(preferredEdge.from, preferredEdge.to))
+  }
 
   while (candidates.length > 0 && chosen.length < count) {
     const candidateIndex = integerFromRandom(random, candidates.length)
@@ -1050,14 +1070,31 @@ function recordMazeSolution(maze, options = {}) {
   return true
 }
 
+export function finalizeGeneratedMaze(maze, options = {}) {
+  const random = createRandom(Number(options.seed ?? maze.seed ?? Date.now()))
+
+  maze.lights = generateMazeLights(maze, random)
+  maze.visibility = computeMazeCellVisibility(maze)
+  recordMazeSolution(maze, {
+    maxActionCount: options.maxActionCount ?? 320,
+    maxPlanExpansions: options.maxPlanExpansions ?? 500
+  })
+
+  return maze
+}
+
 export function validateMaze(maze, options = {}) {
+  const startedAt = performance.now()
   const {
-    requireAdvancedDifficulty = false,
+    requireAdvancedDifficulty = true,
     requireLightmap = true
   } = options
   const core = validateMazeCore(maze)
   if (!core.valid) {
-    return core
+    return {
+      ...core,
+      durationMs: performance.now() - startedAt
+    }
   }
 
   const minimalityErrors = []
@@ -1088,6 +1125,8 @@ export function validateMaze(maze, options = {}) {
     : { errors: [], valid: true }
 
   return {
+    advancedDifficulty: advancedValidation,
+    durationMs: performance.now() - startedAt,
     errors: [
       ...minimalityErrors,
       ...lightValidation.errors,
@@ -1096,6 +1135,9 @@ export function validateMaze(maze, options = {}) {
       ...solutionErrors,
       ...advancedValidation.errors
     ],
+    imperfectSuccessRate: advancedValidation.imperfectSuccessRate ?? null,
+    metrics: advancedValidation.metrics ?? null,
+    timings: advancedValidation.timings ?? [],
     valid:
       minimalityErrors.length === 0 &&
       lightValidation.valid &&
@@ -1117,10 +1159,10 @@ function generateMazeLights(maze, random) {
   }
 
   const lights = []
-  const addLightForCell = (cell, preferredSide = null) => {
+  const addLightForCell = (cell, preferredSide = null, options = {}) => {
     const key = cellKey(cell)
 
-    if (!unlit.has(key)) {
+    if (!unlit.has(key) && !options.force) {
       return false
     }
 
@@ -1145,7 +1187,7 @@ function generateMazeLights(maze, random) {
 
   for (const pickup of [maze.sword, maze.trophy]) {
     if (pickup?.cell) {
-      addLightForCell(pickup.cell)
+      addLightForCell(pickup.cell, null, { force: true })
     }
   }
 
@@ -1237,10 +1279,21 @@ function getSolutionRouteCells(maze, adjacency) {
   return route
 }
 
+function getSolutionRouteEdges(maze, adjacency) {
+  const cells = getSolutionRouteCells(maze, adjacency)
+  const edges = []
+
+  for (let index = 1; index < cells.length; index += 1) {
+    edges.push(normalizeEdge(cells[index - 1], cells[index]))
+  }
+
+  return edges
+}
+
 function generateMazeMonsters(
   maze,
   random,
-  protectedCellKeys = new Set(),
+  preferredCellKeys = [],
   monsterTypes = ['minotaur', 'werewolf', 'spider']
 ) {
   const reserved = getReservedCellKeys(maze)
@@ -1256,7 +1309,14 @@ function generateMazeMonsters(
     }
   }
 
-  let cells = allCandidateCells.filter((cell) => !protectedCellKeys.has(cellKey(cell)))
+  const preferredCells = preferredCellKeys
+    .map((key) => typeof key === 'string' ? parseCellKey(key) : key)
+    .filter((cell) => !reserved.has(cellKey(cell)))
+  const preferredCellKeySet = new Set(preferredCells.map(cellKey))
+  let cells = [
+    ...preferredCells,
+    ...allCandidateCells.filter((cell) => !preferredCellKeySet.has(cellKey(cell)))
+  ]
 
   if (cells.length < monsterTypes.length) {
     cells = allCandidateCells
@@ -1286,6 +1346,7 @@ export function generateMaze(seed = Date.now(), options = {}) {
     height = MAZE_HEIGHT,
     monsterTypes = ['minotaur', 'werewolf', 'spider'],
     name = null,
+    populateContent = true,
     width = MAZE_WIDTH
   } = options
   const startTime = performance.now()
@@ -1354,7 +1415,12 @@ export function generateMaze(seed = Date.now(), options = {}) {
   }
   const adjacency = buildAdjacency(maze)
 
-  maze.gates = chooseMazeGates(maze, random, gateCount)
+  if (!populateContent) {
+    maze.generationMs = performance.now() - startTime
+    maze.totalGenerationMs = maze.generationMs
+    return maze
+  }
+
   maze.sword = {
     cell: chooseMazeSwordCell(maze, random, adjacency)
   }
@@ -1365,17 +1431,20 @@ export function generateMaze(seed = Date.now(), options = {}) {
       new Set([cellKey(maze.opening.cell), cellKey(maze.sword.cell)])
     )
   }
+  maze.gates = chooseMazeGates(
+    maze,
+    random,
+    gateCount,
+    getSolutionRouteEdges(maze, adjacency)
+  )
   maze.generationMs = performance.now() - startTime
 
-  const protectedMonsterCellKeys = getVisibleCellKeysFromCells(
-    maze,
-    getSolutionRouteCells(maze, adjacency)
-  )
+  const preferredMonsterCellKeys = getSolutionRouteCells(maze, adjacency).map(cellKey)
   for (let attempt = 0; attempt < 1; attempt += 1) {
     maze.monsters = generateMazeMonsters(
       maze,
       random,
-      protectedMonsterCellKeys,
+      preferredMonsterCellKeys,
       monsterTypes
     )
     maze.lights = generateMazeLights(maze, random)

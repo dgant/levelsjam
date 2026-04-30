@@ -159,5 +159,60 @@ test('advanced maze validation reports difficulty failures as diagnostics', () =
 
   assert.equal(validation.valid, false)
   assert.ok(validation.perfect)
+  assert.ok(validation.timings.some((entry) => entry.stage === 'perfect-solution'))
   assert.ok(validation.errors.some((error) => error.includes('75%') || error.includes('monster-free')))
+})
+
+test('advanced maze validation reports solver budget failures separately from impossibility', () => {
+  const maze = {
+    gates: [],
+    height: 1,
+    id: 'advanced-validation-expansion-budget',
+    lights: [],
+    monsters: [],
+    opening: { cell: { x: 0, y: 0 }, side: 'west' },
+    openEdges: [
+      { from: { x: 0, y: 0 }, to: { x: 1, y: 0 } }
+    ],
+    sword: null,
+    trophy: { cell: { x: 1, y: 0 } },
+    width: 2
+  }
+  const validation = validateMazeAdvancedDifficulty(maze, {
+    maxPerfectExpansions: 0
+  })
+
+  assert.equal(validation.valid, false)
+  assert.equal(validation.perfect, null)
+  assert.ok(validation.errors.some((error) => error.includes('expansion limit')))
+  assert.equal(validation.errors.some((error) => error.includes('requires a perfect-information winning solution')), false)
+})
+
+test('advanced maze validation removes gates as ordinary open passages', () => {
+  const gatedMaze = {
+    gates: [
+      { from: { x: 0, y: 0 }, to: { x: 1, y: 0 }, id: 'test-gate' }
+    ],
+    height: 1,
+    id: 'advanced-validation-gate-removal',
+    lights: [],
+    monsters: [],
+    opening: { cell: { x: 0, y: 0 }, side: 'west' },
+    openEdges: [
+      { from: { x: 0, y: 0 }, to: { x: 1, y: 0 } }
+    ],
+    sword: null,
+    trophy: { cell: { x: 1, y: 0 } },
+    width: 2
+  }
+  const validation = validateMazeAdvancedDifficulty(gatedMaze, {
+    imperfectTrialCount: 1,
+    maxPerfectExpansions: 1_000
+  })
+
+  assert.equal(validation.valid, false)
+  assert.ok(validation.perfect)
+  assert.ok(validation.errors.some((error) =>
+    error.includes('Removing gate edge 0,0|1,0 as a monster-blocking gate')
+  ))
 })

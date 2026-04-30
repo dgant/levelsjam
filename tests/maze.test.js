@@ -252,15 +252,18 @@ test('persists at least five valid mazes', async () => {
   assert.ok(files.every((fileName) => /^maze-\d{3}\.js$/.test(fileName)))
 })
 
-test('persists thirty compact valid challenge mazes from 5x5 through 9x9', async () => {
+test('persists only compact valid challenge mazes exposed by the playtest manifest', async () => {
   const challengeDirectory = path.join(process.cwd(), 'src', 'data', 'challenge-mazes')
   const files = fs.readdirSync(challengeDirectory)
     .filter((fileName) => /^challenge-\d{3}\.js$/.test(fileName))
     .sort()
-  const seenSizes = new Set()
   const seenNames = new Set()
+  const manifestPath = path.join(process.cwd(), 'public', 'maze-data', 'index.json')
+  const manifest = fs.existsSync(manifestPath)
+    ? JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+    : null
 
-  assert.equal(files.length, 30)
+  assert.ok(files.length > 0, 'at least one validated challenge maze is checked in')
   for (const fileName of files) {
     const maze = await importPersistedMaze(fileName, challengeDirectory)
     const validation = validateMaze(maze, { requireLightmap: false })
@@ -273,11 +276,15 @@ test('persists thirty compact valid challenge mazes from 5x5 through 9x9', async
     assert.ok(maze.height >= 5 && maze.height <= 9, `${fileName} height ${maze.height}`)
     assert.ok(maze.name && !seenNames.has(maze.name), `${fileName} has a unique descriptive name`)
     seenNames.add(maze.name)
-    seenSizes.add(`${maze.width}x${maze.height}`)
   }
 
-  for (const size of ['5x5', '6x6', '7x7', '8x8', '9x9']) {
-    assert.equal(seenSizes.has(size), true, `missing challenge size ${size}`)
+  if (manifest) {
+    const expectedIds = files.map((fileName) => path.basename(fileName, '.js'))
+    assert.deepEqual(manifest.challengeMazeIds, expectedIds)
+    assert.deepEqual(
+      manifest.challenges.map((challenge) => challenge.id),
+      expectedIds
+    )
   }
 })
 

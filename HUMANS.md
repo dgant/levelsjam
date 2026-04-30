@@ -13,7 +13,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Start one reusable headless Vite instance with `npm run dev:bg`.
 - Check that background instance with `npm run dev:bg:status`.
 - Stop that background instance with `npm run dev:bg:stop`.
-- Publish compact challenge mazes for immediate browser playtesting with `npm run playtest:challenge-mazes`, then open the in-game menu with Escape and choose from the Challenge Mazes section. These playtest payloads use neutral dummy lighting, so turning off Lighting in the menu is acceptable when testing their gameplay.
+- Publish the checked-in validated compact challenge mazes for immediate browser playtesting with `npm run playtest:challenge-mazes`, then open the in-game menu with Escape and choose from the Challenge Mazes section. These playtest payloads use neutral dummy lighting, so turning off Lighting in the menu is acceptable when testing their gameplay.
 - The background dev-server helper refuses to start if `127.0.0.1:5173` is already occupied by an unmanaged process, because stale Vite instances can serve old builds while the repo appears current.
 - Open the local URL printed by the dev server.
 - For agent work, prefer one long-lived headless Vite instance instead of repeatedly opening new visible windows.
@@ -171,7 +171,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Keep `npm run test:unit` under 20 seconds.
 - Keep `npm run test:perf:runner` under 1 minute, and expect it to benchmark the initial gameplay view after all monsters have rendered and the recorded solution replay rather than only a cheap static camera angle.
 - Keep the prepared smoke startup phase under 1 minute after a single `npm run build:pages`, and keep the total benchmarked smoke runner under 3 minutes while deeper render assertions remain split into slower integration specs.
-- Latest measured benchmark on April 30, 2026: `npm run build:pages` took about `44s`; `npm run test:unit` reported about `3.5s`; `npm run test:perf:runner` passed in about `36.4s`; `npm run test:maze:runner` reported about `30.3s` with a `30.5s` wall total after adding validation for thirty compact challenge-maze sources; and `npm run ensure:mazes` previously took about `4.9m`, dominated by `export:maze-probes` at about `4.5m` for all 245 persisted probe captures.
+- Latest measured benchmark on April 30, 2026: `npm run build:pages` took about `44s`; `npm run test:unit` reported about `3.5s`; `npm run test:perf:runner` passed in about `36.4s`; targeted validation of 18 compact challenge-maze sources reported about `44.4s`; and `npm run ensure:mazes` previously took about `4.9m`, dominated by `export:maze-probes` at about `4.5m` for all 245 persisted probe captures.
 
 ## Deployment
 - The project is intended for GitHub Pages hosting.
