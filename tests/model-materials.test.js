@@ -375,6 +375,12 @@ test('static detail meshes receive the static surface lighting path', () => {
   assert.match(appSource, /lightMap=\{lightmapTexture\}/)
   assert.match(appSource, /applyRectLightmapUvsToModel\(cupModel/)
   assert.match(appSource, /material\.lightMap = lightmapTexture/)
+  assert.match(appSource, /const STATIC_SURFACE_LIGHTMAP_PROBE_BLEND: ProbeBlendConfig = \{/)
+  assert.match(appSource, /useAttachProbeBlendToModel\(cupModel, STATIC_SURFACE_LIGHTMAP_PROBE_BLEND, patchConfig\)/)
+  assert.match(appSource, /probeBlend=\{STATIC_SURFACE_LIGHTMAP_PROBE_BLEND\}/)
+  assert.match(appSource, /function WallSconce[\s\S]*?diffuseIntensity: 0,[\s\S]*?vlmMode: 'disabled'/)
+  assert.doesNotMatch(appSource, /const cupProbeBlend =/)
+  assert.doesNotMatch(appSource, /probeBlend=\{blockProbeBlend\}/)
 })
 
 test('mobile touch controls do not paint the whole tap region on press', () => {

@@ -2183,6 +2183,16 @@ type ProbeBlendConfig = {
   weights?: [number, number, number, number]
 }
 
+const STATIC_SURFACE_LIGHTMAP_PROBE_BLEND: ProbeBlendConfig = {
+  diffuseIntensity: 0,
+  mode: 'none',
+  probeTextures: [],
+  radianceIntensity: 0,
+  radianceMode: 'none',
+  vlmMode: 'disabled',
+  weights: [1, 0, 0, 0]
+}
+
 type ProbeBlendShader = Shader & {
   uniforms: Shader['uniforms'] & {
     lightMapAmbientTint?: Uniform<Color>
@@ -9625,7 +9635,6 @@ function WallSconce({
 }) {
   const metal = useStandardPbrTextures(METAL_TEXTURE_URLS, METAL_TEXTURE_REPEAT)
   const levelWorldTransform = useContext(LevelRenderTransformContext)
-  const volumetricShadowsEnabled = useContext(VolumetricShadowContext)
   const [material, setMaterial] = useState<ThreeMeshStandardMaterial | null>(null)
   const surfaceLightmapsEnabled =
     lightmapContributionIntensity > EFFECT_EPSILON
@@ -9692,9 +9701,6 @@ function WallSconce({
     [reflectionProbeBlend.probeIndices, reflectionProbeCoefficients]
   )
   const hasProbeTextures = Boolean(monsterRadianceProbeTextures[0])
-  const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
-  const diffuseProbeIntensity = iblContributionIntensity
-  const diffuseProbeAvailable = hasProbeCoefficients
   const reflectionAvailable = hasProbeTextures
   const probeBlend = useMemo(
     () => ({
@@ -9707,29 +9713,16 @@ function WallSconce({
         probeCoefficients,
         'disabled',
         {
-          diffuseIntensity: diffuseProbeIntensity,
-          probeCoefficientTextures,
+          diffuseIntensity: 0,
           radianceIntensity: reflectionContributionIntensity,
           radianceMode: reflectionAvailable ? 'constant' : 'disabled',
-          useProbeConnectivity: volumetricShadowsEnabled,
-          vlmBoundaryNormal:
-            mazeLight.side === 'east'
-              ? { x: 1, z: 0 }
-              : mazeLight.side === 'west'
-                ? { x: -1, z: 0 }
-                : mazeLight.side === 'south'
-                  ? { x: 0, z: 1 }
-                  : { x: 0, z: -1 },
-          vlmMode: diffuseProbeAvailable ? 'boundary8' : 'disabled',
+          vlmMode: 'disabled',
           weights: reflectionProbeBlend.weights as [number, number, number, number],
           worldTransform: levelWorldTransform
         }
       )
     }),
     [
-      diffuseProbeIntensity,
-      hasProbeTextures,
-      iblContributionIntensity,
       layout,
       levelWorldTransform,
       probeCoefficients,
@@ -9737,11 +9730,9 @@ function WallSconce({
       probeDepthTextures,
       probeTextures,
       reflectionContributionIntensity,
-      diffuseProbeAvailable,
       reflectionAvailable,
       reflectionProbeBlend.probeIndices,
-      reflectionProbeBlend.weights,
-      volumetricShadowsEnabled
+      reflectionProbeBlend.weights
     ]
   )
   const materialKey = useMemo(
@@ -13061,7 +13052,7 @@ function MazeAltarActor({
   )
   const hasProbeTextures = hasCompleteProbeTextures(probeTextures)
   const hasProbeCoefficients = hasCompleteProbeCoefficients(probeCoefficients)
-  const blockProbeBlend = useMemo(
+  const offeringProbeBlend = useMemo(
     () =>
       buildProbeBlendConfig(
         layout,
@@ -13097,13 +13088,6 @@ function MazeAltarActor({
       volumetricShadowsEnabled
     ]
   )
-  const cupProbeBlend = useMemo(
-    () => ({
-      ...blockProbeBlend,
-      diffuseIntensity: iblContributionIntensity + lightmapContributionIntensity
-    }),
-    [blockProbeBlend, iblContributionIntensity, lightmapContributionIntensity]
-  )
   const surfaceLightmapsEnabled =
     lightmapContributionIntensity > EFFECT_EPSILON
   const lightMapIntensity =
@@ -13122,8 +13106,8 @@ function MazeAltarActor({
     [lightmapContributionIntensity, lightmapTextureEncoding, surfaceLightmapsEnabled]
   )
   const materialKey = useMemo(
-    () => getProbeBlendMaterialKey('maze-altar', blockProbeBlend, patchConfig),
-    [blockProbeBlend, patchConfig]
+    () => getProbeBlendMaterialKey('maze-altar', STATIC_SURFACE_LIGHTMAP_PROBE_BLEND, patchConfig),
+    [patchConfig]
   )
   const cupTransform = useMemo(() => {
     if (!cupModel) {
@@ -13155,7 +13139,7 @@ function MazeAltarActor({
     [altar.id, layout.maze.lightmap]
   )
 
-  useAttachProbeBlendToModel(cupModel, cupProbeBlend, patchConfig)
+  useAttachProbeBlendToModel(cupModel, STATIC_SURFACE_LIGHTMAP_PROBE_BLEND, patchConfig)
 
   useEffect(() => {
     if (!cupModel) {
@@ -13211,7 +13195,7 @@ function MazeAltarActor({
           maps={wallMaps}
           materialKey={materialKey}
           patchConfig={patchConfig}
-          probeBlend={blockProbeBlend}
+          probeBlend={STATIC_SURFACE_LIGHTMAP_PROBE_BLEND}
         />
       </mesh>
       {cupModel && cupTransform ? (
@@ -13230,7 +13214,7 @@ function MazeAltarActor({
         <AltarOfferingTrophy
           altarPosition={altar.position}
           materialKey={`${materialKey}:offering-trophy`}
-          probeBlend={cupProbeBlend}
+          probeBlend={offeringProbeBlend}
           startedAt={offeringStartedAt ?? performance.now()}
         />
       ) : null}

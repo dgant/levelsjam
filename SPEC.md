@@ -123,9 +123,9 @@
 - Each wall sconce uses a 0.125 meter radius lower hemisphere with the cut top replaced by a flat circular cap.
 - Each wall sconce uses the requested `metal-13` PBR texture pack rather than a debug material.
 - Each wall sconce uses the full authored `metal-13` PBR material stack, excluding only the known-problematic ambient-occlusion map path.
-- Each wall sconce uses the shared static PBR lighting path and receives baked surface-lightmap lighting when attached to a lightmapped wall.
+- Each wall sconce uses the shared static PBR lighting path and receives baked surface-lightmap diffuse lighting when attached to a lightmapped wall.
 - Each wall sconce is positioned with its center one sconce radius outside the wall face.
-- Each wall sconce receives visible local volumetric-lightmap illumination and must not render as hard black under the default lighting stack.
+- Each wall sconce may use local reflection probes for metallic specular response but does not use runtime volumetric-lightmap diffuse lighting under the static material path.
 - Each wall sconce supports a camera-facing torch billboard above it.
 - Each torch billboard is positioned against the same wall face as the sconce, on the side of the cell the light is intended to illuminate.
 - Each torch billboard's bottom edge is flush with the top of the sconce rather than floating above it.
@@ -159,7 +159,7 @@
 - The maze-floor ground preserves the authored world-space puddle-texture texel density rather than retileing the puddle textures at a different density.
 - The maze-floor ground samples the baked surface lightmap with the same world-space X/Z orientation used by the bake, so floor light appears under the torch sources that produced it.
 - The maze-floor ground and maze walls integrate the baked HDR lightmap directly into their PBR material path rather than drawing it as a separate transparent overlay mesh.
-- Static altar blocks and altar bowls use the shared static PBR lighting path and receive baked surface-lightmap lighting.
+- Static altar blocks and altar bowls use the shared static PBR lighting path and receive baked surface-lightmap lighting without runtime volumetric-lightmap diffuse lighting or runtime reflection-probe radiance.
 - The maze walls apply their baked torch lightmap on the actual wall mesh through authored lightmap UVs instead of through duplicate front-face or back-face overlay planes.
 - Runtime maze walls sample a shared baked surface-lightmap atlas through wall-specific atlas UVs rather than allocating separate lightmap textures for each wall face.
 - The baked wall-face lightmap aligns with both local wall-face UV orientations so off-center torch gradients do not appear mirrored on one face orientation.
