@@ -11,7 +11,8 @@
     <script>
       {
         const isLocalHost = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
-        const isDevServer = isLocalHost && ['4273', '5173'].includes(window.location.port)
+        const isViteDevPort = /^51\d\d$/.test(window.location.port)
+        const isDevServer = isLocalHost && (isViteDevPort || window.location.port === '4273')
         if (!isLocalHost) {
           const analytics = document.createElement('script')
           analytics.async = true
@@ -189,9 +190,10 @@
     </div>
     <script>
       const isLocalHost = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
+      const isViteDevPort = /^51\d\d$/.test(window.location.port)
       const isDevServer =
         isLocalHost &&
-        ['4273', '5173'].includes(window.location.port)
+        (isViteDevPort || window.location.port === '4273')
       const preload = (href, as, rel = 'preload') => {
         const link = document.createElement('link')
         link.rel = rel
