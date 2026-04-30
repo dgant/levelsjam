@@ -11,8 +11,6 @@
     <script>
       {
         const isLocalHost = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
-        const isViteDevPort = /^51\d\d$/.test(window.location.port)
-        const isDevServer = isLocalHost && (isViteDevPort || window.location.port === '4273')
         if (!isLocalHost) {
           const analytics = document.createElement('script')
           analytics.async = true
@@ -32,14 +30,14 @@
         }
         const requestedMazeId = new URLSearchParams(window.location.search).get('maze')
 
-        if (!isDevServer) {
+        if (!isLocalHost) {
           addHeadPreload('./assets/app.js', 'script', 'modulepreload')
           addHeadPreload('./assets/bootstrapApp.js', null, 'modulepreload')
           addHeadPreload('./assets/app.css', 'style')
-        }
-        if (requestedMazeId) {
-          addHeadPreload(`./maze-data/${requestedMazeId}.json`, 'fetch')
-          addHeadPreload(`./maze-data/${requestedMazeId}/probe-assets.json`, 'fetch')
+          if (requestedMazeId) {
+            addHeadPreload(`./maze-data/${requestedMazeId}.json`, 'fetch')
+            addHeadPreload(`./maze-data/${requestedMazeId}/probe-assets.json`, 'fetch')
+          }
         }
       }
     </script>
@@ -190,10 +188,21 @@
     </div>
     <script>
       const isLocalHost = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
-      const isViteDevPort = /^51\d\d$/.test(window.location.port)
-      const isDevServer =
-        isLocalHost &&
-        (isViteDevPort || window.location.port === '4273')
+      const detectViteDevServer = async () => {
+        if (!isLocalHost) {
+          return false
+        }
+
+        try {
+          const response = await fetch('/@vite/client', {
+            cache: 'no-store'
+          })
+
+          return response.ok
+        } catch {
+          return false
+        }
+      }
       const preload = (href, as, rel = 'preload') => {
         const link = document.createElement('link')
         link.rel = rel
@@ -206,25 +215,24 @@
         link.href = href
         document.head.appendChild(link)
       }
-      const staticBase = isDevServer ? '/' : './'
       const requestedMazeId = new URLSearchParams(window.location.search).get('maze')
 
-      if (!isDevServer) {
-        preload('./assets/bootstrapApp.js', null, 'modulepreload')
-        preload('./assets/app.css', 'style')
-      }
+      const startApp = async () => {
+        const isDevServer = await detectViteDevServer()
+        const staticBase = isDevServer ? '/' : './'
 
-      if (requestedMazeId) {
-        preload(`${staticBase}maze-data/${requestedMazeId}.json`, 'fetch')
-        preload(`${staticBase}maze-data/${requestedMazeId}/probe-assets.json`, 'fetch')
-      }
-
-      const startApp = () => {
         if (!isDevServer) {
+          preload('./assets/bootstrapApp.js', null, 'modulepreload')
+          preload('./assets/app.css', 'style')
           const stylesheet = document.createElement('link')
           stylesheet.rel = 'stylesheet'
           stylesheet.href = './assets/app.css'
           document.head.appendChild(stylesheet)
+        }
+
+        if (requestedMazeId) {
+          preload(`${staticBase}maze-data/${requestedMazeId}.json`, 'fetch')
+          preload(`${staticBase}maze-data/${requestedMazeId}/probe-assets.json`, 'fetch')
         }
 
         const script = document.createElement('script')
@@ -233,7 +241,9 @@
         document.body.appendChild(script)
       }
 
-      window.requestAnimationFrame(startApp)
+      window.requestAnimationFrame(() => {
+        void startApp()
+      })
     </script>
     <script async src="https://jam.pieter.com/2026/widget.js"></script>
   </body>
