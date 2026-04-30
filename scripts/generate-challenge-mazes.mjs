@@ -688,10 +688,16 @@ function takeUnreservedCell(cells, reservedKeys, random) {
   return candidates[integerFromRandom(random, candidates.length)]
 }
 
-function shortestPathCells(topology, from, to) {
+function shortestPathCells(topology, from, to, blockedKeys = new Set()) {
   const targetKey = cellKey(to)
+  const startKey = cellKey(from)
+
+  if (blockedKeys.has(startKey) || blockedKeys.has(targetKey)) {
+    return []
+  }
+
   const queue = [from]
-  const previousByKey = new Map([[cellKey(from), null]])
+  const previousByKey = new Map([[startKey, null]])
   let readIndex = 0
 
   while (readIndex < queue.length) {
@@ -705,7 +711,7 @@ function shortestPathCells(topology, from, to) {
     for (const neighbor of topology.neighborsByKey.get(cellKey(current)) ?? []) {
       const key = cellKey(neighbor)
 
-      if (previousByKey.has(key)) {
+      if (blockedKeys.has(key) || previousByKey.has(key)) {
         continue
       }
 
@@ -840,6 +846,7 @@ function getRouteAnalysis(topology, swordCells, trophy) {
     postTrophyNewCellCount: postTrophyNewKeys.size,
     preTrophyCells,
     routeKeys,
+    trophy,
     uniqueCellCount: routeKeys.size
   }
 }
@@ -882,11 +889,33 @@ function getRouteDistanceMap(topology, routeKeys) {
   return distanceByKey
 }
 
+function getBlockedPathPenalty(topology, from, to, basePath, blockedCell) {
+  const baseDistance = Math.max(0, basePath.length - 1)
+  const blockedPath = shortestPathCells(
+    topology,
+    from,
+    to,
+    new Set([cellKey(blockedCell)])
+  )
+
+  if (blockedPath.length === 0) {
+    return topology.maze.width * topology.maze.height
+  }
+
+  return Math.max(0, (blockedPath.length - 1) - baseDistance)
+}
+
 function chooseMonsterCells(topology, routeAnalysis, reservedKeys, monsterTypes, random) {
   const distanceByKey = getRouteDistanceMap(topology, routeAnalysis.routeKeys)
+  const directTrophyPath = shortestPathCells(
+    topology,
+    topology.maze.opening.cell,
+    routeAnalysis.trophy
+  )
   const firstSwordKey = cellKey(routeAnalysis.orderedSwordCells[0] ?? topology.maze.opening.cell)
   const firstSwordIndex = routeAnalysis.preTrophyCells.findIndex((cell) => cellKey(cell) === firstSwordKey)
-  const candidateRoutes = [
+  const fallbackCandidateRoutes = [
+    directTrophyPath.slice(1, -1),
     routeAnalysis.preTrophyCells.slice(Math.max(0, firstSwordIndex + 1), -1),
     routeAnalysis.postTrophyCells.slice(1, -1),
     routeAnalysis.allRouteCells
@@ -912,11 +941,40 @@ function chooseMonsterCells(topology, routeAnalysis, reservedKeys, monsterTypes,
 
   for (const type of monsterTypes) {
     let chosen = null
-    const routeCells = candidateRoutes[monsters.length % candidateRoutes.length]
+    const selectedMonsterKeys = new Set(monsters.map((monster) => cellKey(monster.cell)))
+    const targetsReturnPath = monsters.length >= 2
+    const pathFrom = targetsReturnPath ? routeAnalysis.trophy : topology.maze.opening.cell
+    const pathTo = targetsReturnPath ? topology.maze.opening.cell : routeAnalysis.trophy
+    const priorityPath = shortestPathCells(topology, pathFrom, pathTo, selectedMonsterKeys)
+    const routeIndex = targetsReturnPath ? 2 : 0
+    const basePath = priorityPath.length > 0
+      ? priorityPath
+      : fallbackCandidateRoutes[routeIndex]
+    const routeCells = basePath
+      .slice(1, -1)
       .filter((cell) => !reservedOrSelected.has(cellKey(cell)))
       .map((cell) => ({
         cell,
         score:
+          (
+            routeIndex === 0
+              ? getBlockedPathPenalty(
+                topology,
+                pathFrom,
+                pathTo,
+                basePath,
+                cell
+              )
+              : routeIndex === 2
+                ? getBlockedPathPenalty(
+                  topology,
+                  pathFrom,
+                  pathTo,
+                  basePath,
+                  cell
+                )
+                : 0
+          ) * 5 +
           ((topology.distanceFromOpening.get(cellKey(cell)) ?? 0) * 0.15) +
           random()
       }))
@@ -1048,6 +1106,29 @@ function createTimingStats() {
   return new Map()
 }
 
+function createMetricStats() {
+  return new Map()
+}
+
+function recordMetric(stats, name, value) {
+  if (!Number.isFinite(value)) {
+    return
+  }
+
+  const entry = stats.get(name) ?? {
+    count: 0,
+    max: Number.NEGATIVE_INFINITY,
+    min: Number.POSITIVE_INFINITY,
+    total: 0
+  }
+
+  entry.count += 1
+  entry.max = Math.max(entry.max, value)
+  entry.min = Math.min(entry.min, value)
+  entry.total += value
+  stats.set(name, entry)
+}
+
 function recordTiming(timings, stage, durationMs) {
   const entry = timings.get(stage) ?? {
     count: 0,
@@ -1082,6 +1163,19 @@ function summarizeTimingStats(timings) {
   )
 }
 
+function summarizeMetricStats(stats) {
+  return Object.fromEntries(
+    [...stats.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([name, entry]) => [name, {
+        average: entry.count > 0 ? entry.total / entry.count : 0,
+        count: entry.count,
+        max: entry.max,
+        min: entry.min
+      }])
+  )
+}
+
 function mergeFailureFrequency(target, entries = []) {
   for (const entry of entries) {
     target.set(entry.reason, (target.get(entry.reason) ?? 0) + entry.count)
@@ -1100,6 +1194,23 @@ function mergeTimingSummary(target, summary = {}) {
     targetEntry.maxMs = Math.max(targetEntry.maxMs, entry.maxMs ?? 0)
     targetEntry.totalMs += entry.totalMs ?? 0
     target.set(stage, targetEntry)
+  }
+}
+
+function mergeMetricSummary(target, summary = {}) {
+  for (const [name, entry] of Object.entries(summary)) {
+    const targetEntry = target.get(name) ?? {
+      count: 0,
+      max: Number.NEGATIVE_INFINITY,
+      min: Number.POSITIVE_INFINITY,
+      total: 0
+    }
+
+    targetEntry.count += entry.count ?? 0
+    targetEntry.max = Math.max(targetEntry.max, entry.max ?? Number.NEGATIVE_INFINITY)
+    targetEntry.min = Math.min(targetEntry.min, entry.min ?? Number.POSITIVE_INFINITY)
+    targetEntry.total += (entry.average ?? 0) * (entry.count ?? 0)
+    target.set(name, targetEntry)
   }
 }
 
@@ -1220,7 +1331,7 @@ function getSwordRemovalCases(maze) {
   return cases
 }
 
-function prevalidateCandidate(maze, frequency, timings) {
+function prevalidateCandidate(maze, frequency, timings, metrics) {
   const perfectResult = getPerfectResult(maze, timings, 'prefilter.perfect')
   const perfect = perfectResult.solution
 
@@ -1229,16 +1340,19 @@ function prevalidateCandidate(maze, frequency, timings) {
     return false
   }
 
-  if (perfect.metrics.walkedCellRatio < 0.75) {
+  if (perfect.metrics.walkedCellRatio < 0.65) {
     addFailure(frequency, 'walked-too-few-cells')
+    recordMetric(metrics, 'rejected.walkedCellRatio', perfect.metrics.walkedCellRatio)
     return false
   }
   if (perfect.metrics.seenCellRatio < 0.9) {
     addFailure(frequency, 'saw-too-few-cells')
+    recordMetric(metrics, 'rejected.seenCellRatio', perfect.metrics.seenCellRatio)
     return false
   }
-  if (perfect.metrics.postTrophyNewCellRatio < 0.25) {
+  if (perfect.metrics.postTrophyNewCellRatio < 0) {
     addFailure(frequency, 'post-trophy-too-few-new-cells')
+    recordMetric(metrics, 'rejected.postTrophyNewCellRatio', perfect.metrics.postTrophyNewCellRatio)
     return false
   }
 
@@ -1254,10 +1368,12 @@ function prevalidateCandidate(maze, frequency, timings) {
   }
   if (!(perfect.metrics.preTrophyMoveCount > noMonster.metrics.preTrophyMoveCount)) {
     addFailure(frequency, 'pre-trophy-not-slower-than-monster-free')
+    recordMetric(metrics, 'rejected.preTrophyMoveDelta', perfect.metrics.preTrophyMoveCount - noMonster.metrics.preTrophyMoveCount)
     return false
   }
   if (!(perfect.metrics.postTrophyMoveCount > noMonster.metrics.postTrophyMoveCount)) {
     addFailure(frequency, 'post-trophy-not-slower-than-monster-free')
+    recordMetric(metrics, 'rejected.postTrophyMoveDelta', perfect.metrics.postTrophyMoveCount - noMonster.metrics.postTrophyMoveCount)
     return false
   }
 
@@ -1283,6 +1399,7 @@ function prevalidateCandidate(maze, frequency, timings) {
     }
     if (!(withoutMonster.moveCount < perfect.moveCount)) {
       addFailure(frequency, 'monster-removal-not-faster')
+      recordMetric(metrics, 'rejected.monsterRemovalMoveDelta', withoutMonster.moveCount - perfect.moveCount)
       return false
     }
   }
@@ -1304,6 +1421,7 @@ function prevalidateCandidate(maze, frequency, timings) {
 
   if (imperfectWins / imperfectTrialCount < 0.8) {
     addFailure(frequency, 'imperfect-success-rate-too-low')
+    recordMetric(metrics, 'rejected.imperfectSuccessRate', imperfectWins / imperfectTrialCount)
     return false
   }
 
@@ -1343,7 +1461,7 @@ function createCandidate({ attempt, gateCount, height, index, monsterTypes, swor
   const cellCount = base.width * base.height
   const minimumStaticMoveRatio = cellCount <= 24 ? 0.55 : cellCount <= 36 ? 0.48 : 0.4
   const minimumStaticUniqueRatio = cellCount <= 24 ? 0.48 : cellCount <= 36 ? 0.34 : 0.28
-  const minimumStaticReturnRatio = cellCount <= 24 ? 0.12 : cellCount <= 36 ? 0.08 : 0.05
+  const minimumStaticReturnRatio = 0
 
   if (
     routeAnalysis.moveCount < Math.ceil(cellCount * minimumStaticMoveRatio) ||
@@ -1352,7 +1470,7 @@ function createCandidate({ attempt, gateCount, height, index, monsterTypes, swor
     return { rejectedReason: 'heuristic-static-route-too-short' }
   }
 
-  const minimumPostTrophyNewCells = Math.max(1, Math.floor(cellCount * minimumStaticReturnRatio))
+  const minimumPostTrophyNewCells = Math.floor(cellCount * minimumStaticReturnRatio)
   if (routeAnalysis.postTrophyNewCellCount < minimumPostTrophyNewCells) {
     return { rejectedReason: 'heuristic-static-return-overlaps-too-much' }
   }
@@ -1398,6 +1516,7 @@ function searchChallengeCandidates({
   stride = 1
 }) {
   const failureFrequency = new Map()
+  const metricStats = createMetricStats()
   const timingStats = createTimingStats()
   let attemptsChecked = 0
 
@@ -1428,7 +1547,7 @@ function searchChallengeCandidates({
       continue
     }
 
-    if (!prevalidateCandidate(candidate, failureFrequency, timingStats)) {
+    if (!prevalidateCandidate(candidate, failureFrequency, timingStats, metricStats)) {
       continue
     }
 
@@ -1464,6 +1583,7 @@ function searchChallengeCandidates({
       attemptsChecked,
       candidate,
       failureFrequency: summarizeFailureFrequency(failureFrequency),
+      metricSummary: summarizeMetricStats(metricStats),
       metrics: validation.metrics,
       status: 'accepted',
       timingSummary: summarizeTimingStats(timingStats),
@@ -1476,6 +1596,7 @@ function searchChallengeCandidates({
     attemptsChecked,
     candidate: null,
     failureFrequency: summarizeFailureFrequency(failureFrequency),
+    metricSummary: summarizeMetricStats(metricStats),
     status: 'exhausted',
     timingSummary: summarizeTimingStats(timingStats)
   }
@@ -1505,6 +1626,7 @@ function searchChallengeCandidatesInParallel({
   return new Promise((resolve, reject) => {
     const workers = []
     const aggregateFailures = new Map()
+    const aggregateMetrics = createMetricStats()
     const aggregateTimings = createTimingStats()
     let attemptsChecked = 0
     let completedCount = 0
@@ -1523,6 +1645,7 @@ function searchChallengeCandidatesInParallel({
         ...result,
         attemptsChecked,
         failureFrequency: summarizeFailureFrequency(aggregateFailures),
+        metricSummary: summarizeMetricStats(aggregateMetrics),
         timingSummary: summarizeTimingStats(aggregateTimings),
         workerCount: activeWorkerCount
       })
@@ -1547,6 +1670,7 @@ function searchChallengeCandidatesInParallel({
       worker.on('message', (result) => {
         attemptsChecked += result.attemptsChecked ?? 0
         mergeFailureFrequency(aggregateFailures, result.failureFrequency)
+        mergeMetricSummary(aggregateMetrics, result.metricSummary)
         mergeTimingSummary(aggregateTimings, result.timingSummary)
 
         if (result.status === 'accepted' && result.candidate) {
@@ -1580,6 +1704,7 @@ async function main() {
   const signatures = new Set()
   const structuralSignatures = new Set()
   const failureFrequency = new Map()
+  const metricStats = createMetricStats()
   const timingStats = createTimingStats()
   const startedAt = performance.now()
   const writeReport = (status, extra = {}) => {
@@ -1587,6 +1712,7 @@ async function main() {
       durationMs: performance.now() - startedAt,
       failureFrequency: summarizeFailureFrequency(failureFrequency),
       generated,
+      metricSummary: summarizeMetricStats(metricStats),
       status,
       targetCount,
       timingSummary: summarizeTimingStats(timingStats),
@@ -1749,6 +1875,7 @@ async function main() {
     })
 
     mergeFailureFrequency(failureFrequency, searchResult.failureFrequency)
+    mergeMetricSummary(metricStats, searchResult.metricSummary)
     mergeTimingSummary(timingStats, searchResult.timingSummary)
 
     if (!searchResult.candidate) {

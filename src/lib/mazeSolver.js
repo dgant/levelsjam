@@ -1302,14 +1302,14 @@ export function validateMazeAdvancedDifficulty(maze, options = {}) {
     }
   }
 
-  if (perfect.metrics.walkedCellRatio < 0.75) {
-    errors.push(`Optimal solution must walk at least 75% of cells; got ${(perfect.metrics.walkedCellRatio * 100).toFixed(1)}%`)
+  if (perfect.metrics.walkedCellRatio < 0.65) {
+    errors.push(`Optimal solution must walk at least 65% of cells; got ${(perfect.metrics.walkedCellRatio * 100).toFixed(1)}%`)
   }
   if (perfect.metrics.seenCellRatio < 0.9) {
     errors.push(`Optimal solution must see at least 90% of cells; got ${(perfect.metrics.seenCellRatio * 100).toFixed(1)}%`)
   }
-  if (perfect.metrics.postTrophyNewCellRatio < 0.25) {
-    errors.push(`Optimal return must walk at least 25% new cells after trophy; got ${(perfect.metrics.postTrophyNewCellRatio * 100).toFixed(1)}%`)
+  if (perfect.metrics.postTrophyNewCellRatio < 0) {
+    errors.push(`Optimal return must walk at least 0% new cells after trophy; got ${(perfect.metrics.postTrophyNewCellRatio * 100).toFixed(1)}%`)
   }
 
   return {

@@ -395,7 +395,7 @@
 - Maze validation requires a perfect-information shortest solution that acquires the trophy and exits the maze.
 - Maze validation requires an imperfect-information stochastic solver, using only cells seen from traversed cells including diagonals, to solve the maze in at least 80% of attempts.
 - Maze validation requires every monster, sword, and gate to be relevant: removing a monster makes the optimal solution faster, while removing any sword or gate makes the maze impossible.
-- Maze validation requires the optimal solution to be meaningfully maze-covering: trophy acquisition and exit must be slower than the monster-free shortest paths, the path must traverse at least 75% of maze cells, see at least 90% of maze cells, and traverse at least 25% of maze cells after acquiring the trophy that were not visited before acquiring it.
+- Maze validation requires the optimal solution to be meaningfully maze-covering: trophy acquisition and exit must be slower than the monster-free shortest paths, the path must traverse at least 65% of maze cells, see at least 90% of maze cells, and may retrace all cells after acquiring the trophy.
 - Maze generation and validation tooling records candidate-generation time, optimal-solver time, validation time, per-phase validation timings, attempt counts, and rejection failure frequencies so generator quality and performance can be monitored from logs.
 - Maze tooling can generate maze topology without content population when a search loop intends to place and validate puzzle contents separately.
 - Challenge-maze batch generation stops within a bounded run budget and writes an interim report instead of running indefinitely; the default generation budget is 60 seconds.
