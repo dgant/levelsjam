@@ -16856,6 +16856,8 @@ function FlightRig({
           turn: number
         }
         getReplayControllerState?: () => {
+          cameraShakeAmplitude: number
+          cameraShakeEndsAt: number
           freeCamera: boolean
           animationSpeedMultiplier: number
           playerAnimationAction: TurnAction | null
@@ -17404,6 +17406,8 @@ function FlightRig({
       }),
       getReplayControllerState: () => ({
         animationSpeedMultiplier: globalAnimationSpeedMultiplier,
+        cameraShakeAmplitude: cameraShake.current.amplitude,
+        cameraShakeEndsAt: cameraShake.current.endsAt,
         freeCamera: freeCamera.current,
         inputEnabled: inputEnabledRef.current,
         inputEnabledAt: inputEnabledAt.current,
@@ -17604,24 +17608,28 @@ function FlightRig({
             previous: turnStateRef.current,
             state: turnStateRef.current
           }
-          const previousMinotaur = result.previous.monsters.find(
-            (monster) => monster.type === 'minotaur'
-          )
-          const nextMinotaur = result.state.monsters.find(
-            (monster) => monster.type === 'minotaur'
-          )
+          const movedMinotaur = result.state.monsters.find((nextMonster) => {
+            if (nextMonster.type !== 'minotaur') {
+              return false
+            }
 
-          if (
-            previousMinotaur &&
-            nextMinotaur &&
-            (
-              previousMinotaur.cell.x !== nextMinotaur.cell.x ||
-              previousMinotaur.cell.y !== nextMinotaur.cell.y
+            const previousMonster = result.previous.monsters.find(
+              (candidate) => candidate.id === nextMonster.id
             )
-          ) {
+
+            return Boolean(
+              previousMonster &&
+              (
+                previousMonster.cell.x !== nextMonster.cell.x ||
+                previousMonster.cell.y !== nextMonster.cell.y
+              )
+            )
+          })
+
+          if (movedMinotaur) {
             const distanceCells = Math.hypot(
-              nextMinotaur.cell.x - result.state.player.cell.x,
-              nextMinotaur.cell.y - result.state.player.cell.y
+              movedMinotaur.cell.x - result.state.player.cell.x,
+              movedMinotaur.cell.y - result.state.player.cell.y
             )
             const amplitude = MathUtils.clamp(
               0.24 / Math.max(distanceCells + 0.5, 1),
@@ -17757,6 +17765,14 @@ function FlightRig({
             const finalState = activeAnimation.killed
               ? resetTurnStateToCheckpoint(layout.maze, activeAnimation.to)
               : activeAnimation.to
+
+            if (activeAnimation.killed) {
+              cameraShake.current = {
+                amplitude: 0,
+                endsAt: 0
+              }
+              inputQueue.current = []
+            }
 
             turnStateRef.current = finalState
             if (activeAnimation.committedGlobalState && !activeAnimation.killed) {

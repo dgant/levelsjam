@@ -439,3 +439,18 @@ test('gameplay camera writes are centralized through the camera rig helper', () 
   assert.match(appSource, /fromWorldPosition: Vector3/)
   assert.match(appSource, /toWorldPosition: Vector3/)
 })
+
+test('death reset clears transient camera shake before accepting post-resurrection movement', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(
+    appSource,
+    /const finalState = activeAnimation\.killed[\s\S]*?resetTurnStateToCheckpoint\(layout\.maze, activeAnimation\.to\)[\s\S]*?if \(activeAnimation\.killed\) \{\s*cameraShake\.current = \{\s*amplitude: 0,\s*endsAt: 0\s*\}\s*inputQueue\.current = \[\]\s*\}[\s\S]*?turnStateRef\.current = finalState/,
+    'camera shake and buffered inputs from the killing turn must be cleared when resurrection reset commits'
+  )
+  assert.match(
+    appSource,
+    /const movedMinotaur = result\.state\.monsters\.find[\s\S]*?candidate\) => candidate\.id === nextMonster\.id[\s\S]*?if \(movedMinotaur\)/,
+    'minotaur camera shake must compare matching monster identities instead of first minotaur in queue order'
+  )
+})

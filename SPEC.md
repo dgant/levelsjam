@@ -358,6 +358,7 @@
 - If a monster attempts to move into the player cell, the player dies.
 - Player death fades the viewport to black during the movement animation, resets the current maze state to the last checkpoint, and fades back in over `3s`.
 - Player death fades to black over `125ms` and fades back to the camera view over `3s`.
+- Player death clears transient camera shake and queued movement commands when the maze state resets, so movement after resurrection cannot inherit effects from the killing turn or from buffered pre-death input.
 - The sword-strike and player-death fade overlays are applied before the vignette effect so the vignette is still visible on top of the fade color.
 - The current checkpoint is the maze entrance position and entrance-facing direction.
 - Each generated maze places one minotaur, one werewolf, and one spider on distinct non-player tiles.
