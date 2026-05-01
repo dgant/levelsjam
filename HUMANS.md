@@ -1,7 +1,7 @@
 # How To Work On This Project
 
 ## Current State
-The repository contains a runnable browser game prototype for GitHub Pages. The intended build serves a three.js scene with turn-based grid movement, an `F1` free-camera inspection toggle, a `C` credits modal, a local Poly Haven `overcast_soil` HDRI used for the visible skybox, an infinite `puddle-ground` base plane plus a maze-local lit floor patch, one randomly selected persisted maze built from `stone-wall-29` wall meshes, maze-mounted metal sconces with asynchronously loaded animated torch billboards, baked per-maze torch, moonlight, and skylight lightmaps, static local reflection probes for in-maze specular response, volumetric-lightmap probe data, and a backquote visual-controls panel with exposure, `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, `Reflection Intensity`, ambient-occlusion mode, tone-mapper, post-effect controls, and build metadata in the FPS overlay.
+The repository contains a runnable browser game prototype for GitHub Pages. The intended build serves a three.js scene with turn-based grid movement, an `F1` free-camera inspection toggle, a `C` credits modal, a local Poly Haven `qwantani_moon_noon_puresky` EXR used for the visible skybox, a maze-local lit floor patch, persisted levels built from `stone-wall-29` wall meshes, maze-mounted metal sconces with asynchronously loaded animated torch billboards, baked per-maze torch, moonlight, and skylight lightmaps, static local reflection probes for in-maze specular response, volumetric-lightmap probe data, and a backquote visual-controls panel with exposure, `Surface Lightmap`, `Dynamic Volumetric`, `Static Volumetric`, `Reflection Intensity`, ambient-occlusion mode, tone-mapper, post-effect controls, and build metadata in the FPS overlay.
 The initial `MINOTAUR` loading shell now appears directly from inline HTML in [index.html](/E:/p/levelsjam/index.html) before the React bundle finishes booting.
 The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutRuntime.ts](/E:/p/levelsjam/src/lib/sceneLayoutRuntime.ts) so the main app bundle stays small, while Node tests and scripts continue to use the synchronous [sceneLayout.js](/E:/p/levelsjam/src/lib/sceneLayout.js) path.
 
@@ -75,7 +75,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify horizontal speed, vertical speed, fall speed, acceleration, deceleration, and gravity match the documented targets.
 - Verify horizontal motion follows the current camera-relative input direction and that directly opposing input decelerates rather than accelerates through the turn.
 - Verify mouse lock releases on escape-style modifier keys and only re-engages after an explicit click on the scene canvas.
-- Verify the visible skybox comes from local `overcast_soil_1k.hdr`.
+- Verify the visible skybox comes from local `qwantani_moon_noon_puresky_2k.exr`.
 - Verify the visible skybox brightness tracks the same calibrated HDRI path as the environment lighting.
 - Verify the ground, maze walls, and sconces load the committed PBR texture packs instead of preview images.
 - Verify the torch billboard uses the linked flipbook asset rather than a generated placeholder atlas.
@@ -158,7 +158,7 @@ The browser runtime now lazy-loads persisted maze payloads through [sceneLayoutR
 - Verify pressing backquote opens the visual controls panel.
 - Verify the panel no longer exposes obsolete atmosphere or sun controls.
 - Verify opening the panel releases mouse lock and clicking inside the panel does not relock the pointer.
-- Verify the loading subtitle width stays visually stable while the animated dots change.
+- Verify the loading overlay uses `title.png` and `subtitle.png`, and the subtitle scales smoothly without animated ellipsis text.
 - Verify the loaded scene uses one of the persisted maze files instead of the previous random wall field.
 - Verify the repository contains at least five valid maze files, that each maze file includes baked lightmap data, and that maze topology generation remains under 100ms before the later bake step.
 - Verify the validation path records a successful replayable solution for each persisted maze and rejects mazes that cannot be beaten.

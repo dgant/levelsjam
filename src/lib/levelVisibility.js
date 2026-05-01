@@ -30,7 +30,8 @@ function getVisibilityCellsFrom(maze, cell) {
 export function getAdjacentLevelVisibleCellKeys(
   currentMaze,
   targetMaze,
-  currentVisibleCellKeys
+  currentVisibleCellKeys,
+  options = {}
 ) {
   if (!currentMaze || !targetMaze || !currentVisibleCellKeys) {
     return null
@@ -38,8 +39,26 @@ export function getAdjacentLevelVisibleCellKeys(
 
   const directExit = getExitToLevel(currentMaze, targetMaze.id)
   const targetExitToCurrent = getExitToLevel(targetMaze, currentMaze.id)
+  const maxPortalDistanceCells = Number.isFinite(options.maxPortalDistanceCells)
+    ? options.maxPortalDistanceCells
+    : Number.POSITIVE_INFINITY
+  const currentPlayerCell = options.currentPlayerCell ?? null
+  const isPortalNearPlayer = (cell) => {
+    if (!currentPlayerCell) {
+      return true
+    }
 
-  if (directExit && currentVisibleCellKeys.has(cellKey(directExit.cell))) {
+    return (
+      Math.abs(cell.x - currentPlayerCell.x) +
+      Math.abs(cell.y - currentPlayerCell.y)
+    ) <= maxPortalDistanceCells
+  }
+
+  if (
+    directExit &&
+    currentVisibleCellKeys.has(cellKey(directExit.cell)) &&
+    isPortalNearPlayer(directExit.cell)
+  ) {
     const targetConnectionCell = targetExitToCurrent?.cell ?? getIngressCell(targetMaze)
     return targetConnectionCell ? getVisibilityCellsFrom(targetMaze, targetConnectionCell) : []
   }
@@ -47,9 +66,11 @@ export function getAdjacentLevelVisibleCellKeys(
   const currentIngressCell = getIngressCell(currentMaze)
 
   if (
+    !directExit &&
     targetExitToCurrent &&
     currentIngressCell &&
-    currentVisibleCellKeys.has(cellKey(currentIngressCell))
+    currentVisibleCellKeys.has(cellKey(currentIngressCell)) &&
+    isPortalNearPlayer(currentIngressCell)
   ) {
     return getVisibilityCellsFrom(targetMaze, targetExitToCurrent.cell)
   }

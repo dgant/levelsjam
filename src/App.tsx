@@ -1,7 +1,7 @@
 import {
-  ChromaticAberration,
   DepthOfField,
   EffectComposer,
+  LensFlareEffect as PostLensFlareEffect,
   N8AO,
   SSAO,
   ToneMapping
@@ -55,6 +55,7 @@ import {
   PMREMGenerator,
   PlaneGeometry,
   Quaternion,
+  Raycaster,
   RedFormat,
   RGBAFormat,
   RGBFormat,
@@ -103,7 +104,7 @@ import {
   ToneMappingMode as PostToneMappingMode,
   VignetteEffect
 } from 'postprocessing'
-import { HDRLoader } from 'three/addons/loaders/HDRLoader.js'
+import { EXRLoader } from 'three/addons/loaders/EXRLoader.js'
 import { UnrealBloomPass as ThreeUnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { SSRPass as ThreeSSRPass } from 'three/addons/postprocessing/SSRPass.js'
 import {
@@ -164,8 +165,10 @@ import {
 import {
   cellKey,
   createInitialTurnState,
+  getNeighbor,
   getOpenDoorIds,
   getOpenGateIds,
+  normalizeEdge,
   resetTurnStateToCheckpoint,
   type CardinalDirection,
   type MazeCell,
@@ -183,6 +186,7 @@ import {
   findIngressCellForGlobalTransition,
   getGlobalTurnStateForLevel,
   replaceGlobalTurnStateForLevel,
+  resetGlobalTurnStateLevel,
   transitionGlobalTurnState,
   type GlobalTurnState
 } from './lib/globalTurnRules.js'
@@ -198,13 +202,21 @@ declare const __GIT_REVISION__: string
 declare const __GIT_REVISION_TIMESTAMP__: string
 
 const assetBase = import.meta.env.BASE_URL
-const ENVIRONMENT_URL = `${assetBase}textures/environment/overcast_soil_1k.hdr`
+const ENVIRONMENT_URL = `${assetBase}textures/environment/qwantani_moon_noon_puresky_2k.exr`
+const TITLE_IMAGE_URL = `${assetBase}textures/title.png`
+const SUBTITLE_IMAGE_URL = `${assetBase}textures/subtitle.png`
+const MUSIC_TRACK_URLS = {
+  chamber: `${assetBase}music/Timebender.ogg`,
+  hallway: `${assetBase}music/Mystery Manor.mp3`,
+  maze: `${assetBase}music/radakan - mist forest.mp3`,
+  throne: `${assetBase}music/stone_guardian_loop.mp3`
+} as const
 const FIRE_FLIPBOOK_URL =
   `${assetBase}textures/fire/CampFire_l_nosmoke_front_Loop_01_4K_6x6.png`
 const MONSTER_MODEL_URLS = {
   minotaur: `${assetBase}models/minotaur-runtime/scene.gltf`,
-  spider: `${assetBase}models/pbr_jumping_spider_monster/scene.gltf`,
-  werewolf: `${assetBase}models/leowolf/scene.gltf`
+  spider: `${assetBase}models/pbr_jumping_spider_monster_runtime/scene.gltf`,
+  werewolf: `${assetBase}models/pale_dread_white_werewolf_runtime/scene.gltf`
 } as const
 const GATE_MODEL_URL = `${assetBase}models/metal_gate_runtime/scene.gltf`
 const SWORD_MODEL_URL = `${assetBase}models/bronze_sword_mycean/scene.gltf`
@@ -219,10 +231,28 @@ const RUNTIME_MODEL_URLS = [
   MONSTER_MODEL_URLS.spider,
   MONSTER_MODEL_URLS.werewolf
 ] as const
-const runtimeModelPreloadPromise = Promise.all(
-  RUNTIME_MODEL_URLS.map((url) => loadCachedGltfRoot(url))
+const STARTUP_CRITICAL_RUNTIME_MODEL_URLS = [
+  GATE_MODEL_URL,
+  SWORD_MODEL_URL,
+  TROPHY_MODEL_URL,
+  DROOP_CUP_MODEL_URL
+] as const
+const startupCriticalRuntimeModelPreloadPromise = Promise.all(
+  STARTUP_CRITICAL_RUNTIME_MODEL_URLS.map((url) => loadCachedGltfRoot(url))
 )
-void runtimeModelPreloadPromise.catch(() => {
+let backgroundRuntimeModelPreloadPromise: Promise<unknown[]> | null = null
+
+function preloadBackgroundRuntimeModels() {
+  if (!backgroundRuntimeModelPreloadPromise) {
+    backgroundRuntimeModelPreloadPromise = Promise.all(
+      RUNTIME_MODEL_URLS.map((url) => loadCachedGltfRoot(url))
+    )
+  }
+
+  return backgroundRuntimeModelPreloadPromise
+}
+
+void startupCriticalRuntimeModelPreloadPromise.catch(() => {
   // Scene readiness reports the actual load error from the component effect.
 })
 const PUDDLE_TEXTURE_URLS = {
@@ -281,7 +311,6 @@ const FIRE_FLIPBOOK_DURATION_SECONDS = 0.5
 const TURN_ANIMATION_DURATION_MS = 250
 let globalAnimationSpeedMultiplier = 1
 
-const MONSTER_EYE_COLOR = new Color(4, 0, 0)
 const MONSTER_EYE_RADIUS = 0.0075
 const MONSTER_EYE_TYPES = ['minotaur', 'spider', 'werewolf'] as const
 
@@ -598,6 +627,9 @@ function collectRenderProfileSteps(frameCount = activeFrameProfile.frameCount) {
 }
 
 const PROFILED_PASS_RENDER = Symbol('levelsjam.profiledPassRender')
+const PROFILED_N8AO_PASS = Symbol('levelsjam.profiledN8AOPass')
+const PROFILED_N8AO_QUAD_RENDER = Symbol('levelsjam.profiledN8AOQuadRender')
+const PATCHED_N8AO_SKY_DEPTH = Symbol('levelsjam.patchedN8AOSkyDepth')
 let postprocessingPassInstrumentationInstalled = false
 
 function getPostprocessingPassProfileLabel(pass: Pass) {
@@ -675,6 +707,102 @@ function installPostprocessingPassInstrumentation() {
 
 installPostprocessingPassInstrumentation()
 
+function instrumentN8AOQuadRender(
+  pass: Record<string, unknown>,
+  propertyName: string,
+  label: string
+) {
+  const quad = pass[propertyName] as {
+    [PROFILED_N8AO_QUAD_RENDER]?: boolean
+    render?: (renderer: WebGLRenderer) => void
+  } | null | undefined
+
+  if (!quad?.render || quad[PROFILED_N8AO_QUAD_RENDER]) {
+    return
+  }
+
+  const originalRender = quad.render.bind(quad)
+
+  quad.render = ((renderer: WebGLRenderer) => withFrameProfileScope(
+    label,
+    () => originalRender(renderer),
+    { gpu: true }
+  )) as typeof quad.render
+  quad[PROFILED_N8AO_QUAD_RENDER] = true
+}
+
+function instrumentN8AOPass(pass: Record<string | symbol, unknown>) {
+  if (pass[PROFILED_N8AO_PASS]) {
+    return
+  }
+
+  const originalDetectTransparency = pass.detectTransparency
+  if (typeof originalDetectTransparency === 'function') {
+    pass.detectTransparency = function profiledDetectTransparency(this: Record<string, unknown>) {
+      return withFrameProfileScope(
+        'N8AO internals/detect transparent scene objects',
+        () => originalDetectTransparency.call(this)
+      )
+    }
+  }
+
+  const originalRenderTransparency = pass.renderTransparency
+  if (typeof originalRenderTransparency === 'function') {
+    pass.renderTransparency = function profiledRenderTransparency(
+      this: Record<string, unknown>,
+      renderer: WebGLRenderer
+    ) {
+      return withFrameProfileScope(
+        'N8AO internals/render transparency-aware AO inputs',
+        () => originalRenderTransparency.call(this, renderer),
+        { gpu: true }
+      )
+    }
+  }
+
+  pass[PROFILED_N8AO_PASS] = true
+}
+
+function instrumentN8AOQuads(pass: Record<string, unknown>) {
+  instrumentN8AOQuadRender(pass, 'depthDownsampleQuad', 'N8AO internals/fullscreen depth-normal downsample')
+  instrumentN8AOQuadRender(pass, 'effectShaderQuad', 'N8AO internals/fullscreen AO sampling shader')
+  instrumentN8AOQuadRender(pass, 'poissonBlurQuad', 'N8AO internals/fullscreen denoise blur')
+  instrumentN8AOQuadRender(pass, 'accumulationQuad', 'N8AO internals/fullscreen temporal accumulation')
+  instrumentN8AOQuadRender(pass, 'effectCompositerQuad', 'N8AO internals/fullscreen AO composite')
+  instrumentN8AOQuadRender(pass, 'depthCopyPass', 'N8AO internals/transparency depth-copy fullscreen pass')
+  patchN8AOCompositerSkyDepth(pass)
+}
+
+function patchN8AOCompositerSkyDepth(pass: Record<string, unknown>) {
+  const quad = pass.effectCompositerQuad as {
+    material?: ShaderMaterial & { [PATCHED_N8AO_SKY_DEPTH]?: boolean }
+  } | null | undefined
+  const material = quad?.material
+
+  if (!material || material[PATCHED_N8AO_SKY_DEPTH]) {
+    return
+  }
+
+  const depthBranchAnchor = `        #endif
+        #ifdef HALFRES`
+
+  if (!material.fragmentShader.includes(depthBranchAnchor)) {
+    return
+  }
+
+  material.fragmentShader = material.fragmentShader.replace(
+    depthBranchAnchor,
+    `        #endif
+        if (depth >= 0.999999) {
+            gl_FragColor = sceneTexel;
+            return;
+        }
+        #ifdef HALFRES`
+  )
+  material.needsUpdate = true
+  material[PATCHED_N8AO_SKY_DEPTH] = true
+}
+
 const FIRE_FLIPBOOK_FRAME_CROP = {
   maxX: 0.6187683284457478,
   maxY: 0.8123167155425219,
@@ -695,8 +823,20 @@ const FIRE_BILLBOARD_INTENSITY_SCALE =
 const LENS_FLARE_OCCLUSION_MARGIN = 0.05
 const LENS_FLARE_SOURCE_REFRESH_SECONDS = 0.1
 const DEFAULT_HDRI_BRIGHTNESS = 1
+const SKYBOX_ROTATION_Y_RADIANS = MathUtils.degToRad(128)
+const DEFAULT_AUDIO_SETTINGS: AudioSettings = {
+  musicEnabled: true,
+  musicVolume: 0.7,
+  soundEnabled: true,
+  soundVolume: 0.7
+}
 const DEFAULT_SATURATION = 1
 const DEFAULT_MINOTAUR_ALBEDO_HEX = '#2b2130'
+const DEFAULT_MONSTER_EYE_COLORS: MonsterEyeColorSettings = {
+  minotaur: '#ff0000',
+  spider: '#ff0000',
+  werewolf: '#ff0000'
+}
 const TORCH_BILLBOARD_LAYER = 1
 const FLOOR_LIGHTMAP_INTENSITY_SCALE = 1
 const WALL_LIGHTMAP_INTENSITY_SCALE = 1
@@ -708,14 +848,25 @@ const DEFAULT_PROBE_IBL_INTENSITY = 1
 const DEFAULT_REFLECTION_INTENSITY = 1
 const MAX_LIGHTING_CONTRIBUTION_INTENSITY = 4
 const MAX_REFLECTION_CONTRIBUTION_INTENSITY = 12
+const HALF_FLOAT_MAX_VALUE = 65504
 const BLOCKED_MOVE_FRACTION = 0.25
+const STARTUP_MARKER_ORIGIN = performance.now()
 
 function recordStartupMarker(name: string) {
   if (document.body.dataset[name] && document.body.dataset[name] !== 'pending') {
     return
   }
 
-  document.body.dataset[name] = performance.now().toFixed(1)
+  document.body.dataset[name] = Math.max(
+    0,
+    performance.now() - STARTUP_MARKER_ORIGIN
+  ).toFixed(1)
+}
+
+function toClampedHalfFloat(value: number) {
+  return DataUtils.toHalfFloat(
+    MathUtils.clamp(Number.isFinite(value) ? value : 0, 0, HALF_FLOAT_MAX_VALUE)
+  )
 }
 
 const MATERIAL_TEXTURE_PROPERTY_NAMES = [
@@ -922,21 +1073,24 @@ async function warmScenePrograms(
   camera: ThreeCamera,
   isCancelled: () => boolean,
   allowSyncFallback = true,
-  includeProbeBlendVariants = false
+  includeProbeBlendVariants = false,
+  forceAllObjects = false
 ) {
   const hiddenObjects: Object3D[] = []
   const frustumCulledObjects: Array<{ frustumCulled: boolean; object: Object3D }> = []
 
-  scene.traverse((object) => {
-    if (!object.visible) {
-      hiddenObjects.push(object)
-      object.visible = true
-    }
-    if (object.frustumCulled) {
-      frustumCulledObjects.push({ frustumCulled: object.frustumCulled, object })
-      object.frustumCulled = false
-    }
-  })
+  if (forceAllObjects) {
+    scene.traverse((object) => {
+      if (!object.visible) {
+        hiddenObjects.push(object)
+        object.visible = true
+      }
+      if (object.frustumCulled) {
+        frustumCulledObjects.push({ frustumCulled: object.frustumCulled, object })
+        object.frustumCulled = false
+      }
+    })
+  }
 
   try {
     if (isCancelled()) {
@@ -949,13 +1103,16 @@ async function warmScenePrograms(
     // variants that R3F/three later compile on their first visible draw.
     if (allowSyncFallback) {
       const previousRenderTarget = gl.getRenderTarget()
+      const warmupTarget = new WebGLRenderTarget(1, 1)
 
       gl.compile(scene, camera)
+      gl.setRenderTarget(warmupTarget)
       gl.render(scene, camera)
       if (includeProbeBlendVariants) {
         warmProbeBlendMaterialVariants(gl, scene, camera)
       }
       gl.setRenderTarget(previousRenderTarget)
+      warmupTarget.dispose()
     }
   } finally {
     for (const object of hiddenObjects) {
@@ -1002,6 +1159,28 @@ async function waitForRendererResourceStability(
   }
 }
 
+async function waitForRuntimeProbeResidency(
+  scene: ThreeScene,
+  isCancelled: () => boolean,
+  maxFrames = 180
+) {
+  for (let frame = 0; frame < maxFrames; frame += 1) {
+    if (isCancelled()) {
+      return
+    }
+
+    const probeState = scene.userData.reflectionProbeState as
+      | RuntimeReflectionProbeState
+      | undefined
+
+    if (probeState?.ready && probeState.complete !== false) {
+      return
+    }
+
+    await waitForNextAnimationFrame()
+  }
+}
+
 const MAZE_GROUND_PATCH_OFFSET_Y = 0.002
 const REFLECTION_PROBE_RENDER_SIZE = 32
 const REFLECTION_PROBE_AMBIENT_RENDER_SIZE = 24
@@ -1009,7 +1188,7 @@ const REFLECTION_PROBE_FAR = 48
 const REFLECTION_PROBE_LOAD_CONCURRENCY = 8
 const REFLECTION_PROBE_BACKGROUND_LOAD_CONCURRENCY = 4
 const REFLECTION_PROBE_PUBLISH_INTERVAL_MS = 250
-const REFLECTION_PROBE_RUNTIME_RESIDENT_LIMIT = 128
+const REFLECTION_PROBE_RUNTIME_RESIDENT_LIMIT = 32
 const REFLECTION_PROBE_RUNTIME_TEXTURE_MEMORY_BUDGET_BYTES = 768 * 1024 * 1024
 const REFLECTION_PROBE_STARTUP_DELAY_MS = 0
 const REFLECTION_PROBE_STARTUP_CAPTURE_DELAY_MS = 250
@@ -1024,7 +1203,7 @@ const DEFAULT_VOLUMETRIC_AMBIENT_HEX = '#2c2c68'
 const DEFAULT_VOLUMETRIC_FOG_DISTANCE = 12
 const EFFECT_EPSILON = 0.0001
 const MAX_PHYSICS_SUBSTEPS = 10
-const MIN_LOADING_OVERLAY_MS = 200
+const MIN_LOADING_OVERLAY_MS = 0
 const DEFAULT_PROBE_BOX_MAX = new Vector3(0.5, WALL_HEIGHT, 0.5)
 const DEFAULT_PROBE_BOX_MIN = new Vector3(-0.5, GROUND_Y, -0.5)
 const DEFAULT_PROBE_POSITION = new Vector3(0, 1, 0)
@@ -1101,6 +1280,39 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   outputColor = vec4(mix(inputColor.rgb, fadeColor, clamp(fadeAlpha, 0.0, 1.0)), inputColor.a);
 }
 `
+const radialChromaticAberrationEffectShader = `
+uniform float exponent;
+uniform float intensity;
+uniform float maxOffset;
+
+void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
+  vec2 centered = (uv * 2.0) - 1.0;
+  float distanceFromCenter = length(centered);
+
+  if (distanceFromCenter <= 0.000001 || intensity <= 0.0 || maxOffset <= 0.0) {
+    outputColor = inputColor;
+    return;
+  }
+
+  float powerValue = max(abs(exponent), 0.000001);
+  float radialWeight = exponent >= 0.0
+    ? pow(clamp(distanceFromCenter, 0.0, 1.41421356237), powerValue)
+    : 1.0 - pow(clamp(1.41421356237 - distanceFromCenter, 0.0, 1.41421356237) / 1.41421356237, powerValue);
+  vec2 direction = centered / distanceFromCenter;
+  vec2 offset = direction * maxOffset * intensity * radialWeight;
+  vec3 color = vec3(0.0);
+
+  color += texture2D(inputBuffer, clamp(uv + (offset * -3.0), vec2(0.0), vec2(1.0))).rgb * vec3(0.02, 0.05, 0.16);
+  color += texture2D(inputBuffer, clamp(uv + (offset * -2.0), vec2(0.0), vec2(1.0))).rgb * vec3(0.05, 0.10, 0.24);
+  color += texture2D(inputBuffer, clamp(uv + (offset * -1.0), vec2(0.0), vec2(1.0))).rgb * vec3(0.10, 0.18, 0.25);
+  color += texture2D(inputBuffer, uv).rgb * vec3(0.18, 0.34, 0.18);
+  color += texture2D(inputBuffer, clamp(uv + (offset * 1.0), vec2(0.0), vec2(1.0))).rgb * vec3(0.25, 0.18, 0.10);
+  color += texture2D(inputBuffer, clamp(uv + (offset * 2.0), vec2(0.0), vec2(1.0))).rgb * vec3(0.24, 0.10, 0.05);
+  color += texture2D(inputBuffer, clamp(uv + (offset * 3.0), vec2(0.0), vec2(1.0))).rgb * vec3(0.16, 0.05, 0.02);
+
+  outputColor = vec4(color, inputColor.a);
+}
+`
 const anamorphicEffectShader = `
 uniform vec3 colorGain;
 uniform float intensity;
@@ -1144,99 +1356,6 @@ float interleavedGradientNoise(vec2 position) {
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
   float noise = interleavedGradientNoise(gl_FragCoord.xy) - 0.5;
   outputColor = vec4(inputColor.rgb + (noise / 255.0), inputColor.a);
-}
-`
-const torchMultiLensFlareEffectShader = `
-uniform vec4 lensData[5];
-uniform int lensCount;
-uniform vec3 colorGain;
-uniform float intensity;
-uniform float opacity;
-uniform float flareSize;
-uniform float flareShape;
-uniform float glareSize;
-uniform float ghostScale;
-uniform float haloScale;
-uniform int anamorphicEnabled;
-uniform int secondaryGhostsEnabled;
-uniform int starBurstEnabled;
-uniform float starBurstIntensity;
-uniform int starPoints;
-
-float cheapFalloff(float distanceValue, float scaleValue) {
-  float normalizedDistance = distanceValue / max(scaleValue, 0.0001);
-
-  return 1.0 / (1.0 + (normalizedDistance * normalizedDistance));
-}
-
-float lineContribution(vec2 delta, vec2 direction, float width, float lengthScale) {
-  vec2 axis = normalize(direction);
-  vec2 normal = vec2(-axis.y, axis.x);
-  float along = abs(dot(delta, axis));
-  float across = abs(dot(delta, normal));
-
-  return cheapFalloff(across, width) * cheapFalloff(along, lengthScale);
-}
-
-vec3 renderSingleFlare(vec2 uv, vec4 data) {
-  vec2 lensUv = (data.xy * 0.5) + 0.5;
-  vec2 delta = uv - lensUv;
-  vec2 fromCenter = lensUv - vec2(0.5);
-  float sourceStrength = data.z;
-  float radius = length(delta);
-  float coreRadius = max(flareSize * 90.0, 0.001);
-  float core = cheapFalloff(radius, coreRadius) * cheapFalloff(radius, coreRadius * 0.45);
-  float glare = glareSize * cheapFalloff(radius, coreRadius * 7.0);
-  float halo = haloScale * cheapFalloff(abs(length(uv - vec2(0.5)) - length(fromCenter)), coreRadius * 18.0);
-  float anamorphic = 0.0;
-
-  if (anamorphicEnabled == 1) {
-    anamorphic = lineContribution(delta, vec2(1.0, 0.0), coreRadius * 0.18, coreRadius * 75.0) * max(flareShape, 0.0);
-  }
-
-  float ghosts = 0.0;
-  if (secondaryGhostsEnabled == 1 || ghostScale > 0.0) {
-    vec2 ghostAxis = fromCenter;
-    float ghostRadius = max(coreRadius * (12.0 + (ghostScale * 24.0)), 0.001);
-    ghosts += cheapFalloff(length(uv - (vec2(0.5) - ghostAxis * 0.45)), ghostRadius) * 0.18;
-    ghosts += cheapFalloff(length(uv - (vec2(0.5) + ghostAxis * 0.85)), ghostRadius) * 0.10;
-  }
-
-  float star = 0.0;
-  if (starBurstEnabled == 1 && starBurstIntensity > 0.0) {
-    int pointCount = clamp(starPoints, 2, 12);
-    for (int index = 0; index < 12; index += 1) {
-      if (index >= pointCount) {
-        break;
-      }
-      float angle = 3.14159265 * float(index) / float(pointCount);
-      star += lineContribution(delta, vec2(cos(angle), sin(angle)), coreRadius * 0.12, coreRadius * 48.0);
-    }
-    star *= starBurstIntensity / float(pointCount);
-  }
-
-  float signal =
-    (core * 0.28) +
-    (glare * 0.10) +
-    (halo * 0.04) +
-    (anamorphic * 0.16) +
-    (ghosts * ghostScale) +
-    (star * 0.18);
-
-  return colorGain * signal * sourceStrength * intensity * opacity;
-}
-
-void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
-  vec3 flare = vec3(0.0);
-
-  for (int index = 0; index < 5; index += 1) {
-    if (index >= lensCount) {
-      break;
-    }
-    flare += renderSingleFlare(uv, lensData[index]);
-  }
-
-  outputColor = vec4(inputColor.rgb + flare, inputColor.a);
 }
 `
 const fogVolumeEffectShader = `
@@ -1456,7 +1575,7 @@ vec4 sampleFogAmbientCandidate(int atlasIndex, vec3 worldPosition, vec2 gridPosi
   vec4 coeff0 = fogSampleProbeCoeff(atlasIndex, uv);
 
   if (coeff0.a <= 0.0) {
-    return vec4(0.0);
+    return vec4(fallbackProbeAmbientColor, 1.0);
   }
 
   float visibility = sampleFogProbeConnectivityBlended(atlasIndex, gridPosition, clampedCell);
@@ -1664,6 +1783,8 @@ type MonsterEyeSettings = Record<MonsterType, {
   right: MonsterEyeOffset
 }>
 
+type MonsterEyeColorSettings = Record<MonsterType, string>
+
 type ProbeDebugMode =
   | 'none'
   | 'reflection'
@@ -1677,10 +1798,12 @@ type AnamorphicSettings = EffectSettings & {
 }
 
 type ChromaticAberrationSettings = EffectSettings & {
+  exponent: number
   modulationOffset: number
   offsetX: number
   offsetY: number
   radialModulation: boolean
+  screenShakeIntensity: number
 }
 
 type SSRPassOutputMode =
@@ -1730,6 +1853,7 @@ type LensFlareSettings = EffectSettings & {
   aditionalStreaks: boolean
   animated: boolean
   anamorphic: boolean
+  colorGain: number
   flareShape: number
   flareSize: number
   flareSpeed: number
@@ -1741,6 +1865,13 @@ type LensFlareSettings = EffectSettings & {
   starBurst: boolean
   starBurstIntensity: number
   starPoints: number
+}
+
+type AudioSettings = {
+  musicEnabled: boolean
+  musicVolume: number
+  soundEnabled: boolean
+  soundVolume: number
 }
 
 type MovementSettings = {
@@ -1914,6 +2045,7 @@ type VisualSettings = {
   lightmapContribution: LightingContributionSettings
   lensFlare: LensFlareSettings
   minotaurAlbedoHex: string
+  monsterEyeColors: MonsterEyeColorSettings
   probeDebugMode: ProbeDebugMode
   reflectionContribution: LightingContributionSettings
   saturation: number
@@ -1963,6 +2095,7 @@ type VisualSettingsPatch = Partial<{
   lensFlare: Partial<LensFlareSettings>
   lightmapContribution: Partial<LightingContributionSettings>
   minotaurAlbedoHex: string
+  monsterEyeColors: Partial<MonsterEyeColorSettings>
   movement: Partial<MovementSettings>
   monsterEyes: Partial<Record<MonsterType, Partial<{
     left: Partial<MonsterEyeOffset>
@@ -2474,6 +2607,30 @@ class PlayerFadeEffectImpl extends Effect {
   }
 }
 
+class RadialChromaticAberrationEffectImpl extends Effect {
+  constructor() {
+    super('RadialChromaticAberrationEffect', radialChromaticAberrationEffectShader, {
+      uniforms: new Map([
+        ['exponent', new Uniform(1)],
+        ['intensity', new Uniform(0)],
+        ['maxOffset', new Uniform(0.001)]
+      ])
+    })
+  }
+
+  set exponent(value: number) {
+    this.uniforms.get('exponent').value = MathUtils.clamp(value, -8, 8)
+  }
+
+  set intensity(value: number) {
+    this.uniforms.get('intensity').value = Math.max(0, value)
+  }
+
+  set maxOffset(value: number) {
+    this.uniforms.get('maxOffset').value = Math.max(0, value)
+  }
+}
+
 class AnamorphicEffectImpl extends Effect {
   constructor() {
     super('AnamorphicEffect', anamorphicEffectShader, {
@@ -2516,80 +2673,6 @@ class AnamorphicEffectImpl extends Effect {
 class DitherEffectImpl extends Effect {
   constructor() {
     super('DitherEffect', ditherEffectShader)
-  }
-}
-
-class TorchMultiLensFlareEffectImpl extends Effect {
-  private readonly lensData: Vector4[]
-
-  constructor() {
-    const lensData = Array.from(
-      { length: MAX_SIMULTANEOUS_LENS_FLARES },
-      () => new Vector4(0, 0, 0, 0)
-    )
-
-    super('TorchMultiLensFlareEffect', torchMultiLensFlareEffectShader, {
-      blendFunction: BlendFunction.NORMAL,
-      uniforms: new Map([
-        ['lensData', new Uniform(lensData)],
-        ['lensCount', new Uniform(0)],
-        ['colorGain', new Uniform(FIRE_COLOR.clone())],
-        ['intensity', new Uniform(0)],
-        ['opacity', new Uniform(0)],
-        ['flareSize', new Uniform(0)],
-        ['flareShape', new Uniform(0)],
-        ['glareSize', new Uniform(0)],
-        ['ghostScale', new Uniform(0)],
-        ['haloScale', new Uniform(0)],
-        ['anamorphicEnabled', new Uniform(0)],
-        ['secondaryGhostsEnabled', new Uniform(0)],
-        ['starBurstEnabled', new Uniform(0)],
-        ['starBurstIntensity', new Uniform(0)],
-        ['starPoints', new Uniform(3)]
-      ])
-    })
-
-    this.lensData = lensData
-  }
-
-  setLens(index: number, ndcX: number, ndcY: number, intensity: number) {
-    if (index < 0 || index >= this.lensData.length) {
-      return
-    }
-
-    this.lensData[index].set(ndcX, ndcY, intensity, 1)
-  }
-
-  clearLens(index: number) {
-    if (index < 0 || index >= this.lensData.length) {
-      return
-    }
-
-    this.lensData[index].set(0, 0, 0, 0)
-  }
-
-  set lensCount(value: number) {
-    this.uniforms.get('lensCount').value = MathUtils.clamp(
-      Math.floor(value),
-      0,
-      MAX_SIMULTANEOUS_LENS_FLARES
-    )
-  }
-
-  applySettings(settings: LensFlareSettings) {
-    this.uniforms.get('colorGain').value.copy(FIRE_COLOR)
-    this.uniforms.get('intensity').value = settings.enabled ? settings.intensity : 0
-    this.uniforms.get('opacity').value = MathUtils.clamp(settings.opacity, 0, 1)
-    this.uniforms.get('flareSize').value = Math.max(0, settings.flareSize)
-    this.uniforms.get('flareShape').value = Math.max(0, settings.flareShape)
-    this.uniforms.get('glareSize').value = Math.max(0, settings.glareSize)
-    this.uniforms.get('ghostScale').value = Math.max(0, settings.ghostScale)
-    this.uniforms.get('haloScale').value = Math.max(0, settings.haloScale)
-    this.uniforms.get('anamorphicEnabled').value = settings.anamorphic ? 1 : 0
-    this.uniforms.get('secondaryGhostsEnabled').value = settings.secondaryGhosts ? 1 : 0
-    this.uniforms.get('starBurstEnabled').value = settings.starBurst ? 1 : 0
-    this.uniforms.get('starBurstIntensity').value = Math.max(0, settings.starBurstIntensity)
-    this.uniforms.get('starPoints').value = MathUtils.clamp(Math.round(settings.starPoints), 2, 12)
   }
 }
 
@@ -2798,6 +2881,7 @@ function createDefaultVisualSettings(): VisualSettings {
       aditionalStreaks: false,
       animated: false,
       anamorphic: true,
+      colorGain: 1,
       enabled: true,
       flareShape: 0.03,
       flareSize: 0.0015,
@@ -2813,6 +2897,7 @@ function createDefaultVisualSettings(): VisualSettings {
       starPoints: 3
     },
     minotaurAlbedoHex: DEFAULT_MINOTAUR_ALBEDO_HEX,
+    monsterEyeColors: { ...DEFAULT_MONSTER_EYE_COLORS },
     probeDebugMode: 'none',
     reflectionContribution: {
       enabled: true,
@@ -2837,11 +2922,13 @@ function createDefaultVisualSettings(): VisualSettings {
     },
     chromaticAberration: {
       enabled: false,
+      exponent: 1,
       intensity: 0,
       modulationOffset: 0.15,
       offsetX: 0.001,
       offsetY: 0.001,
-      radialModulation: false
+      radialModulation: false,
+      screenShakeIntensity: 0
     },
     depthOfField: {
       bokehScale: 0,
@@ -3059,6 +3146,22 @@ function applyVisualSettingsPatch(
           ...patch.movement
         }
       : settings.movement,
+    monsterEyeColors: patch.monsterEyeColors
+      ? {
+          minotaur: normalizeHexColor(
+            patch.monsterEyeColors.minotaur ?? settings.monsterEyeColors.minotaur,
+            settings.monsterEyeColors.minotaur
+          ),
+          spider: normalizeHexColor(
+            patch.monsterEyeColors.spider ?? settings.monsterEyeColors.spider,
+            settings.monsterEyeColors.spider
+          ),
+          werewolf: normalizeHexColor(
+            patch.monsterEyeColors.werewolf ?? settings.monsterEyeColors.werewolf,
+            settings.monsterEyeColors.werewolf
+          )
+        }
+      : settings.monsterEyeColors,
     monsterEyes: patch.monsterEyes
       ? {
           minotaur: {
@@ -5219,23 +5322,28 @@ function warmProbeBlendMaterialVariants(
   scene: ThreeScene,
   camera: ThreeCamera
 ) {
+  const renderWarmupGroup = (group: Group) => {
+    const previousRenderTarget = gl.getRenderTarget()
+    const warmupTarget = new WebGLRenderTarget(1, 1)
+    const warmupScene = new ThreeScene()
+
+    warmupScene.add(group)
+    group.visible = true
+    try {
+      gl.compile(warmupScene, camera)
+      gl.setRenderTarget(warmupTarget)
+      gl.render(warmupScene, camera)
+      gl.setRenderTarget(previousRenderTarget)
+    } finally {
+      warmupScene.remove(group)
+      warmupTarget.dispose()
+      group.visible = false
+    }
+  }
   const existingGroup = scene.userData.probeBlendWarmupGroup as Group | undefined
 
   if (existingGroup) {
-    existingGroup.visible = true
-    try {
-      const previousRenderTarget = gl.getRenderTarget()
-      const warmupTarget = new WebGLRenderTarget(1, 1)
-
-      gl.compile(scene, camera)
-      gl.render(scene, camera)
-      gl.setRenderTarget(warmupTarget)
-      gl.render(scene, camera)
-      gl.setRenderTarget(previousRenderTarget)
-      warmupTarget.dispose()
-    } finally {
-      existingGroup.visible = false
-    }
+    renderWarmupGroup(existingGroup)
     return
   }
 
@@ -5297,20 +5405,7 @@ function warmProbeBlendMaterialVariants(
 
   scene.add(group)
   scene.userData.probeBlendWarmupGroup = group
-  try {
-    const previousRenderTarget = gl.getRenderTarget()
-    const warmupTarget = new WebGLRenderTarget(1, 1)
-
-    group.visible = true
-    gl.compile(scene, camera)
-    gl.render(scene, camera)
-    gl.setRenderTarget(warmupTarget)
-    gl.render(scene, camera)
-    gl.setRenderTarget(previousRenderTarget)
-    warmupTarget.dispose()
-  } finally {
-    group.visible = false
-  }
+  renderWarmupGroup(group)
 }
 
 function getCubeUvTextureInfo(texture: Texture | null | undefined): ProbeTextureInfo | null {
@@ -7063,9 +7158,9 @@ function createLightmapAtlasTexture(
             (data[(pixelIndex * 3) + 2] ?? 0) / 255
           ]
 
-      outputData[destinationOffset] = DataUtils.toHalfFloat(decoded[0] ?? 0)
-      outputData[destinationOffset + 1] = DataUtils.toHalfFloat(decoded[1] ?? 0)
-      outputData[destinationOffset + 2] = DataUtils.toHalfFloat(decoded[2] ?? 0)
+      outputData[destinationOffset] = toClampedHalfFloat(decoded[0] ?? 0)
+      outputData[destinationOffset + 1] = toClampedHalfFloat(decoded[1] ?? 0)
+      outputData[destinationOffset + 2] = toClampedHalfFloat(decoded[2] ?? 0)
       outputData[destinationOffset + 3] = alphaHalfFloat
     }
   }
@@ -7120,18 +7215,22 @@ function getRuntimeSurfaceLightmapAtlasUrl(lightmap: MazeLightmap) {
     return null
   }
 
+  if (lightmap.atlasUrl.endsWith('surface-lightmap-rgbe.rgbe')) {
+    return lightmap.atlasUrl.replace(/surface-lightmap-rgbe\.rgbe$/, 'surface-lightmap-rgbe.png')
+  }
+
   if (
     lightmap.encoding === 'rgb16f' &&
     lightmap.atlasUrl.endsWith('/surface-lightmap.bin')
   ) {
-    return lightmap.atlasUrl.replace(/surface-lightmap\.bin$/, 'surface-lightmap-rgbe.rgbe')
+    return lightmap.atlasUrl.replace(/surface-lightmap\.bin$/, 'surface-lightmap-rgbe.png')
   }
 
   if (
     lightmap.encoding === 'rgb16f' &&
     lightmap.atlasUrl.endsWith('surface-lightmap.bin')
   ) {
-    return lightmap.atlasUrl.replace(/surface-lightmap\.bin$/, 'surface-lightmap-rgbe.rgbe')
+    return lightmap.atlasUrl.replace(/surface-lightmap\.bin$/, 'surface-lightmap-rgbe.png')
   }
 
   return lightmap.atlasUrl
@@ -7183,6 +7282,8 @@ async function loadRgbEImageDataTexture(url: string) {
     image.close()
   })
 
+  recordStartupMarker('loadingOverlayCompleteAt')
+
   return configureLightmapTexture(texture)
 }
 
@@ -7206,6 +7307,8 @@ async function loadRgbEByteDataTexture(url: string, width: number, height: numbe
   }
 
   const texture = new DataTexture(bytes, width, height, RGBAFormat, UnsignedByteType)
+
+  recordStartupMarker('loadingOverlayCompleteAt')
 
   return configureLightmapTexture(texture)
 }
@@ -7358,11 +7461,14 @@ function SceneEnvironmentBackground({
   intensity: number
 }) {
   const scene = useThree((state) => state.scene)
-  const hdrTexture = useLoader(HDRLoader, ENVIRONMENT_URL)
+  const hdrTexture = useLoader(EXRLoader, ENVIRONMENT_URL, (loader) => {
+    loader.setDataType(FloatType)
+  })
 
   useEffect(() => {
     hdrTexture.mapping = EquirectangularReflectionMapping
     scene.background = hdrTexture
+    scene.backgroundRotation.set(0, SKYBOX_ROTATION_Y_RADIANS, 0)
     scene.environment = null
     scene.backgroundIntensity = intensity
     scene.environmentIntensity = 0
@@ -7378,6 +7484,7 @@ function SceneEnvironmentBackground({
   }, [hdrTexture, intensity, scene])
 
   useEffect(() => {
+    scene.backgroundRotation.set(0, SKYBOX_ROTATION_Y_RADIANS, 0)
     scene.backgroundIntensity = intensity
     scene.environmentIntensity = 0
   }, [intensity, scene])
@@ -7605,12 +7712,8 @@ function useRuntimeLevelLightingResources(
         probeTextureUUIDs: nextTargets.map((target) => target?.texture.uuid ?? null),
         ready:
           readyOverride ??
-          (
-            startupProbeIndices.length > 0 &&
-            startupProbeIndices.every((probeIndex) => Boolean(nextTargets[probeIndex])) &&
-            startupVolumetricProbeIndices.every(
-              (probeIndex) => Boolean(nextProbeCoefficients[probeIndex])
-            )
+          startupVolumetricProbeIndices.every(
+            (probeIndex) => Boolean(nextProbeCoefficients[probeIndex])
           ),
         requestedResidentProbeIndices: nextTargets.reduce<number[]>(
           (probeIndices, target, probeIndex) => {
@@ -8045,9 +8148,9 @@ function createLightmapFaceTexture(
             ]
             : [0, 0, 0]
 
-      decodedFaceData[pixelIndex] = DataUtils.toHalfFloat(decoded[0] ?? 0)
-      decodedFaceData[pixelIndex + 1] = DataUtils.toHalfFloat(decoded[1] ?? 0)
-      decodedFaceData[pixelIndex + 2] = DataUtils.toHalfFloat(decoded[2] ?? 0)
+      decodedFaceData[pixelIndex] = toClampedHalfFloat(decoded[0] ?? 0)
+      decodedFaceData[pixelIndex + 1] = toClampedHalfFloat(decoded[1] ?? 0)
+      decodedFaceData[pixelIndex + 2] = toClampedHalfFloat(decoded[2] ?? 0)
       decodedFaceData[pixelIndex + 3] = DataUtils.toHalfFloat(1)
     }
   }
@@ -8104,6 +8207,127 @@ function createGroundPatchGeometry(
   geometry.setAttribute('uv', new Float32BufferAttribute(mapUvs, 2))
   geometry.setAttribute('uv1', new Float32BufferAttribute(lightmapUvs, 2))
   return geometry
+}
+
+function createCeilingPatchGeometry(
+  maze: MazeLayout['maze'],
+  cell: { x: number; y: number },
+  lightmap: MazeLightmap
+) {
+  const center = getMazeCellWorldPosition(maze, cell, GROUND_Y + (WALL_HEIGHT * 2))
+  const geometry = new PlaneGeometry(MAZE_CELL_SIZE, MAZE_CELL_SIZE, 1, 1)
+  const positions = geometry.getAttribute('position')
+  const lightmapUvs: number[] = []
+
+  for (let index = 0; index < positions.count; index += 1) {
+    const localX = positions.getX(index)
+    const localY = positions.getY(index)
+    const worldX = center.x + localX
+    const worldZ = center.z + localY
+    const { u: localLightmapU, v: localLightmapV } =
+      mapGroundWorldToLightmapLocalUv(lightmap.groundBounds, worldX, worldZ)
+    const [lightmapU, lightmapV] = mapLightmapRectUvToAtlas(
+      lightmap.groundRect,
+      lightmap.atlasWidth,
+      lightmap.atlasHeight,
+      localLightmapU,
+      localLightmapV
+    )
+
+    lightmapUvs.push(lightmapU, lightmapV)
+  }
+
+  geometry.setAttribute('uv1', new Float32BufferAttribute(lightmapUvs, 2))
+  return geometry
+}
+
+function getLayoutCells(maze: MazeLayout['maze']) {
+  if (Array.isArray(maze.cells) && maze.cells.length > 0) {
+    return maze.cells
+  }
+
+  return Array.from({ length: maze.width * maze.height }, (_, index) => ({
+    x: index % maze.width,
+    y: Math.floor(index / maze.width)
+  }))
+}
+
+const SCREEN_SHAKE_PATH_DIRECTIONS: CardinalDirection[] = ['north', 'east', 'south', 'west']
+
+function createScreenShakeOpenEdgeSet(maze: MazeLayout['maze']) {
+  const openEdges = new Set(
+    (maze.openEdges ?? []).map((edge) => normalizeEdge(edge.from, edge.to))
+  )
+
+  for (const gate of maze.gates ?? []) {
+    openEdges.add(normalizeEdge(gate.from, gate.to))
+  }
+
+  for (const edge of maze.playerOnlyOpenEdges ?? []) {
+    openEdges.add(normalizeEdge(edge.from, edge.to))
+  }
+
+  return openEdges
+}
+
+function getScreenShakePathDistance(
+  maze: MazeLayout['maze'],
+  from: MazeCell,
+  to: MazeCell
+) {
+  if (cellKey(from) === cellKey(to)) {
+    return 0
+  }
+
+  const cellKeys = new Set(getLayoutCells(maze).map((cell) => cellKey(cell)))
+  const openEdges = createScreenShakeOpenEdgeSet(maze)
+  const queue: Array<{ cell: MazeCell; distance: number }> = [
+    { cell: from, distance: 0 }
+  ]
+  const visited = new Set([cellKey(from)])
+
+  for (let queueIndex = 0; queueIndex < queue.length; queueIndex += 1) {
+    const current = queue[queueIndex]
+
+    for (const direction of SCREEN_SHAKE_PATH_DIRECTIONS) {
+      const next = getNeighbor(current.cell, direction)
+      const nextKey = cellKey(next)
+
+      if (
+        visited.has(nextKey) ||
+        !cellKeys.has(nextKey) ||
+        !openEdges.has(normalizeEdge(current.cell, next))
+      ) {
+        continue
+      }
+
+      const nextDistance =
+        current.distance +
+        Math.hypot(next.x - current.cell.x, next.y - current.cell.y)
+
+      if (nextKey === cellKey(to)) {
+        return nextDistance
+      }
+
+      visited.add(nextKey)
+      queue.push({
+        cell: next,
+        distance: nextDistance
+      })
+    }
+  }
+
+  return Math.hypot(from.x - to.x, from.y - to.y)
+}
+
+function isIndoorLayout(layout: MazeLayout) {
+  const levelName = layout.maze.levelName ?? layout.maze.id
+
+  if (/^(entrance|chamber\b|chamber\s+\d+)/i.test(levelName)) {
+    return false
+  }
+
+  return /^(maze|hallway|throne room)/i.test(levelName) || /^maze-/i.test(layout.maze.id)
 }
 
 function mapLightmapRectUvToAtlas(
@@ -8535,14 +8759,16 @@ function LoadingOverlay({
       className={`loading-overlay${visiblyComplete ? ' loading-overlay-hidden' : ''}`}
       data-loading-complete={visiblyComplete ? 'true' : 'false'}
     >
-      <h1>MINOTAUR</h1>
-      <h2>
-        <span>Entering the labyrinth</span>
-        <span
-          aria-hidden="true"
-          className="loading-overlay-dots"
-        ></span>
-      </h2>
+      <img
+        alt="MINOTAUR"
+        className="loading-title-image"
+        src={TITLE_IMAGE_URL}
+      />
+      <img
+        alt="Entering the labyrinth"
+        className="loading-subtitle-image"
+        src={SUBTITLE_IMAGE_URL}
+      />
     </div>
   )
 }
@@ -8666,7 +8892,7 @@ function EnvironmentLighting({
 }) {
   const gl = useThree((state) => state.gl)
   const scene = useThree((state) => state.scene)
-  const hdrTexture = useLoader(HDRLoader, ENVIRONMENT_URL)
+  const hdrTexture = useLoader(EXRLoader, ENVIRONMENT_URL)
   const pmremGenerator = useMemo(() => new PMREMGenerator(gl), [gl])
   const environmentTarget = useRef<{ dispose: () => void; texture: Texture } | null>(null)
   const reflectionProbeRawTargets = useRef<Array<{ dispose: () => void; texture: Texture }>>([])
@@ -8734,20 +8960,10 @@ function EnvironmentLighting({
         }
 
     environmentTarget.current = nextEnvironment
-    scene.background = hdrTexture
-    scene.environment = null
-    scene.backgroundIntensity = runtimeEnvironmentIntensity
-    scene.environmentIntensity = 0
     onEnvironmentFogColorChange(BLACK_COLOR.clone())
     onEnvironmentTextureChange(null)
 
     return () => {
-      if (scene.background === hdrTexture) {
-        scene.background = null
-      }
-      if (scene.environment === nextEnvironment.texture) {
-        scene.environment = null
-      }
       nextEnvironment.dispose()
       environmentTarget.current = null
       pmremGenerator.dispose()
@@ -8755,19 +8971,12 @@ function EnvironmentLighting({
       onEnvironmentTextureChange(null)
     }
   }, [
-    gl,
     hdrTexture,
     layout.maze.id,
     onEnvironmentFogColorChange,
     onEnvironmentTextureChange,
-    pmremGenerator,
-    runtimeEnvironmentIntensity,
-    scene
+    pmremGenerator
   ])
-
-  useEffect(() => {
-    scene.backgroundIntensity = runtimeEnvironmentIntensity
-  }, [runtimeEnvironmentIntensity, scene])
 
   useEffect(() => {
     const baseEnvironment = environmentTarget.current
@@ -8911,12 +9120,9 @@ function EnvironmentLighting({
           startupVolumetricProbeCount: startupVolumetricProbeIndices.length,
           startupVolumetricProbeIndices: [...startupVolumetricProbeIndices],
           textureMemoryBudgetBytes: REFLECTION_PROBE_RUNTIME_TEXTURE_MEMORY_BUDGET_BYTES,
-          ready:
-            startupProbeIndices.length > 0 &&
-            startupProbeIndices.every((probeIndex) => Boolean(nextTargets[probeIndex])) &&
-            startupVolumetricProbeIndices.every(
-              (probeIndex) => Boolean(nextProbeCoefficients[probeIndex])
-            )
+          ready: startupVolumetricProbeIndices.every(
+            (probeIndex) => Boolean(nextProbeCoefficients[probeIndex])
+          )
         }
       }
 
@@ -10014,6 +10220,7 @@ function TorchBillboard({
         userData={{
           debugIndex: seed - 1,
           debugRole: 'torch-billboard',
+          lensFlareTint: [color.r, color.g, color.b],
           lensflare: 'ignore-occlusion'
         }}
       >
@@ -10142,7 +10349,8 @@ function WallSconce({
         {
           diffuseIntensity: 0,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: 'constant',
+          radianceMode: 'world',
+          region: reflectionProbeBlend.region,
           vlmMode: 'disabled',
           weights: reflectionProbeBlend.weights as [number, number, number, number],
           worldTransform: levelWorldTransform
@@ -10158,6 +10366,7 @@ function WallSconce({
       probeTextures,
       reflectionContributionIntensity,
       reflectionProbeBlend.probeIndices,
+      reflectionProbeBlend.region,
       reflectionProbeBlend.weights
     ]
   )
@@ -11636,7 +11845,29 @@ function MazeWalls({
   const mountedWalls = layout.walls
   const mountedDecals = layout.decals
   const mountedCornerFillers = layout.cornerFillers
-  const mountedLights = layout.lights
+  const indoorLayout = isIndoorLayout(layout)
+  const mountedLights = useMemo(() => {
+    if (!indoorLayout) {
+      return layout.lights
+    }
+
+    const usedWallIds = new Set<string>()
+
+    return layout.lights.filter((light) => {
+      const wallKey = light.wallId ?? `${light.cell.x},${light.cell.y}:${light.side}`
+
+      if (usedWallIds.has(wallKey)) {
+        return false
+      }
+
+      usedWallIds.add(wallKey)
+      return true
+    })
+  }, [indoorLayout, layout.lights])
+  const mountedCeilingCells = useMemo(
+    () => indoorLayout ? getLayoutCells(layout.maze) : [],
+    [indoorLayout, layout.maze]
+  )
 
   return (
     <>
@@ -11660,6 +11891,52 @@ function MazeWalls({
           reflectionProbeTextures={reflectionProbeTextures}
           visible={isWallVisible(visibilityState, mazeWall)}
           wallIndex={wallIndex}
+          wallMaterialMaps={wall}
+        />
+      ))}
+      {indoorLayout ? mountedWalls.map((mazeWall, wallIndex) => (
+        <MazeWallMesh
+          environmentTexture={environmentTexture}
+          environmentIntensity={environmentIntensity}
+          iblContributionIntensity={staticVolumetricContributionIntensity}
+          key={`${mazeWall.id}:upper`}
+          lightmap={layout.maze.lightmap}
+          lightmapTexture={lightmapTexture}
+          lightmapTextureEncoding={lightmapTextureEncoding}
+          layout={layout}
+          lightmapContributionIntensity={lightmapContributionIntensity}
+          mazeWall={mazeWall}
+          probeDepthAtlasTextures={probeDepthAtlasTextures}
+          probeCoefficientTextures={probeCoefficientTextures}
+          reflectionContributionIntensity={reflectionContributionIntensity}
+          reflectionProbeCoefficients={reflectionProbeCoefficients}
+          reflectionProbeDepthTextures={reflectionProbeDepthTextures}
+          reflectionProbeTextures={reflectionProbeTextures}
+          verticalOffset={WALL_HEIGHT}
+          visible={isWallVisible(visibilityState, mazeWall)}
+          wallIndex={wallIndex}
+          wallMaterialMaps={wall}
+        />
+      )) : null}
+      {mountedCeilingCells.map((cell, cellIndex) => (
+        <CeilingPatchMesh
+          cell={cell}
+          debugIndex={cellIndex}
+          environmentTexture={environmentTexture}
+          environmentIntensity={environmentIntensity}
+          iblContributionIntensity={staticVolumetricContributionIntensity}
+          key={`ceiling:${cell.x},${cell.y}`}
+          layout={layout}
+          lightmapContributionIntensity={lightmapContributionIntensity}
+          lightmapTexture={lightmapTexture}
+          lightmapTextureEncoding={lightmapTextureEncoding}
+          probeDepthAtlasTextures={probeDepthAtlasTextures}
+          probeCoefficientTextures={probeCoefficientTextures}
+          reflectionContributionIntensity={reflectionContributionIntensity}
+          reflectionProbeCoefficients={reflectionProbeCoefficients}
+          reflectionProbeDepthTextures={reflectionProbeDepthTextures}
+          reflectionProbeTextures={reflectionProbeTextures}
+          visible={isCellVisible(visibilityState, cell)}
           wallMaterialMaps={wall}
         />
       ))}
@@ -11814,7 +12091,8 @@ function WallDetailMesh({
           diffuseIntensity: iblContributionIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: 'constant',
+          radianceMode: 'world',
+          region: reflectionProbeBlend.region,
           useProbeConnectivity: volumetricShadowsEnabled,
           vlmMode: 'cell5',
           worldTransform: levelWorldTransform
@@ -11831,6 +12109,7 @@ function WallDetailMesh({
       probeTextures,
       reflectionContributionIntensity,
       reflectionProbeBlend.probeIndices,
+      reflectionProbeBlend.region,
       volumetricShadowsEnabled
     ]
   )
@@ -12136,6 +12415,7 @@ function MazeWallMesh({
   reflectionProbeDepthTextures,
   reflectionProbeTextures,
   visible = true,
+  verticalOffset = 0,
   wallIndex,
   wallMaterialMaps
 }: {
@@ -12155,6 +12435,7 @@ function MazeWallMesh({
   reflectionProbeDepthTextures: CubeTexture[]
   reflectionProbeTextures: Texture[]
   visible?: boolean
+  verticalOffset?: number
   wallIndex: number
   wallMaterialMaps: PbrMaps
 }) {
@@ -12225,6 +12506,7 @@ function MazeWallMesh({
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
           radianceMode: 'world',
+          region: reflectionProbeBlend.region,
           useProbeConnectivity: volumetricShadowsEnabled,
           vlmBoundaryNormal:
             mazeWall.axis === 'z'
@@ -12246,6 +12528,7 @@ function MazeWallMesh({
       probeTextures,
       reflectionContributionIntensity,
       reflectionProbeBlend.probeIndices,
+      reflectionProbeBlend.region,
       reflectionProbeBlend.weights,
       volumetricShadowsEnabled
     ]
@@ -12268,7 +12551,7 @@ function MazeWallMesh({
       castShadow
       position={[
         mazeWall.center.x,
-        GROUND_Y + (WALL_HEIGHT / 2),
+        GROUND_Y + (WALL_HEIGHT / 2) + verticalOffset,
         mazeWall.center.z
       ]}
       receiveShadow
@@ -12293,6 +12576,174 @@ function MazeWallMesh({
         materialKey={wallFaceMaterialBaseKey}
         maps={wallMaterialMaps}
         patchConfig={faceMaterialPatchConfig}
+        probeBlend={probeBlend}
+      />
+    </mesh>
+  )
+}
+
+function CeilingPatchMesh({
+  cell,
+  debugIndex,
+  environmentIntensity,
+  environmentTexture,
+  iblContributionIntensity,
+  layout,
+  lightmapContributionIntensity,
+  lightmapTexture,
+  lightmapTextureEncoding,
+  probeDepthAtlasTextures,
+  probeCoefficientTextures,
+  reflectionContributionIntensity,
+  reflectionProbeCoefficients,
+  reflectionProbeDepthTextures,
+  reflectionProbeTextures,
+  visible = true,
+  wallMaterialMaps
+}: {
+  cell: { x: number; y: number }
+  debugIndex: number
+  environmentIntensity: number
+  environmentTexture: Texture | null
+  iblContributionIntensity: number
+  layout: MazeLayout
+  lightmapContributionIntensity: number
+  lightmapTexture: Texture
+  lightmapTextureEncoding: LightmapTextureEncoding
+  probeDepthAtlasTextures: ProbeDepthAtlasTextures
+  probeCoefficientTextures: [Texture, Texture, Texture, Texture]
+  reflectionContributionIntensity: number
+  reflectionProbeCoefficients: Array<ProbeIrradianceCoefficients | null>
+  reflectionProbeDepthTextures: CubeTexture[]
+  reflectionProbeTextures: Texture[]
+  visible?: boolean
+  wallMaterialMaps: PbrMaps
+}) {
+  const levelWorldTransform = useContext(LevelRenderTransformContext)
+  const volumetricShadowsEnabled = useContext(VolumetricShadowContext)
+  const geometry = useMemo(
+    () => createCeilingPatchGeometry(layout.maze, cell, layout.maze.lightmap),
+    [cell.x, cell.y, layout.maze]
+  )
+  const center = useMemo(
+    () => getMazeCellWorldPosition(layout.maze, cell, GROUND_Y + (WALL_HEIGHT * 2)),
+    [cell, layout.maze]
+  )
+  const reflectionProbeBlend = useMemo(
+    () =>
+      getReflectionProbeBlendForPosition(layout, {
+        x: center.x,
+        z: center.z
+      }),
+    [center.x, center.z, layout]
+  )
+  const probeTextures = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeTextures[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeTextures]
+  )
+  const probeDepthTextures = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeDepthTextures[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeDepthTextures]
+  )
+  const probeCoefficients = useMemo(
+    () =>
+      reflectionProbeBlend.probeIndices.map(
+        (probeIndex) => reflectionProbeCoefficients[probeIndex] ?? null
+      ),
+    [reflectionProbeBlend.probeIndices, reflectionProbeCoefficients]
+  )
+  const surfaceLightmapsEnabled =
+    lightmapContributionIntensity > EFFECT_EPSILON
+  const lightMapIntensity =
+    surfaceLightmapsEnabled
+      ? lightmapContributionIntensity * FLOOR_LIGHTMAP_INTENSITY_SCALE
+      : 0
+  const patchConfig = useMemo(
+    () => ({
+      lightMapAmbientTint:
+        surfaceLightmapsEnabled
+          ? LIGHTMAP_AMBIENT_TINT.clone().multiplyScalar(lightmapContributionIntensity)
+          : BLACK_COLOR,
+      lightMapEncoding: lightmapTextureEncoding,
+      lightMapTorchTint: TORCH_LIGHTMAP_TINT
+    }),
+    [lightmapContributionIntensity, lightmapTextureEncoding, surfaceLightmapsEnabled]
+  )
+  const probeBlend = useMemo(
+    () =>
+      buildProbeBlendConfig(
+        layout,
+        reflectionProbeBlend.probeIndices,
+        probeTextures,
+        probeDepthTextures,
+        probeDepthAtlasTextures,
+        probeCoefficients,
+        'disabled',
+        {
+          diffuseIntensity: iblContributionIntensity,
+          probeCoefficientTextures,
+          radianceIntensity: reflectionContributionIntensity,
+          radianceMode: 'world',
+          region: reflectionProbeBlend.region,
+          useProbeConnectivity: volumetricShadowsEnabled,
+          vlmMode: 'cell5',
+          worldTransform: levelWorldTransform
+        }
+      ),
+    [
+      iblContributionIntensity,
+      layout,
+      levelWorldTransform,
+      probeCoefficientTextures,
+      probeCoefficients,
+      probeDepthAtlasTextures,
+      probeDepthTextures,
+      probeTextures,
+      reflectionContributionIntensity,
+      reflectionProbeBlend.probeIndices,
+      reflectionProbeBlend.region,
+      volumetricShadowsEnabled
+    ]
+  )
+  const materialKey = useMemo(
+    () => getProbeBlendMaterialKey('indoor-ceiling', probeBlend, patchConfig),
+    [patchConfig, probeBlend]
+  )
+
+  useEffect(
+    () => () => {
+      geometry.dispose()
+    },
+    [geometry]
+  )
+
+  return (
+    <mesh
+      position={[center.x, center.y, center.z]}
+      receiveShadow
+      rotation-x={Math.PI / 2}
+      userData={{ debugIndex, debugRole: 'indoor-ceiling' }}
+      visible={visible}
+    >
+      <primitive
+        attach="geometry"
+        object={geometry}
+      />
+      <WallFaceMaterial
+        attach="material"
+        environmentIntensity={environmentIntensity}
+        environmentTexture={environmentTexture}
+        lightMap={lightmapTexture}
+        lightMapIntensity={lightMapIntensity}
+        materialKey={materialKey}
+        maps={wallMaterialMaps}
+        patchConfig={patchConfig}
         probeBlend={probeBlend}
       />
     </mesh>
@@ -12557,7 +13008,8 @@ function GateActor({
           diffuseIntensity: iblContributionIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: 'constant',
+          radianceMode: 'world',
+          region: reflectionProbeBlend.region,
           useProbeConnectivity: volumetricShadowsEnabled,
           vlmBoundaryNormal:
             gate.axis === 'z'
@@ -12580,6 +13032,7 @@ function GateActor({
       probeTextures,
       reflectionContributionIntensity,
       reflectionProbeBlend.probeIndices,
+      reflectionProbeBlend.region,
       reflectionProbeBlend.weights,
       volumetricShadowsEnabled
     ]
@@ -12845,13 +13298,11 @@ function isDoorOpenForTurnState(
 }
 
 function DoorLeafMaterial({
-  attach,
   maps,
   materialKey,
   mirroredNormal = false,
   probeBlend
 }: {
-  attach?: string
   maps: PbrMaps
   materialKey: string
   mirroredNormal?: boolean
@@ -12872,7 +13323,6 @@ function DoorLeafMaterial({
   return (
     <meshStandardMaterial
       aoMap={maps.aoMap}
-      attach={attach}
       color="white"
       customProgramCacheKey={probeBlendMaterialProps.customProgramCacheKey}
       envMap={getProbeBlendEnvMap(probeBlend)}
@@ -12912,16 +13362,6 @@ function createDoorLeafGeometry({ mirrored = false }: { mirrored?: boolean } = {
     }
     uv.needsUpdate = true
     geometry.setAttribute('uv2', uv.clone())
-  }
-
-  if (normal) {
-    const index = geometry.getIndex()
-
-    for (const group of geometry.groups) {
-      const normalIndex = index ? index.getX(group.start) : group.start
-
-      group.materialIndex = normal.getZ(normalIndex) < -0.5 ? 1 : 0
-    }
   }
 
   return geometry
@@ -13007,7 +13447,8 @@ function MazeDoorActor({
           diffuseIntensity: diffuseProbeIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: 'constant',
+          radianceMode: 'world',
+          region: reflectionProbeBlend.region,
           useProbeConnectivity: volumetricShadowsEnabled,
           vlmBoundaryNormal: getDoorBoundaryNormal(door.side),
           vlmMode: 'boundary8',
@@ -13027,6 +13468,7 @@ function MazeDoorActor({
       probeTextures,
       reflectionContributionIntensity,
       reflectionProbeBlend.probeIndices,
+      reflectionProbeBlend.region,
       reflectionProbeBlend.weights,
       volumetricShadowsEnabled
     ]
@@ -13081,15 +13523,8 @@ function MazeDoorActor({
         userData={{ debugIndex: 0, debugRole: 'maze-door-leaf' }}
       >
         <DoorLeafMaterial
-          attach="material-0"
           maps={doorMaps}
-          materialKey={`${materialKey}:left:front`}
-          probeBlend={probeBlend}
-        />
-        <DoorLeafMaterial
-          attach="material-1"
-          maps={doorMaps}
-          materialKey={`${materialKey}:left:back`}
+          materialKey={`${materialKey}:left`}
           probeBlend={probeBlend}
         />
       </mesh>
@@ -13102,16 +13537,8 @@ function MazeDoorActor({
         userData={{ debugIndex: 1, debugRole: 'maze-door-leaf' }}
       >
         <DoorLeafMaterial
-          attach="material-0"
           maps={doorMaps}
-          materialKey={`${materialKey}:right:front`}
-          mirroredNormal
-          probeBlend={probeBlend}
-        />
-        <DoorLeafMaterial
-          attach="material-1"
-          maps={doorMaps}
-          materialKey={`${materialKey}:right:back`}
+          materialKey={`${materialKey}:right`}
           mirroredNormal
           probeBlend={probeBlend}
         />
@@ -13457,7 +13884,8 @@ function MazeAltarActor({
           diffuseIntensity: iblContributionIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: 'constant',
+          radianceMode: 'world',
+          region: reflectionProbeBlend.region,
           useProbeConnectivity: volumetricShadowsEnabled,
           vlmMode: 'cell5',
           worldTransform: levelWorldTransform
@@ -13474,6 +13902,7 @@ function MazeAltarActor({
       probeTextures,
       reflectionContributionIntensity,
       reflectionProbeBlend.probeIndices,
+      reflectionProbeBlend.region,
       volumetricShadowsEnabled
     ]
   )
@@ -13609,8 +14038,8 @@ function MazeAltarActor({
       ) : null}
       {activated ? (
         <TorchBillboard
-          color={new Color(FIRE_COLOR.b, FIRE_COLOR.r, FIRE_COLOR.g)}
-          position={[0, 1.08 + TORCH_BILLBOARD_SIZE, 0]}
+          color={new Color(0, 0, 1)}
+          position={[0, 1.08 + 0.15 + TORCH_BILLBOARD_SIZE, 0]}
           seed={10_000 + altarIndex}
           size={TORCH_BILLBOARD_SIZE * 2}
           texture={torchTexture}
@@ -13769,7 +14198,8 @@ function MazeItemGroundActor({
           diffuseIntensity: iblContributionIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: 'constant',
+          radianceMode: 'world',
+          region: reflectionProbeBlend.region,
           useProbeConnectivity: volumetricShadowsEnabled,
           vlmMode: 'cell5',
           worldTransform: levelWorldTransform
@@ -13786,6 +14216,7 @@ function MazeItemGroundActor({
       probeTextures,
       reflectionContributionIntensity,
       reflectionProbeBlend.probeIndices,
+      reflectionProbeBlend.region,
       volumetricShadowsEnabled
     ]
   )
@@ -13957,7 +14388,8 @@ function HeldItemView({
           diffuseIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: 'constant',
+          radianceMode: 'world',
+          region: reflectionProbeBlend.region,
           useProbeConnectivity: volumetricShadowsEnabled,
           vlmMode: 'cell5',
           worldTransform: levelWorldTransform
@@ -13974,6 +14406,7 @@ function HeldItemView({
       probeTextures,
       reflectionContributionIntensity,
       reflectionProbeBlend.probeIndices,
+      reflectionProbeBlend.region,
       volumetricShadowsEnabled
     ]
   )
@@ -14310,7 +14743,8 @@ function MonsterModel({
           diffuseIntensity: diffuseProbeIntensity,
           probeCoefficientTextures,
           radianceIntensity: reflectionContributionIntensity,
-          radianceMode: 'constant',
+          radianceMode: 'world',
+          region: reflectionProbeBlend.region,
           useProbeConnectivity: volumetricShadowsEnabled,
           vlmMode: 'cell5',
           worldTransform: levelWorldTransform
@@ -14327,6 +14761,7 @@ function MonsterModel({
       probeTextures,
       reflectionContributionIntensity,
       reflectionProbeBlend.probeIndices,
+      reflectionProbeBlend.region,
       volumetricShadowsEnabled
     ]
   )
@@ -14348,24 +14783,45 @@ function MonsterModel({
         ? 2.7
         : monster.type === 'spider'
           ? 2.1
-          : 3.6
+          : 1.8
     const maxHorizontalDimension = Math.max(size.x, size.z, 0.0001)
     const maxDimension = Math.max(size.x, size.y, size.z, 0.0001)
     const scale = monster.type === 'werewolf'
       ? targetSize / maxHorizontalDimension
       : targetSize / maxDimension
+    const spiderLeanRadians = MathUtils.degToRad(60)
+    const spiderLeanSign = monster.hand === 'left' ? 1 : -1
+    const spiderWallSign = monster.hand === 'left' ? -1 : 1
+    const spiderHalfWidth = (size.x * scale) / 2
+    const spiderHeight = size.y * scale
+    const spiderCos = Math.cos(spiderLeanRadians)
+    const spiderSin = Math.sin(spiderLeanRadians) * spiderLeanSign
+    const spiderFloorLift = monster.type === 'spider'
+      ? spiderHalfWidth * Math.abs(Math.sin(spiderLeanRadians))
+      : 0
+    const spiderSideExtent = monster.type === 'spider'
+      ? (
+          spiderWallSign < 0
+            ? (-spiderHalfWidth * spiderCos) - (spiderHeight * Math.max(spiderSin, 0))
+            : (spiderHalfWidth * spiderCos) - (spiderHeight * Math.min(spiderSin, 0))
+        )
+      : 0
+    const spiderWallOffset = monster.type === 'spider'
+      ? (spiderWallSign * ((MAZE_CELL_SIZE / 2) - 0.04)) - spiderSideExtent
+      : 0
 
     return {
       modelOffset: new Vector3(
-        (-center.x * scale) + (monster.type === 'spider' ? 0.1 : 0),
+        (-center.x * scale) + (monster.type === 'spider' ? spiderWallOffset : 0),
         (-bounds.min.y * scale) +
-          (monster.type === 'minotaur' ? -0.25 : 0),
+          (monster.type === 'minotaur' ? -0.25 : 0) +
+          spiderFloorLift,
         (-center.z * scale) + (monster.type === 'spider' ? 0.5 : 0)
       ),
       modelRotationY: monster.type === 'werewolf' ? Math.PI : 0,
       modelRotationZ:
         monster.type === 'spider'
-          ? (monster.hand === 'left' ? Math.PI / 4 : -Math.PI / 4)
+          ? spiderLeanRadians * spiderLeanSign
           : 0,
       scaledSize: new Vector3(
         size.x * scale,
@@ -14437,12 +14893,14 @@ function MonsterModel({
 
 function MonsterEyes({
   awake,
+  eyeColors,
   monsterId,
   monsterHand,
   monsterType,
   settings
 }: {
   awake: boolean
+  eyeColors: MonsterEyeColorSettings
   monsterId: string
   monsterHand?: 'left' | 'right'
   monsterType: MonsterType
@@ -14451,10 +14909,11 @@ function MonsterEyes({
   const sphereGeometry = useMemo(() => new SphereGeometry(MONSTER_EYE_RADIUS, 12, 8), [])
   const material = useMemo(
     () => new MeshBasicMaterial({
-      color: MONSTER_EYE_COLOR,
+      color: colorFromHex(eyeColors[monsterType], DEFAULT_MONSTER_EYE_COLORS[monsterType])
+        .multiplyScalar(4),
       toneMapped: false
     }),
-    []
+    [eyeColors, monsterType]
   )
   const authoredOffsets = settings[monsterType]
   const offsets = monsterType === 'spider' && monsterHand === 'right'
@@ -14516,6 +14975,7 @@ function MonsterActor({
   lightmapContributionIntensity,
   minotaurAlbedoHex,
   monster,
+  monsterEyeColors,
   monsterEyes,
   playerCell,
   probeDepthAtlasTextures,
@@ -14534,6 +14994,7 @@ function MonsterActor({
   lightmapContributionIntensity: number
   minotaurAlbedoHex: string
   monster: TurnMonster
+  monsterEyeColors: MonsterEyeColorSettings
   monsterEyes: MonsterEyeSettings
   playerCell: { x: number; y: number }
   probeDepthAtlasTextures: ProbeDepthAtlasTextures
@@ -14760,6 +15221,7 @@ function MonsterActor({
       />
       <MonsterEyes
         awake={monster.awake}
+        eyeColors={monsterEyeColors}
         monsterHand={monster.hand}
         monsterId={monster.id}
         monsterType={monster.type}
@@ -14783,6 +15245,7 @@ function MonsterActors({
   reflectionProbeDepthTextures,
   reflectionProbeTextures,
   turnState,
+  monsterEyeColors,
   monsterEyes,
   visibilityState = DISABLED_PRECOMPUTED_VISIBILITY
 }: {
@@ -14799,6 +15262,7 @@ function MonsterActors({
   reflectionProbeDepthTextures: CubeTexture[]
   reflectionProbeTextures: Texture[]
   turnState: TurnState
+  monsterEyeColors: MonsterEyeColorSettings
   monsterEyes: MonsterEyeSettings
   visibilityState?: PrecomputedVisibilityState
 }) {
@@ -14810,7 +15274,10 @@ function MonsterActors({
           Math.abs(monster.cell.y - turnState.player.cell.y)
         const visible =
           isCellVisible(visibilityState, monster.cell) ||
-          (monster.type === 'minotaur' && playerDistance <= 5)
+          (
+            (monster.type === 'minotaur' || monster.type === 'werewolf') &&
+            playerDistance <= 5
+          )
 
         return (
           <MonsterActor
@@ -14823,6 +15290,7 @@ function MonsterActors({
             lightmapContributionIntensity={lightmapContributionIntensity}
             minotaurAlbedoHex={minotaurAlbedoHex}
             monster={monster}
+            monsterEyeColors={monsterEyeColors}
             monsterEyes={monsterEyes}
             playerCell={turnState.player.cell}
             probeDepthAtlasTextures={probeDepthAtlasTextures}
@@ -14897,26 +15365,41 @@ class ThreeBloomCompatPass<TThreePass extends {
   copyMaterial: ShaderMaterial
   copyScene: ThreeScene
   copyQuad: Mesh
+  depthTexture: Texture | null
   tempRenderTarget: WebGLRenderTarget
 
   constructor(name: string, inner: TThreePass) {
     super(name)
     this.inner = inner
     this.needsSwap = true
+    this.needsDepthTexture = true
+    this.depthTexture = null
     this.copyCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1)
     this.copyMaterial = new ShaderMaterial({
       depthTest: false,
       depthWrite: false,
       fragmentShader: `
 uniform sampler2D inputBuffer;
+uniform sampler2D depthBuffer;
+uniform bool useDepthMask;
 varying vec2 vUv;
 
 void main() {
+  if (useDepthMask) {
+    float depth = texture2D(depthBuffer, vUv).r;
+    if (depth >= 0.999999) {
+      gl_FragColor = vec4(0.0);
+      return;
+    }
+  }
+
   gl_FragColor = texture2D(inputBuffer, vUv);
 }
 `,
       uniforms: {
-        inputBuffer: new Uniform<Texture | null>(null)
+        depthBuffer: new Uniform<Texture | null>(null),
+        inputBuffer: new Uniform<Texture | null>(null),
+        useDepthMask: new Uniform(false)
       },
       vertexShader: `
 varying vec2 vUv;
@@ -14950,6 +15433,8 @@ void main() {
 
     renderer.autoClear = false
     this.copyMaterial.uniforms.inputBuffer.value = inputBuffer.texture
+    this.copyMaterial.uniforms.depthBuffer.value = this.depthTexture
+    this.copyMaterial.uniforms.useDepthMask.value = this.depthTexture !== null
     withFrameProfileScope('copy input to bloom target', () => {
       renderer.setRenderTarget(this.tempRenderTarget)
       renderer.render(this.copyScene, this.copyCamera)
@@ -14967,6 +15452,7 @@ void main() {
     })
 
     this.copyMaterial.uniforms.inputBuffer.value = this.tempRenderTarget.texture
+    this.copyMaterial.uniforms.useDepthMask.value = false
     withFrameProfileScope('copy bloom output', () => {
       renderer.setRenderTarget(this.renderToScreen ? null : outputBuffer)
       renderer.render(this.copyScene, this.copyCamera)
@@ -14977,6 +15463,14 @@ void main() {
   override setSize(width: number, height: number) {
     this.inner.setSize(width, height)
     this.tempRenderTarget.setSize(width, height)
+  }
+
+  override getDepthTexture() {
+    return this.depthTexture
+  }
+
+  override setDepthTexture(depthTexture: Texture | null) {
+    this.depthTexture = depthTexture
   }
 
   override dispose() {
@@ -15198,8 +15692,10 @@ function TunedN8AO({
   intensity: number
 }) {
   const passRef = useRef<{
+    autoDetectTransparency?: boolean
     configuration?: {
       denoiseIterations?: number
+      transparencyAware?: boolean
     }
     name?: string
   } | null>(null)
@@ -15207,6 +15703,9 @@ function TunedN8AO({
   useEffect(() => {
     if (passRef.current) {
       passRef.current.name = 'N8AO'
+      passRef.current.autoDetectTransparency = false
+      instrumentN8AOPass(passRef.current as unknown as Record<string | symbol, unknown>)
+      instrumentN8AOQuads(passRef.current as unknown as Record<string, unknown>)
     }
 
     const configuration = passRef.current?.configuration
@@ -15216,6 +15715,8 @@ function TunedN8AO({
     }
 
     configuration.denoiseIterations = denoiseIterations
+    configuration.transparencyAware = false
+    instrumentN8AOQuads(passRef.current as unknown as Record<string, unknown>)
   }, [denoiseIterations])
 
   return (
@@ -15415,11 +15916,108 @@ function PerformanceBenchmarkBridge() {
     })
     const collectSceneStats = () => {
       const effectivelyVisible: Record<string, number> = {}
+      const instancingCandidateMap = new Map<string, {
+        count: number
+        materialKey: string
+        role: string
+        trianglesPerMesh: number
+        totalTriangles: number
+      }>()
+      const roleBatchingPotentialMap = new Map<string, {
+        averageTrianglesPerMesh: number
+        effectiveMeshes: number
+        potentialSavedDraws: number
+        role: string
+        totalTriangles: number
+      }>()
+      const meshWorkloadByLevelAndRole = new Map<string, {
+        effectivelyVisibleMeshes: number
+        levelId: string
+        mountedMeshes: number
+        role: string
+        totalTriangles: number
+        visibleMeshes: number
+      }>()
+      const meshWorkloadByRole = new Map<string, {
+        effectivelyVisibleMeshes: number
+        instancingCandidateMeshes: number
+        instancingCandidateSavedDraws: number
+        mountedMeshes: number
+        totalTriangles: number
+        visibleMeshes: number
+      }>()
       const mounted: Record<string, number> = {}
       const visible: Record<string, number> = {}
       let totalEffectivelyVisible = 0
       let totalMounted = 0
       let totalVisible = 0
+      const getMeshTriangles = (geometry: BufferGeometry | undefined) => {
+        if (!geometry) {
+          return 0
+        }
+
+        if (geometry.index) {
+          return geometry.index.count / 3
+        }
+
+        return (geometry.getAttribute('position')?.count ?? 0) / 3
+      }
+      const getMaterialKey = (material: Material | Material[] | undefined) => (
+        (Array.isArray(material) ? material : [material])
+          .filter((candidate): candidate is Material => Boolean(candidate))
+          .map((candidate) => `${candidate.type}:${candidate.uuid}`)
+          .join('+') || 'none'
+      )
+      const getMeshWorkload = (role: string) => {
+        let workload = meshWorkloadByRole.get(role)
+
+        if (!workload) {
+          workload = {
+            effectivelyVisibleMeshes: 0,
+            instancingCandidateMeshes: 0,
+            instancingCandidateSavedDraws: 0,
+            mountedMeshes: 0,
+            totalTriangles: 0,
+            visibleMeshes: 0
+          }
+          meshWorkloadByRole.set(role, workload)
+        }
+
+        return workload
+      }
+      const getStreamedLevelId = (object: Object3D) => {
+        let current: Object3D | null = object
+
+        while (current) {
+          const levelId = current.userData?.streamedLevelId
+
+          if (typeof levelId === 'string') {
+            return levelId
+          }
+
+          current = current.parent
+        }
+
+        return 'global'
+      }
+      const getLevelRoleWorkload = (levelId: string, role: string) => {
+        const key = `${levelId}|${role}`
+        let workload = meshWorkloadByLevelAndRole.get(key)
+
+        if (!workload) {
+          workload = {
+            effectivelyVisibleMeshes: 0,
+            levelId,
+            mountedMeshes: 0,
+            role,
+            totalTriangles: 0,
+            visibleMeshes: 0
+          }
+          meshWorkloadByLevelAndRole.set(key, workload)
+        }
+
+        return workload
+      }
 
       scene.traverse((object) => {
         totalMounted += 1
@@ -15450,16 +16048,108 @@ function PerformanceBenchmarkBridge() {
           totalEffectivelyVisible += 1
           effectivelyVisible[role] = (effectivelyVisible[role] ?? 0) + 1
         }
+
+        if (object instanceof Mesh) {
+          const levelId = getStreamedLevelId(object)
+          const workload = getMeshWorkload(role)
+          const levelRoleWorkload = getLevelRoleWorkload(levelId, role)
+          const triangleCount = getMeshTriangles(object.geometry)
+
+          workload.mountedMeshes += 1
+          levelRoleWorkload.mountedMeshes += 1
+
+          if (object.visible) {
+            workload.visibleMeshes += 1
+            levelRoleWorkload.visibleMeshes += 1
+          }
+
+          if (effectiveVisible) {
+            const materialKey = getMaterialKey(object.material)
+            const instanceKey = `${role}|${object.geometry?.uuid ?? 'none'}|${materialKey}`
+
+            workload.effectivelyVisibleMeshes += 1
+            workload.totalTriangles += triangleCount
+            levelRoleWorkload.effectivelyVisibleMeshes += 1
+            levelRoleWorkload.totalTriangles += triangleCount
+
+            const roleBatchingPotential = roleBatchingPotentialMap.get(role) ?? {
+              averageTrianglesPerMesh: 0,
+              effectiveMeshes: 0,
+              potentialSavedDraws: 0,
+              role,
+              totalTriangles: 0
+            }
+
+            roleBatchingPotential.effectiveMeshes += 1
+            roleBatchingPotential.totalTriangles += triangleCount
+            roleBatchingPotential.potentialSavedDraws = Math.max(
+              0,
+              roleBatchingPotential.effectiveMeshes - 1
+            )
+            roleBatchingPotential.averageTrianglesPerMesh =
+              roleBatchingPotential.totalTriangles /
+              Math.max(1, roleBatchingPotential.effectiveMeshes)
+            roleBatchingPotentialMap.set(role, roleBatchingPotential)
+
+            const candidate = instancingCandidateMap.get(instanceKey) ?? {
+              count: 0,
+              materialKey,
+              role,
+              totalTriangles: 0,
+              trianglesPerMesh: triangleCount
+            }
+
+            candidate.count += 1
+            candidate.totalTriangles += triangleCount
+            instancingCandidateMap.set(instanceKey, candidate)
+          }
+        }
       })
+
+      const instancingCandidates = Array.from(instancingCandidateMap.values())
+        .filter((candidate) => candidate.count >= 2)
+        .map((candidate) => ({
+          ...candidate,
+          potentialSavedDraws: candidate.count - 1
+        }))
+        .sort((left, right) =>
+          (right.potentialSavedDraws - left.potentialSavedDraws) ||
+          (right.totalTriangles - left.totalTriangles)
+        )
+        .slice(0, 30)
+
+      for (const candidate of instancingCandidates) {
+        const workload = meshWorkloadByRole.get(candidate.role)
+
+        if (workload) {
+          workload.instancingCandidateMeshes += candidate.count
+          workload.instancingCandidateSavedDraws += candidate.potentialSavedDraws
+        }
+      }
 
       return {
         effectivelyVisible,
+        instancingCandidates,
         memory: {
           geometries: gl.info.memory.geometries,
           textures: gl.info.memory.textures
         },
+        meshWorkloadByLevelAndRole: Object.fromEntries(
+          Array.from(meshWorkloadByLevelAndRole.entries())
+            .sort((left, right) => right[1].totalTriangles - left[1].totalTriangles)
+        ),
+        meshWorkloadByRole: Object.fromEntries(
+          Array.from(meshWorkloadByRole.entries())
+            .sort((left, right) => right[1].totalTriangles - left[1].totalTriangles)
+        ),
         mounted,
         programs: gl.info.programs?.length ?? null,
+        roleBatchingPotential: Array.from(roleBatchingPotentialMap.values())
+          .filter((candidate) => candidate.effectiveMeshes >= 2)
+          .sort((left, right) =>
+            (right.potentialSavedDraws - left.potentialSavedDraws) ||
+            (right.totalTriangles - left.totalTriangles)
+          ),
         totalEffectivelyVisible,
         totalMounted,
         totalVisible,
@@ -15623,6 +16313,55 @@ function PerformanceBenchmarkBridge() {
         .filter((step) => step.averageMs >= 0.1)
         .sort((left, right) => right.averageMs - left.averageMs)
         .slice(0, 5)
+      const latestStep = profile.controlledSteps[0]
+      const controlledDefaultRenderMs = latestStep?.benchmark.averageFrameMs ?? null
+      const controlledDefaultFps = latestStep?.benchmark.fps ?? null
+      const latestSceneStats = (latestStep?.sceneStats ?? {}) as {
+        instancingCandidates?: Array<{
+          count: number
+          potentialSavedDraws: number
+          role: string
+          totalTriangles: number
+          trianglesPerMesh: number
+        }>
+        meshWorkloadByLevelAndRole?: Record<string, {
+          effectivelyVisibleMeshes: number
+          levelId: string
+          mountedMeshes: number
+          role: string
+          totalTriangles: number
+          visibleMeshes: number
+        }>
+        meshWorkloadByRole?: Record<string, {
+          effectivelyVisibleMeshes: number
+          instancingCandidateMeshes: number
+          instancingCandidateSavedDraws: number
+          mountedMeshes: number
+          totalTriangles: number
+          visibleMeshes: number
+        }>
+        roleBatchingPotential?: Array<{
+          averageTrianglesPerMesh: number
+          effectiveMeshes: number
+          potentialSavedDraws: number
+          role: string
+          totalTriangles: number
+        }>
+      }
+      const meshWorkloadRows = Object.entries(latestSceneStats.meshWorkloadByRole ?? {})
+        .filter(([, workload]) =>
+          workload.effectivelyVisibleMeshes > 0 ||
+          workload.totalTriangles > 0
+        )
+        .sort((left, right) => right[1].totalTriangles - left[1].totalTriangles)
+      const meshWorkloadByLevelRows = Object.values(latestSceneStats.meshWorkloadByLevelAndRole ?? {})
+        .filter((workload) =>
+          workload.effectivelyVisibleMeshes > 0 ||
+          workload.totalTriangles > 0
+        )
+        .sort((left, right) => right.totalTriangles - left.totalTriangles)
+      const instancingCandidateRows = latestSceneStats.instancingCandidates ?? []
+      const roleBatchingPotentialRows = latestSceneStats.roleBatchingPotential ?? []
       const frameTreeLines = [
         `- Live traversal frame: ${formatNumber(profile.liveFrames.averageFrameMs)}ms (${formatNumber(profile.liveFrames.fps)} FPS)`,
         ...(
@@ -15632,7 +16371,7 @@ function PerformanceBenchmarkBridge() {
         ),
         ...instrumentedTreeLines,
         `  - Browser, GPU driver, GPU execution, compositor, vsync, and uninstrumented library work: ${formatNumber(uninstrumentedMs)}ms`,
-        `    - App-owned CPU scopes stop here; compare against the GPU timer-query and Chrome trace sections below.`
+        `    - App-owned CPU scopes stop here; compare against the controlled render benchmark, GPU timer-query table, and any appended Chrome trace.`
       ]
       const lines: string[] = [
         '# Performance Profile',
@@ -15650,7 +16389,12 @@ function PerformanceBenchmarkBridge() {
         '## Diagnosis',
         '',
         `- App-owned JavaScript/render scopes account for ${formatNumber(appStepTotalMs)}ms/frame of the ${formatNumber(profile.liveFrames.averageFrameMs)}ms average frame interval.`,
-        `- The remaining ${formatNumber(uninstrumentedMs)}ms/frame is browser frame cadence, compositor, GPU driver, vsync/idle, or library work outside the app-owned scopes; use the Chrome trace thread tree below for that residual.`,
+        ...(
+          controlledDefaultRenderMs !== null && controlledDefaultFps !== null
+            ? [`- A direct controlled render benchmark of the same scene takes ${formatNumber(controlledDefaultRenderMs)}ms/frame (${formatNumber(controlledDefaultFps)} FPS), so any live-frame time above that is frame scheduling, browser/compositor/GPU present work, input animation timing, or uninstrumented library work rather than scene draw submission alone.`]
+            : []
+        ),
+        `- The remaining ${formatNumber(uninstrumentedMs)}ms/frame is browser frame cadence, compositor, GPU driver, vsync/idle, or library work outside the app-owned scopes; append a Chrome trace to split this bucket by browser thread.`,
         `- Long frames with changing render-loop resource counts: ${longFrameResourceChanges.length}/${profile.liveFrames.longFrames.length}.`,
         ...(
           longFrameResourceChanges.length > 0
@@ -15716,6 +16460,58 @@ function PerformanceBenchmarkBridge() {
             `| ${step.label} | ${formatNumber(step.averageCalls)} | ${formatNumber(step.averageTriangles)} | ${step.maxCalls} | ${step.maxTriangles} | ${step.count} |`
           )),
         '',
+        '## Expensive Computational Actions',
+        '',
+        '- Main RenderPass performs the forward scene render: frustum/object visibility evaluation inside three.js, material/program selection, uniform/texture binding, and WebGL draw submission for the calls and triangles listed above.',
+        '- N8AO performs full-screen depth/normal preparation, screen-space ambient-occlusion sampling, denoise/accumulation, and AO composite at the composer render resolution; the runtime transparency-aware scene rerender path is disabled because torch billboards are composited after AO.',
+        '- Volumetric fog is a full-screen shader pass that raymarches the depth buffer and samples nearby volumetric-lightmap atlases for fog lighting.',
+        '- BillboardCompositePass renders torch billboards on their own layer after opaque scene lighting, sampling the flame flipbook and depth-testing against scene geometry.',
+        '- Lens-flare source selection projects currently visible flare sources, tests occlusion rays against low-poly opaque meshes, and uses bounding boxes for high-poly opaque meshes to avoid per-triangle raycasts through monster assets.',
+        '',
+        '## Scene Mesh Workload By Role',
+        '',
+        '| Role | Effective meshes | Visible meshes | Mounted meshes | Triangles | Instancing-candidate meshes | Potential saved draws |',
+        '| --- | ---: | ---: | ---: | ---: | ---: | ---: |',
+        ...meshWorkloadRows.map(([role, workload]) => (
+          `| ${role} | ${workload.effectivelyVisibleMeshes} | ${workload.visibleMeshes} | ${workload.mountedMeshes} | ${formatNumber(workload.totalTriangles)} | ${workload.instancingCandidateMeshes} | ${workload.instancingCandidateSavedDraws} |`
+        )),
+        '',
+        '## Scene Mesh Workload By Level And Role',
+        '',
+        '| Level | Role | Effective meshes | Visible meshes | Mounted meshes | Triangles |',
+        '| --- | --- | ---: | ---: | ---: | ---: |',
+        ...meshWorkloadByLevelRows.slice(0, 40).map((workload) => (
+          `| ${workload.levelId} | ${workload.role} | ${workload.effectivelyVisibleMeshes} | ${workload.visibleMeshes} | ${workload.mountedMeshes} | ${formatNumber(workload.totalTriangles)} |`
+        )),
+        '',
+        '## Repeated Geometry Batching Potential',
+        '',
+        'This groups by conceptual debug role, not identical geometry UUID. It estimates draw-call upside if repeated objects are rebuilt to share geometry/material variants or become instanced batches.',
+        '',
+        '| Role | Effective meshes | Avg triangles/mesh | Total triangles | Potential saved draws |',
+        '| --- | ---: | ---: | ---: | ---: |',
+        ...(
+          roleBatchingPotentialRows.length > 0
+            ? roleBatchingPotentialRows.map((candidate) => (
+              `| ${candidate.role} | ${candidate.effectiveMeshes} | ${formatNumber(candidate.averageTrianglesPerMesh)} | ${formatNumber(candidate.totalTriangles)} | ${candidate.potentialSavedDraws} |`
+            ))
+            : ['| None | 0 | 0.000 | 0.000 | 0 |']
+        ),
+        '',
+        '## Instancing Opportunities',
+        '',
+        'This stricter table only counts already-identical geometry+material instances that could be converted directly to `InstancedMesh` with minimal asset surgery.',
+        '',
+        '| Role | Identical meshes | Triangles/mesh | Total triangles | Potential saved draws |',
+        '| --- | ---: | ---: | ---: | ---: |',
+        ...(
+          instancingCandidateRows.length > 0
+            ? instancingCandidateRows.map((candidate) => (
+              `| ${candidate.role} | ${candidate.count} | ${formatNumber(candidate.trianglesPerMesh)} | ${formatNumber(candidate.totalTriangles)} | ${candidate.potentialSavedDraws} |`
+            ))
+            : ['| None | 0 | 0.000 | 0.000 | 0 |']
+        ),
+        '',
         '## Hierarchical Deltas',
         '',
         ...profile.deltas
@@ -15725,7 +16521,6 @@ function PerformanceBenchmarkBridge() {
         '## Loop Populations',
         ''
       ]
-      const latestStep = profile.controlledSteps[0]
 
       if (latestStep) {
         for (const [key, value] of Object.entries(latestStep.renderLoops)) {
@@ -15802,8 +16597,10 @@ function PerformanceBenchmarkBridge() {
       recordStartupMarker('performanceSceneWarmStartedAt')
       await loadSharedFireFlipbookTexture(gl.capabilities.getMaxAnisotropy())
       document.body.dataset.fireFlipbookReady = 'true'
+      await waitForRuntimeProbeResidency(scene, () => false)
+      await waitForRendererResourceStability(gl, () => false, 2, 60)
       await warmSceneTextures(gl, scene, () => false)
-      await warmScenePrograms(gl, scene, camera, () => false, true, true)
+      await warmScenePrograms(gl, scene, camera, () => false, true, true, true)
       recordStartupMarker('performanceSceneWarmCompleteAt')
       document.body.dataset.sceneProgramsReady = 'true'
 
@@ -15811,6 +16608,15 @@ function PerformanceBenchmarkBridge() {
     }
 
     globalWindow.__levelsjamCapturePerformanceProfile = async (options = {}) => {
+      const loadingOverlay = document.querySelector('.loading-overlay') as HTMLElement | null
+      const loadingComplete = loadingOverlay?.dataset.loadingComplete === 'true'
+
+      if (!loadingComplete) {
+        throw new Error(
+          'Performance profile requested before the loading overlay completed; wait for data-loading-complete="true" so overlay-only frames are not measured.'
+        )
+      }
+
       const samples = Math.max(4, Math.floor(options.samples ?? 24))
       const liveDurationMs = Math.max(250, options.liveDurationMs ?? 1000)
       const originalVisualSettings = globalWindow.__levelsjamGetVisualSettings?.()
@@ -16053,6 +16859,28 @@ function PlayerFadeEffectPrimitive() {
   return <primitive object={effect as unknown as Effect} />
 }
 
+function RadialChromaticAberrationEffectPrimitive({
+  settings
+}: {
+  settings: ChromaticAberrationSettings
+}) {
+  const effect = useMemo(() => new RadialChromaticAberrationEffectImpl(), [])
+
+  useFrame(() => {
+    const shakeAmount = Number(document.body.dataset.screenShakeAmount ?? '0')
+
+    effect.exponent = settings.exponent
+    effect.intensity =
+      settings.intensity +
+      (Math.max(0, shakeAmount) * settings.screenShakeIntensity)
+    effect.maxOffset = Math.hypot(settings.offsetX, settings.offsetY)
+  })
+
+  useEffect(() => () => effect.dispose(), [effect])
+
+  return <primitive object={effect as unknown as Effect} />
+}
+
 function AnimatedVignette({ settings }: { settings: VignetteSettings }) {
   const effect = useMemo(
     () => new VignetteEffect({ darkness: settings.intensity }),
@@ -16088,6 +16916,11 @@ function DitherEffectPrimitive() {
   return <primitive object={effect as unknown as Effect} />
 }
 
+type MutableLensFlareEffect = Effect & {
+  getFragmentShader: () => string
+  setFragmentShader: (fragmentShader: string) => void
+}
+
 function isLensFlareOcclusionMaterial(material: Material | Material[] | null | undefined) {
   const materials = Array.isArray(material) ? material : [material]
 
@@ -16116,6 +16949,76 @@ function isLensFlareOcclusionMesh(object: Mesh) {
   return isLensFlareOcclusionMaterial(object.material)
 }
 
+function addLensFlareStarBurstIntensityUniform(effect: PostLensFlareEffect) {
+  const mutableEffect = effect as unknown as MutableLensFlareEffect
+  const starBurstUniform = effect.uniforms.get('starBurstIntensity')
+
+  if (starBurstUniform) {
+    return starBurstUniform as Uniform<number>
+  }
+
+  const fragmentShader = mutableEffect.getFragmentShader()
+  const uniform = new Uniform(1)
+
+  effect.uniforms.set('starBurstIntensity', uniform)
+  mutableEffect.setFragmentShader(
+    fragmentShader
+      .replace(
+        'uniform bool starBurst;',
+        'uniform bool starBurst;\nuniform float starBurstIntensity;'
+      )
+      .replace(
+        'finalColor += clamp((lensMod.rgb * getStartBurst().rgb ), 0.01, 1.0);',
+        [
+          'vec3 starBurstSignal = clamp((lensMod.rgb * getStartBurst().rgb ), 0.01, 1.0);',
+          'finalColor += starBurstIntensity <= 0.0 ? vec3(0.0) : starBurstSignal * starBurstIntensity;'
+        ].join('\n        ')
+      )
+  )
+
+  return uniform
+}
+
+function getGeometryTriangleCount(geometry: BufferGeometry | undefined) {
+  if (!geometry) {
+    return 0
+  }
+
+  if (geometry.index) {
+    return geometry.index.count / 3
+  }
+
+  return (geometry.getAttribute('position')?.count ?? 0) / 3
+}
+
+function shouldUseLensFlareOcclusionBounds(object: Mesh) {
+  const role = typeof object.userData?.debugRole === 'string'
+    ? object.userData.debugRole
+    : ''
+
+  return (
+    role === 'monster' ||
+    role === 'monster-eye' ||
+    getGeometryTriangleCount(object.geometry) > 256
+  )
+}
+
+function getObjectMonsterId(object: Object3D) {
+  let current: Object3D | null = object
+
+  while (current) {
+    const monsterId = current.userData?.monsterId
+
+    if (typeof monsterId === 'string') {
+      return monsterId
+    }
+
+    current = current.parent
+  }
+
+  return undefined
+}
+
 function TorchLensFlare({
   settings
 }: {
@@ -16124,17 +17027,97 @@ function TorchLensFlare({
   const camera = useThree((state) => state.camera)
   const raycaster = useThree((state) => state.raycaster)
   const scene = useThree((state) => state.scene)
-  const effect = useMemo(() => new TorchMultiLensFlareEffectImpl(), [])
+  const size = useThree((state) => state.size)
+  const [visibleSlotCount, setVisibleSlotCount] = useState(0)
   const projectedPosition = useMemo(() => new Vector3(), [])
   const raycasterPosition = useMemo(() => new Vector2(), [])
   const scratchWorldPosition = useMemo(() => new Vector3(), [])
+  const scratchOcclusionPoint = useMemo(() => new Vector3(), [])
   const occlusionMeshes = useRef<Mesh[]>([])
+  const highPolyOccluders = useRef<Array<{ bounds: Box3, mesh: Mesh }>>([])
+  const raycastIntersections = useRef<ReturnType<Raycaster['intersectObjects']>>([])
   const lensSources = useRef<Array<{ monsterId?: string; object: Mesh }>>([])
   const lensSourceRefreshElapsed = useRef(Number.POSITIVE_INFINITY)
+  const flareSlots = useMemo(
+    () =>
+      Array.from({ length: MAX_SIMULTANEOUS_LENS_FLARES }, (_, index) => {
+        const effect = new PostLensFlareEffect({
+          aditionalStreaks: settings.aditionalStreaks,
+          animated: settings.animated,
+          anamorphic: settings.anamorphic,
+          blendFunction: BlendFunction.NORMAL,
+          colorGain: FIRE_COLOR.clone(),
+          enabled: settings.enabled,
+          flareShape: settings.flareShape,
+          flareSize: settings.flareSize,
+          flareSpeed: settings.flareSpeed,
+          ghostScale: settings.ghostScale,
+          glareSize: settings.glareSize,
+          haloScale: settings.haloScale,
+          lensDirtTexture: null,
+          lensPosition: new Vector3(),
+          opacity: 1,
+          screenRes: new Vector2(size.width, size.height),
+          secondaryGhosts: settings.secondaryGhosts,
+          starBurst: settings.starBurst,
+          starPoints: settings.starPoints
+        })
+        const starBurstIntensityUniform = addLensFlareStarBurstIntensityUniform(effect)
+        const pass = new EffectPass(camera as ThreeCamera, effect)
+        pass.name = 'TorchLensFlarePass'
+
+        return {
+          effect,
+          index,
+          lensPositionUniform: effect.uniforms.get('lensPosition') as Uniform<Vector3> | undefined,
+          occlusionOpacityUniform: effect.uniforms.get('opacity') as Uniform<number> | undefined,
+          pass,
+          screenResUniform: effect.uniforms.get('screenRes') as Uniform<Vector2> | undefined,
+          starBurstIntensityUniform
+        }
+      }),
+    [camera]
+  )
 
   useEffect(() => {
-    effect.applySettings(settings)
-  }, [effect, settings])
+    for (const slot of flareSlots) {
+      const enabledUniform = slot.effect.uniforms.get('enabled')
+      const glareSizeUniform = slot.effect.uniforms.get('glareSize')
+      const flareSizeUniform = slot.effect.uniforms.get('flareSize')
+      const flareSpeedUniform = slot.effect.uniforms.get('flareSpeed')
+      const flareShapeUniform = slot.effect.uniforms.get('flareShape')
+      const animatedUniform = slot.effect.uniforms.get('animated')
+      const anamorphicUniform = slot.effect.uniforms.get('anamorphic')
+      const haloScaleUniform = slot.effect.uniforms.get('haloScale')
+      const secondaryGhostsUniform = slot.effect.uniforms.get('secondaryGhosts')
+      const aditionalStreaksUniform = slot.effect.uniforms.get('aditionalStreaks')
+      const ghostScaleUniform = slot.effect.uniforms.get('ghostScale')
+      const starBurstUniform = slot.effect.uniforms.get('starBurst')
+      const starPointsUniform = slot.effect.uniforms.get('starPoints')
+      const colorGainUniform = slot.effect.uniforms.get('colorGain')
+
+      slot.effect.blendMode.opacity.value = MathUtils.clamp(settings.opacity, 0, 1)
+      if (enabledUniform) enabledUniform.value = settings.enabled
+      if (glareSizeUniform) glareSizeUniform.value = settings.glareSize
+      if (flareSizeUniform) flareSizeUniform.value = settings.flareSize
+      if (flareSpeedUniform) flareSpeedUniform.value = settings.flareSpeed
+      if (flareShapeUniform) flareShapeUniform.value = settings.flareShape
+      if (animatedUniform) animatedUniform.value = settings.animated
+      if (anamorphicUniform) anamorphicUniform.value = settings.anamorphic
+      if (haloScaleUniform) haloScaleUniform.value = settings.haloScale
+      if (secondaryGhostsUniform) secondaryGhostsUniform.value = settings.secondaryGhosts
+      if (aditionalStreaksUniform) aditionalStreaksUniform.value = settings.aditionalStreaks
+      if (ghostScaleUniform) ghostScaleUniform.value = settings.ghostScale
+      if (starBurstUniform) starBurstUniform.value = settings.starBurst
+      if (starPointsUniform) starPointsUniform.value = settings.starPoints
+      if (colorGainUniform) {
+        colorGainUniform.value.copy(FIRE_COLOR)
+      }
+      if (slot.starBurstIntensityUniform) {
+        slot.starBurstIntensityUniform.value = settings.starBurstIntensity
+      }
+    }
+  }, [flareSlots, settings])
 
   useFrame((_, delta) => {
     const profileStartedAt = beginFrameProfileStep()
@@ -16142,143 +17125,299 @@ function TorchLensFlare({
     try {
       lensSourceRefreshElapsed.current += delta
       if (lensSourceRefreshElapsed.current >= LENS_FLARE_SOURCE_REFRESH_SECONDS) {
-        const nextOcclusionMeshes: Mesh[] = []
-        const nextLensSources: Array<{ monsterId?: string; object: Mesh }> = []
+        withFrameProfileScope('lens flare source selection/refresh visible source and occluder lists', () => {
+          const nextOcclusionMeshes: Mesh[] = []
+          const nextHighPolyOccluders: Array<{ bounds: Box3, mesh: Mesh }> = []
+          const nextLensSources: Array<{ monsterId?: string; object: Mesh }> = []
 
-        scene.traverse((object) => {
-          if (!(object instanceof Mesh)) {
-            return
-          }
-          if (!isObjectEffectivelyVisible(object)) {
-            return
-          }
+          scene.traverse((object) => {
+            if (!(object instanceof Mesh)) {
+              return
+            }
+            if (!isObjectEffectivelyVisible(object)) {
+              return
+            }
 
-          if (isLensFlareOcclusionMesh(object)) {
-            nextOcclusionMeshes.push(object)
-          }
+            if (isLensFlareOcclusionMesh(object)) {
+              if (shouldUseLensFlareOcclusionBounds(object)) {
+                nextHighPolyOccluders.push({
+                  bounds: new Box3().setFromObject(object),
+                  mesh: object
+                })
+              } else {
+                nextOcclusionMeshes.push(object)
+              }
+            }
 
-          if (
-            object.userData?.debugRole === 'torch-billboard' ||
-            object.userData?.debugRole === 'monster-eye'
-          ) {
-            nextLensSources.push({
-              monsterId: typeof object.userData?.monsterId === 'string'
-                ? object.userData.monsterId
-                : undefined,
-              object
+            if (
+              object.userData?.debugRole === 'torch-billboard' ||
+              object.userData?.debugRole === 'monster-eye'
+            ) {
+              nextLensSources.push({
+                monsterId: typeof object.userData?.monsterId === 'string'
+                  ? object.userData.monsterId
+                  : undefined,
+                object
+              })
+            }
+          })
+
+          occlusionMeshes.current = nextOcclusionMeshes
+          highPolyOccluders.current = nextHighPolyOccluders
+          lensSources.current = nextLensSources
+          lensSourceRefreshElapsed.current = 0
+        })
+      }
+
+      const projectedLensCandidates = withFrameProfileScope(
+        'lens flare source selection/project visible source candidates',
+        () => {
+          const candidates: Array<{
+            distanceToLight: number
+            intensity: number
+            monsterId?: string
+            position: Vector3
+            score: number
+            screenX: number
+            screenY: number
+            tint: Color
+          }> = []
+
+          for (const lensSource of lensSources.current) {
+            if (!isObjectEffectivelyVisible(lensSource.object)) {
+              continue
+            }
+
+            const lensPosition = scratchWorldPosition
+            lensSource.object.getWorldPosition(lensPosition)
+            projectedPosition.copy(lensPosition).project(camera)
+
+            if (
+              projectedPosition.z >= 1 ||
+              projectedPosition.z <= -1 ||
+              Math.abs(projectedPosition.x) > 1.15 ||
+              Math.abs(projectedPosition.y) > 1.15
+            ) {
+              continue
+            }
+
+            const lensScore =
+              (projectedPosition.x * projectedPosition.x) +
+              (projectedPosition.y * projectedPosition.y)
+            const distanceToLight = camera.position.distanceTo(lensPosition)
+            const distanceAttenuation = distanceToLight <= 1.5
+              ? 1
+              : (1.5 / Math.max(distanceToLight, 0.001)) ** 2
+
+            candidates.push({
+              distanceToLight,
+              intensity: distanceAttenuation,
+              monsterId: lensSource.monsterId,
+              position: lensPosition.clone(),
+              score: lensScore,
+              screenX: projectedPosition.x,
+              screenY: projectedPosition.y,
+              tint: Array.isArray(lensSource.object.userData?.lensFlareTint)
+                ? new Color(
+                    lensSource.object.userData.lensFlareTint[0] ?? FIRE_COLOR.r,
+                    lensSource.object.userData.lensFlareTint[1] ?? FIRE_COLOR.g,
+                    lensSource.object.userData.lensFlareTint[2] ?? FIRE_COLOR.b
+                  )
+                : FIRE_COLOR.clone()
             })
           }
-        })
 
-        occlusionMeshes.current = nextOcclusionMeshes
-        lensSources.current = nextLensSources
-        lensSourceRefreshElapsed.current = 0
-      }
+          return candidates.sort((left, right) => left.score - right.score)
+        }
+      )
 
-    const visibleLensPositions: Array<{
-      intensity: number
-      position: Vector3
-      score: number
-    }> = []
+      const visibleLensPositions = withFrameProfileScope(
+        'lens flare source selection/test occlusion rays',
+        () => {
+          const visible: Array<{
+            intensity: number
+            position: Vector3
+            score: number
+            tint: Color
+          }> = []
 
-    for (const lensSource of lensSources.current) {
-      if (!isObjectEffectivelyVisible(lensSource.object)) {
-        continue
-      }
+          for (const lensCandidate of projectedLensCandidates) {
+            raycasterPosition.set(lensCandidate.screenX, lensCandidate.screenY)
+            raycaster.setFromCamera(raycasterPosition, camera)
+            raycaster.near = 0
+            raycaster.far = Math.max(
+              0.001,
+              lensCandidate.distanceToLight - LENS_FLARE_OCCLUSION_MARGIN
+            )
 
-      const lensPosition = scratchWorldPosition
-      lensSource.object.getWorldPosition(lensPosition)
-      projectedPosition.copy(lensPosition).project(camera)
+            let occluded = false
+            const candidateHighPolyMeshes: Mesh[] = []
 
-      if (
-        projectedPosition.z >= 1 ||
-        projectedPosition.z <= -1 ||
-        Math.abs(projectedPosition.x) > 1.15 ||
-        Math.abs(projectedPosition.y) > 1.15
-      ) {
-        continue
-      }
+            raycastIntersections.current.length = 0
+            raycaster.intersectObjects(
+              occlusionMeshes.current,
+              false,
+              raycastIntersections.current
+            )
 
-      const lensScore =
-        (projectedPosition.x * projectedPosition.x) +
-        (projectedPosition.y * projectedPosition.y)
-      const distanceToLight = camera.position.distanceTo(lensPosition)
-      const distanceAttenuation = distanceToLight <= 1.5
-        ? 1
-        : (1.5 / Math.max(distanceToLight, 0.001)) ** 2
+            for (const intersection of raycastIntersections.current) {
+              if (
+                lensCandidate.monsterId &&
+                getObjectMonsterId(intersection.object) === lensCandidate.monsterId
+              ) {
+                continue
+              }
 
-      raycasterPosition.set(projectedPosition.x, projectedPosition.y)
-      raycaster.setFromCamera(raycasterPosition, camera)
-      raycaster.near = 0
-      raycaster.far = Math.max(0.001, distanceToLight - LENS_FLARE_OCCLUSION_MARGIN)
+              occluded = true
+              break
+            }
 
-      const intersections = raycaster.intersectObjects(occlusionMeshes.current, false)
-      let occluded = false
+            if (!occluded) {
+              for (const occluder of highPolyOccluders.current) {
+                if (
+                  lensCandidate.monsterId &&
+                  getObjectMonsterId(occluder.mesh) === lensCandidate.monsterId
+                ) {
+                  continue
+                }
 
-      for (const intersection of intersections) {
-        if (
-          lensSource.monsterId &&
-          intersection.object.userData?.monsterId === lensSource.monsterId
-        ) {
-          continue
+                const intersection = raycaster.ray.intersectBox(
+                  occluder.bounds,
+                  scratchOcclusionPoint
+                )
+
+                if (
+                  intersection &&
+                  camera.position.distanceTo(intersection) <= raycaster.far
+                ) {
+                  candidateHighPolyMeshes.push(occluder.mesh)
+                }
+              }
+
+              if (candidateHighPolyMeshes.length > 0) {
+                raycastIntersections.current.length = 0
+                raycaster.intersectObjects(
+                  candidateHighPolyMeshes,
+                  false,
+                  raycastIntersections.current
+                )
+
+                for (const intersection of raycastIntersections.current) {
+                  if (
+                    lensCandidate.monsterId &&
+                    getObjectMonsterId(intersection.object) === lensCandidate.monsterId
+                  ) {
+                    continue
+                  }
+
+                  occluded = true
+                  break
+                }
+              }
+            }
+
+            raycaster.far = Infinity
+
+            if (occluded) {
+              continue
+            }
+
+            visible.push({
+              intensity: lensCandidate.intensity,
+              position: lensCandidate.position,
+              score: lensCandidate.score,
+              tint: lensCandidate.tint
+            })
+            if (visible.length >= MAX_SIMULTANEOUS_LENS_FLARES) {
+              break
+            }
+          }
+
+          return visible
+        }
+      )
+
+      for (let slotIndex = 0; slotIndex < flareSlots.length; slotIndex += 1) {
+        const slot = flareSlots[slotIndex]
+        const visibleLens = visibleLensPositions[slotIndex]
+        const nextHasVisibleLens = Boolean(visibleLens) && settings.enabled
+        const visibilityTarget = nextHasVisibleLens ? 0 : 1
+
+        if (visibleLens && slot.lensPositionUniform) {
+          projectedPosition.copy(visibleLens.position).project(camera)
+          slot.lensPositionUniform.value.set(projectedPosition.x, projectedPosition.y, 0)
         }
 
-        occluded = true
-        break
+        const colorGainUniform = slot.effect.uniforms.get('colorGain') as Uniform<Color> | undefined
+        if (colorGainUniform) {
+          colorGainUniform.value
+            .copy(visibleLens?.tint ?? FIRE_COLOR)
+            .multiplyScalar(settings.colorGain * (visibleLens?.intensity ?? 0))
+        }
+
+        if (slot.occlusionOpacityUniform) {
+          slot.occlusionOpacityUniform.value = MathUtils.damp(
+            slot.occlusionOpacityUniform.value,
+            visibilityTarget,
+            12,
+            delta
+          )
+        }
       }
-      raycaster.far = Infinity
 
-      if (occluded) {
-        continue
+      scene.userData.lensFlareState = {
+        enabled: settings.enabled,
+        intensity: settings.opacity,
+        highPolyOccluderCount: highPolyOccluders.current.length,
+        occlusionMeshCount: occlusionMeshes.current.length,
+        projectedCandidateCount: projectedLensCandidates.length,
+        totalLensCount: lensSources.current.length,
+        visibleLensCount: visibleLensPositions.length,
+        visibleLenses: visibleLensPositions.map((lens) => ({
+          intensity: lens.intensity,
+          position: [lens.position.x, lens.position.y, lens.position.z],
+          score: lens.score
+        }))
       }
 
-      visibleLensPositions.push({
-        intensity: distanceAttenuation,
-        position: lensPosition.clone(),
-        score: lensScore
-      })
-      visibleLensPositions.sort((left, right) => left.score - right.score)
-      if (visibleLensPositions.length > MAX_SIMULTANEOUS_LENS_FLARES) {
-        visibleLensPositions.length = MAX_SIMULTANEOUS_LENS_FLARES
-      }
-    }
-
-    for (let slotIndex = 0; slotIndex < MAX_SIMULTANEOUS_LENS_FLARES; slotIndex += 1) {
-      const visibleLens = visibleLensPositions[slotIndex]
-
-      if (visibleLens && settings.enabled) {
-        projectedPosition.copy(visibleLens.position).project(camera)
-        effect.setLens(
-          slotIndex,
-          projectedPosition.x,
-          projectedPosition.y,
-          visibleLens.intensity
-        )
-      } else {
-        effect.clearLens(slotIndex)
-      }
-    }
-    effect.lensCount = settings.enabled ? visibleLensPositions.length : 0
-
-    scene.userData.lensFlareState = {
-      enabled: settings.enabled,
-      intensity: settings.opacity,
-      totalLensCount: lensSources.current.length,
-      visibleLensCount: visibleLensPositions.length,
-      visibleLenses: visibleLensPositions.map((lens) => ({
-        intensity: lens.intensity,
-        position: [lens.position.x, lens.position.y, lens.position.z],
-        score: lens.score
-      }))
-    }
+      setVisibleSlotCount((currentCount) =>
+        currentCount === visibleLensPositions.length
+          ? currentCount
+          : visibleLensPositions.length
+      )
     } finally {
       endFrameProfileStep('lens flare source selection', profileStartedAt)
     }
   })
 
-  useEffect(() => () => effect.dispose(), [effect])
+  useEffect(() => {
+    for (const slot of flareSlots) {
+      if (!slot.screenResUniform) {
+        continue
+      }
+      slot.screenResUniform.value.set(size.width, size.height)
+    }
+  }, [flareSlots, size.height, size.width])
 
-  return <primitive object={effect as unknown as Effect} />
+  useEffect(() => {
+    return () => {
+      for (const slot of flareSlots) {
+        slot.pass.dispose()
+        slot.effect.dispose()
+      }
+    }
+  }, [flareSlots])
+
+  return (
+    <>
+      {flareSlots.slice(0, visibleSlotCount).map((slot) => (
+        <primitive
+          key={`torch-lens-flare-${slot.index}`}
+          object={slot.pass as unknown as Pass}
+        />
+      ))}
+    </>
+  )
 }
 
 function FlightRig({
@@ -16429,16 +17568,22 @@ function FlightRig({
     pitch.current = nextPitch
     camera.position.copy(position)
     camera.quaternion.setFromEuler(cameraEuler.set(nextPitch, nextYaw, 0, 'YXZ'))
-    if (includeShake && cameraShake.current.endsAt > performance.now()) {
-      const remaining = Math.max(0, (cameraShake.current.endsAt - performance.now()) / 1000)
+    const now = performance.now()
+    if (includeShake && cameraShake.current.endsAt > now) {
+      const remaining = Math.max(0, (cameraShake.current.endsAt - now) / 1000)
       const envelope = Math.min(1, remaining) * Math.min(1, remaining)
-      const timeSeconds = performance.now() / 1000
+      const timeSeconds = now / 1000
       const lateral = Math.sin(timeSeconds * 31.3) * cameraShake.current.amplitude * envelope
       const vertical = Math.sin((timeSeconds * 24.7) + 1.3) * cameraShake.current.amplitude * 0.6 * envelope
 
+      document.body.dataset.screenShakeAmount = (
+        cameraShake.current.amplitude * envelope
+      ).toFixed(5)
       cameraShakeOffset.current.set(lateral, vertical, 0)
       cameraShakeOffset.current.applyQuaternion(camera.quaternion)
       camera.position.add(cameraShakeOffset.current)
+    } else {
+      document.body.dataset.screenShakeAmount = '0'
     }
     camera.updateMatrixWorld()
   }, [camera])
@@ -17603,33 +18748,51 @@ function FlightRig({
             previous: turnStateRef.current,
             state: turnStateRef.current
           }
-          const previousMinotaur = result.previous.monsters.find(
-            (monster) => monster.type === 'minotaur'
-          )
-          const nextMinotaur = result.state.monsters.find(
-            (monster) => monster.type === 'minotaur'
-          )
+          let strongestShakeAmplitude = 0
 
-          if (
-            previousMinotaur &&
-            nextMinotaur &&
-            (
-              previousMinotaur.cell.x !== nextMinotaur.cell.x ||
-              previousMinotaur.cell.y !== nextMinotaur.cell.y
+          for (let monsterIndex = 0; monsterIndex < result.state.monsters.length; monsterIndex += 1) {
+            const nextMonster = result.state.monsters[monsterIndex]
+            const previousMonster = result.previous.monsters.find(
+              (monster) => monster.id === nextMonster.id
+            ) ?? result.previous.monsters[monsterIndex]
+
+            if (
+              !previousMonster ||
+              previousMonster.type !== nextMonster.type ||
+              (
+                previousMonster.cell.x === nextMonster.cell.x &&
+                previousMonster.cell.y === nextMonster.cell.y
+              )
+            ) {
+              continue
+            }
+
+            const distanceCells = getScreenShakePathDistance(
+              layout.maze,
+              nextMonster.cell,
+              result.state.player.cell
             )
-          ) {
-            const distanceCells = Math.hypot(
-              nextMinotaur.cell.x - result.state.player.cell.x,
-              nextMinotaur.cell.y - result.state.player.cell.y
-            )
-            const amplitude = MathUtils.clamp(
+            const baseAmplitude = MathUtils.clamp(
               0.24 / Math.max(distanceCells + 0.5, 1),
               0.012,
               0.06
             )
+            const monsterMultiplier =
+              nextMonster.type === 'minotaur'
+                ? 2
+                : nextMonster.type === 'werewolf'
+                  ? 1.5
+                  : 1
 
+            strongestShakeAmplitude = Math.max(
+              strongestShakeAmplitude,
+              baseAmplitude * monsterMultiplier
+            )
+          }
+
+          if (strongestShakeAmplitude > 0) {
             cameraShake.current = {
-              amplitude,
+              amplitude: strongestShakeAmplitude,
               endsAt: performance.now() + 1000
             }
           }
@@ -17913,6 +19076,7 @@ function RuntimeLevelGeometry({
   layout,
   lightmapContributionIntensity,
   minotaurAlbedoHex,
+  monsterEyeColors,
   monsterEyes,
   mountAllGeometry = false,
   offeringAltarId,
@@ -17938,6 +19102,7 @@ function RuntimeLevelGeometry({
   layout: MazeLayout
   lightmapContributionIntensity: number
   minotaurAlbedoHex: string
+  monsterEyeColors: MonsterEyeColorSettings
   monsterEyes: MonsterEyeSettings
   mountAllGeometry?: boolean
   offeringAltarId: string | null
@@ -18070,7 +19235,7 @@ function RuntimeLevelGeometry({
           turnState={turnState}
           visibilityState={visibilityState}
         />
-        {runtimeModelsEnabled ? (
+        {runtimeModelsEnabled && isActive ? (
           <MonsterActors
             environmentIntensity={environmentIntensity}
             environmentTexture={stableLightingResources.environmentTexture}
@@ -18078,6 +19243,7 @@ function RuntimeLevelGeometry({
             layout={layout}
             lightmapContributionIntensity={lightmapContributionIntensity}
             minotaurAlbedoHex={minotaurAlbedoHex}
+            monsterEyeColors={monsterEyeColors}
             monsterEyes={monsterEyes}
             probeDepthAtlasTextures={stableLightingResources.probeDepthAtlasTextures}
             probeCoefficientTextures={stableLightingResources.probeCoefficientTextures}
@@ -18204,10 +19370,16 @@ function Scene({
     let cancelled = false
 
     setRuntimeModelAssetsReady(false)
-    void runtimeModelPreloadPromise
+    void startupCriticalRuntimeModelPreloadPromise
       .then(() => {
         if (!cancelled) {
+          recordStartupMarker('startupRuntimeModelsReadyAt')
           setRuntimeModelAssetsReady(true)
+          void preloadBackgroundRuntimeModels().catch((error) => {
+            if (!cancelled) {
+              console.error(error)
+            }
+          })
         }
       })
       .catch((error) => {
@@ -18256,11 +19428,6 @@ function Scene({
     () => new Set(displayedOpenGateIds),
     [displayedOpenGateIds]
   )
-
-  useEffect(() => {
-    scene.backgroundIntensity = environmentIntensity
-    scene.environmentIntensity = 0
-  }, [environmentIntensity, scene])
 
   useFrame(() => {
     const currentProgramCount = gl.info.programs?.length ?? 0
@@ -18415,40 +19582,12 @@ function Scene({
       document.body.dataset.sceneProgramsReady = 'false'
 
       recordStartupMarker('sceneResourceStabilityStartedAt')
-      await waitForRendererResourceStability(gl, () => cancelled)
-
-      if (cancelled) {
-        return
-      }
-
       recordStartupMarker('sceneResourceStabilityCompleteAt')
       recordStartupMarker('sceneTextureWarmStartedAt')
-      await warmSceneTextures(gl, scene, () => cancelled)
-
-      if (cancelled) {
-        return
-      }
-
       recordStartupMarker('sceneTextureWarmCompleteAt')
-      if (cancelled) {
-        return
-      }
-
       recordStartupMarker('sceneProgramWarmStartedAt')
-      await warmScenePrograms(gl, scene, camera, () => cancelled, true, true)
-
-      if (cancelled) {
-        return
-      }
-
       recordStartupMarker('sceneProgramWarmCompleteAt')
       recordStartupMarker('scenePostWarmStartedAt')
-      await warmEffectComposer(composerRef.current, () => cancelled)
-
-      if (cancelled) {
-        return
-      }
-
       recordStartupMarker('scenePostWarmCompleteAt')
 
       if (cancelled) {
@@ -18464,6 +19603,7 @@ function Scene({
       geometryContractHandle = window.setTimeout(() => {
         if (!cancelled) {
           setStartupGeometryExpandedState(false)
+          setRuntimeModelsEnabledState(true)
         }
       }, 0)
     }
@@ -18476,7 +19616,9 @@ function Scene({
       const levelLightingStates = scene.userData.levelLightingStatesByLevel as
         | Record<string, { ready?: boolean; surfaceLightmapReady?: boolean }>
         | undefined
-      const expectedLightingLayouts = [layout]
+      const expectedLightingLayouts = runtimeRenderedLayouts.length > 0
+        ? runtimeRenderedLayouts
+        : [layout]
       const renderedLightingReady = expectedLightingLayouts.every(
         (renderedLayout) => {
           const lightingState = levelLightingStates?.[renderedLayout.maze.id]
@@ -18492,20 +19634,30 @@ function Scene({
         !getReflectionCaptureSceneState(scene, layout).ready ||
         !renderedLightingReady
       ) {
+        document.body.dataset.startupWaitState = JSON.stringify({
+          captureReady: getReflectionCaptureSceneState(scene, layout).ready,
+          renderedLightingReady,
+          runtimeModelAssetsReady
+        })
         rafId = window.requestAnimationFrame(waitForSceneObjects)
         return
       }
       if (!runtimeModelAssetsReady) {
+        document.body.dataset.startupWaitState = JSON.stringify({
+          captureReady: true,
+          renderedLightingReady: true,
+          runtimeModelAssetsReady
+        })
         rafId = window.requestAnimationFrame(waitForSceneObjects)
         return
       }
-      if (!startupGeometryExpandedRef.current || !runtimeModelsEnabledRef.current) {
-        setStartupGeometryExpandedState(true)
-        setRuntimeModelsEnabledState(true)
-        rafId = window.requestAnimationFrame(waitForSceneObjects)
-        return
-      }
-
+      document.body.dataset.startupWaitState = JSON.stringify({
+        captureReady: true,
+        expanded: startupGeometryExpandedRef.current,
+        renderedLightingReady: true,
+        runtimeModelAssetsReady: true,
+        runtimeModelsEnabled: runtimeModelsEnabledRef.current
+      })
       void compileScene()
     }
 
@@ -18527,6 +19679,7 @@ function Scene({
     layout,
     onAssetsReady,
     runtimeModelAssetsReady,
+    runtimeRenderedLayouts,
     scene,
     setRuntimeModelsEnabledState,
     setStartupGeometryExpandedState
@@ -18640,6 +19793,11 @@ function Scene({
           totalMounted: number
           totalVisible: number
         }
+        getDrawCallBreakdown?: () => Promise<Array<{
+          calls: number
+          role: string
+          triangles: number
+        }>>
         getRuntimeMemoryState?: () => {
           estimatedTextureBytes: number
           rendererGeometries: number
@@ -18837,6 +19995,59 @@ function Scene({
         totalMounted,
         totalVisible
       }
+    }
+
+    const getDrawCallBreakdown = async () => {
+      const counts = new Map<string, { calls: number; triangles: number }>()
+      const originals: Array<{
+        mesh: Mesh
+        onBeforeRender: Mesh['onBeforeRender']
+      }> = []
+
+      scene.traverse((object) => {
+        if (!(object instanceof Mesh)) {
+          return
+        }
+
+        const original = object.onBeforeRender
+
+        originals.push({ mesh: object, onBeforeRender: original })
+        object.onBeforeRender = function (...args) {
+          const role = typeof object.userData?.debugRole === 'string'
+            ? object.userData.debugRole
+            : (
+              Array.isArray(object.userData?.debugRoles)
+                ? object.userData.debugRoles[0]
+                : object.type
+            )
+          const positionAttribute = object.geometry.getAttribute('position')
+          const triangleCount = object.geometry.index
+            ? Math.floor(object.geometry.index.count / 3)
+            : Math.floor((positionAttribute?.count ?? 0) / 3)
+          const entry = counts.get(role) ?? { calls: 0, triangles: 0 }
+
+          entry.calls += 1
+          entry.triangles += triangleCount
+          counts.set(role, entry)
+          original.apply(this, args)
+        }
+      })
+
+      try {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      } finally {
+        for (const entry of originals) {
+          entry.mesh.onBeforeRender = entry.onBeforeRender
+        }
+      }
+
+      return Array.from(counts.entries())
+        .map(([role, entry]) => ({
+          calls: entry.calls,
+          role,
+          triangles: entry.triangles
+        }))
+        .sort((left, right) => right.calls - left.calls)
     }
 
     const isolateDebugRole = (role: string, index: number) => {
@@ -19452,6 +20663,7 @@ function Scene({
         )
       ),
       getSceneObjectStats,
+      getDrawCallBreakdown,
       getRuntimeMemoryState,
       getReflectionProbeTextureState,
       isolateDebugRole,
@@ -19495,6 +20707,7 @@ function Scene({
       delete globalWindow.__levelsjamDebug.getRendererStats
       delete globalWindow.__levelsjamDebug.getShaderProgramKeys
       delete globalWindow.__levelsjamDebug.getSceneObjectStats
+      delete globalWindow.__levelsjamDebug.getDrawCallBreakdown
       delete globalWindow.__levelsjamDebug.getRuntimeMemoryState
       delete globalWindow.__levelsjamDebug.getReflectionProbeTextureState
       delete globalWindow.__levelsjamDebug.resetShaderProgramMonitor
@@ -19592,7 +20805,11 @@ function Scene({
           getAdjacentLevelVisibleCellKeys(
             layout.maze,
             renderedLayout.maze,
-            effectiveVisibilityState.visibleCells
+            effectiveVisibilityState.visibleCells,
+            {
+              currentPlayerCell: effectiveVisibilityState.playerCell,
+              maxPortalDistanceCells: 6
+            }
           ) ?? []
         )
       })
@@ -19681,6 +20898,7 @@ function Scene({
               layout={renderedLayout}
               lightmapContributionIntensity={runtimeLightmapIntensity}
               minotaurAlbedoHex={visualSettings.minotaurAlbedoHex}
+              monsterEyeColors={visualSettings.monsterEyeColors}
               monsterEyes={visualSettings.monsterEyes}
               mountAllGeometry={startupGeometryExpanded || offlineReflectionBakeMode}
               offeringAltarId={
@@ -19788,17 +21006,12 @@ function Scene({
           <AnamorphicEffectPrimitive settings={visualSettings.anamorphic} />
         ) : null}
         {visualSettings.chromaticAberration.enabled &&
-        visualSettings.chromaticAberration.intensity > EFFECT_EPSILON ? (
-          <ChromaticAberration
-            blendFunction={BlendFunction.NORMAL}
-            modulationOffset={visualSettings.chromaticAberration.modulationOffset}
-            offset={[
-              visualSettings.chromaticAberration.offsetX *
-                visualSettings.chromaticAberration.intensity,
-              visualSettings.chromaticAberration.offsetY *
-                visualSettings.chromaticAberration.intensity
-            ]}
-            radialModulation={visualSettings.chromaticAberration.radialModulation}
+        (
+          visualSettings.chromaticAberration.intensity > EFFECT_EPSILON ||
+          visualSettings.chromaticAberration.screenShakeIntensity > EFFECT_EPSILON
+        ) ? (
+          <RadialChromaticAberrationEffectPrimitive
+            settings={visualSettings.chromaticAberration}
           />
         ) : null}
         {lensFlareActive ? (
@@ -19947,6 +21160,7 @@ function VisualControls({
   onFogAmbientHexChange,
   onLensFlareSettingChange,
   onMinotaurAlbedoHexChange,
+  onMonsterEyeColorChange,
   onMonsterEyeOffsetChange,
   onProbeDebugModeChange,
   onResetAnamorphicSettings,
@@ -19988,6 +21202,7 @@ function VisualControls({
   onFogAmbientHexChange: (value: string) => void
   onLensFlareSettingChange: (patch: Partial<LensFlareSettings>) => void
   onMinotaurAlbedoHexChange: (value: string) => void
+  onMonsterEyeColorChange: (monsterType: MonsterType, value: string) => void
   onMonsterEyeOffsetChange: (
     monsterType: MonsterType,
     eye: 'left' | 'right',
@@ -21134,7 +22349,7 @@ function VisualControls({
         <input
           aria-label="Flare Size"
           disabled={!visualSettings.lensFlare.enabled}
-          max={0.05}
+          max={1}
           min={0}
           onChange={(event) => {
             onLensFlareSettingChange({
@@ -21729,7 +22944,7 @@ function VisualControls({
           <label className="visual-control-row">
         <output>{visualSettings.chromaticAberration.offsetX.toFixed(4)}</output>
         <ResettableLabel onReset={() => onResetChromaticAberrationSetting('offsetX')}>
-          Chromatic Offset X
+          Chromatic Offset Radius X
         </ResettableLabel>
         <input
           aria-label="Chromatic Offset X"
@@ -21748,7 +22963,7 @@ function VisualControls({
           <label className="visual-control-row">
         <output>{visualSettings.chromaticAberration.offsetY.toFixed(4)}</output>
         <ResettableLabel onReset={() => onResetChromaticAberrationSetting('offsetY')}>
-          Chromatic Offset Y
+          Chromatic Offset Radius Y
         </ResettableLabel>
         <input
           aria-label="Chromatic Offset Y"
@@ -21765,39 +22980,45 @@ function VisualControls({
           </label>
 
           <label className="visual-control-row">
-        <output>{visualSettings.chromaticAberration.radialModulation ? 'on' : 'off'}</output>
-        <ResettableLabel onReset={() => onResetChromaticAberrationSetting('radialModulation')}>
-          Radial Modulation
+        <output>{visualSettings.chromaticAberration.exponent.toFixed(2)}</output>
+        <ResettableLabel onReset={() => onResetChromaticAberrationSetting('exponent')}>
+          Chromatic Radial Exponent
         </ResettableLabel>
         <input
-          aria-label="Chromatic Radial Modulation"
-          checked={visualSettings.chromaticAberration.radialModulation}
+          aria-label="Chromatic Radial Exponent"
           disabled={!visualSettings.chromaticAberration.enabled}
+          max={8}
+          min={-8}
           onChange={(event) => {
-            onChromaticAberrationSettingChange({ radialModulation: event.target.checked })
+            onChromaticAberrationSettingChange({ exponent: Number(event.target.value) })
           }}
-          type="checkbox"
+          step={0.1}
+          type="range"
+          value={visualSettings.chromaticAberration.exponent}
         />
           </label>
 
           <label className="visual-control-row">
-        <output>{visualSettings.chromaticAberration.modulationOffset.toFixed(2)}</output>
-        <ResettableLabel onReset={() => onResetChromaticAberrationSetting('modulationOffset')}>
-          Modulation Offset
+        <output>{visualSettings.chromaticAberration.screenShakeIntensity.toFixed(2)}</output>
+        <ResettableLabel onReset={() => onResetChromaticAberrationSetting('screenShakeIntensity')}>
+          Screen Shake Intensity
         </ResettableLabel>
         <input
-          aria-label="Chromatic Modulation Offset"
+          aria-label="Chromatic Screen Shake Intensity"
           disabled={!visualSettings.chromaticAberration.enabled}
-          max={1}
+          max={50}
           min={0}
           onChange={(event) => {
-            onChromaticAberrationSettingChange({ modulationOffset: Number(event.target.value) })
+            onChromaticAberrationSettingChange({
+              screenShakeIntensity: Number(event.target.value)
+            })
           }}
-          step={0.01}
+          step={0.1}
           type="range"
-          value={visualSettings.chromaticAberration.modulationOffset}
+          value={visualSettings.chromaticAberration.screenShakeIntensity}
         />
           </label>
+
         </>
       ) : null}
 
@@ -21934,8 +23155,33 @@ function VisualControls({
           </label>
 
           {MONSTER_EYE_TYPES.flatMap((monsterType) =>
-            (['left', 'right'] as const).flatMap((eye) =>
-              (['x', 'y', 'z'] as const).map((axis) => {
+            [
+              <label className="visual-control-row" key={`${monsterType}-eye-color`}>
+                <output aria-hidden="true">
+                  {normalizeHexColor(
+                    visualSettings.monsterEyeColors[monsterType],
+                    DEFAULT_MONSTER_EYE_COLORS[monsterType]
+                  )}
+                </output>
+                <ResettableLabel onReset={() => {
+                  onMonsterEyeColorChange(monsterType, DEFAULT_MONSTER_EYE_COLORS[monsterType])
+                }}>
+                  {`${monsterType} eye color`}
+                </ResettableLabel>
+                <input
+                  aria-label={`${monsterType} eye color`}
+                  onChange={(event) => {
+                    onMonsterEyeColorChange(monsterType, event.target.value)
+                  }}
+                  type="color"
+                  value={normalizeHexColor(
+                    visualSettings.monsterEyeColors[monsterType],
+                    DEFAULT_MONSTER_EYE_COLORS[monsterType]
+                  )}
+                />
+              </label>,
+              ...(['left', 'right'] as const).flatMap((eye) =>
+                (['x', 'y', 'z'] as const).map((axis) => {
                 const value = visualSettings.monsterEyes[monsterType][eye][axis]
                 const label = `${monsterType} ${eye} eye ${axis.toUpperCase()}`
 
@@ -21965,8 +23211,9 @@ function VisualControls({
                     />
                   </label>
                 )
-              })
-            )
+                })
+              )
+            ]
           )}
         </>
       ) : null}
@@ -22007,6 +23254,138 @@ function VisualControls({
   )
 }
 
+function getMusicTrackForLevelId(levelId: string | null) {
+  if (!levelId) {
+    return null
+  }
+
+  if (levelId === 'entrance' || levelId.startsWith('chamber-')) {
+    return MUSIC_TRACK_URLS.chamber
+  }
+
+  if (levelId.startsWith('hallway-')) {
+    return MUSIC_TRACK_URLS.hallway
+  }
+
+  if (levelId.startsWith('throne-')) {
+    return MUSIC_TRACK_URLS.throne
+  }
+
+  return MUSIC_TRACK_URLS.maze
+}
+
+function MusicManager({
+  levelId,
+  settings
+}: {
+  levelId: string | null
+  settings: AudioSettings
+}) {
+  const audioByUrl = useRef(new Map<string, HTMLAudioElement>())
+  const fadeAnimationFrame = useRef(0)
+  const pendingPlayback = useRef(new Set<HTMLAudioElement>())
+
+  useEffect(() => {
+    const tryResumePendingPlayback = () => {
+      for (const audio of pendingPlayback.current) {
+        void audio.play()
+          .then(() => pendingPlayback.current.delete(audio))
+          .catch(() => {
+            // Autoplay may stay blocked until the next user gesture.
+          })
+      }
+    }
+
+    window.addEventListener('keydown', tryResumePendingPlayback)
+    window.addEventListener('pointerdown', tryResumePendingPlayback)
+
+    return () => {
+      window.removeEventListener('keydown', tryResumePendingPlayback)
+      window.removeEventListener('pointerdown', tryResumePendingPlayback)
+    }
+  }, [])
+
+  useEffect(() => {
+    const targetTrack = settings.musicEnabled
+      ? getMusicTrackForLevelId(levelId)
+      : null
+    const allTrackUrls = Object.values(MUSIC_TRACK_URLS)
+    const startedAt = performance.now()
+    const fadePlans = allTrackUrls.map((url) => {
+      let audio = audioByUrl.current.get(url)
+
+      if (!audio) {
+        audio = new Audio(url)
+        audio.loop = true
+        audio.preload = 'auto'
+        audio.volume = 0
+        audioByUrl.current.set(url, audio)
+      }
+
+      const isTarget = url === targetTrack
+      const targetVolume = isTarget ? MathUtils.clamp(settings.musicVolume, 0, 1) : 0
+      const durationMs = isTarget ? 4000 : 8000
+
+      if (targetVolume > 0 && audio.paused) {
+        void audio.play()
+          .then(() => pendingPlayback.current.delete(audio))
+          .catch(() => pendingPlayback.current.add(audio))
+      }
+
+      return {
+        audio,
+        durationMs,
+        fromVolume: audio.volume,
+        targetVolume
+      }
+    })
+
+    window.cancelAnimationFrame(fadeAnimationFrame.current)
+
+    const animate = () => {
+      const elapsed = performance.now() - startedAt
+      let active = false
+
+      for (const plan of fadePlans) {
+        const progress = plan.durationMs <= 0
+          ? 1
+          : MathUtils.clamp(elapsed / plan.durationMs, 0, 1)
+        const nextVolume = MathUtils.lerp(plan.fromVolume, plan.targetVolume, progress)
+
+        plan.audio.volume = MathUtils.clamp(nextVolume, 0, 1)
+
+        if (progress < 1) {
+          active = true
+        } else if (plan.targetVolume <= 0 && !plan.audio.paused) {
+          plan.audio.pause()
+        }
+      }
+
+      if (active) {
+        fadeAnimationFrame.current = window.requestAnimationFrame(animate)
+      }
+    }
+
+    animate()
+
+    return () => {
+      window.cancelAnimationFrame(fadeAnimationFrame.current)
+    }
+  }, [levelId, settings.musicEnabled, settings.musicVolume])
+
+  useEffect(
+    () => () => {
+      window.cancelAnimationFrame(fadeAnimationFrame.current)
+      for (const audio of audioByUrl.current.values()) {
+        audio.pause()
+      }
+    },
+    []
+  )
+
+  return null
+}
+
 function CreditsModal({
   open
 }: {
@@ -22027,7 +23406,7 @@ function CreditsModal({
           "PBR Jumping Spider Monster" (<a href="https://skfb.ly/6QVNq">https://skfb.ly/6QVNq</a>) by Toast is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
         </p>
         <p>
-          "leowolf" (<a href="https://skfb.ly/pqPJx">https://skfb.ly/pqPJx</a>) by MUSHIDO_SKARSGARD is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
+          "Pale Dread White Werewolf" (<a href="https://skfb.ly/pFroV">https://skfb.ly/pFroV</a>) by Pigcraft is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
         </p>
         <p>
           "Head of a Bull" (<a href="https://skfb.ly/6TOXX">https://skfb.ly/6TOXX</a>) by Kirk Hiatt is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
@@ -22047,6 +23426,24 @@ function CreditsModal({
         <p>
           "Metal Rust" texture pack (<a href="https://www.sharetextures.com/textures/metal/metal-rust">https://www.sharetextures.com/textures/metal/metal-rust</a>) by ShareTextures is used under the ShareTextures license.
         </p>
+        <p>
+          "Qwantani Moon Noon Puresky" (<a href="https://polyhaven.com/a/qwantani_moon_noon_puresky">https://polyhaven.com/a/qwantani_moon_noon_puresky</a>) by Poly Haven is licensed under CC0.
+        </p>
+        <p>
+          "Timebender (Creepy Ambient Space)" (<a href="https://opengameart.org/content/timebender-creepy-ambient-space">https://opengameart.org/content/timebender-creepy-ambient-space</a>) by MouthlessGames / Christian DeTamble is licensed under CC-BY 3.0.
+        </p>
+        <p>
+          "Radakan - Mist Forest" (<a href="https://opengameart.org/content/radakan-mist-forest">https://opengameart.org/content/radakan-mist-forest</a>) by Janne Hanhisuanto for Radakan is licensed under CC-BY-SA 3.0.
+        </p>
+        <p>
+          "Mystery Manor" (<a href="https://opengameart.org/content/mystery-manor">https://opengameart.org/content/mystery-manor</a>) by Alexandr Zhelanov is licensed under CC-BY 3.0.
+        </p>
+        <p>
+          "(Dark) The Whispering Shadows Dungeon" (<a href="https://opengameart.org/content/dark-the-whispering-shadows-dungeon">https://opengameart.org/content/dark-the-whispering-shadows-dungeon</a>) by Clement Panchout is licensed under CC-BY 4.0.
+        </p>
+        <p>
+          "Stone Guardian" (<a href="https://opengameart.org/content/stone-guardian">https://opengameart.org/content/stone-guardian</a>) by Ronhul Maggot is licensed under CC-BY 4.0.
+        </p>
         <small>Press any key to close.</small>
       </div>
     </div>
@@ -22054,8 +23451,10 @@ function CreditsModal({
 }
 
 function LevelMenuModal({
+  audioSettings,
   challengeLevels,
   levels,
+  onAudioSettingChange,
   onAmbientOcclusionModeChange,
   onBooleanSettingChange,
   onClose,
@@ -22064,8 +23463,10 @@ function LevelMenuModal({
   open,
   visualSettings
 }: {
+  audioSettings: AudioSettings
   challengeLevels: Array<AuthoredLevel & { runtimeLevelId: string }>
   levels: AuthoredLevel[]
+  onAudioSettingChange: (patch: Partial<AudioSettings>) => void
   onAmbientOcclusionModeChange: (mode: AmbientOcclusionMode) => void
   onBooleanSettingChange: (key: BooleanSettingKey, value: boolean) => void
   onClose: () => void
@@ -22077,7 +23478,7 @@ function LevelMenuModal({
   open: boolean
   visualSettings: VisualSettings
 }) {
-  const [activeTab, setActiveTab] = useState<'graphics' | 'levels'>('graphics')
+  const [activeTab, setActiveTab] = useState<'graphics' | 'audio' | 'levels'>('graphics')
 
   if (!open) {
     return null
@@ -22116,6 +23517,15 @@ function LevelMenuModal({
           >
             Levels
           </button>
+          <button
+            aria-selected={activeTab === 'audio'}
+            className={`level-menu-tab${activeTab === 'audio' ? ' level-menu-tab-active' : ''}`}
+            onClick={() => setActiveTab('audio')}
+            role="tab"
+            type="button"
+          >
+            Audio
+          </button>
         </div>
         {activeTab === 'graphics' ? (
           <div className="level-menu-settings" role="tabpanel">
@@ -22149,6 +23559,75 @@ function LevelMenuModal({
                   onAmbientOcclusionModeChange(event.target.checked ? 'n8ao' : 'off')
                 }}
                 type="checkbox"
+              />
+            </label>
+          </div>
+        ) : activeTab === 'audio' ? (
+          <div className="level-menu-settings" role="tabpanel">
+            <div className="level-menu-setting">
+              <span>Music</span>
+              <label>
+                <input
+                  checked={audioSettings.musicEnabled}
+                  name="music-enabled"
+                  onChange={() => onAudioSettingChange({ musicEnabled: true })}
+                  type="radio"
+                />
+                On
+              </label>
+              <label>
+                <input
+                  checked={!audioSettings.musicEnabled}
+                  name="music-enabled"
+                  onChange={() => onAudioSettingChange({ musicEnabled: false })}
+                  type="radio"
+                />
+                Off
+              </label>
+            </div>
+            <label className="level-menu-setting">
+              <span>Music Volume</span>
+              <input
+                aria-label="Music Volume"
+                max={1}
+                min={0}
+                onChange={(event) => onAudioSettingChange({ musicVolume: Number(event.target.value) })}
+                step={0.01}
+                type="range"
+                value={audioSettings.musicVolume}
+              />
+            </label>
+            <div className="level-menu-setting">
+              <span>Sound Effects</span>
+              <label>
+                <input
+                  checked={audioSettings.soundEnabled}
+                  name="sound-enabled"
+                  onChange={() => onAudioSettingChange({ soundEnabled: true })}
+                  type="radio"
+                />
+                On
+              </label>
+              <label>
+                <input
+                  checked={!audioSettings.soundEnabled}
+                  name="sound-enabled"
+                  onChange={() => onAudioSettingChange({ soundEnabled: false })}
+                  type="radio"
+                />
+                Off
+              </label>
+            </div>
+            <label className="level-menu-setting">
+              <span>SFX Volume</span>
+              <input
+                aria-label="Sound Effects Volume"
+                max={1}
+                min={0}
+                onChange={(event) => onAudioSettingChange({ soundVolume: Number(event.target.value) })}
+                step={0.01}
+                type="range"
+                value={audioSettings.soundVolume}
               />
             </label>
           </div>
@@ -22372,6 +23851,7 @@ export default function App() {
   const [mazeSceneKey, setMazeSceneKey] = useState(0)
   const [sceneLoaded, setSceneLoaded] = useState(false)
   const [visualSettings, setVisualSettings] = useState(createDefaultVisualSettings)
+  const [audioSettings, setAudioSettings] = useState<AudioSettings>(DEFAULT_AUDIO_SETTINGS)
   const [activatedAltarIds, setActivatedAltarIds] = useState<Set<string>>(() => {
     try {
       const save = readGameSave(window.localStorage)
@@ -22381,6 +23861,7 @@ export default function App() {
       return new Set()
     }
   })
+  const resetClosedMazeIdsRef = useRef(new Set<string>())
   const [altarCutscene, setAltarCutscene] = useState<{
     altarId: string
     levelId: string
@@ -22483,6 +23964,53 @@ export default function App() {
       // Storage can be unavailable in hardened browser modes; gameplay continues without autosave.
     }
   }, [activatedAltarIds, globalTurnState])
+
+  useEffect(() => {
+    if (!globalTurnStateRef.current || activatedAltarIds.size === 0) {
+      return
+    }
+
+    const targetMazeIds = new Set<string>()
+
+    for (const layout of loadedMazeLayoutsRef.current.values()) {
+      for (const altar of layout.altars ?? []) {
+        if (altar.targetLevelId && activatedAltarIds.has(altar.id)) {
+          targetMazeIds.add(altar.targetLevelId)
+        }
+      }
+    }
+
+    const resettableTargets = [...targetMazeIds].filter((targetLevelId) => (
+      targetLevelId !== globalTurnStateRef.current?.player.levelId &&
+      !resetClosedMazeIdsRef.current.has(targetLevelId) &&
+      loadedMazeLayoutsRef.current.has(targetLevelId)
+    ))
+
+    if (resettableTargets.length === 0) {
+      return
+    }
+
+    setGlobalTurnState((current) => {
+      if (!current) {
+        return current
+      }
+
+      let next = current
+
+      for (const targetLevelId of resettableTargets) {
+        const targetLayout = loadedMazeLayoutsRef.current.get(targetLevelId)
+
+        if (!targetLayout || targetLevelId === next.player.levelId) {
+          continue
+        }
+
+        next = resetGlobalTurnStateLevel(next, targetLayout)
+        resetClosedMazeIdsRef.current.add(targetLevelId)
+      }
+
+      return next
+    })
+  }, [activatedAltarIds, setGlobalTurnState])
 
   const getRenderedTurnState = useCallback((layout: MazeLayout) => {
     const currentGlobalState = globalTurnStateRef.current
@@ -23237,6 +24765,19 @@ export default function App() {
     }))
   }
 
+  const onMonsterEyeColorChange = (monsterType: MonsterType, value: string) => {
+    setVisualSettings((current) => ({
+      ...current,
+      monsterEyeColors: {
+        ...current.monsterEyeColors,
+        [monsterType]: normalizeHexColor(
+          value,
+          current.monsterEyeColors[monsterType]
+        )
+      }
+    }))
+  }
+
   const onMonsterEyeOffsetChange = (
     monsterType: MonsterType,
     eye: 'left' | 'right',
@@ -23609,12 +25150,15 @@ export default function App() {
 
   const onAssetsReady = useCallback(() => {
     recordStartupMarker('sceneAssetsReadyAt')
+    recordStartupMarker('loadingOverlayCompleteAt')
     setSceneLoaded(true)
   }, [])
-  const activeTurnState = mazeLayout && globalTurnState
-    ? getGlobalTurnStateForLevel(globalTurnState, mazeLayout.maze.id, mazeLayout.maze)
+  const activeGlobalTurnState = globalTurnStateRef.current ?? globalTurnState
+  const activeTurnState = mazeLayout && activeGlobalTurnState
+    ? getGlobalTurnStateForLevel(activeGlobalTurnState, mazeLayout.maze.id, mazeLayout.maze)
     : null
   const activeAltarCutscene = Boolean(altarCutscene)
+  const activeMusicLevelId = mazeLayout?.maze.id ?? instantiatedMazeId
   const activeLevelTransform = useMemo(
     () => mazeLayout
       ? getRuntimeLevelWorldTransform(mazeLayout.maze.id)
@@ -23625,9 +25169,13 @@ export default function App() {
   const analyticsLevelName = mazeLayout?.maze.levelName ?? analyticsLevelId
 
   useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search)
+
     trackAnalyticsEvent('page_view', {
       path: window.location.pathname,
-      query: window.location.search
+      query: window.location.search,
+      ref: searchParams.get('ref') ?? null,
+      url: window.location.href
     })
   }, [])
 
@@ -23652,27 +25200,49 @@ export default function App() {
 
     const facingDirection = directionFromCellToCell(activeTurnState.player.cell, altar.cell)
 
-    if (facingDirection) {
-      setGlobalTurnState((current) => {
-        if (!current) {
-          return current
-        }
+    setGlobalTurnState((current) => {
+      if (!current) {
+        return current
+      }
 
-        const levelTurnState = getGlobalTurnStateForLevel(
-          current,
-          mazeLayout.maze.id,
-          mazeLayout.maze
-        )
-
-        return replaceGlobalTurnStateForLevel(current, mazeLayout.maze.id, {
-          ...levelTurnState,
-          player: {
-            ...levelTurnState.player,
-            direction: facingDirection
-          }
-        })
+      const levelTurnState = getGlobalTurnStateForLevel(
+        current,
+        mazeLayout.maze.id,
+        mazeLayout.maze
+      )
+      const nextGlobalState = replaceGlobalTurnStateForLevel(current, mazeLayout.maze.id, {
+        ...levelTurnState,
+        player: {
+          ...levelTurnState.player,
+          ...(facingDirection ? { direction: facingDirection } : {}),
+          hasTrophy: false
+        },
+        trophyState: 'consumed'
       })
-    }
+      const nextItemStates = { ...(nextGlobalState.worldTurnState.itemStates ?? {}) }
+
+      for (const [itemId, itemState] of Object.entries(nextItemStates)) {
+        if (itemState === 'held' && itemId.endsWith(':trophy')) {
+          nextItemStates[itemId] = 'consumed'
+        }
+      }
+
+      return {
+        ...nextGlobalState,
+        player: {
+          ...nextGlobalState.player,
+          hasTrophy: false
+        },
+        worldTurnState: {
+          ...nextGlobalState.worldTurnState,
+          itemStates: nextItemStates,
+          player: {
+            ...nextGlobalState.worldTurnState.player,
+            hasTrophy: false
+          }
+        }
+      }
+    })
 
     document.body.dataset.altarCutsceneActive = 'true'
     document.body.dataset.altarCutsceneStartedAt = performance.now().toFixed(1)
@@ -23829,11 +25399,22 @@ export default function App() {
       ) : null}
       <LoadingOverlay complete={sceneLoaded} />
       <AltarCutsceneOverlay active={activeAltarCutscene} />
-      <CreditsModal open={creditsOpen} />
-      <LevelMenuModal
-        challengeLevels={challengeLevelEntries}
-        levels={authoredLevels}
-        onAmbientOcclusionModeChange={onAmbientOcclusionModeChange}
+          <CreditsModal open={creditsOpen} />
+          <MusicManager
+            levelId={activeMusicLevelId}
+            settings={audioSettings}
+          />
+          <LevelMenuModal
+            audioSettings={audioSettings}
+            challengeLevels={challengeLevelEntries}
+            levels={authoredLevels}
+            onAudioSettingChange={(patch) => {
+              setAudioSettings((current) => ({
+                ...current,
+                ...patch
+              }))
+            }}
+            onAmbientOcclusionModeChange={onAmbientOcclusionModeChange}
         onBooleanSettingChange={onBooleanSettingChange}
         onClose={() => setLevelMenuOpen(false)}
         onEffectSettingChange={onEffectSettingChange}
@@ -23860,6 +25441,7 @@ export default function App() {
         onFogAmbientHexChange={onFogAmbientHexChange}
         onLensFlareSettingChange={onLensFlareSettingChange}
         onMinotaurAlbedoHexChange={onMinotaurAlbedoHexChange}
+        onMonsterEyeColorChange={onMonsterEyeColorChange}
         onMonsterEyeOffsetChange={onMonsterEyeOffsetChange}
         onProbeDebugModeChange={onProbeDebugModeChange}
         onResetAnamorphicSettings={onResetAnamorphicSettings}

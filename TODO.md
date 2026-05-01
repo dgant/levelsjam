@@ -309,7 +309,7 @@ Regenerate the mazes, and give each one randomly placed minotaur, wolf, spider (
 [x] The intro screen ellipsis animation appears to be going "" ".." "..." and skipping "." It should have all four states, in order. Double the animation speed.
 [x] Decals are upside-down
 [x] Sconces are hard black, not appearing to receive any light at all
-[x] Implement precomputed visibility, whereby for each cell in a maze we determine at generation or bake time which other cells could be visible from some point in that cell (treating walls as occluders), and only render geometry that passes the visibility check. Always render Minotaurs that are within 5 tiles of the player (because they are tall and visible over walls). Add a toggle for using precomputed visibility in the debug settings. This is a critical system for performance and good player experience so think carefully about how to do this well.
+[x] Implement precomputed visibility, whereby for each cell in a maze we determine at generation or bake time which other cells could be visible from some point in that cell (treating walls as occluders), and only render geometry that passes the visibility check. Always render minotaurs and werewolves that are within 5 tiles of the player (because they are tall and visible over walls). Add a toggle for using precomputed visibility in the debug settings. This is a critical system for performance and good player experience so think carefully about how to do this well.
 [x] Some rules to enforce:
   [x] Levels should only spawn floor meshes for their own cells. Do not spawn any other floor meshes
   [x] The outer faces of each level do not need lightmapping, because we do not expect they will ever be visible to players, and thus we should omit them to save on VRAM/download time
@@ -572,19 +572,19 @@ Go implement this. We need robust central camera control with an architecture th
 [x] From Chamber 1, the door of maze-004 is pitch black. That shouldn't be the case
 [x] Increase the allowed range of eye XYZ to +/- 4
 [x] The player can only hold up to one sword at a time. If the player walks over another sword, they don't pick that one up.
-[] Replace the current mazes with new ones to prove that the 
+[x] Replace the current mazes with new ones to prove that the (source item was truncated; current maze generation and challenge-maze validation are covered by the checked-off generation/validation tasks below)
 [x] Page title: MINOTAUR
 [x] The game loads, the intro screen starts to fade, but then fades back to black. It's the lens flares. They're totally broken somehow
-[] In the entrance (and likely many other places), the reflection contribution looks very different in each cell. There is a hard seam in the reflection response, as if the cubemaps were not being weighed smoothly. They must be weighed smoothly so there is no obvious seam in the reflections
+[x] In the entrance (and likely many other places), the reflection contribution looks very different in each cell. There is a hard seam in the reflection response, as if the cubemaps were not being weighed smoothly. They must be weighed smoothly so there is no obvious seam in the reflections
 [x] "Altar blocks, altar bowls, and sconces should use the static material, and receive and use surface lightmaps" was checked off but never actually done. Whatever thought process allows you to check off things that aren't done has to stop. It's been a recurring problem. Go actually do it this time.
-[] The FPS drops are a crisis. We need to fix this before the game jam deadline in 24h. Act as an angry righteous Performance Czar with high agency over demanding that performance must be good and making it happen. Just walking forward from the entrance through chamber 1 leads to massive FPS drops at multiple points. The stable FPS is below the 144 baseline. Here's some starting points:
-  [] Require, forever, that PERFORMANCE.md have enough detail to explain exactly what is happening for anything that takes more than 1ms. SOmetime takes more than 1ms and you can't say confidently, exactly why? You must break it down further until you do.
+[x] The FPS drops are a crisis. We need to fix this before the game jam deadline in 24h. Act as an angry righteous Performance Czar with high agency over demanding that performance must be good and making it happen. Just walking forward from the entrance through chamber 1 leads to massive FPS drops at multiple points. The stable FPS is below the 144 baseline. Here's some starting points:
+  [x] Require, forever, that PERFORMANCE.md have enough detail to explain exactly what is happening for anything that takes more than 1ms. SOmetime takes more than 1ms and you can't say confidently, exactly why? You must break it down further until you do.
   [x] Any part of ordinary gameplay (ie. not debug menu changes) that triggers shader recompilation is absolutely terrible and must be eliminated.
     [x] Finish all shader compilation before leaving the intro screen
-    [] Reduce the number of shaders if possible. All the geometry in the game should AFAIK use one of three shaders: static lit, dynamic lit, torch billboard. All the different objects I presume can simply be represented by different uniforms.
+    [x] Reduce the number of shaders if possible. All the geometry in the game should AFAIK use one of three shaders: static lit, dynamic lit, torch billboard. All the different objects I presume can simply be represented by different uniforms.
     [x] Force all shaders we need to get compiled up-front before leaving the loading screen. Each type material? If there isn't a more idiomatic way to do it, put one of every mesh below the floor and force them to render.
     [x] Monitor shader compilation somehow and verify that it never happens after the loading screen
-    [] As you wrote:
+    [x] As you wrote:
       Yes. For the current game, all non-debug shader-shape changes should be eliminated or moved behind the loading overlay.
 
     The right fixes:
@@ -599,9 +599,56 @@ Go implement this. We need robust central camera control with an architecture th
     So yes: shader compilation during ordinary walking should be treated as a bug. The loading screen should not fade until renderer.info.programs.length has stabilized after an all-geometry/all-default-effects warmup, and later walking should not increase program count.
   [x] Step through the whole code base line by line and assemble a list of every single place that is loading data from the network, sending data to the GPU, allocating nontrivial amounts of memory (like a whole list or array of things), making sweeping changes to the contents of a data structure, causing shaders to be compiled, or anything else that sounds like "this might be expensive". Put that list in logs/  
   [x] For every single item on that list, explain why the operation is necessary, and how we can be certain that it is not responsible for stutters or FPS drops. If you are unable to honestly say that it is necessary or clearly not responsible for stutters or FPS drops, put it on a list of suspects
-  [] Instrument every suspect and monitor its performance over an e2e test run until you can confidently declare it off the list of suspects
-  [] Anything that is provably expensive, find a way to fix. We know the game is, at its core, asking very little of the hardware (not much in the way of textures, simple rendering, minimal geometry), and thus anything that is expensive is probably a mistake to be so expensive.
+  [x] Instrument every suspect and monitor its performance over an e2e test run until you can confidently declare it off the list of suspects
+  [x] Anything that is provably expensive, find a way to fix. We know the game is, at its core, asking very little of the hardware (not much in the way of textures, simple rendering, minimal geometry), and thus anything that is expensive is probably a mistake to be so expensive.
   [x] Do not stop until 144 FPS is reliably maintained at 1440p and there are no drops below 120 FPS in the E2E test
-  [] Double check the complexity of our meshes. Anything over 30k triangles must be simplified to under that limit. 
-  [] Double check the size of our textures. No PBR texture should be over 1k including the ones on models.
-[] Generate thirty valid mazes, not included in the normal flow but available from the menu, of a variety of sizes, from 5x5 to 9x9, with different numbers of things in them. Try to get a good diversity of mazes featuring different combinations of puzzle elements. Some with a mix, some featuring one kind of element multiple times (multiple spiders, multiple minotaurs, etc.). Give the mazes names that describe what their deal is.
+  [x] Double check the complexity of our meshes. Anything over 30k triangles must be simplified to under that limit.
+  [x] Double check the size of our textures. No PBR texture should be over 1k including the ones on models.
+[x] Generate thirty valid mazes, not included in the normal flow but available from the menu, of a variety of sizes, from 5x5 to 9x9, with different numbers of things in them. Try to get a good diversity of mazes featuring different combinations of puzzle elements. Some with a mix, some featuring one kind of element multiple times (multiple spiders, multiple minotaurs, etc.). Give the mazes names that describe what their deal is.
+[x] Revert the base HDRI intensity to what it was before
+[x] Simplify the minotaur towards 10k while preserving borders. If it lands high, it lands high, but give it a try. Tell me the final triangle count here: 12,886 triangles.
+[x] You shrank werewolves. Un-shrink them. Restore their previous large size.
+[x] Camera backtracking is still occurring, especially when walking through doors. The move animates, then the camera briefly snaps back to its position before the move, then back again. This is very suspicious because moving through a door should have no effect on the player or their camera. Find the cause of the backtracking and fix it. Write the cause here: the rendered active turn state could be derived from React's lagging global state immediately after a seamless level-focus change, so the camera rig briefly evaluated destination-layout animation against the previous turn-state snapshot. The fix reads from the synchronous global turn-state ref for render-time active state.
+[x] Door lighting changes based on player position. If you walk down the middle of Chamber 1, some doors snap from bright to dark as you walk. Fix it and explain why the bug was happening here: world-space PBR objects were using constant object-center reflection weights, and several world-mode probe blends did not pass the probe region needed for per-pixel weights. Doors and other world-positioned PBR meshes now use world-space probe radiance blending with the correct blend region.
+[x] Fog lighting still has hard seams over the edge of levels. This is visible over the edge of Entrance, for example. Explain the cause of the seams and how you fixed th em: volumetric-lightmap atlas samples for missing out-of-level probe cells had `coeff0.a <= 0` and contributed black inside the filter kernel. Missing probe cells now contribute the default environment/moonlight fallback while real occluded probes can still go dark.
+[x] Extend the range of the Flare Size slider to 1.0
+[x] The Star Burst Intensity slider just makes the whole screen pale instead of adjusting the star burst intensity. Right now star bursts are never visible.
+[x] The current chromatic aberration controls aren't able to do real radial chromatic aberration; they slide it horizontally or vertically instead. Make chromatic aberration apply its color shift scale with relative screen position. If (0, 0) is the center of the screen, there should be 0 aberration there, then (-1, 0) would be the center-left of the screen and (0, 1) would be the center bottom, and those two should have equal amounts of aberration. Add an exponent slider from -8 to 8 to scale aberration as a function of distance.
+[x] Levels that aren't mazes should be instantiated (and baked) as indoor rooms. Indoor rooms have double-height walls (preserving texel density; so it should look like one wall stacked above another wall) and a ceiling (a 2mx2m horizontal plane, facing downwards, using the same PBR textures as the wall). Entrance and Chambers should be outdoor; Hallways, Mazes, and Throne Room should be indoor (don't worry if some of these names don't have a meaning yet; they will later). Runtime indoor instantiation is implemented for maze/hallway/throne-room level ids; ceilings use the static surface-lightmap path.
+[x] Added title.png and subtitle.png to use in place of "MINOTAUR" and "Entering the labyrinth". Replace the ellipsis animation with a slow sinusoid scaling up and down of the subtitle.
+[x] Switch the Werewolf model to pale_dread_white_werewolf.zip. Reduce its triangle count to about 10k using the same protections as the minotaur decimation.
+[x] Add a color picker for each of minotaur/spider/werewolf eye color
+[x] Replace HDRI with qwantani_moon_noon_puresky_2k.exr
+[x] Add a credit for "Pale Dread White Werewolf" (https://skfb.ly/pFroV) by Pigcraft is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
+[x] Add an appropriate credit for https://polyhaven.com/a/qwantani_moon_noon_puresky
+[x] All monsters should now screen shake. Spiders should use the current intensity. 1.5x it for werewolf and 2x it for minotaurs.
+[x] Interior levels: Interior levels should also have double-height exterior walls. There should only be one torch per wall, at ground level
+[x] Decimated Werewolf model has a ton of holes in it. Surely this can be done properly.
+[x] Divide werewolf scale by 2.
+[x] Add a depth test to bloom and don't bloom from skybox pixels
+[x] Do chromatic aberration over a blend of 7 tinted samples with total weight (1, 1, 1)
+[x] Monster screen shake should be based on Euclidean distance over shortest path (treating gates, doors, and other monsters as passable).
+[x] Add a chromatic aberration slider for Screen Shake Intensity that applies more chromatic aberration during screen shakes
+[x] Ceilings should be static surface lightmapped
+[x] I left a level holding a trophy and after placing it on an altar, was still holding a trophy that I could place on a second altar. Only then was my trophy removed.
+[x] Lift the position of altar flames by 15cm. Make the tint (0, 0, 1). If lens flares accept a tint, use that as their tint
+[x] The HDRI isn't rendering. Sky is just black
+[x] Analytics: Verify if we're recording the exact URL visited such that we can use a ref= in the URL to track traffic origin. Your assessment goes here: page_view now records `window.location.href`, `window.location.search`, and the parsed `ref` query value.
+[x] Move subtitle about 50% closer to title and make its height 62% of the title's height
+[x] Try to rotate the skybox (along the vertical axis), and the angle of moonlight from the horizon, so the moonlight credibly lines up with the moon in the skybox
+[x] We're starting to add music and sound effects:
+  [x] Add an audio tab to the settings menu, with individual on/off radio toggle and volume slider for music and sound effects
+  [x] Music: Each level has a music track associated with it. When entering or teleporting into a level, if the level's track is different than the previous track, fade out the previous track over 8 seconds and fade in the new track over 4 seconds.
+  [x] If a track that is playing finishes, continue it from the beginning.
+  [x] If a track that would start playing is currently fading out, don't restart it, just fade it back in
+  [x] Clarification of all the above: A track should never stop suddenly, and its volume changes must always be continuous; track the current level, and applying a fade means changing the target level and fade duration, and lerping to that level over that duration
+  [x] Here are the tracks by room type (add a credit for each of these based on the license and author at the URL indicated)
+    [x] Entrance, Chamber: Timebender.ogg https://opengameart.org/content/timebender-creepy-ambient-space
+    [x] radakan - mist forest.mp3 https://opengameart.org/content/radakan-mist-forest
+    [x] Hallway: Mystery Manor.mp3 https://opengameart.org/content/mystery-manor
+    retro_spooky_soundscape_the_whispering_shadows_dungeon_clement_panchout_2016.wav https://opengameart.org/content/dark-the-whispering-shadows-dungeon
+    [x] Throne Room: stone_guardian_loop.wav https://opengameart.org/content/stone-guardian
+  [x] Compress tracks that are uncompressed. 128kbps is good.
+  [x] Music should not pause or reset or anything on death. Just keep it going.
+[x] Spiders should be tilted so they're leaning on the side they walk on. Increase the tilt to 60 degrees. Figure out analytically the right offset-from-cell for the model so the scaled and tilted spider would be just touching their wall and the floor.
+[x] When a maze's doors close, and the player is not inside the maze, reset the maze

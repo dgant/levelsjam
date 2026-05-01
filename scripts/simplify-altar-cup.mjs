@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { NodeIO } from '@gltf-transform/core'
+import { Jimp } from 'jimp'
 import { MeshoptSimplifier } from 'meshoptimizer'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -14,6 +15,7 @@ const MIN_PRIMITIVE_TRIANGLES = 12
 const MAX_ERROR = 0.2
 const SIMPLIFY_FLAGS = []
 const MISSING_INDEX = 0xffffffff
+const MAX_TEXTURE_DIMENSION = 1024
 
 function getPrimitiveTriangleCount(primitive) {
   const indices = primitive.getIndices()
@@ -164,6 +166,45 @@ function isOutputFresh() {
   }
 }
 
+async function resizeOutputTexturesIfNeeded() {
+  const texturesDirectory = path.join(outputDir, 'textures')
+
+  if (!fs.existsSync(texturesDirectory)) {
+    return false
+  }
+
+  let resized = false
+
+  for (const entry of fs.readdirSync(texturesDirectory)) {
+    const extension = path.extname(entry).toLowerCase()
+
+    if (!['.jpg', '.jpeg', '.png', '.webp'].includes(extension)) {
+      continue
+    }
+
+    const texturePath = path.join(texturesDirectory, entry)
+    const image = await Jimp.read(texturePath)
+    const largest = Math.max(image.bitmap.width, image.bitmap.height)
+
+    if (largest <= MAX_TEXTURE_DIMENSION) {
+      continue
+    }
+
+    const scale = MAX_TEXTURE_DIMENSION / largest
+    const width = Math.max(1, Math.round(image.bitmap.width * scale))
+    const height = Math.max(1, Math.round(image.bitmap.height * scale))
+
+    image.resize({ h: height, w: width })
+    await image.write(texturePath)
+    resized = true
+    console.log(
+      `[simplify-altar-cup] resized ${entry} to ${width}x${height}`
+    )
+  }
+
+  return resized
+}
+
 async function main() {
   await MeshoptSimplifier.ready
 
@@ -174,6 +215,7 @@ async function main() {
     const existingTriangles = getDocumentTriangleCount(existing)
 
     if (existingTriangles <= TARGET_TRIANGLES * 1.1) {
+      await resizeOutputTexturesIfNeeded()
       console.log(
         `[simplify-altar-cup] runtime cup is fresh at ${existingTriangles.toLocaleString()} triangles`
       )
@@ -275,6 +317,7 @@ async function main() {
   fs.rmSync(outputDir, { force: true, recursive: true })
   fs.mkdirSync(outputDir, { recursive: true })
   await io.write(outputPath, document)
+  await resizeOutputTexturesIfNeeded()
   fs.copyFileSync(
     path.join(rootDir, 'public', 'models', 'droop_cup_4th_century_bc', 'license.txt'),
     path.join(outputDir, 'license.txt')

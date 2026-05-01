@@ -40,8 +40,11 @@
 - Runtime volumetric-fog atlas selection is based on world-space camera distance and stable level identity; active-level focus is not a tie-breaker and cannot by itself change which equally near atlas is sampled.
 - Runtime volumetric fog treats volumetric-lightmap coefficient textures as its readiness requirement; specular reflection-cubemap residency must not determine whether fog can sample a level's diffuse probe lighting.
 - Runtime volumetric fog uses a default environment-and-moonlight volumetric probe for world cells that do not have level-authored volumetric-lightmap data, so sky and out-of-level fog receive continuous low-frequency lighting instead of hard black seams.
+- The visible HDR skybox is owned by one global background component and uses the authored HDRI brightness for display; per-level lighting-resource hooks must not overwrite or clear `scene.background` during resource loading or cleanup.
 - Lens flares are level-agnostic at runtime and choose from the currently rendered visible torch billboards/lights, regardless of the level that authored them.
 - Lens flare contribution from each visible source is full-strength at `1.5m` or closer to the camera, then falls off by inverse square distance.
+- Lens flare anamorphic mode produces a crisp horizontal streak rather than a soft blob; the flare shape control changes the streak definition/width, not merely the streak intensity.
+- Runtime lens flare rendering uses the upstream `LensFlareEffect` shape kernel for up to five visible flare sources, with each source rendered through its own pass so upstream shader globals do not collide.
 - Reflection and volumetric probe debug visualization shows all currently loaded/rendered probes rather than only the active level's probes.
 - Reflection and volumetric probe debug visualization is drawn only in detached free-camera inspection mode.
 - Walking across a level boundary updates only the active debug/resource-priority focus and any rules context needed to interpret the player's current world cell.
@@ -86,6 +89,13 @@
 - Level floor meshes are spawned only inside the level's own cell footprint and not in the lightmap margin or any neighboring level's footprint.
 - Level floor visibility is evaluated per whole cell; precomputed visibility may hide an entire floor cell, but it must not clip a visible floor cell into partial missing-cell fragments.
 - Level floor meshes are emitted as one 2m by 2m patch per maze cell, centered on that cell, so floor mesh boundaries align with the gameplay grid.
+- Runtime maze, hallway, and throne-room levels are treated as indoor spaces.
+- Runtime entrance and chamber levels are treated as outdoor spaces.
+- Indoor levels render double-height walls by stacking a second wall-height segment above each ordinary wall while preserving wall-material texel density.
+- Indoor levels render double-height exterior walls with the same stacked-wall treatment as interior walls.
+- Indoor levels render a downward-facing ceiling plane over each playable cell using the same PBR texture family as the walls.
+- Indoor ceiling planes use the same static surface-lightmap material path as other lightmapped static geometry.
+- Indoor levels render at most one ground-level torch assembly per wall face.
 - Once a level's gameplay-rule state has been loaded, the runtime keeps that state available for the rest of the session instead of unloading or resetting it during ordinary level traversal.
 - Player movement between connected levels is a level transition, not an escape state.
 - One-cell passages that connect levels are outside the rectangular gameplay layout of each connected level; authored level room rectangles contain only the room proper, not the connector passage.
@@ -93,12 +103,12 @@
 - The authored Entrance level has a closed outer wall wherever it does not connect to Chamber 1.
 
 ## Current Scope
-- The scene uses image-based lighting from the Poly Haven `overcast_soil` environment.
+- The scene uses image-based lighting from the Poly Haven `qwantani_moon_noon_puresky` environment.
 - The scene does not use `@takram/three-atmosphere`.
 - The scene does not use the three.js `Water` helper.
 - The scene does not use a runtime directional sunlight source.
 - Static bake-time moonlight is a directional light baked into surface lightmaps and volumetric probes, not a runtime light.
-- Bake-time moonlight is positioned 15 degrees above the horizon and 30 degrees east of south in level-local world space.
+- Bake-time moonlight is positioned 18 degrees above the horizon and 30 degrees east of south in level-local world space.
 - Bake-time moonlight uses a slightly bluish light-gray tint and approximately half the one-meter direct luminance of a torch.
 - The scene contains maze-floor ground geometry covering the playable maze footprint and its required baked-lighting bounds.
 - The maze-floor ground uses the extracted ShareTextures `puddle-ground` PBR pack rather than preview imagery.
@@ -218,6 +228,7 @@
 - Diffuse volumetric-lightmap shading and volumetric-fog probe lighting blend continuously across connected cells, including across the midlines between adjacent probe centers, while still rejecting contribution across maze walls when volumetric occlusion is enabled.
 - Diffuse volumetric-lightmap shading visibly contributes to surface materials when its runtime intensity is nonzero.
 - Local reflection probes visibly contribute to reflective surface materials when their runtime intensity is nonzero.
+- Runtime local reflection contribution is evaluated from per-pixel world-space probe weights for world-positioned PBR geometry so adjacent cells do not show hard reflection seams from object-center probe selection.
 - Runtime volumetric-lightmap diffuse contribution supports a debug saturation control from grayscale to full authored color before the probe lighting is applied.
 - Runtime local reflection intensity can be inspected and tuned from zero through twelve-times contribution in the debug controls.
 - Geometry that lives primarily inside a maze cell, such as monsters and cell-ground surfaces, evaluates diffuse volumetric-lightmap shading from the current probe plus the four cardinally adjacent probes.
@@ -256,7 +267,7 @@
 - The spider model is scaled to `1.5x` its previous runtime size while keeping its floor contact point on the floor and its wall-following legs oriented against the followed wall.
 - The minotaur runtime model is an offline-simplified derivative of the authored source model and stays far below the authored source triangle count while preserving the silhouette expected in gameplay views.
 - The minotaur runtime model simplification preserves continuous visible surfaces and must not introduce see-through topology holes.
-- The werewolf model loads from the `leowolf` asset, scales proportionally to `1.8m` wide across its horizontal footprint, and sits with the bottoms of its feet on the floor.
+- The werewolf model loads from the `pale_dread_white_werewolf` asset, scales proportionally to `1.8m` wide across its horizontal footprint, and sits with the bottoms of its feet on the floor.
 - Screen-space ambient occlusion controls visibly affect the scene when enabled.
 - Lens flares, SSR, and volumetric fog remain visually stable as their intensity controls increase and must not black out the scene.
 - Lens flares do not appear for fully occluded lights.
@@ -299,7 +310,8 @@
 - Each altar is a static prop consisting of a `0.5m x 1m x 0.5m` block centered on the cell floor using the wall texture texel density, with the `Droop cup 4th century BC` model scaled to `0.65m` wide and resting on top.
 - Altar and cup materials participate in the same baked/probe lighting stack as other static maze props.
 - The altar cup runtime model is simplified to approximately `5000` triangles while preserving visible surface continuity and normals.
-- If the player enters a cell adjacent to an altar while holding a trophy, the runtime plays an uninterruptible trophy-placement cutscene: black letterbox bars slide in for `1s`, the player turns toward the altar for `1s`, the held trophy moves smoothly from the player's hand into the bowl for `1s`, the trophy is consumed from player inventory, the trophy is replaced by a double-size blue flame billboard using BRG-swizzled torch colors at the base height of the bowl, then the letterbox bars slide out for `1s` before player control is restored.
+- If the player enters a cell adjacent to an altar while holding a trophy, the runtime immediately consumes the trophy from player inventory and plays an uninterruptible trophy-placement cutscene: black letterbox bars slide in for `1s`, the player turns toward the altar for `1s`, the held trophy moves smoothly from the player's hand into the bowl for `1s`, the trophy is replaced by a double-size blue flame billboard at the base height of the bowl, then the letterbox bars slide out for `1s` before player control is restored.
+- Activated altar flames are lifted `0.15m` above the prior altar-flame position and use an RGB tint of `(0, 0, 1)`.
 - Each cell may contain any number of items and at most one character.
 - Each maze contains one sword on a random unoccupied cell.
 - Each maze contains one trophy on the unoccupied cell with the greatest path distance from the entrance.
@@ -338,6 +350,7 @@
 - Monster model translation between grid cells is interpolated over `250ms` rather than teleporting at turn boundaries.
 - Monster render positions remain at the previous rendered pose until their turn/move animation advances them; receiving a new rules cell must not snap the rendered model to the target cell before the animation starts.
 - Monster render actors remain mounted across visibility-culling changes so a monster that becomes visible after moving still has its previous rendered pose available for interpolation.
+- Runtime monster actors are rendered for the current gameplay-focus level; adjacent streamed levels keep their monster rules state loaded but do not render off-level monster meshes until that level becomes active.
 - Monster visibility culling may hide an actor after its current animation completes, but it must not unmount or reinitialize the actor at the target cell during ordinary turn updates.
 - Minotaurs check line of sight to the player before and after their move. If a minotaur gains line of sight after moving, it updates its remembered player direction and final facing direction from the post-move cell.
 - The player has no rendered character model.
@@ -377,18 +390,23 @@
 - After a werewolf moves, it turns to face the direction it would choose if it could take another move immediately.
 - Monster models rotate to face their upcoming move before moving when a rotation is required.
 - After moving, monster models rotate to face the direction they would move if their next turn were resolved immediately.
-- Each minotaur move triggers a mild screen shake whose amplitude falls off with maze distance from the player and whose duration is `1s`.
+- Each monster move triggers a mild screen shake whose amplitude falls off with Euclidean distance accumulated along the shortest passable maze path to the player and whose duration is `1s`.
+- Screen-shake distance treats gates, doors, and other monsters as passable when computing the shortest path for shake falloff.
+- Minotaur movement screen shake uses a `2x` multiplier over the base monster shake.
+- Werewolf movement screen shake uses a `1.5x` multiplier over the base monster shake.
+- Spider movement screen shake uses the base monster shake intensity.
 - Each awake monster renders two glowing red eye spheres that rotate with the monster and disappear while the monster is asleep.
 - Monster eye spheres are `0.75cm` radius HDR red emitters with color `(4, 0, 0)` where `(1, 1, 1)` is white, so they can trigger bloom.
 - Monster eyes are lens-flare sources when visible and unoccluded.
 - The debug controls include editable numeric monster-eye position controls for each monster type and eye axis.
-- The werewolf model loads from `public/models/leowolf.zip`, scales proportionally to `3.6m` wide across its horizontal footprint, is flipped `180` degrees around the vertical axis, and places the bottoms of its feet on the floor at the tile bottom-center.
+- The werewolf model loads from `public/models/pale_dread_white_werewolf.zip`, scales proportionally to `1.8m` wide across its horizontal footprint, is flipped `180` degrees around the vertical axis, and places the bottoms of its feet on the floor at the tile bottom-center.
 - The spider model loads from `public/models/pbr_jumping_spider_monster.zip`, scales proportionally to fit a `1.4m` cube, and is placed as a wall-walking spider with its base oriented along the configured wall and floor.
 - The spider model origin is offset by `(0.1m, 0m, 0.5m)` relative to the fitted model center.
+- Runtime spiders lean `60deg` toward their configured wall side and are analytically offset from their scaled bounds so the tilted model touches the floor and the followed wall without sinking through either surface.
 - The left-wall spider eye defaults are left `(-0.18, 0.35, -0.29)` and right `(-0.27, 0.26, -0.29)` in local model space; right-wall spiders use the corresponding mirrored and swapped asymmetric offsets.
 - The minotaur runtime model loads from an offline-simplified asset derived from `public/models/minotaur.zip`, reduces the source mesh to roughly ten thousand triangles, scales proportionally to fit a `2.7m` cube, and places its bottom `0.25m` below the tile bottom-center.
 - The minotaur model's base tint is `#2b2130`.
-- The werewolf runtime model loads from the extracted `public/models/leowolf/scene.gltf` asset and preserves the authored texture set.
+- The werewolf runtime model loads from the extracted `public/models/pale_dread_white_werewolf/scene.gltf` asset, preserves the authored texture set, uses runtime ORM material textures, and is simplified offline to roughly ten thousand triangles.
 - Monster GLTF materials preserve their authored PBR texture and material inputs where those inputs load successfully.
 - Monster GLTF materials participate in the local volumetric-lightmap diffuse path and the local reflection-probe specular path.
 - Maze generation initializes each monster facing a legal neighboring cell when one exists.
@@ -474,8 +492,9 @@
 - The debug controls include an anamorphic tab backed by a live WebGL post effect derived from the official three.js anamorphic implementation.
 - Bloom defaults to enabled with intensity `1.0`, kernel `Huge`, threshold `0.7`, smoothing `0.5`, and resolution scale `0.25x`.
 - Bloom preserves the same effective scene color precision when enabled at zero or near-zero contribution and must not introduce visible color banding merely by being enabled.
+- Bloom prefilters against scene depth so skybox pixels do not create bloom.
 - Depth of Field defaults to disabled.
-- Lens Flares default to enabled with strength `0.01`, flare size `0.0015`, glare size `0`, ghost scale `0`, flare shape `0.03`, animated mode off, anamorphic mode on, extra streaks off, secondary ghosts on, star points `3`, star burst off, and star-burst intensity `1.0`.
+- Lens Flares default to enabled with strength `0.01`, internal color gain `1.0`, flare size `0.0015`, glare size `0`, ghost scale `0`, flare shape `0.03`, animated mode off, anamorphic mode on, extra streaks off, secondary ghosts on, star points `3`, star burst off, and star-burst intensity `1.0`.
 - SSR defaults to disabled.
 - Ambient Occlusion defaults to `N8AO` with a radius of `1m`.
 - Vignette defaults to enabled with intensity `0.6`.
@@ -489,6 +508,12 @@
 - The debug panel exposes `Surface Lightmap Saturation` and `Volumetric Lightmap Saturation` sliders from `0` to `1`.
 - The debug panel exposes a `Torch Billboard Intensity` slider that changes visible flame brightness without rebaking.
 - The debug panel lens flare control provides useful adjustment very close to zero rather than jumping immediately to an over-bright flare.
+- The debug panel lens flare size slider ranges up to `1.0`.
+- The debug panel star-burst intensity slider controls star-burst contribution without washing out the whole screen.
+- Chromatic aberration is radial from screen center, producing no offset at screen center and equal offset magnitude at equal radial distances such as center-left and bottom-center.
+- Chromatic aberration blends seven radially offset tinted samples whose per-channel weights sum to `(1, 1, 1)`.
+- The chromatic-aberration debug tab exposes a radial exponent slider from `-8` to `8`.
+- The chromatic-aberration debug tab exposes a screen-shake intensity slider that adds temporary aberration while a monster movement shake is active.
 - The debug panel SSR intensity control is clamped to a maximum of `1.0`.
 - The debug panel exposes an ambient-occlusion mode dropdown with working `Off`, `N8AO`, and `SSAO` modes.
 - The debug panel exposes one shared ambient-occlusion intensity slider for the selected AO mode.
@@ -543,9 +568,12 @@
 - The frame-cost profile includes a human-legible frame-time accounting table that names at least 90% of the measured average frame interval, including app-owned render work, browser main-thread trace work, GPU-process trace work, compositor/present work, and wait-for-next-frame time.
 - The frame-cost profile distinguishes additive app-owned scope totals from overlapping browser thread busy times so the report can guide optimization without double-counting parallel work.
 - The frame-cost profile records application-owned named render pipeline scopes, including the main composer frame, each composer pass, custom pass sub-steps, WebGL render submissions, and hot per-frame gameplay/update systems.
+- The frame-cost profile describes expensive render branches in terms of concrete computational actions, such as scene traversals, transparent-object passes, fullscreen shader passes, WebGL draw submissions, and object-role triangle sources.
+- The frame-cost profile reports visible mesh triangle counts and instancing candidates by object role so repeated walls, floors, sconces, billboards, and props can be evaluated for draw-call reduction.
 - The frame-cost profile reports GPU timer-query measurements for render/composer scopes when the browser exposes WebGL GPU timer queries.
 - The frame-cost profile annotates long frames with resource-residency deltas so runtime probe, volumetric-lightmap, level, or scene-object churn is visible in the report.
 - The frame-cost profile waits for startup loading, adjacent level resources, lightmaps, volumetric probes, reflection probes, shader warmup, and deferred texture work, including the fire flipbook atlas, to cool down before starting the representative live traversal capture.
+- Performance captures are invalid when the default gameplay frame is visibly blown out, all-white, black, placeholder-only, or otherwise not representative of normal rendering.
 - The performance profiler records normal gameplay traversal with active level walking and active scene resources so reported FPS is representative of player-visible stutter.
 - Automated performance coverage includes a repeated forward-run through Chamber 1 that records live `requestAnimationFrame` gaps during movement rather than only sampling a fixed camera after movement has stopped.
 - The Chamber 1 live-movement performance gate emits a timestamped log with player position, rendered levels, renderer stats, scene-object counts, probe residency, and shader-program churn for every hitch frame.
@@ -560,12 +588,17 @@
 - The initial loading shell yields one browser paint before the main app module is requested so the shell is visible immediately instead of being delayed by app bootstrap work.
 - The React app yields animation frames before creating the WebGL canvas so app bootstrap work and WebGL scene construction do not form a single uninterrupted startup stall.
 - The initial loading shell becomes visible in under 1 second from navigation start on the project’s enforced startup benchmark.
-- The loading overlay shows an `h1` with the text `MINOTAUR`.
-- The loading overlay shows an `h2` with the text `Entering the labyrinth...`.
-- The loading overlay animates the trailing dots on the subtitle through `.`, `..`, `...`, and a blank ellipsis slot at 0.125 second intervals.
-- The loading-overlay dot animation does not rely on JavaScript timers and remains visually smooth while the app bundle and maze payload load.
-- The animated ellipsis aligns on the same baseline as the rest of the loading subtitle text instead of floating higher than the letters.
-- The loading subtitle keeps a consistent total width while the trailing dots animate.
+- The loading overlay shows `title.png` as the title artwork.
+- The loading overlay shows `subtitle.png` as the subtitle artwork.
+- The loading overlay animates the subtitle artwork with a slow sinusoidal scale pulse.
+- The loading-overlay subtitle animation does not rely on JavaScript timers and remains visually smooth while the app bundle and maze payload load.
+- The loading-overlay subtitle sits about half as far from the title as the previous default spacing and renders at `62%` of the title artwork height.
+- The settings menu includes an Audio tab with independent on/off radio controls and volume sliders for music and sound effects.
+- Music is assigned by level role: Entrance and Chamber levels use `Timebender.ogg`, maze levels use `radakan - mist forest.mp3`, hallway levels use `Mystery Manor.mp3`, and throne-room levels use `stone_guardian_loop.mp3`.
+- Music loops continuously while gameplay continues.
+- Entering or teleporting to a level whose assigned track differs from the current track fades the previous track out over `8s` and fades the new track in over `4s`.
+- If a track that should start is already fading out, it reverses into a fade-in without restarting playback.
+- Player death does not pause, stop, or reset music.
 - The loading overlay remains visible until the scene assets have loaded.
 - The loading overlay becomes eligible to start its fade-out in under 5 seconds from navigation start on the project’s enforced startup benchmark.
 - Persisted maze definitions and their baked lightmap payloads load outside the initial app bundle rather than being parsed eagerly before the loading overlay can appear.
@@ -587,17 +620,21 @@
 - Pressing backquote is reserved for the debug controls panel and does not restore mouse lock.
 - Mouse lock is only requested from an explicit click on the scene canvas.
 - The game responds to movement and look input without requiring any preliminary button click.
+- Analytics page-view events include the exact visited URL and the `ref` query parameter when present so traffic-origin links can be attributed.
 
 ## Visual Requirements
-- The environment map from `overcast_soil` provides the visible skybox.
-- The environment map from `overcast_soil` provides the authored outdoor sky backdrop.
-- The environment map from `overcast_soil` is baked into maze-local lighting assets where maze geometry should receive diffuse sky contribution.
-- The environment map from `overcast_soil` is captured into maze-local reflection probes where maze geometry should receive local specular sky contribution.
+- The environment map from `qwantani_moon_noon_puresky` provides the visible skybox.
+- The environment map from `qwantani_moon_noon_puresky` provides the authored outdoor sky backdrop.
+- The visible skybox can be rotated around the vertical axis independently of maze geometry so the authored moon direction can be aligned with baked moonlight.
+- The baked moonlight horizon angle may be adjusted so the moonlight direction visually agrees with the visible skybox moon.
+- The environment map from `qwantani_moon_noon_puresky` is baked into maze-local lighting assets where maze geometry should receive diffuse sky contribution.
+- The environment map from `qwantani_moon_noon_puresky` is captured into maze-local reflection probes where maze geometry should receive local specular sky contribution.
 - The scene also derives local specular reflection data from static maze reflection probes captured inside the maze.
 - The current reflection probes are authored-baseline offline captures rather than live-recaptured responses to every debug-slider change.
 - The visible skybox remains the authored HDRI even when local reflection probes drive material reflections.
 - The visible skybox and the baked environment lighting use the same calibrated HDRI intensity path.
 - The debug controls panel includes a live HDRI brightness slider that adjusts the visible skybox brightness without triggering rebakes or changing baked lighting artifacts.
+- Screen-space ambient occlusion preserves background pixels that have no scene depth, so enabling N8AO must not black out or darken the visible HDR skybox.
 - The torch and sky-source bake intensities are pre-scaled from the legacy `-4.5` stop baseline so runtime `Exposure 0.0` preserves the previously approved lighting balance without needing an extra exposure offset.
 - The ground and walls use extracted PBR texture packs with tiling based on a 1 meter world scale unless a source specifies otherwise.
 - Maze wall materials do not add direct runtime scene-environment diffuse lighting on top of their baked diffuse lightmaps.
@@ -709,7 +746,13 @@
 ## Credits
 - The credits modal header is `Credits`.
 - The credits modal includes `"Minotaur" (https://skfb.ly/6TK77) by yanbelmont is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
-- The credits modal includes `"leowolf" (https://skfb.ly/pqPJx) by MUSHIDO_SKARSGARD is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
+- The credits modal includes `"Pale Dread White Werewolf" (https://skfb.ly/pFroV) by Pigcraft is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
+- The credits modal includes `"Qwantani Moon Noon Puresky" (https://polyhaven.com/a/qwantani_moon_noon_puresky) by Poly Haven is licensed under CC0.`
+- The credits modal includes `"Timebender (Creepy Ambient Space)" (https://opengameart.org/content/timebender-creepy-ambient-space) by MouthlessGames / Christian DeTamble is licensed under CC-BY 3.0.`
+- The credits modal includes `"Radakan - Mist Forest" (https://opengameart.org/content/radakan-mist-forest) by Janne Hanhisuanto for Radakan is licensed under CC-BY-SA 3.0.`
+- The credits modal includes `"Mystery Manor" (https://opengameart.org/content/mystery-manor) by Alexandr Zhelanov is licensed under CC-BY 3.0.`
+- The credits modal includes `"(Dark) The Whispering Shadows Dungeon" (https://opengameart.org/content/dark-the-whispering-shadows-dungeon) by Clement Panchout is licensed under CC-BY 4.0.`
+- The credits modal includes `"Stone Guardian" (https://opengameart.org/content/stone-guardian) by Ronhul Maggot is licensed under CC-BY 4.0.`
 - The credits modal includes `"PBR Jumping Spider Monster" (https://skfb.ly/6QVNq) by Toast is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
 - The credits modal includes `"Head of a Bull" (https://skfb.ly/6TOXX) by Kirk Hiatt is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
 - The credits modal includes `"Metal Gate" (https://skfb.ly/oK7QR) by i bull your wife is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
@@ -742,9 +785,10 @@
 - Bloom starts disabled by default.
 - The depth-of-field tab exposes enabled state and all useful depth-of-field parameters, including `focusDistance`, `focusRange`, `bokehScale`, and resolution scale.
 - The lens-flare tab exposes enabled state and all useful flare parameters needed to tune visibility and shape, including a single strength control, flare size, glare size, ghost scale, halo scale, star-burst intensity, star-point count, and the wrapped effect's animated and anamorphic toggles.
-- Lens flares start disabled by default until their postprocess path is stable enough not to black out or stall the loading fade.
+- Lens flares default to the tuned visual settings and must not black out or stall the loading fade.
 - The lens-flare strength debug control is an editable numeric input so very small values can be typed exactly.
 - The monster debug tab exposes a minotaur albedo color picker with `#2b2130` as the default color.
+- The monster debug tab exposes independent eye-color pickers for minotaurs, spiders, and werewolves.
 - The SSR tab exposes enabled state and the core canonical tuning parameters needed to tune its documented implementation, including opacity, distance, thickness, resolution scale, and pass output mode.
 - The volumetric-fog tab exposes enabled state and the core fog parameters needed to tune its probe-lit volume implementation, including amount and noise frequency.
 - The volumetric-fog tab also exposes the high-impact density-shaping parameters needed to tune the current implementation, including noise strength, height falloff, lighting strength, and ray-march step count; the default ray-march count is `6`.
@@ -784,10 +828,13 @@
 - Default gameplay at 1440p targets `144 FPS` and automated end-to-end traversal must not drop below `120 FPS` after startup and deferred resource loading have stabilized.
 - Runtime PBR material textures, including model textures, are authored or derived at no more than `1024px` on their largest side.
 - Runtime gameplay meshes over `30000` triangles are simplified offline or explicitly documented as a temporary blocker.
+- The werewolf runtime model is simplified offline from its source model to at most `10000` triangles.
+- Tall monsters, including minotaurs and werewolves, remain rendered when they are either in a precomputed visible cell or within `5` Manhattan cells of the player, because they can be visible over maze walls.
 - Runtime readiness waits for renderer geometry and texture counts to stabilize before scene texture/program warmup, so late model commits do not upload geometry or compile shaders on the first visible gameplay frames.
 - Runtime startup readiness is scoped to the active level's required lighting, reflection, texture, and shader resources. Adjacent streamed levels continue loading after the first fade without blocking the initial overlay completion.
+- Adjacent levels remain loaded for seamless traversal, but adjacent-level rendering is portal-windowed around nearby transitions so distant adjacent mazes do not contribute their full entrance visibility across an open chamber.
 - Runtime visual contribution controls that only change intensity preserve the compiled material shape and update shader uniforms rather than remounting materials or changing shader defines.
-- Runtime surface lightmaps are loaded from a raw RGBE byte payload for browser startup so PNG decode does not stall the loading overlay. Inspectable RGBE PNG and preview PNG files remain emitted as artifacts for tooling and debugging.
+- Runtime surface lightmaps are loaded from the emitted RGBE PNG artifact so the browser can use its image decode/upload path while preserving the baked RGBE light values. Raw RGBE byte payloads and preview PNG files remain emitted as artifacts for tooling and debugging.
 - The frame rate remains stable during ordinary movement and camera motion.
 - `PERFORMANCE.md` records a hierarchical frame-time breakdown for the default post-startup gameplay scene and continues breaking down any measured branch at or above `0.1ms/frame` when the code can reasonably instrument it.
 - The runtime avoids per-level duplication of full-screen postprocessing effects when one global effect can represent the visible world.

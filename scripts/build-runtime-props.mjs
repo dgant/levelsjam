@@ -52,7 +52,16 @@ async function resizeImageIfStale(sourceImagePath, targetImagePath, targetSize) 
     'image/png': { maxMemoryUsageInMB: 2048 }
   })
 
-  jimp.resize({ h: targetSize, w: targetSize })
+  const maxSourceDimension = Math.max(jimp.bitmap.width, jimp.bitmap.height)
+  const scale = maxSourceDimension > targetSize
+    ? targetSize / maxSourceDimension
+    : 1
+  const width = Math.max(1, Math.round(jimp.bitmap.width * scale))
+  const height = Math.max(1, Math.round(jimp.bitmap.height * scale))
+
+  if (scale < 1) {
+    jimp.resize({ h: height, w: width })
+  }
 
   await ensureDirectory(path.dirname(targetImagePath))
   await jimp.write(targetImagePath)
@@ -462,6 +471,7 @@ function getVec3Bounds(array) {
 }
 
 async function buildJoinedStaticRuntimeModel({
+  modelName,
   sourceDirectory,
   targetDirectory
 }) {
@@ -666,7 +676,7 @@ async function buildJoinedStaticRuntimeModel({
     materials: sourceGltf.materials,
     meshes: [
       {
-        name: 'awil_werewolf_runtime_joined',
+        name: `${modelName ?? path.basename(targetDirectory)}_joined`,
         primitives: [
           {
             attributes: {
@@ -684,7 +694,7 @@ async function buildJoinedStaticRuntimeModel({
     nodes: [
       {
         mesh: 0,
-        name: 'awil_werewolf_runtime'
+        name: modelName ?? path.basename(targetDirectory)
       }
     ],
     samplers: sourceGltf.samplers,
@@ -783,8 +793,50 @@ async function buildTrophyRuntimeAssets() {
   )
 }
 
+async function buildSimpleRuntimeModelAssets({
+  sourceDirectory,
+  targetDirectory,
+  targetSize
+}) {
+  const gltf = JSON.parse(
+    await fs.readFile(path.join(sourceDirectory, 'scene.gltf'), 'utf8')
+  )
+  const sourceUriByTargetUri = rewriteGltfMaterialsToOrm(gltf)
+
+  await fs.rm(targetDirectory, { force: true, recursive: true })
+  await ensureDirectory(targetDirectory)
+
+  try {
+    await copyFileIfChanged(
+      path.join(sourceDirectory, 'license.txt'),
+      path.join(targetDirectory, 'license.txt')
+    )
+  } catch {
+    // Some Sketchfab exports do not include a sidecar license file in the
+    // extracted directory; credits remain tracked in the app.
+  }
+
+  await copyFileIfChanged(
+    path.join(sourceDirectory, 'scene.bin'),
+    path.join(targetDirectory, 'scene.bin')
+  )
+
+  await copyRuntimeGltfImages({
+    sourceDirectory,
+    sourceUriByTargetUri,
+    targetDirectory,
+    targetSize
+  })
+
+  await fs.writeFile(
+    path.join(targetDirectory, 'scene.gltf'),
+    `${JSON.stringify(gltf, null, 2)}\n`
+  )
+}
+
 async function buildWerewolfRuntimeAssets() {
   await buildJoinedStaticRuntimeModel({
+    modelName: 'awil_werewolf_runtime',
     sourceDirectory: path.join(PROJECT_ROOT, 'public', 'models', 'awil_werewolf'),
     targetDirectory: path.join(PROJECT_ROOT, 'public', 'models', 'awil_werewolf_runtime')
   })
@@ -794,6 +846,16 @@ async function main() {
   await buildGateRuntimeAssets()
   await buildTrophyRuntimeAssets()
   await buildWerewolfRuntimeAssets()
+  await buildJoinedStaticRuntimeModel({
+    modelName: 'pale_dread_white_werewolf_runtime',
+    sourceDirectory: path.join(PROJECT_ROOT, 'public', 'models', 'pale_dread_white_werewolf'),
+    targetDirectory: path.join(PROJECT_ROOT, 'public', 'models', 'pale_dread_white_werewolf_runtime')
+  })
+  await buildSimpleRuntimeModelAssets({
+    sourceDirectory: path.join(PROJECT_ROOT, 'public', 'models', 'pbr_jumping_spider_monster'),
+    targetDirectory: path.join(PROJECT_ROOT, 'public', 'models', 'pbr_jumping_spider_monster_runtime'),
+    targetSize: 1024
+  })
 }
 
 main().catch((error) => {

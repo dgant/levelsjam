@@ -19,7 +19,7 @@
   "exposureStops": 0,
   "hdriBrightness": 1,
   "iblContribution": {
-    "enabled": false,
+    "enabled": true,
     "intensity": 1
   },
   "lightmapContribution": {
@@ -69,11 +69,13 @@
   },
   "chromaticAberration": {
     "enabled": false,
+    "exponent": 1,
     "intensity": 2,
     "modulationOffset": 0.9,
     "offsetX": 0.0005,
     "offsetY": 0.02,
-    "radialModulation": true
+    "radialModulation": true,
+    "screenShakeIntensity": 0
   },
   "depthOfField": {
     "bokehScale": 1,
@@ -124,6 +126,11 @@
         "z": -0.36
       }
     }
+  },
+  "monsterEyeColors": {
+    "minotaur": "#ff0000",
+    "spider": "#ff0000",
+    "werewolf": "#ff0000"
   },
   "precomputedVisibilityEnabled": true,
   "ssr": {

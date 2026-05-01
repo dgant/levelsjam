@@ -9,13 +9,12 @@ const rootDir = path.resolve(__dirname, '..')
 const sourcePath = path.join(rootDir, 'public', 'models', 'minotaur', 'scene.gltf')
 const outputDir = path.join(rootDir, 'public', 'models', 'minotaur-runtime')
 const outputPath = path.join(outputDir, 'scene.gltf')
-// The source scan has many open borders. Locking borders is required to avoid
-// turning those openings into visible holes during simplification, so the
-// requested target is a lower bound rather than an exact triangle count.
 const TARGET_TRIANGLES = 10_000
+const MAX_RUNTIME_TRIANGLES = 30_000
 const MIN_PRIMITIVE_TRIANGLES = 12
 const MAX_ERROR = 0.04
-const SIMPLIFY_FLAGS = ['LockBorder']
+const LOCKED_SIMPLIFY_FLAGS = ['LockBorder']
+const RELAXED_SIMPLIFY_FLAGS = []
 const MISSING_INDEX = 0xffffffff
 
 function getPrimitiveTriangleCount(primitive) {
@@ -157,11 +156,28 @@ function remapAttributeArray(sourceArray, elementSize, remap, nextVertexCount) {
   return outputArray
 }
 
-async function main() {
-  await MeshoptSimplifier.ready
+function allocatePrimitiveTargets(primitives, totalTriangles, targetTriangles) {
+  let allocatedTriangles = 0
 
-  const io = new NodeIO()
-  const document = await io.read(sourcePath)
+  return primitives.map((primitive, primitiveIndex) => {
+    const primitiveTriangles = getPrimitiveTriangleCount(primitive)
+    const remainingPrimitives = primitives.length - primitiveIndex - 1
+    const proportionalTarget = Math.floor(
+      (primitiveTriangles / totalTriangles) * targetTriangles
+    )
+    const maxAvailable =
+      targetTriangles - allocatedTriangles - (remainingPrimitives * MIN_PRIMITIVE_TRIANGLES)
+    const nextTarget = Math.max(
+      MIN_PRIMITIVE_TRIANGLES,
+      Math.min(primitiveTriangles, Math.max(MIN_PRIMITIVE_TRIANGLES, maxAvailable), proportionalTarget)
+    )
+
+    allocatedTriangles += nextTarget
+    return nextTarget
+  })
+}
+
+function simplifyDocument(document, flags) {
   const root = document.getRoot()
   const primitives = root
     .listMeshes()
@@ -172,34 +188,15 @@ async function main() {
     0
   )
 
-  console.log(
-    `[simplify-minotaur] source triangles: ${totalTriangles.toLocaleString()}`
-  )
-
   if (totalTriangles <= TARGET_TRIANGLES) {
-    fs.mkdirSync(outputDir, { recursive: true })
-    await io.write(outputPath, document)
-    console.log('[simplify-minotaur] source already meets the triangle budget')
     return
   }
 
-  let allocatedTriangles = 0
-  const primitiveTargets = primitives.map((primitive, primitiveIndex) => {
-    const primitiveTriangles = getPrimitiveTriangleCount(primitive)
-    const remainingPrimitives = primitives.length - primitiveIndex - 1
-    const proportionalTarget = Math.floor(
-      (primitiveTriangles / totalTriangles) * TARGET_TRIANGLES
-    )
-    const maxAvailable =
-      TARGET_TRIANGLES - allocatedTriangles - (remainingPrimitives * MIN_PRIMITIVE_TRIANGLES)
-    const nextTarget = Math.max(
-      MIN_PRIMITIVE_TRIANGLES,
-      Math.min(primitiveTriangles, Math.max(MIN_PRIMITIVE_TRIANGLES, maxAvailable), proportionalTarget)
-    )
-
-    allocatedTriangles += nextTarget
-    return nextTarget
-  })
+  const primitiveTargets = allocatePrimitiveTargets(
+    primitives,
+    totalTriangles,
+    TARGET_TRIANGLES
+  )
 
   for (let primitiveIndex = 0; primitiveIndex < primitives.length; primitiveIndex += 1) {
     const primitive = primitives[primitiveIndex]
@@ -237,7 +234,7 @@ async function main() {
             null,
             targetIndexCount,
             MAX_ERROR,
-            SIMPLIFY_FLAGS
+            flags
           )
         : MeshoptSimplifier.simplify(
             new Uint32Array(indexArray),
@@ -245,7 +242,7 @@ async function main() {
             3,
             targetIndexCount,
             MAX_ERROR,
-            SIMPLIFY_FLAGS
+            flags
           )
     const simplifiedIndices = simplifyResult[0].slice()
     const [remap, nextVertexCount] = MeshoptSimplifier.compactMesh(simplifiedIndices)
@@ -274,17 +271,67 @@ async function main() {
       )
     }
   }
+}
+
+async function main() {
+  await MeshoptSimplifier.ready
+
+  const io = new NodeIO()
+  const sourceDocument = await io.read(sourcePath)
+  const totalTriangles = sourceDocument
+    .getRoot()
+    .listMeshes()
+    .flatMap((mesh) => mesh.listPrimitives())
+    .reduce((sum, primitive) => sum + getPrimitiveTriangleCount(primitive), 0)
+
+  console.log(
+    `[simplify-minotaur] source triangles: ${totalTriangles.toLocaleString()}`
+  )
+
+  if (totalTriangles <= TARGET_TRIANGLES) {
+    fs.mkdirSync(outputDir, { recursive: true })
+    await io.write(outputPath, sourceDocument)
+    console.log('[simplify-minotaur] source already meets the triangle budget')
+    return
+  }
+
+  let document = await io.read(sourcePath)
+
+  simplifyDocument(document, LOCKED_SIMPLIFY_FLAGS)
 
   fs.rmSync(outputDir, { force: true, recursive: true })
   fs.mkdirSync(outputDir, { recursive: true })
   await io.write(outputPath, document)
 
-  const simplified = await io.read(outputPath)
-  const simplifiedTriangles = simplified
+  let simplified = await io.read(outputPath)
+  let simplifiedTriangles = simplified
     .getRoot()
     .listMeshes()
     .flatMap((mesh) => mesh.listPrimitives())
     .reduce((sum, primitive) => sum + getPrimitiveTriangleCount(primitive), 0)
+
+  if (simplifiedTriangles > MAX_RUNTIME_TRIANGLES) {
+    console.log(
+      `[simplify-minotaur] locked-border pass produced ${simplifiedTriangles.toLocaleString()} triangles; retrying relaxed pass for runtime budget`
+    )
+    document = await io.read(sourcePath)
+    simplifyDocument(document, RELAXED_SIMPLIFY_FLAGS)
+    fs.rmSync(outputDir, { force: true, recursive: true })
+    fs.mkdirSync(outputDir, { recursive: true })
+    await io.write(outputPath, document)
+    simplified = await io.read(outputPath)
+    simplifiedTriangles = simplified
+      .getRoot()
+      .listMeshes()
+      .flatMap((mesh) => mesh.listPrimitives())
+      .reduce((sum, primitive) => sum + getPrimitiveTriangleCount(primitive), 0)
+  }
+
+  if (simplifiedTriangles > MAX_RUNTIME_TRIANGLES) {
+    throw new Error(
+      `Runtime minotaur has ${simplifiedTriangles.toLocaleString()} triangles; expected at most ${MAX_RUNTIME_TRIANGLES.toLocaleString()}`
+    )
+  }
 
   console.log(
     `[simplify-minotaur] wrote ${outputPath} with ${simplifiedTriangles.toLocaleString()} triangles`

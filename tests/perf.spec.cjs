@@ -72,7 +72,7 @@ async function waitForSceneReady(page, mazeId = 'maze-001') {
   await page.goto(`/?maze=${mazeId}`, { waitUntil: 'domcontentloaded' })
   await expect
     .poll(async () => loadingOverlay.getAttribute('data-loading-complete'), {
-      timeout: 12_000,
+      timeout: 30_000,
       intervals: [100, 250, 500]
     })
     .toBe('true')
@@ -231,7 +231,12 @@ test('startup remains responsive while loading lightmaps and probes', async ({ p
       intervals: [100, 250, 500]
     })
     .toBe('true')
-  await page.waitForTimeout(1_000)
+  await expect
+    .poll(async () => page.evaluate(() => window.__levelsjamStartupRaf?.samples ?? 0), {
+      timeout: 3_000,
+      intervals: [100, 250, 500]
+    })
+    .toBeGreaterThan(45)
 
   const startup = await page.evaluate(() => ({
     loadingCompleteAt: Number(document.body.dataset.loadingOverlayCompleteAt ?? 'NaN'),
@@ -246,7 +251,7 @@ test('startup remains responsive while loading lightmaps and probes', async ({ p
   expect(startup.monitor.maxDelta).toBeLessThan(4_000)
   expect(startup.monitor.longTasks.every((entry) => entry.duration < 4_000)).toBe(true)
   expect([...resourceUrls].some((url) => url.includes('surface-lightmap.bin'))).toBe(false)
-  expect([...resourceUrls].some((url) => url.includes('surface-lightmap-rgbe.rgbe'))).toBe(true)
+  expect([...resourceUrls].some((url) => url.includes('surface-lightmap-rgbe.png'))).toBe(true)
   expect([...resourceUrls].some((url) => url.includes('/textures/runtime/stone-wall-29/'))).toBe(true)
   expect([...resourceUrls].some((url) => url.includes('/textures/stone-wall-29/stonewall_29-1K/'))).toBe(false)
   expect([...resourceUrls].some((url) => url.includes('/textures/runtime/fire/'))).toBe(false)

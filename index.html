@@ -34,10 +34,12 @@
           addHeadPreload('./assets/app.js', 'script', 'modulepreload')
           addHeadPreload('./assets/bootstrapApp.js', null, 'modulepreload')
           addHeadPreload('./assets/app.css', 'style')
-          if (requestedMazeId) {
-            addHeadPreload(`./maze-data/${requestedMazeId}.json`, 'fetch')
-            addHeadPreload(`./maze-data/${requestedMazeId}/probe-assets.json`, 'fetch')
-          }
+        }
+        addHeadPreload('./textures/title.png', 'image')
+        addHeadPreload('./textures/subtitle.png', 'image')
+        if (requestedMazeId) {
+          addHeadPreload(`./maze-data/${requestedMazeId}.json`, 'fetch')
+          addHeadPreload(`./maze-data/${requestedMazeId}/probe-assets.json`, 'fetch')
         }
       }
     </script>
@@ -77,72 +79,38 @@
         z-index: 4;
         display: grid;
         place-content: center;
-        gap: 0.35rem;
+        gap: 0.175rem;
         background:
           linear-gradient(180deg, rgb(9 11 15 / 88%), rgb(4 6 9 / 94%));
         text-align: center;
       }
 
-      .loading-overlay h1,
-      .loading-overlay h2 {
-        margin: 0;
-        color: #f3eddc;
-        text-transform: uppercase;
-        letter-spacing: 0.14em;
+      .loading-title-image,
+      .loading-subtitle-image {
+        display: block;
+        height: auto;
+        margin: 0 auto;
+        user-select: none;
       }
 
-      .loading-overlay h1 {
-        font-size: clamp(2.8rem, 6vw, 5.5rem);
-        font-weight: 800;
+      .loading-title-image {
+        width: min(72vw, 720px);
       }
 
-      .loading-overlay h2 {
-        font-size: clamp(0.95rem, 2vw, 1.35rem);
-        font-weight: 500;
-        color: rgb(230 212 171 / 88%);
-        display: inline-flex;
-        justify-content: center;
-        align-items: baseline;
+      .loading-subtitle-image {
+        width: min(59.5vw, 595px);
+        animation: loading-subtitle-breathe 2.4s ease-in-out infinite;
+        transform-origin: center;
       }
 
-      .loading-overlay-dots {
-        display: inline-flex;
-        align-items: baseline;
-        width: 3ch;
-        text-align: left;
-        white-space: nowrap;
-        vertical-align: baseline;
-      }
-
-      .loading-overlay-dots::after {
-        content: '...';
-        display: inline-block;
-        line-height: inherit;
-        vertical-align: baseline;
-        width: 1ch;
-        overflow: hidden;
-        animation: loading-overlay-dots 0.5s steps(1, end) infinite;
-      }
-
-      @keyframes loading-overlay-dots {
+      @keyframes loading-subtitle-breathe {
         0%,
-        24.999% {
-          width: 1ch;
-        }
-
-        25%,
-        49.999% {
-          width: 2ch;
-        }
-
-        50%,
-        74.999% {
-          width: 3ch;
-        }
-
-        75%,
         100% {
-          width: 0;
+          transform: scale(0.985);
+        }
+
+        50% {
+          transform: scale(1.025);
         }
       }
     </style>
@@ -158,14 +126,16 @@
         class="loading-overlay"
         data-loading-complete="false"
       >
-        <h1>MINOTAUR</h1>
-        <h2>
-          <span>Entering the labyrinth</span>
-          <span
-            aria-hidden="true"
-            class="loading-overlay-dots"
-          ></span>
-        </h2>
+        <img
+          alt="MINOTAUR"
+          class="loading-title-image"
+          src="./textures/title.png"
+        />
+        <img
+          alt="Entering the labyrinth"
+          class="loading-subtitle-image"
+          src="./textures/subtitle.png"
+        />
       </div>
     </div>
     <div id="root">
@@ -175,21 +145,23 @@
           class="loading-overlay"
           data-loading-complete="false"
         >
-          <h1>MINOTAUR</h1>
-          <h2>
-            <span>Entering the labyrinth</span>
-            <span
-              aria-hidden="true"
-              class="loading-overlay-dots"
-            ></span>
-          </h2>
+          <img
+            alt="MINOTAUR"
+            class="loading-title-image"
+            src="./textures/title.png"
+          />
+          <img
+            alt="Entering the labyrinth"
+            class="loading-subtitle-image"
+            src="./textures/subtitle.png"
+          />
         </div>
       </div>
     </div>
     <script>
       const isLocalHost = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
       const detectViteDevServer = async () => {
-        if (!isLocalHost) {
+        if (!isLocalHost || !['5173', '5174'].includes(window.location.port)) {
           return false
         }
 

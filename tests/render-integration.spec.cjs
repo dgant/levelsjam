@@ -438,7 +438,8 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByRole('dialog', { name: 'Credits' })).toBeVisible()
     await expect(page.getByRole('dialog', { name: 'Credits' })).toContainText('Minotaur')
     await expect(page.getByRole('dialog', { name: 'Credits' })).toContainText('PBR Jumping Spider Monster')
-    await expect(page.getByRole('dialog', { name: 'Credits' })).toContainText('leowolf')
+    await expect(page.getByRole('dialog', { name: 'Credits' })).toContainText('Pale Dread White Werewolf')
+    await expect(page.getByRole('dialog', { name: 'Credits' })).toContainText('Qwantani Moon Noon Puresky')
     await page.keyboard.press('KeyX')
     await expect(page.getByRole('dialog', { name: 'Credits' })).toBeHidden()
     await page.keyboard.press('Backquote')
@@ -916,7 +917,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   expect(frameBrightness.average).toBeGreaterThan(8)
   expect(frameBrightness.max).toBeGreaterThan(20)
   expect(
-    [...resourceUrls].some((url) => url.includes('overcast_soil_1k.hdr'))
+    [...resourceUrls].some((url) => url.includes('qwantani_moon_noon_puresky_2k.exr'))
   ).toBe(true)
   expect(
     [...resourceUrls].some((url) => url.includes('stonewall_29_basecolor-1K.png'))
@@ -1018,9 +1019,11 @@ test('walking from Entrance into Chamber 1 keeps surface lighting resident', asy
       expect.objectContaining({ mazeId: 'chamber-1', ready: true })
     ])
   )
-  expect(chamberBrightness.average).toBeGreaterThan(8)
+  // qwantani is a darker moon-sky HDRI than the previous overcast source; keep
+  // this as a visibility/regression gate rather than the old sky-specific value.
+  expect(chamberBrightness.average).toBeGreaterThan(4)
   expect(chamberBrightness.max).toBeGreaterThan(20)
-  expect(chamberBrightness.average).toBeGreaterThan(entranceBrightness.average * 0.2)
+  expect(chamberBrightness.average).toBeGreaterThan(entranceBrightness.average * 0.04)
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
 })

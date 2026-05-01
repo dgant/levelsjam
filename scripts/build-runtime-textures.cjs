@@ -57,6 +57,12 @@ const runtimeOrmSpecs = [
   }
 ]
 
+const runtimeMaxDimensionSpecs = [
+  'public/textures/runtime/minoan-door/minoan_door_left_basecolor.png',
+  'public/textures/runtime/minoan-door/minoan_door_left_normal.png',
+  'public/textures/runtime/minoan-door/minoan_door_left_orm.png'
+]
+
 function writeIfChanged(filePath, bytes) {
   if (fs.existsSync(filePath)) {
     const existing = fs.readFileSync(filePath)
@@ -73,6 +79,27 @@ function writeIfChanged(filePath, bytes) {
 
 function readPng(relativePath) {
   return PNG.sync.read(fs.readFileSync(path.join(rootDir, relativePath)))
+}
+
+async function resizeRuntimeTextureIfOversized(relativePath, maxDimension = 1024) {
+  const filePath = path.join(rootDir, relativePath)
+  const image = await Jimp.read(filePath)
+  const largest = Math.max(image.bitmap.width, image.bitmap.height)
+
+  if (largest <= maxDimension) {
+    return false
+  }
+
+  const scale = maxDimension / largest
+  const width = Math.max(1, Math.round(image.bitmap.width * scale))
+  const height = Math.max(1, Math.round(image.bitmap.height * scale))
+
+  image.resize({ h: height, w: width })
+  await image.write(filePath)
+  console.log(
+    `[build-runtime-textures] ${relativePath} resized to ${width}x${height}`
+  )
+  return true
 }
 
 async function readRaster(relativePath) {
@@ -186,6 +213,16 @@ async function main() {
 
   console.log(
     `[build-runtime-textures] wrote ${writtenOrmCount}/${runtimeOrmSpecs.length} runtime ORM textures`
+  )
+
+  let resizedCount = 0
+
+  for (const relativePath of runtimeMaxDimensionSpecs) {
+    resizedCount += await resizeRuntimeTextureIfOversized(relativePath) ? 1 : 0
+  }
+
+  console.log(
+    `[build-runtime-textures] resized ${resizedCount}/${runtimeMaxDimensionSpecs.length} oversized runtime textures`
   )
 }
 

@@ -1802,8 +1802,11 @@ test('four forward moves keep Chamber 1 surfaces lit with postprocessing disable
 
   expect(centerFrame.average).toBeGreaterThan(15)
   expect(centerFrame.max).toBeGreaterThan(120)
-  expect(floorFrame.average).toBeGreaterThan(7)
-  expect(floorFrame.max).toBeGreaterThan(25)
+  // The qwantani moon sky is darker than the previous overcast HDRI, so the
+  // floor check asserts "lit and visible" rather than the old sky-specific
+  // absolute luminance.
+  expect(floorFrame.average).toBeGreaterThan(4)
+  expect(floorFrame.max).toBeGreaterThan(15)
   expect(consoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
 })
@@ -2459,7 +2462,7 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   expect(shellVisibleAtMs).toBeLessThan(1_000)
   expect(loadingCompleteAtMs).toBeLessThan(5_000)
   expect(
-    [...resourceUrls].some((url) => url.includes('overcast_soil_1k.hdr'))
+    [...resourceUrls].some((url) => url.includes('qwantani_moon_noon_puresky_2k.exr'))
   ).toBe(true)
   expect(
     [...resourceUrls].some((url) => url.includes('stonewall_29_basecolor-1K.png'))

@@ -8,8 +8,8 @@ const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const runtimeModelGltfPaths = [
   'public/models/droop_cup_runtime/scene.gltf',
   'public/models/metal_gate_runtime/scene.gltf',
-  'public/models/pbr_jumping_spider_monster/scene.gltf',
-  'public/models/awil_werewolf_runtime/scene.gltf',
+  'public/models/pbr_jumping_spider_monster_runtime/scene.gltf',
+  'public/models/pale_dread_white_werewolf_runtime/scene.gltf',
   'public/models/bronze_sword_mycean/scene.gltf',
   'public/models/head_of_a_bull_runtime/scene.gltf',
   'public/models/minotaur-runtime/scene.gltf'
@@ -198,13 +198,21 @@ test('completed altar target mazes keep entrance doors closed after resume', () 
   assert.match(appSource, /!isPermanentlyClosed &&[\s\S]*?isDoorOpenForTurnState/)
 })
 
+test('closed completed mazes reset when player is outside them', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(appSource, /resetClosedMazeIdsRef/)
+  assert.match(appSource, /resetGlobalTurnStateLevel\(next, targetLayout\)/)
+  assert.match(appSource, /targetLevelId !== globalTurnStateRef\.current\?\.player\.levelId/)
+})
+
 test('door back faces keep handles toward the doorway center', () => {
   const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
 
   assert.match(
     appSource,
-    /geometry=\{leftDoorGeometry\}[\s\S]*?maps=\{doorMaps\}\s+materialKey=\{`\$\{materialKey\}:left:front`\}[\s\S]*?maps=\{doorMaps\}\s+materialKey=\{`\$\{materialKey\}:left:back`\}/,
-    'left door leaf should use the shared left texture on both visible sides'
+    /geometry=\{leftDoorGeometry\}[\s\S]*?maps=\{doorMaps\}\s+materialKey=\{`\$\{materialKey\}:left`\}/,
+    'left door leaf should use the shared left texture with one batched material path'
   )
   assert.match(
     appSource,
@@ -213,8 +221,8 @@ test('door back faces keep handles toward the doorway center', () => {
   )
   assert.match(
     appSource,
-    /geometry=\{rightDoorGeometry\}[\s\S]*?materialKey=\{`\$\{materialKey\}:right:front`\}\s+mirroredNormal[\s\S]*?materialKey=\{`\$\{materialKey\}:right:back`\}\s+mirroredNormal/,
-    'right door leaf should invert its tangent-space normal X contribution at runtime'
+    /geometry=\{rightDoorGeometry\}[\s\S]*?materialKey=\{`\$\{materialKey\}:right`\}\s+mirroredNormal/,
+    'right door leaf should invert its tangent-space normal X contribution at runtime while using one material'
   )
 })
 
@@ -226,7 +234,7 @@ test('lens flare controls do not use app-side giant multipliers', () => {
   assert.match(appSource, /Star Burst Intensity/)
   assert.match(
     appSource,
-    /star \*= starBurstIntensity \/ float\(pointCount\)/
+    /starBurstIntensity <= 0\.0 \? vec3\(0\.0\) : starBurstSignal \* starBurstIntensity/
   )
   assert.doesNotMatch(
     appSource,
@@ -235,13 +243,37 @@ test('lens flare controls do not use app-side giant multipliers', () => {
   assert.doesNotMatch(appSource, /Flare Opacity/)
 })
 
+test('anamorphic lens flare shape controls streak definition', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(appSource, /LensFlareEffect as PostLensFlareEffect/)
+  assert.match(appSource, /new PostLensFlareEffect\(\{/)
+  assert.match(appSource, /blendFunction: BlendFunction\.NORMAL/)
+  assert.match(appSource, /new EffectPass\(camera as ThreeCamera, effect\)/)
+  assert.match(appSource, /object=\{slot\.pass as unknown as Pass\}/)
+  assert.doesNotMatch(appSource, /MAX_UPSTREAM_LENS_FLARE_EFFECTS/)
+  assert.doesNotMatch(
+    appSource,
+    /torchMultiLensFlareEffectShader|TorchMultiLensFlareEffectImpl/,
+    'lens flare shape should come from the upstream postprocessing effect, not a custom approximation'
+  )
+  assert.doesNotMatch(
+    appSource,
+    /flareSize \* 90\.0|float sharpLineContribution/,
+    'flareSize should not be scaled into a broad custom blob before shape is applied'
+  )
+  assert.match(appSource, /colorGain: number/)
+  assert.match(appSource, /colorGain: 1/)
+})
+
 test('lens flares apply per-source inverse-square camera distance falloff', () => {
   const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
 
   assert.match(appSource, /distanceToLight <= 1\.5/)
   assert.match(appSource, /\(1\.5 \/ Math\.max\(distanceToLight, 0\.001\)\) \*\* 2/)
-  assert.match(appSource, /visibleLensPositions\.push\(\{\s*intensity: distanceAttenuation/)
-  assert.match(appSource, /effect\.setLens\(\s*slotIndex,[\s\S]*?visibleLens\.intensity\s*\)/)
+  assert.match(appSource, /candidates\.push\(\{\s*distanceToLight,\s*intensity: distanceAttenuation/)
+  assert.match(appSource, /colorGain: 1/)
+  assert.match(appSource, /multiplyScalar\(settings\.colorGain \* \(visibleLens\?\.intensity \?\? 0\)\)/)
 })
 
 test('lens flare occlusion raycasts against all opaque scene meshes', () => {
@@ -318,6 +350,45 @@ test('minotaur runtime materials use the authored dark base tint', () => {
   }
 })
 
+test('minotaur runtime model stays within the runtime triangle budget', () => {
+  const gltf = readGltf('public/models/minotaur-runtime/scene.gltf')
+
+  assert.ok(
+    getGltfTriangleCount(gltf) <= 30_000,
+    `runtime minotaur should stay under 30k triangles, got ${getGltfTriangleCount(gltf)}`
+  )
+})
+
+test('werewolf runtime model is simplified to the tall-monster triangle budget', () => {
+  const gltf = readGltf('public/models/pale_dread_white_werewolf_runtime/scene.gltf')
+  const simplifySource = fs.readFileSync(path.join(rootDir, 'scripts/simplify-werewolf.mjs'), 'utf8')
+
+  assert.ok(
+    getGltfTriangleCount(gltf) <= 10_000,
+    `runtime werewolf should stay under 10k triangles, got ${getGltfTriangleCount(gltf)}`
+  )
+  assert.doesNotMatch(
+    simplifySource,
+    /simplifyDocument\(relaxedDocument,\s*RELAXED_SIMPLIFY_FLAGS,\s*false\)/,
+    'werewolf fallback simplification must keep attribute-aware remapping instead of the hole-prone sloppy path'
+  )
+})
+
+test('tall monsters render when visible or near the player', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(
+    appSource,
+    /\(monster\.type === 'minotaur' \|\| monster\.type === 'werewolf'\) &&\s*playerDistance <= 5/,
+    'minotaurs and werewolves should share the proximity render override'
+  )
+  assert.doesNotMatch(
+    appSource,
+    /monster\.type === 'minotaur' && playerDistance <= 5/,
+    'the proximity render override should not remain minotaur-only'
+  )
+})
+
 test('altar cup runtime model is simplified to the requested triangle budget', () => {
   const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
   const gltf = readGltf('public/models/droop_cup_runtime/scene.gltf')
@@ -345,6 +416,140 @@ test('debug visual defaults live in the editable source config', () => {
   assert.match(appSource, /link\.download = 'visual-settings\.defaults\.json'/)
 })
 
+test('runtime skybox ownership stays global instead of per-level', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(
+    appSource,
+    /<SceneEnvironmentBackground intensity=\{environmentIntensity\}/,
+    'visible skybox brightness should use the calibrated environment intensity'
+  )
+  assert.doesNotMatch(appSource, /<EnvironmentLighting\b/)
+  assert.match(appSource, /qwantani_moon_noon_puresky_2k\.exr/)
+  assert.match(appSource, /useLoader\(EXRLoader, ENVIRONMENT_URL\)/)
+})
+
+test('N8AO preserves skybox pixels without scene depth', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(appSource, /function patchN8AOCompositerSkyDepth/)
+  assert.match(appSource, /if \(depth >= 0\.999999\) \{\s*gl_FragColor = sceneTexel;\s*return;/)
+  assert.match(appSource, /patchN8AOCompositerSkyDepth\(pass\)/)
+})
+
+test('bloom prefilter uses depth to suppress skybox pixels', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(appSource, /class ThreeBloomCompatPass/)
+  assert.match(appSource, /this\.needsDepthTexture = true/)
+  assert.match(appSource, /uniform sampler2D depthBuffer/)
+  assert.match(appSource, /if \(depth >= 0\.999999\) \{\s*gl_FragColor = vec4\(0\.0\);\s*return;/)
+  assert.match(appSource, /setDepthTexture\(depthTexture: Texture \| null\)/)
+})
+
+test('radial chromatic aberration uses seven tinted unit-sum samples', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(appSource, /RadialChromaticAberrationEffect/)
+  assert.match(appSource, /offset \* -3\.0/)
+  assert.match(appSource, /offset \* 3\.0/)
+  assert.match(appSource, /vec3\(0\.02, 0\.05, 0\.16\)/)
+  assert.match(appSource, /vec3\(0\.16, 0\.05, 0\.02\)/)
+  assert.doesNotMatch(appSource, /inputColor\.g,\s*texture2D\(inputBuffer, blueUv\)\.b/)
+})
+
+test('monster screen shake uses shortest passable path distance', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(appSource, /function getScreenShakePathDistance/)
+  assert.match(appSource, /createScreenShakeOpenEdgeSet/)
+  assert.match(appSource, /maze\.playerOnlyOpenEdges/)
+  assert.match(appSource, /for \(const gate of maze\.gates \?\? \[\]\)/)
+  assert.match(appSource, /getScreenShakePathDistance\(\s*layout\.maze,\s*nextMonster\.cell,\s*result\.state\.player\.cell\s*\)/)
+  assert.doesNotMatch(appSource, /const distanceCells = Math\.hypot\(\s*nextMonster\.cell\.x - result\.state\.player\.cell\.x/)
+})
+
+test('chromatic aberration can be driven by screen shake', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+  const defaults = JSON.parse(
+    fs.readFileSync(path.join(rootDir, 'src/visual-settings.defaults.json'), 'utf8')
+  )
+
+  assert.equal(defaults.chromaticAberration.screenShakeIntensity, 0)
+  assert.match(appSource, /screenShakeIntensity: number/)
+  assert.match(appSource, /document\.body\.dataset\.screenShakeAmount/)
+  assert.match(appSource, /settings\.intensity \+\s*\(Math\.max\(0, shakeAmount\) \* settings\.screenShakeIntensity\)/)
+  assert.match(appSource, /aria-label="Chromatic Screen Shake Intensity"/)
+})
+
+test('indoor ceiling patches use static surface lightmaps', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(appSource, /function createCeilingPatchGeometry\(\s*maze: MazeLayout\['maze'\],\s*cell: \{ x: number; y: number \},\s*lightmap: MazeLightmap\s*\)/)
+  assert.match(appSource, /mapGroundWorldToLightmapLocalUv\(lightmap\.groundBounds, worldX, worldZ\)/)
+  assert.match(appSource, /createCeilingPatchGeometry\(layout\.maze, cell, layout\.maze\.lightmap\)/)
+  assert.match(appSource, /function CeilingPatchMesh[\s\S]*?lightMap=\{lightmapTexture\}[\s\S]*?lightMapIntensity=\{lightMapIntensity\}/)
+})
+
+test('altar trophy placement consumes held trophy immediately and blue flame is raised', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(appSource, /setGlobalTurnState\(\(current\) => \{[\s\S]*?hasTrophy: false[\s\S]*?trophyState: 'consumed'[\s\S]*?itemId\.endsWith\(':trophy'\)/)
+  assert.match(appSource, /<TorchBillboard[\s\S]*?color=\{new Color\(0, 0, 1\)\}[\s\S]*?position=\{\[0, 1\.08 \+ 0\.15 \+ TORCH_BILLBOARD_SIZE, 0\]\}/)
+  assert.match(appSource, /lensFlareTint: \[color\.r, color\.g, color\.b\]/)
+  assert.match(appSource, /copy\(visibleLens\?\.tint \?\? FIRE_COLOR\)/)
+})
+
+test('loading subtitle spacing and height ratio use requested artwork layout', () => {
+  const indexSource = fs.readFileSync(path.join(rootDir, 'index.html'), 'utf8')
+  const cssSource = fs.readFileSync(path.join(rootDir, 'src/styles.css'), 'utf8')
+
+  for (const source of [indexSource, cssSource]) {
+    assert.match(source, /gap: 0\.175rem;/)
+    assert.match(source, /width: min\(59\.5vw, 595px\);/)
+  }
+})
+
+test('settings menu exposes audio controls and continuous music crossfades', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(appSource, /type AudioSettings/)
+  assert.match(appSource, /function MusicManager/)
+  assert.match(appSource, /Timebender\.ogg/)
+  assert.match(appSource, /radakan - mist forest\.mp3/)
+  assert.match(appSource, /Mystery Manor\.mp3/)
+  assert.match(appSource, /stone_guardian_loop\.mp3/)
+  assert.match(appSource, /const durationMs = isTarget \? 4000 : 8000/)
+  assert.match(appSource, /audio\.loop = true/)
+  assert.match(appSource, /aria-label="Music Volume"/)
+  assert.match(appSource, /aria-label="Sound Effects Volume"/)
+})
+
+test('page analytics records exact URL and ref query parameter', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(appSource, /url: window\.location\.href/)
+  assert.match(appSource, /ref: searchParams\.get\('ref'\) \?\? null/)
+})
+
+test('skybox rotation and moonlight angle are configured together', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+  const mazeSource = fs.readFileSync(path.join(rootDir, 'src/lib/maze.js'), 'utf8')
+
+  assert.match(appSource, /SKYBOX_ROTATION_Y_RADIANS/)
+  assert.match(appSource, /scene\.backgroundRotation\.set\(0, SKYBOX_ROTATION_Y_RADIANS, 0\)/)
+  assert.match(mazeSource, /MAZE_MOONLIGHT_ELEVATION_RADIANS = 18 \* Math\.PI \/ 180/)
+})
+
+test('runtime spiders lean sixty degrees into their wall side', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(appSource, /const spiderLeanRadians = MathUtils\.degToRad\(60\)/)
+  assert.match(appSource, /spiderWallOffset/)
+  assert.match(appSource, /spiderFloorLift/)
+  assert.match(appSource, /modelRotationZ:[\s\S]*spiderLeanRadians \* spiderLeanSign/)
+})
+
 test('debug lighting and post controls are wired to live render settings', () => {
   const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
 
@@ -352,8 +557,9 @@ test('debug lighting and post controls are wired to live render settings', () =>
   assert.match(appSource, /aria-label="Surface-LM Saturation"/)
   assert.match(appSource, /aria-label="Volumetric-LM Saturation"/)
   assert.match(appSource, /aria-label="Torch Billboard Intensity"/)
-  assert.match(appSource, /<ChromaticAberration/)
+  assert.match(appSource, /<RadialChromaticAberrationEffectPrimitive/)
   assert.match(appSource, /aria-label="Chromatic Aberration Intensity"/)
+  assert.match(appSource, /aria-label="Chromatic Screen Shake Intensity"/)
   assert.match(appSource, /focusRange=\{visualSettings\.depthOfField\.focusRange\}/)
   assert.doesNotMatch(appSource, /focalLength=\{visualSettings\.depthOfField/)
 })

@@ -94,8 +94,8 @@ test('monsters render, stay off surface lightmaps, and land near intended size',
   expect(new Set(lifecycleState.cachedGltfRootUrls).size).toBe(lifecycleState.cachedGltfRootUrls.length)
   expect(lifecycleState.cachedGltfRootUrls).toEqual(expect.arrayContaining([
     expect.stringContaining('/models/minotaur-runtime/scene.gltf'),
-    expect.stringContaining('/models/pbr_jumping_spider_monster/scene.gltf'),
-    expect.stringContaining('/models/awil_werewolf_runtime/scene.gltf')
+    expect.stringContaining('/models/pbr_jumping_spider_monster_runtime/scene.gltf'),
+    expect.stringContaining('/models/pale_dread_white_werewolf_runtime/scene.gltf')
   ]))
 
   const monsterStates = await page.evaluate(() =>
@@ -121,8 +121,13 @@ test('monsters render, stay off surface lightmaps, and land near intended size',
     expect(monster.state.boundsMax).not.toBeNull()
 
     const maxDimension = Math.max(...monster.state.boundsSize)
-    expect(maxDimension).toBeGreaterThan(monster.state.targetSize * 0.6)
-    expect(maxDimension).toBeLessThan(monster.state.targetSize * 1.35)
+    const maxHorizontalDimension = Math.max(monster.state.boundsSize[0], monster.state.boundsSize[2])
+    const fittedDimension =
+      monster.state.type === 'werewolf'
+        ? maxHorizontalDimension
+        : maxDimension
+    expect(fittedDimension).toBeGreaterThan(monster.state.targetSize * 0.6)
+    expect(fittedDimension).toBeLessThan(monster.state.targetSize * 1.35)
 
     if (monster.state.type === 'minotaur') {
       expect(monster.state.targetSize).toBeCloseTo(2.7, 3)
@@ -132,8 +137,8 @@ test('monsters render, stay off surface lightmaps, and land near intended size',
     }
 
     if (monster.state.type === 'werewolf') {
-      expect(monster.state.targetSize).toBeCloseTo(1.6, 3)
-      expect(monster.state.boundsMin[1]).toBeGreaterThanOrEqual(0)
+      expect(monster.state.targetSize).toBeCloseTo(1.8, 3)
+      expect(monster.state.boundsMin[1]).toBeGreaterThanOrEqual(-0.001)
       expect(monster.state.meshCount).toBeLessThanOrEqual(2)
     }
 

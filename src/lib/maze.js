@@ -42,7 +42,7 @@ const MAZE_LIGHTMAP_GROUND_BOUNCE_ALBEDO = [0.34, 0.32, 0.28]
 const MAZE_LIGHTMAP_WALL_BOUNCE_ALBEDO = [0.5, 0.48, 0.43]
 const MAZE_TORCH_LIGHT_COLOR = [10, 2.0863687013464577, 0]
 const MAZE_MOONLIGHT_TINT = [0.78, 0.84, 1.0]
-const MAZE_MOONLIGHT_ELEVATION_RADIANS = 15 * Math.PI / 180
+const MAZE_MOONLIGHT_ELEVATION_RADIANS = 18 * Math.PI / 180
 const MAZE_MOONLIGHT_AZIMUTH_EAST_OF_SOUTH_RADIANS = 30 * Math.PI / 180
 const MAZE_MOONLIGHT_HORIZONTAL = Math.cos(MAZE_MOONLIGHT_ELEVATION_RADIANS)
 const MAZE_MOONLIGHT_DIRECTION = {
@@ -65,6 +65,15 @@ const MAZE_MOONLIGHT_COLOR = MAZE_MOONLIGHT_TINT.map(
     Math.max(MAZE_MOONLIGHT_TINT_LUMINANCE, 1e-6) *
     MAZE_LIGHTMAP_TORCH_STRENGTH
 )
+const HALF_FLOAT_MAX_VALUE = 65504
+
+function toClampedHalfFloat(value) {
+  const finiteValue = Number.isFinite(value) ? value : 0
+
+  return DataUtils.toHalfFloat(
+    Math.min(Math.max(finiteValue, 0), HALF_FLOAT_MAX_VALUE)
+  )
+}
 const MAZE_SKY_LIGHT_COLOR = [
   1.4241132301976904 * getHdrLightingIntensity(AUTHORED_LIGHTING_SOURCE_SCALE),
   1.4103858565213159 * getHdrLightingIntensity(AUTHORED_LIGHTING_SOURCE_SCALE),
@@ -3442,9 +3451,9 @@ function bakeMazeLightmapCpu(
     const sourceOffset = pixelIndex * 3
     const outputOffset = pixelIndex * 3
 
-    atlasData[outputOffset] = DataUtils.toHalfFloat(atlasFloatData[sourceOffset])
-    atlasData[outputOffset + 1] = DataUtils.toHalfFloat(atlasFloatData[sourceOffset + 1])
-    atlasData[outputOffset + 2] = DataUtils.toHalfFloat(atlasFloatData[sourceOffset + 2])
+    atlasData[outputOffset] = toClampedHalfFloat(atlasFloatData[sourceOffset])
+    atlasData[outputOffset + 1] = toClampedHalfFloat(atlasFloatData[sourceOffset + 1])
+    atlasData[outputOffset + 2] = toClampedHalfFloat(atlasFloatData[sourceOffset + 2])
   }
 
   return {
