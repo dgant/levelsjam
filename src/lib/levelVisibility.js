@@ -11,9 +11,10 @@ function getIngressCell(maze) {
 }
 
 function getExitToLevel(maze, targetLevelId) {
-  const exits = Array.isArray(maze?.levelExits)
-    ? maze.levelExits
-    : []
+  const exits = [
+    ...(Array.isArray(maze?.levelExits) ? maze.levelExits : []),
+    ...(Array.isArray(maze?.levelConnections) ? maze.levelConnections : [])
+  ]
 
   return exits.find((exit) => exit?.targetLevelId === targetLevelId) ?? null
 }

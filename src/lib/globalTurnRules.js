@@ -288,9 +288,11 @@ function applyLocalProjectionToWorld(state, levelId, turnState, maze) {
 }
 
 export function findIngressCellForGlobalTransition(targetMaze, sourceLevelId) {
-  const reverseExit = Array.isArray(targetMaze.levelExits)
-    ? targetMaze.levelExits.find((exit) => exit.targetLevelId === sourceLevelId)
-    : null
+  const transitions = [
+    ...(Array.isArray(targetMaze.levelExits) ? targetMaze.levelExits : []),
+    ...(Array.isArray(targetMaze.levelConnections) ? targetMaze.levelConnections : [])
+  ]
+  const reverseExit = transitions.find((exit) => exit.targetLevelId === sourceLevelId) ?? null
 
   return {
     ...(reverseExit?.cell ?? targetMaze.playerStart?.cell ?? targetMaze.opening.cell)

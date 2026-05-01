@@ -17,12 +17,19 @@ async function authoredLayout(id) {
   }
 }
 
+function levelTransitions(maze) {
+  return [
+    ...(maze.levelExits ?? []),
+    ...(maze.levelConnections ?? [])
+  ]
+}
+
 test('world grid aligns the Entrance to first hallway seam as one continuous cell edge', async () => {
   const entrance = await authoredLayout('entrance')
   const hallway = await authoredLayout('hallway-1-1')
   const worldGrid = buildWorldGridFromLayouts([entrance, hallway])
   const entranceExit = entrance.maze.levelExits.find((exit) => exit.targetLevelId === 'hallway-1-1')
-  const hallwayIngress = hallway.maze.levelExits.find((exit) => exit.targetLevelId === 'entrance')
+  const hallwayIngress = levelTransitions(hallway.maze).find((exit) => exit.targetLevelId === 'entrance')
   const entranceExitWorldCell = localCellToWorldCell(entrance, entranceExit.cell)
   const seamWorldCell = localCellToWorldCell(entrance, getNeighbor(entranceExit.cell, entranceExit.side))
   const hallwayIngressWorldCell = localCellToWorldCell(hallway, hallwayIngress.cell)

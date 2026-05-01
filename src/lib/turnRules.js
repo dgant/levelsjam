@@ -227,11 +227,15 @@ function createPlayerState(maze, direction) {
 }
 
 export function getExitForMove(maze, cell, direction) {
+  const transitions = [
+    ...(Array.isArray(maze.levelExits) ? maze.levelExits : []),
+    ...(Array.isArray(maze.levelConnections) ? maze.levelConnections : [])
+  ]
   const exits = maze.disableOpeningExit
-    ? (maze.levelExits ?? [])
+    ? transitions
     : (
-      Array.isArray(maze.levelExits) && maze.levelExits.length > 0
-        ? maze.levelExits
+      transitions.length > 0
+        ? transitions
         : [maze.opening]
     )
 

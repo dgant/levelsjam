@@ -116,7 +116,6 @@ import {
 import {
   getAdjacentRuntimeLevelIds,
   getDefaultRuntimeLevelId,
-  getDirectedRuntimeLevelGraph,
   getLatestDirectedNonMazeLevelId,
   getRuntimeLevelWorldTransform,
   getStoryMazeParentLevelId,
@@ -13434,12 +13433,9 @@ function getMazeDoorForBoundary(
 function getMazeDoors(layout: MazeLayout): MazeRuntimeDoor[] {
   const doors: MazeRuntimeDoor[] = []
   const seenDoorKeys = new Set<string>()
-  const directedLevelGraph = getDirectedRuntimeLevelGraph()
-  const directedTargets = new Set(directedLevelGraph[layout.maze.id] ?? [])
   const addDoor = (
     boundary: {
       cell: MazeCell
-      renderDoor?: boolean
       side: CardinalDirection
       targetLevelId?: string
     } | null | undefined,
@@ -13464,19 +13460,6 @@ function getMazeDoors(layout: MazeLayout): MazeRuntimeDoor[] {
   }
 
   for (const exit of layout.maze.levelExits ?? []) {
-    if (exit.renderDoor === false) {
-      continue
-    }
-
-    if (
-      layout.maze.isAuthoredLevel &&
-      exit.targetLevelId &&
-      !directedTargets.has(exit.targetLevelId) &&
-      exit.renderDoor !== true
-    ) {
-      continue
-    }
-
     addDoor(
       exit,
       `${layout.maze.id}:door:${exit.cell.x},${exit.cell.y}:${exit.side}:${exit.targetLevelId ?? 'exit'}`

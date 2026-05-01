@@ -210,14 +210,10 @@ test('doors use generated Minoan-door ORM textures and baked dynamic lighting', 
   )
   assert.match(
     appSource,
-    /exit\.renderDoor === false/,
-    'authored progression exits can suppress physical door meshes while remaining traversable'
+    /for \(const exit of layout\.maze\.levelExits \?\? \[\]\) \{\s*addDoor\(/,
+    'authored progression rooms should render every levelExit as a physical door'
   )
-  assert.match(
-    appSource,
-    /layout\.maze\.isAuthoredLevel &&[\s\S]*?exit\.targetLevelId &&[\s\S]*?!directedTargets\.has\(exit\.targetLevelId\) &&[\s\S]*?exit\.renderDoor !== true/,
-    'authored progression seams should render one directed door instead of duplicate doors from both sides'
-  )
+  assert.doesNotMatch(appSource, /renderDoor/)
 })
 
 test('completed altar target mazes keep entrance doors closed after resume', () => {

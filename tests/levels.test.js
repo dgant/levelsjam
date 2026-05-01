@@ -135,8 +135,8 @@ test('Hallway 1-2 matches the minotaur-door ASCII topology', async () => {
     [{ x: 0, y: 0 }]
   )
   assert.deepEqual(
-    hallway.cells.filter((cell) => cell.y === 3),
-    [{ x: 0, y: 3 }]
+    hallway.cells.filter((cell) => cell.y === 4),
+    [{ x: 0, y: 4 }]
   )
   assert.deepEqual(hallway.monsters, [{ cell: { x: 0, y: 0 }, type: 'minotaur' }])
   assert.deepEqual(
@@ -145,7 +145,11 @@ test('Hallway 1-2 matches the minotaur-door ASCII topology', async () => {
   )
   assert.deepEqual(
     hallway.levelExits.find((exit) => exit.targetLevelId === 'hallway-1-1'),
-    { cell: { x: 0, y: 3 }, renderDoor: true, side: 'south', targetLevelId: 'hallway-1-1' }
+    undefined
+  )
+  assert.deepEqual(
+    hallway.levelConnections.find((connection) => connection.targetLevelId === 'hallway-1-1'),
+    { cell: { x: 0, y: 4 }, side: 'south', targetLevelId: 'hallway-1-1' }
   )
   assert.deepEqual(
     hallway.lights.filter((light) => light.cell.x === 0 && light.cell.y === 0),
@@ -156,12 +160,12 @@ test('Hallway 1-2 matches the minotaur-door ASCII topology', async () => {
   )
 })
 
-test('Hallway 1-1 traverses to Hallway 1-2 without rendering the seam door on its side', async () => {
+test('Hallway 1-1 renders the single door into Hallway 1-2', async () => {
   const hallway = await createAuthoredRuntimeMaze('hallway-1-1')
 
   assert.deepEqual(
     hallway.levelExits.find((exit) => exit.targetLevelId === 'hallway-1-2'),
-    { cell: { x: 3, y: 0 }, renderDoor: false, side: 'north', targetLevelId: 'hallway-1-2' }
+    { cell: { x: 3, y: 0 }, side: 'north', targetLevelId: 'hallway-1-2' }
   )
 })
 
@@ -173,12 +177,12 @@ test('Hallway 1-3 matches the gate ASCII topology', async () => {
     [{ x: 0, y: 0 }]
   )
   assert.deepEqual(
-    hallway.cells.filter((cell) => cell.y === 3),
-    [{ x: 0, y: 3 }]
+    hallway.cells.filter((cell) => cell.y === 5),
+    [{ x: 0, y: 5 }]
   )
   assert.deepEqual(hallway.monsters, [{ cell: { x: 0, y: 0 }, type: 'minotaur' }])
   assert.deepEqual(hallway.gates, [
-    { from: { x: 1, y: 2 }, id: 'hallway-1-3:gate', to: { x: 2, y: 2 } }
+    { from: { x: 1, y: 3 }, id: 'hallway-1-3:gate', to: { x: 2, y: 3 } }
   ])
   assert.deepEqual(
     hallway.levelExits.find((exit) => exit.targetLevelId === 'hallway-1-4'),
@@ -186,8 +190,31 @@ test('Hallway 1-3 matches the gate ASCII topology', async () => {
   )
   assert.deepEqual(
     hallway.levelExits.find((exit) => exit.targetLevelId === 'hallway-1-2'),
-    { cell: { x: 0, y: 3 }, side: 'south', targetLevelId: 'hallway-1-2' }
+    undefined
   )
+  assert.deepEqual(
+    hallway.levelConnections.find((connection) => connection.targetLevelId === 'hallway-1-2'),
+    { cell: { x: 0, y: 5 }, side: 'south', targetLevelId: 'hallway-1-2' }
+  )
+})
+
+test('Hallway 1-4 uses the revised sword-tutorial bend', async () => {
+  const hallway = await createAuthoredRuntimeMaze('hallway-1-4')
+
+  assert.deepEqual(
+    hallway.cells.filter((cell) => cell.y === 4),
+    [{ x: 5, y: 4 }]
+  )
+  assert.deepEqual(
+    hallway.levelConnections.find((connection) => connection.targetLevelId === 'hallway-1-3'),
+    { cell: { x: 5, y: 4 }, side: 'south', targetLevelId: 'hallway-1-3' }
+  )
+  assert.deepEqual(
+    hallway.levelExits.find((exit) => exit.targetLevelId === 'hallway-1-5'),
+    { cell: { x: 4, y: 0 }, side: 'north', targetLevelId: 'hallway-1-5' }
+  )
+  assert.deepEqual(hallway.sword, { cell: { x: 5, y: 3 } })
+  assert.equal(hallway.trophy, null)
 })
 
 test('directed runtime level graph is rooted at Entrance and acyclic', () => {

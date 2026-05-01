@@ -118,14 +118,16 @@
 - Authored levels may define an explicit playable-cell footprint so connector cells can exist outside the room-proper rectangle without causing adjacent non-room cells to render floors, walls, or visibility entries.
 - The authored Entrance level has a closed outer wall wherever it does not connect to `Hallway 1-1`.
 - Authored progression levels render doors only for authored `levelExits`; legacy maze `opening` metadata must not create extra doors in authored rooms.
-- Authored progression level seams render one physical door from the directed source level rather than duplicate doors from both connected levels.
-- Authored progression level exits may remain traversable while suppressing their physical door mesh when the `LEVELS.md` diagram does not draw a door at that seam.
+- Authored progression levels use explicit non-door `levelConnections` for traversable seams where `LEVELS.md` does not draw a door.
+- Every authored `levelExit` renders as a physical door; non-door traversal must not be represented as a hidden or invisible door.
 - Authored Entrance and Hallway levels follow the playable-cell topology shown in `LEVELS.md` rather than using placeholder rectangular rooms.
 - `Hallway 1-2` has a connected playable loop and accepts movement immediately after the player enters it.
 - `Hallway 1-2` has a recorded solution that reaches the `Hallway 1-3` exit under the normal monster rules.
 - `Hallway 1-2` has a single upper-row cell containing the minotaur, a lower single ingress cell, with the exit door on the upper cell's north side and torch walls on both the west and east sides of that upper cell.
 - `Hallway 1-3` follows the `LEVELS.md` gate tutorial diagram with a single upper minotaur cell, a lower single ingress cell, a four-cell middle row, a four-cell gate row, and one gate between the second and third cells of the gate row.
 - `Hallway 1-3` has a recorded solution that reaches the `Hallway 1-4` exit under the normal monster and gate rules.
+- `Hallway 1-4` follows the revised sword tutorial bend from `LEVELS.md`, starts the player in the lower-right ingress cell, provides a sword in the entry bend before the minotaur engagement, and contains no trophy pickup.
+- `Hallway 1-4` has a recorded solution that reaches the `Hallway 1-5` exit under the normal monster and sword rules.
 
 ## Current Scope
 - The scene uses image-based lighting from the Poly Haven `qwantani_moon_noon_puresky` environment.

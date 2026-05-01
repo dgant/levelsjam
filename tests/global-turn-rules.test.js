@@ -158,7 +158,7 @@ test('resetting all global levels clears active monster state after death', asyn
   const nextHallway = await authoredLayout('hallway-1-3')
   let globalState = createInitialGlobalTurnState(hallway, [nextHallway])
 
-  for (const action of ['move-forward', 'move-backward', 'rotate-left', 'move-backward']) {
+  for (const action of hallway.maze.solution.actions.slice(0, 8)) {
     globalState = applyGlobalTurnActionForLevel(
       globalState,
       hallway.maze.id,
@@ -179,7 +179,7 @@ test('resetting all global levels clears active monster state after death', asyn
     hallway.maze
   )
 
-  assert.deepEqual(resetHallwayState.player.cell, { x: 0, y: 3 })
+  assert.deepEqual(resetHallwayState.player.cell, { x: 0, y: 4 })
   assert.equal(resetHallwayState.player.direction, 'north')
   assert.deepEqual(resetHallwayState.monsters[0].cell, { x: 0, y: 0 })
   assert.equal(resetHallwayState.monsters[0].awake, false)

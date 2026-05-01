@@ -50,18 +50,18 @@ q# # # # # # # mf
    f q q q q q q
 q1q
 
-Door leads to Hallway 1-2.
-
 + Hallway 1-2
 This is the introduction to juking the Minotaur. It is intended that the player loop around the minotaur to escape.
 
- d
-fmf
-   q q
-q#q# #q
+   d
+  fmf
+     q q
+  q#q# #q
   
-q# # #f
-   q q 
+  q# # #f
+ q   q q
+q# #f
+   q
 q1q
  
 Door leads to Hallway 1-3.
@@ -69,13 +69,17 @@ This is the introduction to gates.
 
 + Hallway 1-3
 
- d
-fmf
-   q q q
-q#q# # #q
-     q 
-q# #g# #f
-   q q q
+   d
+  fmf
+
+  q#q
+     q q q
+  q#q# # #q
+       q
+  q# #g# #f
+ q   q q q
+q# #f
+   q
 q1q
 
 Door leads to Hallway 1-4
@@ -89,7 +93,9 @@ This is the introduction to the sword.
  q q q q   q
 fd # # # # f
  q q q q   q
-        q1q
+        q# #q
+         t
+          q1q
 
 Door leads to Hallway 1-5
 This is the introduction to the altar.

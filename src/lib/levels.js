@@ -129,6 +129,13 @@ function getNeighbor(cell, side) {
   return { x: cell.x + delta.x, y: cell.y + delta.y }
 }
 
+function getLevelTransitions(maze) {
+  return [
+    ...(Array.isArray(maze.levelExits) ? maze.levelExits : []),
+    ...(Array.isArray(maze.levelConnections) ? maze.levelConnections : [])
+  ]
+}
+
 function localCellCenter(width, height, cell) {
   return {
     x: -width + 1 + (cell.x * 2),
@@ -216,7 +223,7 @@ function createRuntimeTransforms() {
     const currentId = authoredLineIds[index]
     const previousMaze = authoredLineMazes[previousId]
     const currentMaze = authoredLineMazes[currentId]
-    const previousExit = previousMaze.levelExits.find((exit) => exit.targetLevelId === currentId)
+    const previousExit = getLevelTransitions(previousMaze).find((exit) => exit.targetLevelId === currentId)
     const entryWorldCell = getNeighbor(
       localCellToWorldCell(previousMaze, transforms[previousId], previousExit.cell),
       previousExit.side
@@ -364,10 +371,12 @@ function createAuthoredRoomMaze({
   gates = [],
   height,
   id,
+  levelConnections = [],
   levelExits,
   lights = [],
   monsters = [],
   opening,
+  openEdges = null,
   playerStart,
   solution = null,
   sword = null,
@@ -383,11 +392,12 @@ function createAuthoredRoomMaze({
     id,
     indoor: id !== 'entrance',
     isAuthoredLevel: true,
+    levelConnections,
     levelExits,
     levelName: AUTHORED_LEVEL_NAMES[id],
     lights,
     monsters,
-    openEdges: openEdgesForCells(cells),
+    openEdges: openEdges ?? openEdgesForCells(cells),
     opening,
     playerStart,
     ...(solution ? { solution } : {}),
@@ -435,8 +445,10 @@ function createChamberMazeDefinition(id, previousLevelId, nextLevelId, mazeIds, 
     height,
     id,
     isAuthoredLevel: true,
+    levelConnections: [
+      { cell: { x: 2, y: height - 1 }, side: 'south', targetLevelId: previousLevelId }
+    ],
     levelExits: [
-      { cell: { x: 2, y: height - 1 }, side: 'south', targetLevelId: previousLevelId },
       {
         cell: { x: 2, y: 0 },
         requiredAltarIds: altars.slice(0, requiredAltarCount).map((altar) => altar.id),
@@ -480,9 +492,10 @@ function createThroneRoomDefinition() {
     id: 'throne-room',
     indoor: true,
     isAuthoredLevel: true,
-    levelExits: [
+    levelConnections: [
       { cell: { x: 2, y: 7 }, side: 'south', targetLevelId: 'chamber-2' }
     ],
+    levelExits: [],
     levelName: AUTHORED_LEVEL_NAMES['throne-room'],
     lights: [
       { cell: { x: 0, y: 0 }, side: 'west' },
@@ -540,9 +553,11 @@ function createAuthoredMazeDefinition(id) {
       ],
       height: 3,
       id,
+      levelConnections: [
+        { cell: { x: 0, y: 2 }, side: 'south', targetLevelId: 'entrance' }
+      ],
       levelExits: [
-        { cell: { x: 0, y: 2 }, side: 'south', targetLevelId: 'entrance' },
-        { cell: { x: 3, y: 0 }, renderDoor: false, side: 'north', targetLevelId: 'hallway-1-2' }
+        { cell: { x: 3, y: 0 }, side: 'north', targetLevelId: 'hallway-1-2' }
       ],
       lights: [
         { cell: { x: 3, y: 0 }, side: 'west' },
@@ -565,12 +580,16 @@ function createAuthoredMazeDefinition(id) {
         { x: 0, y: 2 },
         { x: 1, y: 2 },
         { x: 2, y: 2 },
-        { x: 0, y: 3 }
+        { x: 0, y: 3 },
+        { x: 1, y: 3 },
+        { x: 0, y: 4 }
       ],
-      height: 4,
+      height: 5,
       id,
+      levelConnections: [
+        { cell: { x: 0, y: 4 }, side: 'south', targetLevelId: 'hallway-1-1' }
+      ],
       levelExits: [
-        { cell: { x: 0, y: 3 }, renderDoor: true, side: 'south', targetLevelId: 'hallway-1-1' },
         { cell: { x: 0, y: 0 }, side: 'north', targetLevelId: 'hallway-1-3' }
       ],
       lights: [
@@ -579,9 +598,21 @@ function createAuthoredMazeDefinition(id) {
         { cell: { x: 2, y: 2 }, side: 'east' }
       ],
       monsters: [{ cell: { x: 0, y: 0 }, type: 'minotaur' }],
-      opening: { cell: { x: 0, y: 3 }, side: 'south' },
-      playerStart: { cell: { x: 0, y: 3 }, direction: 'north' },
-      solution: { actions: ['move-backward', 'move-forward', 'move-forward', 'rotate-left', 'move-backward', 'rotate-left', 'move-backward', 'rotate-left', 'move-backward', 'rotate-left', 'move-forward', 'move-forward'] },
+      opening: { cell: { x: 0, y: 4 }, side: 'south' },
+      openEdges: [
+        { from: { x: 0, y: 0 }, to: { x: 0, y: 1 } },
+        { from: { x: 0, y: 1 }, to: { x: 0, y: 2 } },
+        { from: { x: 1, y: 1 }, to: { x: 2, y: 1 } },
+        { from: { x: 1, y: 1 }, to: { x: 1, y: 2 } },
+        { from: { x: 2, y: 1 }, to: { x: 2, y: 2 } },
+        { from: { x: 0, y: 2 }, to: { x: 1, y: 2 } },
+        { from: { x: 1, y: 2 }, to: { x: 2, y: 2 } },
+        { from: { x: 1, y: 2 }, to: { x: 1, y: 3 } },
+        { from: { x: 0, y: 3 }, to: { x: 1, y: 3 } },
+        { from: { x: 0, y: 3 }, to: { x: 0, y: 4 } }
+      ],
+      playerStart: { cell: { x: 0, y: 4 }, direction: 'north' },
+      solution: { actions: ['move-forward', 'rotate-left', 'move-backward', 'rotate-left', 'move-backward', 'rotate-left', 'move-backward', 'move-forward', 'rotate-left', 'move-forward', 'rotate-left', 'move-backward', 'move-forward', 'rotate-left', 'move-forward', 'move-backward', 'rotate-left', 'move-forward', 'rotate-left', 'move-backward', 'rotate-left', 'move-forward', 'move-forward', 'rotate-left', 'move-backward', 'move-backward', 'move-backward'] },
       width: 3
     })
   }
@@ -590,31 +621,50 @@ function createAuthoredMazeDefinition(id) {
       cells: [
         { x: 0, y: 0 },
         { x: 0, y: 1 },
-        { x: 1, y: 1 },
-        { x: 2, y: 1 },
-        { x: 3, y: 1 },
         { x: 0, y: 2 },
         { x: 1, y: 2 },
         { x: 2, y: 2 },
         { x: 3, y: 2 },
-        { x: 0, y: 3 }
+        { x: 0, y: 3 },
+        { x: 1, y: 3 },
+        { x: 2, y: 3 },
+        { x: 3, y: 3 },
+        { x: 0, y: 4 },
+        { x: 1, y: 4 },
+        { x: 0, y: 5 }
       ],
-      gates: [{ from: { x: 1, y: 2 }, id: `${id}:gate`, to: { x: 2, y: 2 } }],
-      height: 4,
+      gates: [{ from: { x: 1, y: 3 }, id: `${id}:gate`, to: { x: 2, y: 3 } }],
+      height: 6,
       id,
+      levelConnections: [
+        { cell: { x: 0, y: 5 }, side: 'south', targetLevelId: 'hallway-1-2' }
+      ],
       levelExits: [
-        { cell: { x: 0, y: 3 }, side: 'south', targetLevelId: 'hallway-1-2' },
         { cell: { x: 0, y: 0 }, side: 'north', targetLevelId: 'hallway-1-4' }
       ],
       lights: [
         { cell: { x: 0, y: 0 }, side: 'west' },
         { cell: { x: 0, y: 0 }, side: 'east' },
-        { cell: { x: 3, y: 2 }, side: 'east' }
+        { cell: { x: 3, y: 3 }, side: 'east' }
       ],
       monsters: [{ cell: { x: 0, y: 0 }, type: 'minotaur' }],
-      opening: { cell: { x: 0, y: 3 }, side: 'south' },
-      playerStart: { cell: { x: 0, y: 3 }, direction: 'north' },
-      solution: { actions: ['move-forward', 'rotate-left', 'move-backward', 'move-backward', 'move-backward', 'move-forward', 'rotate-left', 'move-backward', 'rotate-left', 'move-backward', 'move-backward', 'rotate-left', 'move-forward', 'move-forward'] },
+      opening: { cell: { x: 0, y: 5 }, side: 'south' },
+      openEdges: [
+        { from: { x: 0, y: 0 }, to: { x: 0, y: 1 } },
+        { from: { x: 0, y: 1 }, to: { x: 0, y: 2 } },
+        { from: { x: 1, y: 2 }, to: { x: 2, y: 2 } },
+        { from: { x: 2, y: 2 }, to: { x: 3, y: 2 } },
+        { from: { x: 0, y: 2 }, to: { x: 0, y: 3 } },
+        { from: { x: 1, y: 2 }, to: { x: 1, y: 3 } },
+        { from: { x: 3, y: 2 }, to: { x: 3, y: 3 } },
+        { from: { x: 0, y: 3 }, to: { x: 1, y: 3 } },
+        { from: { x: 2, y: 3 }, to: { x: 3, y: 3 } },
+        { from: { x: 1, y: 3 }, to: { x: 1, y: 4 } },
+        { from: { x: 0, y: 4 }, to: { x: 1, y: 4 } },
+        { from: { x: 0, y: 4 }, to: { x: 0, y: 5 } }
+      ],
+      playerStart: { cell: { x: 0, y: 5 }, direction: 'north' },
+      solution: { actions: ['move-forward', 'rotate-left', 'move-backward', 'rotate-left', 'move-backward', 'rotate-left', 'move-backward', 'move-forward', 'move-forward', 'move-backward', 'rotate-left', 'move-forward', 'rotate-left', 'move-backward', 'move-backward', 'rotate-left', 'move-forward', 'rotate-left', 'move-backward', 'move-backward', 'move-backward', 'rotate-left', 'move-forward', 'move-forward', 'move-forward', 'move-forward'] },
       width: 4
     })
   }
@@ -623,12 +673,17 @@ function createAuthoredMazeDefinition(id) {
       cells: [
         { x: 4, y: 0 },
         ...Array.from({ length: 5 }, (_, x) => ({ x, y: 1 })),
-        { x: 4, y: 2 }
+        { x: 4, y: 2 },
+        { x: 5, y: 2 },
+        { x: 5, y: 3 },
+        { x: 5, y: 4 }
       ],
-      height: 3,
+      height: 5,
       id,
+      levelConnections: [
+        { cell: { x: 5, y: 4 }, side: 'south', targetLevelId: 'hallway-1-3' }
+      ],
       levelExits: [
-        { cell: { x: 4, y: 2 }, side: 'south', targetLevelId: 'hallway-1-3' },
         { cell: { x: 4, y: 0 }, side: 'north', targetLevelId: 'hallway-1-5' }
       ],
       lights: [
@@ -636,11 +691,23 @@ function createAuthoredMazeDefinition(id) {
         { cell: { x: 4, y: 1 }, side: 'east' }
       ],
       monsters: [{ cell: { x: 4, y: 0 }, type: 'minotaur' }],
-      opening: { cell: { x: 4, y: 2 }, side: 'south' },
-      playerStart: { cell: { x: 4, y: 2 }, direction: 'north' },
-      solution: { actions: ['rotate-left', 'move-forward', 'move-forward', 'move-forward', 'move-forward', 'rotate-right', 'move-forward', 'move-forward'] },
-      sword: { cell: { x: 0, y: 1 } },
-      width: 5
+      opening: { cell: { x: 5, y: 4 }, side: 'south' },
+      openEdges: [
+        { from: { x: 4, y: 0 }, to: { x: 4, y: 1 } },
+        { from: { x: 0, y: 1 }, to: { x: 1, y: 1 } },
+        { from: { x: 1, y: 1 }, to: { x: 2, y: 1 } },
+        { from: { x: 2, y: 1 }, to: { x: 3, y: 1 } },
+        { from: { x: 3, y: 1 }, to: { x: 4, y: 1 } },
+        { from: { x: 4, y: 1 }, to: { x: 4, y: 2 } },
+        { from: { x: 4, y: 2 }, to: { x: 5, y: 2 } },
+        { from: { x: 5, y: 2 }, to: { x: 5, y: 3 } },
+        { from: { x: 5, y: 3 }, to: { x: 5, y: 4 } }
+      ],
+      playerStart: { cell: { x: 5, y: 4 }, direction: 'north' },
+      solution: { actions: ['move-forward', 'move-forward', 'rotate-left', 'move-forward', 'rotate-left', 'move-backward', 'move-backward', 'move-backward'] },
+      sword: { cell: { x: 5, y: 3 } },
+      trophy: null,
+      width: 6
     })
   }
   if (id === 'hallway-1-5') {
@@ -649,8 +716,10 @@ function createAuthoredMazeDefinition(id) {
       cells: rectangularCells(3, 3),
       height: 3,
       id,
+      levelConnections: [
+        { cell: { x: 0, y: 2 }, side: 'south', targetLevelId: 'hallway-1-4' }
+      ],
       levelExits: [
-        { cell: { x: 0, y: 2 }, side: 'south', targetLevelId: 'hallway-1-4' },
         { cell: { x: 0, y: 0 }, side: 'north', targetLevelId: 'chamber-1' }
       ],
       lights: [
@@ -774,6 +843,10 @@ export async function createAuthoredRuntimeMaze(id, options = {}) {
   if (bakeLightmap && cached) {
     return {
       ...cached,
+      levelConnections: (cached.levelConnections ?? []).map((connection) => ({
+        ...connection,
+        cell: cloneCell(connection.cell)
+      })),
       levelExits: cached.levelExits.map((exit) => ({
         ...exit,
         cell: cloneCell(exit.cell)
@@ -795,6 +868,10 @@ export async function createAuthoredRuntimeMaze(id, options = {}) {
 
   return {
     ...maze,
+    levelConnections: (maze.levelConnections ?? []).map((connection) => ({
+      ...connection,
+      cell: cloneCell(connection.cell)
+    })),
     levelExits: maze.levelExits.map((exit) => ({
       ...exit,
       cell: cloneCell(exit.cell)

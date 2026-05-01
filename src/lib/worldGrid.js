@@ -50,6 +50,13 @@ function worldCellKey(cell) {
   return `${cell.x},${cell.y}`
 }
 
+function getLevelTransitions(maze) {
+  return [
+    ...(Array.isArray(maze.levelExits) ? maze.levelExits : []),
+    ...(Array.isArray(maze.levelConnections) ? maze.levelConnections : [])
+  ]
+}
+
 function localCellToWorldCellWithTransform(maze, transform, cell) {
   const worldCenter = localPointToWorld(localCellCenter(maze, cell), transform)
 
@@ -211,7 +218,7 @@ export function buildWorldGridFromLayouts(layouts) {
       })
     }
 
-    for (const exit of maze.levelExits ?? []) {
+    for (const exit of getLevelTransitions(maze)) {
       if (!exit.targetLevelId) {
         continue
       }

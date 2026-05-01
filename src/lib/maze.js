@@ -846,8 +846,9 @@ function validateMazeCore(maze) {
 function getClosedSides(maze, adjacency, cell) {
   const closed = []
   const exteriorOpenings = [
-    maze.opening,
+    ...(maze.isAuthoredLevel ? [] : [maze.opening]),
     ...(Array.isArray(maze.levelExits) ? maze.levelExits : []),
+    ...(Array.isArray(maze.levelConnections) ? maze.levelConnections : []),
     ...(Array.isArray(maze.exteriorOpenings) ? maze.exteriorOpenings : [])
   ].filter(Boolean)
 
