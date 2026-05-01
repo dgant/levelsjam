@@ -127,6 +127,27 @@ test('Chamber 1 publishes a neutral lightmap while progression e2e is prioritize
   assert.ok(chamber.sourceSignature.startsWith('neutral-authored:chamber-1'))
 })
 
+test('Hallway 1-2 matches the minotaur-door ASCII topology', async () => {
+  const hallway = await createAuthoredRuntimeMaze('hallway-1-2')
+
+  assert.deepEqual(
+    hallway.cells.filter((cell) => cell.y === 0),
+    [{ x: 0, y: 0 }]
+  )
+  assert.deepEqual(hallway.monsters, [{ cell: { x: 0, y: 0 }, type: 'minotaur' }])
+  assert.deepEqual(
+    hallway.levelExits.find((exit) => exit.targetLevelId === 'hallway-1-3'),
+    { cell: { x: 0, y: 0 }, side: 'north', targetLevelId: 'hallway-1-3' }
+  )
+  assert.deepEqual(
+    hallway.lights.filter((light) => light.cell.x === 0 && light.cell.y === 0),
+    [
+      { cell: { x: 0, y: 0 }, side: 'west' },
+      { cell: { x: 0, y: 0 }, side: 'east' }
+    ]
+  )
+})
+
 test('directed runtime level graph is rooted at Entrance and acyclic', () => {
   const graph = getDirectedRuntimeLevelGraph()
   const root = getRuntimeLevelGraphRootId()

@@ -557,16 +557,25 @@ function createAuthoredMazeDefinition(id) {
   }
   if (id === 'hallway-1-2') {
     return createAuthoredRoomMaze({
-      cells: rectangularCells(3, 3),
+      cells: [
+        { x: 0, y: 0 },
+        { x: 0, y: 1 },
+        { x: 1, y: 1 },
+        { x: 2, y: 1 },
+        { x: 0, y: 2 },
+        { x: 1, y: 2 },
+        { x: 2, y: 2 }
+      ],
       height: 3,
       id,
       levelExits: [
         { cell: { x: 0, y: 2 }, side: 'south', targetLevelId: 'hallway-1-1' },
-        { cell: { x: 2, y: 0 }, side: 'north', targetLevelId: 'hallway-1-3' }
+        { cell: { x: 0, y: 0 }, side: 'north', targetLevelId: 'hallway-1-3' }
       ],
       lights: [
         { cell: { x: 0, y: 0 }, side: 'west' },
-        { cell: { x: 2, y: 1 }, side: 'east' }
+        { cell: { x: 0, y: 0 }, side: 'east' },
+        { cell: { x: 2, y: 2 }, side: 'east' }
       ],
       monsters: [{ cell: { x: 0, y: 0 }, type: 'minotaur' }],
       opening: { cell: { x: 0, y: 2 }, side: 'south' },

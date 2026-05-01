@@ -116,6 +116,7 @@
 - The authored Entrance level has a closed outer wall wherever it does not connect to `Hallway 1-1`.
 - Authored Entrance and Hallway levels follow the playable-cell topology shown in `LEVELS.md` rather than using placeholder rectangular rooms.
 - `Hallway 1-2` has a connected playable loop and accepts movement immediately after the player enters it.
+- `Hallway 1-2` has a single upper-row cell containing the minotaur, with the exit door on that cell's north side and torch walls on both the west and east sides of that cell.
 
 ## Current Scope
 - The scene uses image-based lighting from the Poly Haven `qwantani_moon_noon_puresky` environment.
