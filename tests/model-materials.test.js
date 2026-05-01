@@ -113,6 +113,7 @@ test('gate dynamic volumetric material variant stays under the WebGL sampler bud
     dynamicVolumetricCoefficientSamplers +
     dynamicVolumetricConnectivitySamplers
   const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+  const syncPagesSource = fs.readFileSync(path.join(rootDir, 'scripts/sync-pages.cjs'), 'utf8')
 
   assert.equal(
     appSource.includes('localProbeDepthAtlas'),
@@ -527,9 +528,27 @@ test('loading subtitle spacing and height ratio use requested artwork layout', (
 
 test('settings menu exposes audio controls and continuous music crossfades', () => {
   const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+  const syncPagesSource = fs.readFileSync(path.join(rootDir, 'scripts/sync-pages.cjs'), 'utf8')
+  const sfxFiles = [
+    'beast-die.mp3',
+    'beast-kill-player.mp3',
+    'beast-proximity-loop.mp3',
+    'gate-close.mp3',
+    'gate-open.mp3',
+    'monster-stomp.mp3',
+    'spider-die.mp3',
+    'spider-kill-player.mp3',
+    'spider-proximity-loop.mp3',
+    'torch-fire-loop.mp3',
+    'wet-footsteps.mp3'
+  ]
 
   assert.match(appSource, /type AudioSettings/)
   assert.match(appSource, /function MusicManager/)
+  assert.match(appSource, /function SfxLibraryManager/)
+  assert.match(appSource, /function SceneSfxRuntime/)
+  assert.match(appSource, /const SFX_URLS = \{/)
+  assert.match(appSource, /const SFX_LABELS = \{/)
   assert.match(appSource, /Timebender\.ogg/)
   assert.match(appSource, /radakan - mist forest\.mp3/)
   assert.match(appSource, /Mystery Manor\.mp3/)
@@ -541,6 +560,37 @@ test('settings menu exposes audio controls and continuous music crossfades', () 
   assert.match(appSource, /audio\.loop = true/)
   assert.match(appSource, /aria-label="Music Volume"/)
   assert.match(appSource, /aria-label="Sound Effects Volume"/)
+  assert.match(appSource, /aria-label=\{`\$\{SFX_LABELS\[key\]\} Volume`\}/)
+  assert.match(appSource, /setSfxLoop\('wetFootsteps'/)
+  assert.match(appSource, /setSfxLoop\('beastProximityLoop'/)
+  assert.match(appSource, /setSfxLoop\('spiderProximityLoop'/)
+  assert.match(appSource, /setSfxLoop\('torchFireLoop'/)
+  assert.match(appSource, /playSfx\('monsterStomp'/)
+  assert.match(appSource, /playSfx\(isOpen \? 'gateOpen' : 'gateClose'/)
+  assert.match(appSource, /'spiderKillPlayer' : 'beastKillPlayer'/)
+  assert.match(appSource, /'spiderDie' : 'beastDie'/)
+  assert.match(syncPagesSource, /path\.join\(publicDir, 'sfx'\)/)
+
+  for (const file of sfxFiles) {
+    const absolutePath = path.join(rootDir, 'public/sfx', file)
+
+    assert.ok(fs.existsSync(absolutePath), `${file} should be committed under public/sfx`)
+    assert.ok(
+      fs.statSync(absolutePath).size < 1024 * 1024,
+      `${file} should stay under the requested 1MB conversion threshold`
+    )
+  }
+})
+
+test('monster eyes are not rendered in normal gameplay', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(appSource, /function MonsterEyes/)
+  assert.doesNotMatch(
+    appSource,
+    /<MonsterEyes\b/,
+    'monster eye helper may remain for authored settings, but normal gameplay should not mount eye meshes'
+  )
 })
 
 test('page analytics records exact URL and ref query parameter', () => {

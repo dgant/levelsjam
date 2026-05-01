@@ -380,6 +380,7 @@
 - The current checkpoint is the maze entrance position and entrance-facing direction.
 - Each generated maze places one minotaur, one werewolf, and one spider on distinct non-player tiles.
 - Each monster begins asleep.
+- Monster eye meshes are disabled and do not render in normal gameplay.
 - A sleeping monster that sees the player in an uninterrupted straight cardinal line wakes up and becomes eligible to move on its following turn.
 - The minotaur records the cardinal direction toward the player on each turn where it can see the player.
 - An awake minotaur attempts to move one cell in its last recorded player direction.
@@ -401,10 +402,7 @@
 - Minotaur movement screen shake uses a `2x` multiplier over the base monster shake.
 - Werewolf movement screen shake uses a `1.5x` multiplier over the base monster shake.
 - Spider movement screen shake uses the base monster shake intensity.
-- Each awake monster renders two glowing red eye spheres that rotate with the monster and disappear while the monster is asleep.
-- Monster eye spheres are `0.75cm` radius HDR red emitters with color `(4, 0, 0)` where `(1, 1, 1)` is white, so they can trigger bloom.
-- Monster eyes are lens-flare sources when visible and unoccluded.
-- The debug controls include editable numeric monster-eye position controls for each monster type and eye axis.
+- Monster eye rendering remains disabled; monster-eye debug controls may preserve authored eye positions for future use, but normal gameplay renders no eye meshes and emits no monster-eye lens-flare sources.
 - The werewolf model loads from `public/models/pale_dread_white_werewolf.zip`, scales proportionally to `1.8m` wide across its horizontal footprint, is flipped `180` degrees around the vertical axis, and places the bottoms of its feet on the floor at the tile bottom-center.
 - The spider model loads from `public/models/pbr_jumping_spider_monster.zip`, scales proportionally to fit a `1.4m` cube, and is placed as a wall-walking spider with its base oriented along the configured wall and floor.
 - The spider model origin is offset by `(0.1m, 0m, 0.5m)` relative to the fitted model center.
@@ -603,12 +601,20 @@
 - The loading-overlay subtitle animation does not rely on JavaScript timers and remains visually smooth while the app bundle and maze payload load.
 - The loading-overlay subtitle sits about half as far from the title as the previous default spacing and renders at `62%` of the title artwork height.
 - The settings menu includes an Audio tab with independent on/off radio controls and volume sliders for music and sound effects.
+- The visual debug controls include a Volume tab with per-sound-effect multipliers from `0x` through `4x`, defaulting to `1x`.
 - Music is assigned by level role: Entrance and Chamber levels use `Timebender.ogg`, maze levels use `radakan - mist forest.mp3`, hallway levels use `Mystery Manor.mp3`, and throne-room levels use `stone_guardian_loop.mp3`.
 - Music loops continuously while gameplay continues.
 - Music and sound assets do not block the loading overlay from fading.
 - Runtime audio downloads do not begin until after the intro overlay has completed its fade.
 - Music playback and crossfade logic starts only after all configured music tracks have loaded enough to play.
 - If a sound effect would play before its asset is loaded, the runtime skips that sound rather than blocking gameplay or the loading overlay.
+- Monster movement screen shake also triggers a spatial monster-stomp sound with the same distance attenuation and monster-type multipliers as the visual shake.
+- Player walking animations drive a looping wet-footstep sound whose volume fades continuously in and out as walking starts, stops, or resumes.
+- Spider player kills play a trimmed spider screech sound ending at `2.845s`; spider deaths play a separate insect death sound.
+- Werewolf and minotaur player kills play a beast roar sound; werewolf and minotaur deaths play a beast death sound.
+- Minotaurs and werewolves within screen-shake range play a spatial looping beast proximity sound; spiders within screen-shake range play a spatial looping insect proximity sound.
+- Gate opening plays a spatial gate sound; gate closing plays the same source pitched down by two semitones.
+- Torch and lit-altar ambience plays as a continuous loop attenuated by nearest torch or lit altar cell distance, with lit altar ambience contributing double the torch volume.
 - Entering or teleporting to a level whose assigned track differs from the current track fades the previous track out over `8s` and fades the new track in over `4s`.
 - If a track that should start is already fading out, it reverses into a fade-in without restarting playback.
 - Player death does not pause, stop, or reset music.
@@ -766,6 +772,16 @@
 - The credits modal includes `"Mystery Manor" (https://opengameart.org/content/mystery-manor) by Alexandr Zhelanov is licensed under CC-BY 3.0.`
 - The credits modal includes `"(Dark) The Whispering Shadows Dungeon" (https://opengameart.org/content/dark-the-whispering-shadows-dungeon) by Clement Panchout is licensed under CC-BY 4.0.`
 - The credits modal includes `"Stone Guardian" (https://opengameart.org/content/stone-guardian) by Ronhul Maggot is licensed under CC-BY 4.0.`
+- The credits modal includes `"Big Monster Stomp" (https://freesound.org/people/Yoyamen1212/sounds/812538/) by Yoyamen1212 is licensed under CC0.`
+- The credits modal includes `"WetFootsteps.wav" (https://freesound.org/people/sqeeeek/sounds/326543/) by sqeeeek is licensed under CC0.`
+- The credits modal includes `"Spider monster screech" (https://freesound.org/people/Patrick_Corra/sounds/540050/) by Patrick_Corra is licensed under Creative Commons Attribution-NonCommercial 4.0.`
+- The credits modal includes `"Beetle Squark5.wav" (https://freesound.org/people/warrenXG/sounds/502211/) by warrenXG is licensed under CC0.`
+- The credits modal includes `"Jumpscare type roar.mp3" (https://freesound.org/people/Ritorex24/sounds/578958/) by Ritorex24 is licensed under CC0.`
+- The credits modal includes `"dyingBeast" (https://freesound.org/people/QuantumFellow/sounds/734841/) by QuantumFellow is licensed under CC0.`
+- The credits modal includes `"SFX - Dragon Low Growls Breathing.wav" (https://freesound.org/people/Karma-Ron/sounds/486596/) by Karma-Ron is licensed under CC0.`
+- The credits modal includes `"Insect in a tree" (https://freesound.org/people/jymdavis/sounds/197329/) by jymdavis is licensed under CC0.`
+- The credits modal includes `"Staple release from paper" (https://freesound.org/people/redpanda69/sounds/686187/) by redpanda69 is licensed under CC0.`
+- The credits modal includes `"fire_small_loop.wav" (https://freesound.org/people/PhreaKsAccount/sounds/46273/) by PhreaKsAccount is licensed under Creative Commons Attribution 3.0.`
 - The credits modal includes `"PBR Jumping Spider Monster" (https://skfb.ly/6QVNq) by Toast is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
 - The credits modal includes `"Head of a Bull" (https://skfb.ly/6TOXX) by Kirk Hiatt is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
 - The credits modal includes `"Metal Gate" (https://skfb.ly/oK7QR) by i bull your wife is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`

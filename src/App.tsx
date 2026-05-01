@@ -213,6 +213,32 @@ const MUSIC_TRACK_URLS = {
   maze: `${assetBase}music/radakan - mist forest.mp3`,
   throne: `${assetBase}music/stone_guardian_loop.mp3`
 } as const
+const SFX_URLS = {
+  beastDie: `${assetBase}sfx/beast-die.mp3`,
+  beastKillPlayer: `${assetBase}sfx/beast-kill-player.mp3`,
+  beastProximityLoop: `${assetBase}sfx/beast-proximity-loop.mp3`,
+  gateClose: `${assetBase}sfx/gate-close.mp3`,
+  gateOpen: `${assetBase}sfx/gate-open.mp3`,
+  monsterStomp: `${assetBase}sfx/monster-stomp.mp3`,
+  spiderDie: `${assetBase}sfx/spider-die.mp3`,
+  spiderKillPlayer: `${assetBase}sfx/spider-kill-player.mp3`,
+  spiderProximityLoop: `${assetBase}sfx/spider-proximity-loop.mp3`,
+  torchFireLoop: `${assetBase}sfx/torch-fire-loop.mp3`,
+  wetFootsteps: `${assetBase}sfx/wet-footsteps.mp3`
+} as const
+const SFX_LABELS = {
+  beastDie: 'Beast Death',
+  beastKillPlayer: 'Beast Kills Player',
+  beastProximityLoop: 'Beast Proximity Loop',
+  gateClose: 'Gate Close',
+  gateOpen: 'Gate Open',
+  monsterStomp: 'Monster Stomp',
+  spiderDie: 'Spider Death',
+  spiderKillPlayer: 'Spider Kills Player',
+  spiderProximityLoop: 'Spider Proximity Loop',
+  torchFireLoop: 'Torch Fire Loop',
+  wetFootsteps: 'Wet Footsteps'
+} satisfies Record<keyof typeof SFX_URLS, string>
 const FIRE_FLIPBOOK_URL =
   `${assetBase}textures/fire/CampFire_l_nosmoke_front_Loop_01_4K_6x6.png`
 const MONSTER_MODEL_URLS = {
@@ -834,11 +860,25 @@ const LENS_FLARE_OCCLUSION_MARGIN = 0.05
 const LENS_FLARE_SOURCE_REFRESH_SECONDS = 0.1
 const DEFAULT_HDRI_BRIGHTNESS = 1
 const SKYBOX_ROTATION_Y_RADIANS = MathUtils.degToRad(128)
+const DEFAULT_SFX_VOLUMES: SfxVolumeSettings = Object.freeze({
+  beastDie: 1,
+  beastKillPlayer: 1,
+  beastProximityLoop: 1,
+  gateClose: 1,
+  gateOpen: 1,
+  monsterStomp: 1,
+  spiderDie: 1,
+  spiderKillPlayer: 1,
+  spiderProximityLoop: 1,
+  torchFireLoop: 1,
+  wetFootsteps: 1
+})
 const DEFAULT_AUDIO_SETTINGS: AudioSettings = {
   musicEnabled: true,
   musicVolume: 0.7,
   soundEnabled: true,
-  soundVolume: 0.7
+  soundVolume: 0.7,
+  sfxVolumes: { ...DEFAULT_SFX_VOLUMES }
 }
 const DEFAULT_SATURATION = 1
 const DEFAULT_MINOTAUR_ALBEDO_HEX = '#2b2130'
@@ -1829,6 +1869,7 @@ type VisualControlTabKey =
   | 'dof'
   | 'eyes'
   | 'flares'
+  | 'volume'
   | 'ssr'
   | 'fog'
   | 'vignette'
@@ -1938,7 +1979,11 @@ type AudioSettings = {
   musicVolume: number
   soundEnabled: boolean
   soundVolume: number
+  sfxVolumes: SfxVolumeSettings
 }
+
+type SfxKey = keyof typeof SFX_URLS
+type SfxVolumeSettings = Record<SfxKey, number>
 
 type MovementSettings = {
   accelerationDistance: number
@@ -1985,6 +2030,7 @@ const VISUAL_CONTROL_TABS: Array<{
   { key: 'bloom', label: 'Bloom' },
   { key: 'dof', label: 'DOF' },
   { key: 'flares', label: 'Flares' },
+  { key: 'volume', label: 'Volume' },
   { key: 'ssr', label: 'SSR' },
   { key: 'fog', label: 'Fog' },
   { key: 'vignette', label: 'Vignette' },
@@ -15301,14 +15347,6 @@ function MonsterActor({
         reflectionProbeDepthTextures={reflectionProbeDepthTextures}
         reflectionProbeTextures={reflectionProbeTextures}
       />
-      <MonsterEyes
-        awake={monster.awake}
-        eyeColors={monsterEyeColors}
-        monsterHand={monster.hand}
-        monsterId={monster.id}
-        monsterType={monster.type}
-        settings={monsterEyes}
-      />
     </group>
   )
 }
@@ -17505,6 +17543,7 @@ function TorchLensFlare({
 function FlightRig({
   applyTurnActionForLevel,
   altarCutsceneTarget,
+  audioSettings,
   cameraTiltDegrees,
   commitGlobalTurnState,
   inputEnabled,
@@ -17539,6 +17578,7 @@ function FlightRig({
     state: GlobalTurnState
   } | null
   altarCutsceneTarget: Vector3 | null
+  audioSettings: AudioSettings
   cameraTiltDegrees: number
   commitGlobalTurnState: (state: GlobalTurnState) => void
   inputEnabled: boolean
@@ -17584,6 +17624,7 @@ function FlightRig({
   const replayActive = useRef(false)
   const lastHandledReplayRequestId = useRef(0)
   const turnStateRef = useRef(turnState)
+  const audioSettingsRef = useRef(audioSettings)
   const inputEnabledRef = useRef(inputEnabled)
   const inputEnabledAt = useRef(inputEnabled ? performance.now() : Number.POSITIVE_INFINITY)
   const isLevelLightingReadyRef = useRef(isLevelLightingReady)
@@ -17632,6 +17673,10 @@ function FlightRig({
       movementSettings.maxHorizontalSpeedMph
     ]
   )
+
+  useEffect(() => {
+    audioSettingsRef.current = audioSettings
+  }, [audioSettings])
   const resolvedFreeCameraSettings = useMemo(
     () => createMovementSettings(DEFAULT_MOVEMENT_SETTINGS),
     []
@@ -18753,6 +18798,21 @@ function FlightRig({
     try {
       scene.userData.freeCameraActive = freeCamera.current
       document.body.dataset.freeCameraActive = freeCamera.current ? 'true' : 'false'
+      const walkingAnimation = playerAnimation.current
+      const walkingLoopActive =
+        !freeCamera.current &&
+        Boolean(
+          walkingAnimation &&
+          !walkingAnimation.blocked &&
+          (
+            walkingAnimation.action === 'move-forward' ||
+            walkingAnimation.action === 'move-backward'
+          )
+        )
+
+      setSfxLoop('wetFootsteps', audioSettingsRef.current, walkingLoopActive, {
+        volume: 0.8
+      })
 
       if (!freeCamera.current) {
       if (altarCutsceneTarget) {
@@ -18835,6 +18895,8 @@ function FlightRig({
             state: turnStateRef.current
           }
           let strongestShakeAmplitude = 0
+          let strongestMovedMonster: TurnMonster | null = null
+          let strongestMovedMonsterVolume = 0
 
           for (let monsterIndex = 0; monsterIndex < result.state.monsters.length; monsterIndex += 1) {
             const nextMonster = result.state.monsters[monsterIndex]
@@ -18864,16 +18926,17 @@ function FlightRig({
               0.06
             )
             const monsterMultiplier =
-              nextMonster.type === 'minotaur'
-                ? 2
-                : nextMonster.type === 'werewolf'
-                  ? 1.5
-                  : 1
+              getMonsterShakeMultiplier(nextMonster.type)
+            const shakeAmplitude = baseAmplitude * monsterMultiplier
 
             strongestShakeAmplitude = Math.max(
               strongestShakeAmplitude,
-              baseAmplitude * monsterMultiplier
+              shakeAmplitude
             )
+            if (shakeAmplitude > strongestMovedMonsterVolume) {
+              strongestMovedMonster = nextMonster
+              strongestMovedMonsterVolume = shakeAmplitude
+            }
           }
 
           if (strongestShakeAmplitude > 0) {
@@ -18881,6 +18944,93 @@ function FlightRig({
               amplitude: strongestShakeAmplitude,
               endsAt: performance.now() + 1000
             }
+          }
+          if (strongestMovedMonster && strongestMovedMonsterVolume > 0) {
+            const monsterWorldPosition = getTransformedMazeCellWorldPosition(
+              layout.maze,
+              levelTransform,
+              strongestMovedMonster.cell,
+              GROUND_Y + PLAYER_EYE_HEIGHT * 0.5
+            )
+
+            playSfx('monsterStomp', audioSettingsRef.current, {
+              pan: getCameraRelativePan(camera, monsterWorldPosition),
+              volume: MathUtils.clamp(strongestMovedMonsterVolume / 0.12, 0, 1)
+            })
+          }
+
+          const previousOpenGateIds = new Set(getOpenGateIds(layout.maze, result.previous))
+          const nextOpenGateIds = new Set(getOpenGateIds(layout.maze, result.state))
+          for (const gate of layout.gates ?? []) {
+            const wasOpen = previousOpenGateIds.has(gate.id)
+            const isOpen = nextOpenGateIds.has(gate.id)
+
+            if (wasOpen === isOpen) {
+              continue
+            }
+
+            const gatePosition = transformLevelLocalPositionToWorld(
+              {
+                x: gate.center.x,
+                y: PLAYER_EYE_HEIGHT * 0.5,
+                z: gate.center.z
+              },
+              levelTransform
+            )
+
+            playSfx(isOpen ? 'gateOpen' : 'gateClose', audioSettingsRef.current, {
+              pan: getCameraRelativePan(camera, gatePosition),
+              volume: 0.7
+            })
+          }
+
+          if (result.killed) {
+            const killer = result.previous.monsters.find((monster) => (
+              monster.cell.x === result.state.player.cell.x &&
+              monster.cell.y === result.state.player.cell.y
+            )) ?? result.state.monsters.find((monster) => (
+              monster.cell.x === result.previous.player.cell.x &&
+              monster.cell.y === result.previous.player.cell.y
+            ))
+            const killerPosition = killer
+              ? getTransformedMazeCellWorldPosition(
+                  layout.maze,
+                  levelTransform,
+                  killer.cell,
+                  GROUND_Y + PLAYER_EYE_HEIGHT * 0.5
+                )
+              : camera.position
+
+            playSfx(
+              killer?.type === 'spider' ? 'spiderKillPlayer' : 'beastKillPlayer',
+              audioSettingsRef.current,
+              {
+                pan: getCameraRelativePan(camera, killerPosition),
+                volume: 1
+              }
+            )
+          }
+
+          const removedMonster = result.previous.monsters.find((previousMonster) => (
+            !result.state.monsters.some((nextMonster) => nextMonster.id === previousMonster.id)
+          ))
+
+          if (removedMonster) {
+            const removedPosition = getTransformedMazeCellWorldPosition(
+              layout.maze,
+              levelTransform,
+              removedMonster.cell,
+              GROUND_Y + PLAYER_EYE_HEIGHT * 0.5
+            )
+
+            playSfx(
+              removedMonster.type === 'spider' ? 'spiderDie' : 'beastDie',
+              audioSettingsRef.current,
+              {
+                pan: getCameraRelativePan(camera, removedPosition),
+                volume: 1
+              }
+            )
           }
 
           const fromWorldPosition = getTransformedMazeCellWorldPosition(
@@ -19134,6 +19284,7 @@ function FlightRig({
 
   useEffect(() => {
     return () => {
+      setSfxLoop('wetFootsteps', audioSettingsRef.current, false)
       if (playerEffectClearTimeout.current !== null) {
         window.clearTimeout(playerEffectClearTimeout.current)
         playerEffectClearTimeout.current = null
@@ -19358,6 +19509,7 @@ function Scene({
   activatedAltarIds,
   applyTurnActionForLevel,
   altarCutscene,
+  audioSettings,
   composerEnabled,
   commitGlobalTurnState,
   controlsOpen,
@@ -19398,6 +19550,7 @@ function Scene({
     levelId: string
     startedAt: number
   } | null
+  audioSettings: AudioSettings
   composerEnabled: boolean
   commitGlobalTurnState: (state: GlobalTurnState) => void
   controlsOpen: boolean
@@ -20973,6 +21126,13 @@ function Scene({
       <TorchBillboardIntensityContext.Provider value={visualSettings.torchBillboardIntensity}>
       <LightmapSaturationContext.Provider value={visualSettings.lightmapSaturation}>
       <VolumetricSaturationContext.Provider value={visualSettings.volumetricSaturation}>
+        <SceneSfxRuntime
+          activatedAltarIds={activatedAltarIds}
+          audioSettings={audioSettings}
+          layout={layout}
+          renderedLayouts={runtimeRenderedLayouts}
+          turnState={turnState}
+        />
         {runtimeRenderedLayouts.map((renderedLayout) => {
           const isActive = renderedLayout.maze.id === layout.maze.id
           const renderedTurnState = isActive
@@ -21141,6 +21301,7 @@ function Scene({
           <FlightRig
             applyTurnActionForLevel={applyTurnActionForLevel}
             altarCutsceneTarget={altarCutsceneTarget}
+            audioSettings={audioSettings}
             cameraTiltDegrees={visualSettings.cameraTiltDegrees}
             commitGlobalTurnState={commitGlobalTurnState}
             inputEnabled={startupSceneReady && !cutsceneActive}
@@ -21253,9 +21414,11 @@ function FogAmbientColorControl({
 function VisualControls({
   onAnamorphicSettingChange,
   onAmbientOcclusionModeChange,
+  audioSettings,
   onBooleanSettingChange,
   onBloomSettingChange,
   controlsOpen,
+  onAudioSettingChange,
   onChromaticAberrationSettingChange,
   onDepthOfFieldSettingChange,
   onEffectSettingChange,
@@ -21289,10 +21452,12 @@ function VisualControls({
 }: {
   onAnamorphicSettingChange: (patch: Partial<AnamorphicSettings>) => void
   onAmbientOcclusionModeChange: (value: AmbientOcclusionMode) => void
+  audioSettings: AudioSettings
   onBooleanSettingChange: (
     key: BooleanSettingKey,
     value: boolean
   ) => void
+  onAudioSettingChange: (patch: Partial<AudioSettings>) => void
   onBloomSettingChange: (patch: Partial<BloomSettings>) => void
   onChromaticAberrationSettingChange: (patch: Partial<ChromaticAberrationSettings>) => void
   controlsOpen: boolean
@@ -23239,6 +23404,44 @@ function VisualControls({
         </>
       ) : null}
 
+      {activeTab === 'volume' ? (
+        <>
+          {(
+            Object.keys(SFX_URLS) as SfxKey[]
+          ).map((key) => (
+            <label className="visual-control-row" key={key}>
+              <output>{(audioSettings.sfxVolumes[key] ?? 1).toFixed(2)}x</output>
+              <ResettableLabel onReset={() => {
+                onAudioSettingChange({
+                  sfxVolumes: {
+                    ...audioSettings.sfxVolumes,
+                    [key]: DEFAULT_SFX_VOLUMES[key]
+                  }
+                })
+              }}>
+                {SFX_LABELS[key]}
+              </ResettableLabel>
+              <input
+                aria-label={`${SFX_LABELS[key]} Volume`}
+                max={4}
+                min={0}
+                onChange={(event) => {
+                  onAudioSettingChange({
+                    sfxVolumes: {
+                      ...audioSettings.sfxVolumes,
+                      [key]: Number(event.target.value)
+                    }
+                  })
+                }}
+                step={0.01}
+                type="range"
+                value={audioSettings.sfxVolumes[key] ?? 1}
+              />
+            </label>
+          ))}
+        </>
+      ) : null}
+
       {activeTab === 'eyes' ? (
         <>
           <label className="visual-control-row">
@@ -23374,6 +23577,353 @@ function getMusicTrackForLevelId(levelId: string | null) {
   }
 
   return MUSIC_TRACK_URLS.maze
+}
+
+type SfxLoopHandle = {
+  gain: GainNode
+  panner: StereoPannerNode | null
+  source: AudioBufferSourceNode
+}
+
+const sfxRuntime = {
+  buffers: new Map<SfxKey, AudioBuffer>(),
+  context: null as AudioContext | null,
+  loading: new Map<SfxKey, Promise<AudioBuffer | null>>(),
+  loops: new Map<SfxKey, SfxLoopHandle>()
+}
+
+function getSfxContext() {
+  if (!sfxRuntime.context) {
+    const AudioContextCtor =
+      window.AudioContext ??
+      (window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext })
+        .webkitAudioContext
+
+    if (!AudioContextCtor) {
+      return null
+    }
+
+    sfxRuntime.context = new AudioContextCtor()
+  }
+
+  return sfxRuntime.context
+}
+
+function ensureSfxBuffer(key: SfxKey) {
+  const existing = sfxRuntime.buffers.get(key)
+
+  if (existing) {
+    return Promise.resolve(existing)
+  }
+
+  const pending = sfxRuntime.loading.get(key)
+
+  if (pending) {
+    return pending
+  }
+
+  const context = getSfxContext()
+
+  if (!context) {
+    return Promise.resolve(null)
+  }
+
+  const promise = fetch(SFX_URLS[key])
+    .then((response) => response.arrayBuffer())
+    .then((arrayBuffer) => context.decodeAudioData(arrayBuffer))
+    .then((buffer) => {
+      sfxRuntime.buffers.set(key, buffer)
+      return buffer
+    })
+    .catch(() => null)
+    .finally(() => {
+      sfxRuntime.loading.delete(key)
+    })
+
+  sfxRuntime.loading.set(key, promise)
+  return promise
+}
+
+function getSfxVolume(settings: AudioSettings, key: SfxKey, baseVolume = 1) {
+  if (!settings.soundEnabled) {
+    return 0
+  }
+
+  return MathUtils.clamp(
+    settings.soundVolume * (settings.sfxVolumes[key] ?? 1) * baseVolume,
+    0,
+    1
+  )
+}
+
+function warmSfxLibrary() {
+  for (const key of Object.keys(SFX_URLS) as SfxKey[]) {
+    void ensureSfxBuffer(key)
+  }
+}
+
+function playSfx(
+  key: SfxKey,
+  settings: AudioSettings,
+  options: { pan?: number; volume?: number } = {}
+) {
+  const context = getSfxContext()
+  const buffer = sfxRuntime.buffers.get(key)
+  const volume = getSfxVolume(settings, key, options.volume ?? 1)
+
+  if (!context || !buffer || volume <= 0) {
+    void ensureSfxBuffer(key)
+    return
+  }
+
+  if (context.state === 'suspended') {
+    void context.resume()
+  }
+
+  const source = context.createBufferSource()
+  const gain = context.createGain()
+  const panner = typeof context.createStereoPanner === 'function'
+    ? context.createStereoPanner()
+    : null
+
+  source.buffer = buffer
+  gain.gain.value = volume
+  if (panner) {
+    panner.pan.value = MathUtils.clamp(options.pan ?? 0, -1, 1)
+    source.connect(gain).connect(panner).connect(context.destination)
+  } else {
+    source.connect(gain).connect(context.destination)
+  }
+  source.start()
+}
+
+function setSfxLoop(
+  key: SfxKey,
+  settings: AudioSettings,
+  active: boolean,
+  options: { pan?: number; volume?: number } = {}
+) {
+  const context = getSfxContext()
+  const current = sfxRuntime.loops.get(key)
+  const targetVolume = active ? getSfxVolume(settings, key, options.volume ?? 1) : 0
+
+  if (!context) {
+    return
+  }
+
+  if (!active || targetVolume <= 0) {
+    if (current) {
+      current.gain.gain.cancelScheduledValues(context.currentTime)
+      current.gain.gain.linearRampToValueAtTime(0, context.currentTime + 0.25)
+      window.setTimeout(() => {
+        try {
+          current.source.stop()
+        } catch {
+          // Already stopped.
+        }
+      }, 260)
+      sfxRuntime.loops.delete(key)
+    }
+    return
+  }
+
+  const buffer = sfxRuntime.buffers.get(key)
+
+  if (!buffer) {
+    void ensureSfxBuffer(key)
+    return
+  }
+
+  if (context.state === 'suspended') {
+    void context.resume()
+  }
+
+  const handle = current ?? (() => {
+    const source = context.createBufferSource()
+    const gain = context.createGain()
+    const panner = typeof context.createStereoPanner === 'function'
+      ? context.createStereoPanner()
+      : null
+
+    source.buffer = buffer
+    source.loop = true
+    gain.gain.value = 0
+    if (panner) {
+      source.connect(gain).connect(panner).connect(context.destination)
+    } else {
+      source.connect(gain).connect(context.destination)
+    }
+    source.start()
+
+    const nextHandle = { gain, panner, source }
+    sfxRuntime.loops.set(key, nextHandle)
+    return nextHandle
+  })()
+
+  handle.gain.gain.cancelScheduledValues(context.currentTime)
+  handle.gain.gain.linearRampToValueAtTime(targetVolume, context.currentTime + 0.25)
+  if (handle.panner) {
+    handle.panner.pan.value = MathUtils.clamp(options.pan ?? 0, -1, 1)
+  }
+}
+
+function stopAllSfxLoops() {
+  for (const [key, handle] of sfxRuntime.loops) {
+    try {
+      handle.source.stop()
+    } catch {
+      // Already stopped.
+    }
+    sfxRuntime.loops.delete(key)
+  }
+}
+
+function getCameraRelativePan(camera: ThreeCamera, position: Vector3) {
+  const local = position.clone().sub(camera.position)
+  const inverse = camera.quaternion.clone().invert()
+
+  local.applyQuaternion(inverse)
+  return MathUtils.clamp(local.x / Math.max(1, Math.abs(local.z), local.length()), -1, 1)
+}
+
+function getMonsterShakeMultiplier(type: TurnMonster['type']) {
+  return type === 'minotaur' ? 2 : type === 'werewolf' ? 1.5 : 1
+}
+
+function getShakeVolumeFromDistance(distanceCells: number, multiplier = 1) {
+  const baseAmplitude = MathUtils.clamp(
+    0.24 / Math.max(distanceCells + 0.5, 1),
+    0.012,
+    0.06
+  )
+
+  return MathUtils.clamp((baseAmplitude * multiplier) / 0.12, 0, 1)
+}
+
+function SceneSfxRuntime({
+  activatedAltarIds,
+  audioSettings,
+  layout,
+  renderedLayouts,
+  turnState
+}: {
+  activatedAltarIds: Set<string>
+  audioSettings: AudioSettings
+  layout: MazeLayout
+  renderedLayouts: MazeLayout[]
+  turnState: TurnState
+}) {
+  const camera = useThree((state) => state.camera)
+  const settingsRef = useRef(audioSettings)
+  const probePosition = useMemo(() => new Vector3(), [])
+
+  useEffect(() => {
+    settingsRef.current = audioSettings
+  }, [audioSettings])
+
+  useFrame(() => {
+    let bestBeastVolume = 0
+    let bestBeastPan = 0
+    let bestSpiderVolume = 0
+    let bestSpiderPan = 0
+
+    for (const monster of turnState.monsters) {
+      const distanceCells = getScreenShakePathDistance(
+        layout.maze,
+        monster.cell,
+        turnState.player.cell
+      )
+      const volume = getShakeVolumeFromDistance(
+        distanceCells,
+        getMonsterShakeMultiplier(monster.type)
+      )
+
+      if (volume <= 0) {
+        continue
+      }
+
+      const monsterWorldPosition = getTransformedMazeCellWorldPosition(
+        layout.maze,
+        getRuntimeLevelWorldTransform(layout.maze.id),
+        monster.cell,
+        GROUND_Y + PLAYER_EYE_HEIGHT * 0.5
+      )
+      const pan = getCameraRelativePan(camera, monsterWorldPosition)
+
+      if (monster.type === 'spider') {
+        if (volume > bestSpiderVolume) {
+          bestSpiderVolume = volume
+          bestSpiderPan = pan
+        }
+      } else if (volume > bestBeastVolume) {
+        bestBeastVolume = volume
+        bestBeastPan = pan
+      }
+    }
+
+    setSfxLoop('beastProximityLoop', settingsRef.current, bestBeastVolume > 0.01, {
+      pan: bestBeastPan,
+      volume: bestBeastVolume
+    })
+    setSfxLoop('spiderProximityLoop', settingsRef.current, bestSpiderVolume > 0.01, {
+      pan: bestSpiderPan,
+      volume: bestSpiderVolume
+    })
+
+    let bestFireVolume = 0
+    let bestFirePan = 0
+
+    for (const renderedLayout of renderedLayouts) {
+      const transform = getRuntimeLevelWorldTransform(renderedLayout.maze.id)
+
+      for (const light of renderedLayout.lights ?? []) {
+        const lightPosition = transformLevelLocalPositionToWorld(
+          light.torchPosition,
+          transform,
+          probePosition
+        )
+        const distanceCells = lightPosition.distanceTo(camera.position) / MAZE_CELL_SIZE
+        const volume = MathUtils.clamp(1 / Math.max(1, distanceCells + 0.25), 0, 1)
+
+        if (volume > bestFireVolume) {
+          bestFireVolume = volume
+          bestFirePan = getCameraRelativePan(camera, lightPosition)
+        }
+      }
+
+      for (const altar of renderedLayout.altars ?? []) {
+        if (!activatedAltarIds.has(altar.id)) {
+          continue
+        }
+
+        const altarPosition = transformLevelLocalPositionToWorld(
+          altar.position,
+          transform,
+          probePosition
+        )
+        const distanceCells = altarPosition.distanceTo(camera.position) / MAZE_CELL_SIZE
+        const volume = MathUtils.clamp(2 / Math.max(1, distanceCells + 0.25), 0, 1)
+
+        if (volume > bestFireVolume) {
+          bestFireVolume = volume
+          bestFirePan = getCameraRelativePan(camera, altarPosition)
+        }
+      }
+    }
+
+    setSfxLoop('torchFireLoop', settingsRef.current, bestFireVolume > 0.01, {
+      pan: bestFirePan,
+      volume: bestFireVolume
+    })
+  })
+
+  useEffect(() => () => {
+    setSfxLoop('beastProximityLoop', settingsRef.current, false)
+    setSfxLoop('spiderProximityLoop', settingsRef.current, false)
+    setSfxLoop('torchFireLoop', settingsRef.current, false)
+  }, [])
+
+  return null
 }
 
 function MusicManager({
@@ -23553,6 +24103,35 @@ function MusicManager({
   return null
 }
 
+function SfxLibraryManager({
+  enabled,
+  settings
+}: {
+  enabled: boolean
+  settings: AudioSettings
+}) {
+  useEffect(() => {
+    if (!enabled || !settings.soundEnabled) {
+      stopAllSfxLoops()
+      return undefined
+    }
+
+    const handle = window.setTimeout(warmSfxLibrary, LOADING_FADE_DURATION_MS)
+
+    return () => {
+      window.clearTimeout(handle)
+    }
+  }, [enabled, settings.soundEnabled])
+
+  useEffect(() => {
+    if (!settings.soundEnabled) {
+      stopAllSfxLoops()
+    }
+  }, [settings.soundEnabled])
+
+  return null
+}
+
 function CreditsModal({
   open
 }: {
@@ -23610,6 +24189,36 @@ function CreditsModal({
         </p>
         <p>
           "Stone Guardian" (<a href="https://opengameart.org/content/stone-guardian">https://opengameart.org/content/stone-guardian</a>) by Ronhul Maggot is licensed under CC-BY 4.0.
+        </p>
+        <p>
+          "Big Monster Stomp" (<a href="https://freesound.org/people/Yoyamen1212/sounds/812538/">https://freesound.org/people/Yoyamen1212/sounds/812538/</a>) by Yoyamen1212 is licensed under CC0.
+        </p>
+        <p>
+          "WetFootsteps.wav" (<a href="https://freesound.org/people/sqeeeek/sounds/326543/">https://freesound.org/people/sqeeeek/sounds/326543/</a>) by sqeeeek is licensed under CC0.
+        </p>
+        <p>
+          "Spider monster screech" (<a href="https://freesound.org/people/Patrick_Corra/sounds/540050/">https://freesound.org/people/Patrick_Corra/sounds/540050/</a>) by Patrick_Corra is licensed under Creative Commons Attribution-NonCommercial 4.0.
+        </p>
+        <p>
+          "Beetle Squark5.wav" (<a href="https://freesound.org/people/warrenXG/sounds/502211/">https://freesound.org/people/warrenXG/sounds/502211/</a>) by warrenXG is licensed under CC0.
+        </p>
+        <p>
+          "Jumpscare type roar.mp3" (<a href="https://freesound.org/people/Ritorex24/sounds/578958/">https://freesound.org/people/Ritorex24/sounds/578958/</a>) by Ritorex24 is licensed under CC0.
+        </p>
+        <p>
+          "dyingBeast" (<a href="https://freesound.org/people/QuantumFellow/sounds/734841/">https://freesound.org/people/QuantumFellow/sounds/734841/</a>) by QuantumFellow is licensed under CC0.
+        </p>
+        <p>
+          "SFX - Dragon Low Growls Breathing.wav" (<a href="https://freesound.org/people/Karma-Ron/sounds/486596/">https://freesound.org/people/Karma-Ron/sounds/486596/</a>) by Karma-Ron is licensed under CC0.
+        </p>
+        <p>
+          "Insect in a tree" (<a href="https://freesound.org/people/jymdavis/sounds/197329/">https://freesound.org/people/jymdavis/sounds/197329/</a>) by jymdavis is licensed under CC0.
+        </p>
+        <p>
+          "Staple release from paper" (<a href="https://freesound.org/people/redpanda69/sounds/686187/">https://freesound.org/people/redpanda69/sounds/686187/</a>) by redpanda69 is licensed under CC0.
+        </p>
+        <p>
+          "fire_small_loop.wav" (<a href="https://freesound.org/people/PhreaKsAccount/sounds/46273/">https://freesound.org/people/PhreaKsAccount/sounds/46273/</a>) by PhreaKsAccount is licensed under Creative Commons Attribution 3.0.
         </p>
         <small>Press any key to close.</small>
       </div>
@@ -24120,6 +24729,18 @@ export default function App() {
   const [sceneLoaded, setSceneLoaded] = useState(false)
   const [visualSettings, setVisualSettings] = useState(createDefaultVisualSettings)
   const [audioSettings, setAudioSettings] = useState<AudioSettings>(DEFAULT_AUDIO_SETTINGS)
+  const handleAudioSettingChange = useCallback((patch: Partial<AudioSettings>) => {
+    setAudioSettings((current) => ({
+      ...current,
+      ...patch,
+      sfxVolumes: patch.sfxVolumes
+        ? {
+            ...current.sfxVolumes,
+            ...patch.sfxVolumes
+          }
+        : current.sfxVolumes
+    }))
+  }, [])
   const [activatedAltarIds, setActivatedAltarIds] = useState<Set<string>>(() => {
     try {
       const save = readGameSave(window.localStorage)
@@ -25769,16 +26390,15 @@ export default function App() {
             levelId={activeMusicLevelId}
             settings={audioSettings}
           />
+          <SfxLibraryManager
+            enabled={sceneLoaded}
+            settings={audioSettings}
+          />
           <LevelMenuModal
             audioSettings={audioSettings}
             challengeLevels={challengeLevelEntries}
             levels={authoredLevels}
-            onAudioSettingChange={(patch) => {
-              setAudioSettings((current) => ({
-                ...current,
-                ...patch
-              }))
-            }}
+            onAudioSettingChange={handleAudioSettingChange}
             onAmbientOcclusionModeChange={onAmbientOcclusionModeChange}
         onBooleanSettingChange={onBooleanSettingChange}
         onClose={() => setLevelMenuOpen(false)}
@@ -25804,8 +26424,10 @@ export default function App() {
         }}
       />
       <VisualControls
+        audioSettings={audioSettings}
         controlsOpen={controlsOpen}
         onAnamorphicSettingChange={onAnamorphicSettingChange}
+        onAudioSettingChange={handleAudioSettingChange}
         onAmbientOcclusionModeChange={onAmbientOcclusionModeChange}
         onBooleanSettingChange={onBooleanSettingChange}
         onBloomSettingChange={onBloomSettingChange}
@@ -25881,11 +26503,12 @@ export default function App() {
               toneMapping={visualSettings.toneMapping}
             />
             <Suspense fallback={null}>
-              <Scene
-                activatedAltarIds={activatedAltarIds}
-                applyTurnActionForLevel={handleTurnActionForLevel}
-                altarCutscene={altarCutscene}
-                composerEnabled={composerEnabled}
+                  <Scene
+                    activatedAltarIds={activatedAltarIds}
+                    applyTurnActionForLevel={handleTurnActionForLevel}
+                    altarCutscene={altarCutscene}
+                    audioSettings={audioSettings}
+                    composerEnabled={composerEnabled}
                 commitGlobalTurnState={commitGlobalTurnState}
                 controlsOpen={controlsOpen}
                 cutsceneActive={activeAltarCutscene}

@@ -50,6 +50,10 @@ for (const { sourcePath, targetPath } of [
     targetPath: path.join(rootDir, 'music')
   },
   {
+    sourcePath: path.join(publicDir, 'sfx'),
+    targetPath: path.join(rootDir, 'sfx')
+  },
+  {
     sourcePath: path.join(publicDir, 'textures'),
     targetPath: path.join(rootDir, 'textures')
   }

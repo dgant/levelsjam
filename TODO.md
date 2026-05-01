@@ -660,3 +660,18 @@ Go implement this. We need robust central camera control with an architecture th
 [x] That top-right display with FPS and maze info? Only show that when the debug menu is open
 [x] Don't require music and sound to be downloaded for the intro screen to fade. In fact, don't even start start downloading music and sound until the intro screen fades. If a sound effect would play but it's not loaded, just don't play anything, that's fine. Start applying the music logic once all the music is loaded.
 [x] Double the length of the fade-in after you die
+[x] Disable monster eyes. Don't render them.
+[x] Play this sound under the same conditions as monster screen shake, with the same formula for volume attenuation, and with the same relative proportions as the monster screen shakes (1x volume for the biggest screen shake and whatever-x for the smallest). Pan it based o the monster's position relative to the player's perspective. Add an appropriate credit for it. https://freesound.org/people/Yoyamen1212/sounds/812538/
+[x] While animating the player walking, play this sound. Fade it out over .25s when the walking animation starts, or fade it back in if movement resumes while it's fading (similar to the music, the volume should lerp and never jump). If sound finishes while player is still walking, loop it. https://freesound.org/people/sqeeeek/sounds/326543/ Basically we want this sound looping for as long as the player is walking, and stopping playback once they stop walking. Add an appropriate credit for it.
+[x] Remove everything from this sound after the 2.845 second mark and play it when a spider kills you. https://freesound.org/people/Patrick_Corra/sounds/540050/ Add an appropriate credit
+[x] Play this sound when a spider dies. https://freesound.org/people/warrenXG/sounds/502211/ Add an appropriate credit
+[x] Play this sound when a werewolf or minotaur kills you. https://freesound.org/people/Ritorex24/sounds/578958/ Add an appropriate credit
+[x] Play this sound when a werewolf or minotaur dies. https://freesound.org/people/QuantumFellow/sounds/734841/ Add an appropriate credit
+[x] Each minotaur or werewolf, while within screen shake range should play this on loop, with the same attenuation factor as the screen shake. Pan it based on the monster's position relative to the player's perspective. Convert it to MP3. https://freesound.org/people/Karma-Ron/sounds/486596/ Add an appropriate credit
+[x] Same as the above but for spiders https://freesound.org/people/jymdavis/sounds/197329/
+[x] (For any of these sounds, convert any wavs over 1mb to mp3 and use tha tinstead)
+[x] Make sure these SFX are attenuated/muted by the SFX volume/mute settings. Ditto the music by the music volume/mute settings
+[x] Play this sound when a gate opens. Pitch it down two semitones and play that sound when a gate closes. Pan appropriately. Credit appropriately. https://freesound.org/people/redpanda69/sounds/686187/
+[x] Play this sound on loop continuously and attenuate based on cell distance of nearest torch or lit altar. Double the volume if it's a lit altar https://freesound.org/people/PhreaKsAccount/sounds/46273/
+[x] Add a debug tab for volume and a slider for each sound effect, slider ranging from 0 to 4 and defaulting to 1
+[] On mobile, disable lighting, fog, and ambient occlusion by default
