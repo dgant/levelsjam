@@ -1,0 +1,680 @@
+export default {
+  "gates": [],
+  "height": 8,
+  "id": "challenge-078",
+  "lights": [
+    {
+      "cell": {
+        "x": 2,
+        "y": 5
+      },
+      "side": "east"
+    },
+    {
+      "cell": {
+        "x": 1,
+        "y": 7
+      },
+      "side": "south"
+    },
+    {
+      "cell": {
+        "x": 0,
+        "y": 6
+      },
+      "side": "west"
+    },
+    {
+      "cell": {
+        "x": 2,
+        "y": 6
+      },
+      "side": "east"
+    },
+    {
+      "cell": {
+        "x": 1,
+        "y": 4
+      },
+      "side": "east"
+    },
+    {
+      "cell": {
+        "x": 0,
+        "y": 3
+      },
+      "side": "west"
+    },
+    {
+      "cell": {
+        "x": 2,
+        "y": 2
+      },
+      "side": "east"
+    },
+    {
+      "cell": {
+        "x": 0,
+        "y": 0
+      },
+      "side": "west"
+    },
+    {
+      "cell": {
+        "x": 1,
+        "y": 1
+      },
+      "side": "north"
+    }
+  ],
+  "opening": {
+    "cell": {
+      "x": 2,
+      "y": 0
+    },
+    "side": "north"
+  },
+  "openEdges": [
+    {
+      "from": {
+        "x": 0,
+        "y": 0
+      },
+      "to": {
+        "x": 1,
+        "y": 0
+      }
+    },
+    {
+      "from": {
+        "x": 0,
+        "y": 0
+      },
+      "to": {
+        "x": 0,
+        "y": 1
+      }
+    },
+    {
+      "from": {
+        "x": 1,
+        "y": 0
+      },
+      "to": {
+        "x": 2,
+        "y": 0
+      }
+    },
+    {
+      "from": {
+        "x": 2,
+        "y": 0
+      },
+      "to": {
+        "x": 2,
+        "y": 1
+      }
+    },
+    {
+      "from": {
+        "x": 0,
+        "y": 1
+      },
+      "to": {
+        "x": 0,
+        "y": 2
+      }
+    },
+    {
+      "from": {
+        "x": 1,
+        "y": 1
+      },
+      "to": {
+        "x": 2,
+        "y": 1
+      }
+    },
+    {
+      "from": {
+        "x": 1,
+        "y": 1
+      },
+      "to": {
+        "x": 1,
+        "y": 2
+      }
+    },
+    {
+      "from": {
+        "x": 0,
+        "y": 2
+      },
+      "to": {
+        "x": 0,
+        "y": 3
+      }
+    },
+    {
+      "from": {
+        "x": 1,
+        "y": 2
+      },
+      "to": {
+        "x": 2,
+        "y": 2
+      }
+    },
+    {
+      "from": {
+        "x": 2,
+        "y": 2
+      },
+      "to": {
+        "x": 2,
+        "y": 3
+      }
+    },
+    {
+      "from": {
+        "x": 0,
+        "y": 3
+      },
+      "to": {
+        "x": 1,
+        "y": 3
+      }
+    },
+    {
+      "from": {
+        "x": 1,
+        "y": 3
+      },
+      "to": {
+        "x": 1,
+        "y": 4
+      }
+    },
+    {
+      "from": {
+        "x": 2,
+        "y": 3
+      },
+      "to": {
+        "x": 2,
+        "y": 4
+      }
+    },
+    {
+      "from": {
+        "x": 0,
+        "y": 4
+      },
+      "to": {
+        "x": 1,
+        "y": 4
+      }
+    },
+    {
+      "from": {
+        "x": 0,
+        "y": 4
+      },
+      "to": {
+        "x": 0,
+        "y": 5
+      }
+    },
+    {
+      "from": {
+        "x": 2,
+        "y": 4
+      },
+      "to": {
+        "x": 2,
+        "y": 5
+      }
+    },
+    {
+      "from": {
+        "x": 0,
+        "y": 5
+      },
+      "to": {
+        "x": 0,
+        "y": 6
+      }
+    },
+    {
+      "from": {
+        "x": 1,
+        "y": 5
+      },
+      "to": {
+        "x": 2,
+        "y": 5
+      }
+    },
+    {
+      "from": {
+        "x": 1,
+        "y": 5
+      },
+      "to": {
+        "x": 1,
+        "y": 6
+      }
+    },
+    {
+      "from": {
+        "x": 0,
+        "y": 6
+      },
+      "to": {
+        "x": 0,
+        "y": 7
+      }
+    },
+    {
+      "from": {
+        "x": 1,
+        "y": 6
+      },
+      "to": {
+        "x": 2,
+        "y": 6
+      }
+    },
+    {
+      "from": {
+        "x": 2,
+        "y": 6
+      },
+      "to": {
+        "x": 2,
+        "y": 7
+      }
+    },
+    {
+      "from": {
+        "x": 0,
+        "y": 7
+      },
+      "to": {
+        "x": 1,
+        "y": 7
+      }
+    },
+    {
+      "from": {
+        "x": 1,
+        "y": 7
+      },
+      "to": {
+        "x": 2,
+        "y": 7
+      }
+    }
+  ],
+  "seed": 328206,
+  "width": 3,
+  "contentProfile": {
+    "gateCount": 0,
+    "monsterTypes": [
+      "minotaur",
+      "minotaur"
+    ],
+    "swordCount": 1
+  },
+  "generatedByChallengeTool": true,
+  "items": [],
+  "monsters": [
+    {
+      "cell": {
+        "x": 2,
+        "y": 7
+      },
+      "type": "minotaur"
+    },
+    {
+      "cell": {
+        "x": 0,
+        "y": 7
+      },
+      "type": "minotaur"
+    }
+  ],
+  "sword": {
+    "cell": {
+      "x": 2,
+      "y": 5
+    }
+  },
+  "trophy": {
+    "cell": {
+      "x": 1,
+      "y": 7
+    }
+  },
+  "visibility": {
+    "cells": {
+      "0,0": [
+        "0,0",
+        "0,1",
+        "0,2",
+        "0,3",
+        "1,0",
+        "1,3",
+        "1,4",
+        "2,0",
+        "2,1"
+      ],
+      "1,0": [
+        "0,0",
+        "0,1",
+        "0,2",
+        "0,3",
+        "1,0",
+        "2,0",
+        "2,1"
+      ],
+      "2,0": [
+        "0,0",
+        "0,1",
+        "1,0",
+        "1,1",
+        "1,2",
+        "2,0",
+        "2,1"
+      ],
+      "0,1": [
+        "0,0",
+        "0,1",
+        "0,2",
+        "0,3",
+        "1,0",
+        "1,3",
+        "1,4",
+        "2,0"
+      ],
+      "1,1": [
+        "1,1",
+        "1,2",
+        "2,0",
+        "2,1",
+        "2,2",
+        "2,3",
+        "2,4",
+        "2,5"
+      ],
+      "2,1": [
+        "0,0",
+        "1,0",
+        "1,1",
+        "1,2",
+        "2,0",
+        "2,1"
+      ],
+      "0,2": [
+        "0,0",
+        "0,1",
+        "0,2",
+        "0,3",
+        "1,0",
+        "1,3",
+        "1,4"
+      ],
+      "1,2": [
+        "1,1",
+        "1,2",
+        "2,0",
+        "2,1",
+        "2,2",
+        "2,3",
+        "2,4",
+        "2,5"
+      ],
+      "2,2": [
+        "1,1",
+        "1,2",
+        "1,5",
+        "1,6",
+        "2,2",
+        "2,3",
+        "2,4",
+        "2,5"
+      ],
+      "0,3": [
+        "0,0",
+        "0,1",
+        "0,2",
+        "0,3",
+        "1,0",
+        "1,3",
+        "1,4"
+      ],
+      "1,3": [
+        "0,0",
+        "0,1",
+        "0,2",
+        "0,3",
+        "0,4",
+        "0,5",
+        "0,6",
+        "0,7",
+        "1,3",
+        "1,4"
+      ],
+      "2,3": [
+        "1,1",
+        "1,2",
+        "1,5",
+        "1,6",
+        "2,2",
+        "2,3",
+        "2,4",
+        "2,5"
+      ],
+      "0,4": [
+        "0,4",
+        "0,5",
+        "0,6",
+        "0,7",
+        "1,3",
+        "1,4",
+        "1,7"
+      ],
+      "1,4": [
+        "0,0",
+        "0,1",
+        "0,2",
+        "0,3",
+        "0,4",
+        "0,5",
+        "0,6",
+        "0,7",
+        "1,3",
+        "1,4"
+      ],
+      "2,4": [
+        "1,1",
+        "1,2",
+        "1,5",
+        "1,6",
+        "2,2",
+        "2,3",
+        "2,4",
+        "2,5"
+      ],
+      "0,5": [
+        "0,4",
+        "0,5",
+        "0,6",
+        "0,7",
+        "1,3",
+        "1,4",
+        "1,7"
+      ],
+      "1,5": [
+        "1,5",
+        "1,6",
+        "2,2",
+        "2,3",
+        "2,4",
+        "2,5",
+        "2,6",
+        "2,7"
+      ],
+      "2,5": [
+        "1,1",
+        "1,2",
+        "1,5",
+        "1,6",
+        "2,2",
+        "2,3",
+        "2,4",
+        "2,5"
+      ],
+      "0,6": [
+        "0,4",
+        "0,5",
+        "0,6",
+        "0,7",
+        "1,3",
+        "1,4",
+        "1,7",
+        "2,7"
+      ],
+      "1,6": [
+        "1,5",
+        "1,6",
+        "2,2",
+        "2,3",
+        "2,4",
+        "2,5",
+        "2,6",
+        "2,7"
+      ],
+      "2,6": [
+        "0,7",
+        "1,5",
+        "1,6",
+        "1,7",
+        "2,6",
+        "2,7"
+      ],
+      "0,7": [
+        "0,4",
+        "0,5",
+        "0,6",
+        "0,7",
+        "1,3",
+        "1,4",
+        "1,7",
+        "2,6",
+        "2,7"
+      ],
+      "1,7": [
+        "0,4",
+        "0,5",
+        "0,6",
+        "0,7",
+        "1,7",
+        "2,6",
+        "2,7"
+      ],
+      "2,7": [
+        "0,6",
+        "0,7",
+        "1,5",
+        "1,6",
+        "1,7",
+        "2,6",
+        "2,7"
+      ]
+    },
+    "version": 1
+  },
+  "solution": {
+    "actions": [
+      "rotate-right",
+      "move-forward",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
+      "move-forward",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
+      "rotate-right",
+      "rotate-right",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
+      "move-forward",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
+      "move-forward",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
+      "rotate-right",
+      "rotate-right",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
+      "move-forward",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
+      "move-forward"
+    ],
+    "moveCount": 41,
+    "observedCellCount": 24,
+    "visibilityLimited": true
+  },
+  "name": "Challenge 78: 3x8, 2 minotaurs, 0 spiders, 0 wolves, 1 sword, 0 gates",
+  "description": "3x8, 2 minotaurs, 0 spiders, 0 wolves, 1 sword, 0 gates"
+}

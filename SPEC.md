@@ -819,13 +819,14 @@
 - The checked-in challenge maze library contains only mazes that have passed the current advanced validation rules.
 - The checked-in challenge maze library may be temporarily empty after invalidated challenge mazes are removed and before replacement generation accepts new validated mazes.
 - Newly generated challenge mazes use independently generated maze geometry; rotations, flips, and other geometric transforms of an existing challenge maze are not accepted as new challenge mazes.
-- The thirty-maze challenge set uses a broad parameter distribution across minotaurs, spiders, werewolves, swords, and gates: each element appears in at least ten mazes, each element appears at least twice in at least five mazes, and each element appears at least three times in at least one maze.
-- Challenge maze generation covers rectangular dimensions from `3` through `8`, including narrow `3x5`, `3x6`, `3x7`, and `3x8` candidates when validation can produce playable puzzles for them.
+- The challenge set uses a broad parameter distribution across minotaurs, spiders, werewolves, swords, and gates: each element appears in at least ten mazes, each element appears at least twice in at least five mazes, and each element appears at least three times in at least one maze.
+- Challenge maze generation covers rectangular dimensions from `3` through `9`, including narrow `3x5`, `3x6`, `3x7`, and `3x8` candidates and square `9x9` candidates when validation can produce playable puzzles for them.
 - Challenge maze names and descriptions state the maze dimensions and the counts of minotaurs, spiders, werewolves, swords, and gates.
-- Challenge maze generation publishes the currently accepted validated maze subset to the runtime playtest manifest whenever a new maze is accepted, so browser playtesting can begin before the full thirty-maze batch finishes.
+- Challenge maze generation publishes the currently accepted validated maze subset to the runtime playtest manifest whenever a new maze is accepted, so browser playtesting can begin before the full batch finishes.
+- Challenge maze library expansion targets at least one hundred playable challenge mazes, and the published challenge list is ordered by ascending recorded solution move count.
 - Challenge mazes are selectable from the level menu without appearing in the default progression path.
 - The challenge maze menu and published runtime manifest expose every checked-in validated challenge maze and no unvalidated challenge maze.
-- The complete challenge maze set covers rectangular sizes from `3x3` through `8x8`, with narrow rectangular candidates such as `3x5`, `3x6`, `3x7`, and `3x8` used when validation can produce playable puzzles for them.
+- The complete challenge maze set covers rectangular sizes from `3x3` through `9x9`, with narrow rectangular candidates such as `3x5`, `3x6`, `3x7`, and `3x8` used when validation can produce playable puzzles for them.
 - Challenge maze names plainly describe their defining puzzle emphasis, such as spider-heavy, minotaur-heavy, gate-and-sword, or mixed-threat layouts.
 - Challenge mazes pass the same structural and solution validation rules as normal persisted mazes before they are exposed in the menu.
 - Persisted normal mazes and challenge mazes pass advanced difficulty validation before they are accepted by tests or publishing scripts.

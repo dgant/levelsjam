@@ -56,9 +56,12 @@ const challengePlanSizes = [
   { height: 6, width: 6 },
   { height: 7, width: 6 },
   { height: 6, width: 7 },
-  { height: 8, width: 8 }
+  { height: 8, width: 8 },
+  { height: 9, width: 9 },
+  { height: 7, width: 9 },
+  { height: 9, width: 7 }
 ]
-const challengeContentPlans = [
+const seedChallengeContentPlans = [
   { gateCount: 0, minotaur: 1, spider: 0, swordCount: 0, werewolf: 0 },
   { gateCount: 0, minotaur: 0, spider: 0, swordCount: 0, werewolf: 1 },
   { gateCount: 0, minotaur: 0, spider: 1, swordCount: 0, werewolf: 0 },
@@ -95,6 +98,71 @@ const challengeContentPlans = [
   { gateCount: 2, minotaur: 1, spider: 1, swordCount: 1, werewolf: 1 },
   { gateCount: 1, minotaur: 2, spider: 1, swordCount: 1, werewolf: 0 },
   { gateCount: 1, minotaur: 0, spider: 1, swordCount: 1, werewolf: 2 }
+]
+const requiredChallengeContentPlans = [
+  { gateCount: 2, minotaur: 1, spider: 1, swordCount: 0, werewolf: 1 },
+  { gateCount: 3, minotaur: 1, spider: 1, swordCount: 0, werewolf: 1 },
+  { gateCount: 0, minotaur: 2, spider: 1, swordCount: 2, werewolf: 1 },
+  { gateCount: 0, minotaur: 2, spider: 1, swordCount: 3, werewolf: 2 },
+  { gateCount: 0, minotaur: 0, spider: 4, swordCount: 0, werewolf: 0 },
+  { gateCount: 0, minotaur: 4, spider: 0, swordCount: 1, werewolf: 0 },
+  { gateCount: 0, minotaur: 5, spider: 0, swordCount: 1, werewolf: 0 },
+  { gateCount: 1, minotaur: 0, spider: 4, swordCount: 1, werewolf: 0 },
+  { gateCount: 1, minotaur: 4, spider: 1, swordCount: 1, werewolf: 0 },
+  { gateCount: 2, minotaur: 2, spider: 1, swordCount: 1, werewolf: 1 },
+  { gateCount: 3, minotaur: 2, spider: 1, swordCount: 1, werewolf: 1 }
+]
+
+function getContentPlanKey(plan) {
+  return [
+    plan.minotaur,
+    plan.spider,
+    plan.werewolf,
+    plan.swordCount,
+    plan.gateCount
+  ].join(':')
+}
+
+function createExpandedChallengeContentPlans() {
+  const plans = []
+
+  for (let minotaur = 0; minotaur <= 5; minotaur += 1) {
+    for (let spider = 0; spider <= 5; spider += 1) {
+      for (let werewolf = 0; werewolf <= 5; werewolf += 1) {
+        const monsterCount = minotaur + spider + werewolf
+
+        if (monsterCount < 1 || monsterCount > 6) {
+          continue
+        }
+
+        for (let swordCount = 0; swordCount <= 3; swordCount += 1) {
+          for (let gateCount = 0; gateCount <= 3; gateCount += 1) {
+            plans.push({ gateCount, minotaur, spider, swordCount, werewolf })
+          }
+        }
+      }
+    }
+  }
+
+  return plans
+}
+
+const challengeContentPlans = [
+  ...seedChallengeContentPlans,
+  ...requiredChallengeContentPlans,
+  ...createExpandedChallengeContentPlans()
+].filter((plan, index, plans) => (
+  plans.findIndex((candidate) => getContentPlanKey(candidate) === getContentPlanKey(plan)) === index
+))
+const priorityMissingBucketPlans = [
+  { gateCount: 3, height: 5, minotaur: 2, spider: 1, swordCount: 1, werewolf: 1, width: 5 },
+  { gateCount: 0, height: 6, minotaur: 3, spider: 1, swordCount: 3, werewolf: 1, width: 5 },
+  { gateCount: 1, height: 9, minotaur: 1, spider: 2, swordCount: 1, werewolf: 2, width: 9 },
+  { gateCount: 1, height: 9, minotaur: 2, spider: 2, swordCount: 2, werewolf: 1, width: 9 },
+  { gateCount: 0, height: 9, minotaur: 1, spider: 3, swordCount: 3, werewolf: 1, width: 9 },
+  { gateCount: 3, height: 6, minotaur: 1, spider: 2, swordCount: 0, werewolf: 1, width: 5 },
+  { gateCount: 3, height: 6, minotaur: 0, spider: 3, swordCount: 2, werewolf: 2, width: 6 },
+  { gateCount: 0, height: 9, minotaur: 2, spider: 2, swordCount: 3, werewolf: 2, width: 9 }
 ]
 const challengePlans = challengeContentPlans.map((plan, index) => ({
   ...challengePlanSizes[index % challengePlanSizes.length],
@@ -1614,6 +1682,77 @@ async function importMazeModule(filePath) {
   return imported.default
 }
 
+function getSolutionMoveCount(maze) {
+  if (Number.isFinite(maze.solution?.moveCount)) {
+    return maze.solution.moveCount
+  }
+
+  return (maze.solution?.actions ?? [])
+    .filter((action) => action === 'move-forward' || action === 'move-backward')
+    .length
+}
+
+async function renumberChallengeMazesBySolutionLength(generated) {
+  const metadataByFileName = new Map(generated.map((entry) => [entry.fileName, entry]))
+  const challengeFiles = fs.readdirSync(outputDirectory)
+    .filter((fileName) => /^challenge-\d{3}\.js$/.test(fileName))
+    .sort()
+  const entries = []
+
+  for (const fileName of challengeFiles) {
+    const maze = await importMazeModule(path.join(outputDirectory, fileName))
+
+    entries.push({
+      fileName,
+      maze,
+      metadata: metadataByFileName.get(fileName) ?? null,
+      moveCount: getSolutionMoveCount(maze)
+    })
+  }
+
+  entries.sort((left, right) => (
+    left.moveCount - right.moveCount ||
+    ((left.maze.solution?.actions?.length ?? 0) - (right.maze.solution?.actions?.length ?? 0)) ||
+    ((left.maze.width * left.maze.height) - (right.maze.width * right.maze.height)) ||
+    String(left.maze.seed ?? '').localeCompare(String(right.maze.seed ?? '')) ||
+    left.fileName.localeCompare(right.fileName)
+  ))
+
+  for (const fileName of challengeFiles) {
+    fs.rmSync(path.join(outputDirectory, fileName), { force: true })
+  }
+
+  const orderedGenerated = []
+
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index]
+    const fileName = `challenge-${String(index + 1).padStart(3, '0')}.js`
+    const id = path.basename(fileName, '.js')
+    const plan = getPlanFromMaze(entry.maze)
+
+    entry.maze.id = id
+    entry.maze.name = getPlanName(index, plan)
+    entry.maze.description = getPlanDescription(plan)
+    updateMazeContentProfile(entry.maze)
+    fs.writeFileSync(
+      path.join(outputDirectory, fileName),
+      serializeMazeModule(entry.maze)
+    )
+    orderedGenerated.push({
+      ...(entry.metadata ?? {}),
+      fileName,
+      metrics: entry.metadata?.metrics ?? null,
+      moveCount: entry.moveCount,
+      name: entry.maze.name,
+      profile: entry.maze.contentProfile,
+      seed: entry.maze.seed,
+      size: `${entry.maze.width}x${entry.maze.height}`
+    })
+  }
+
+  return orderedGenerated
+}
+
 function getMonsterDifficulty(monsterTypes, weights = currentDifficultyWeights) {
   return monsterTypes.reduce((sum, type) => sum + (weights[type] ?? 1), 0)
 }
@@ -1654,14 +1793,14 @@ function getParameterPlanWithScore(plan, weights = currentDifficultyWeights) {
 function createSmartParameterPool(weights = currentDifficultyWeights) {
   const pool = []
 
-  for (let width = 3; width <= 8; width += 1) {
-    for (let height = 3; height <= 8; height += 1) {
-      for (let minotaur = 0; minotaur <= 4; minotaur += 1) {
-        for (let werewolf = 0; werewolf <= 4; werewolf += 1) {
-          for (let spider = 0; spider <= 4; spider += 1) {
+  for (let width = 3; width <= 9; width += 1) {
+    for (let height = 3; height <= 9; height += 1) {
+      for (let minotaur = 0; minotaur <= 5; minotaur += 1) {
+        for (let werewolf = 0; werewolf <= 5; werewolf += 1) {
+          for (let spider = 0; spider <= 5; spider += 1) {
             const monsterCount = minotaur + werewolf + spider
 
-            if (monsterCount < 1 || monsterCount > 4) {
+            if (monsterCount < 1 || monsterCount > 6) {
               continue
             }
 
@@ -1700,6 +1839,17 @@ function setDifficultyWeights(weights = initialDifficultyWeights) {
 }
 
 function chooseParameterSet(index, attempt) {
+  if (
+    process.env.LEVELSJAM_CHALLENGE_PRIORITY_MISSING === '1' &&
+    index >= 100 &&
+    priorityMissingBucketPlans.length > 0 &&
+    attempt % 5 !== 4
+  ) {
+    return getParameterPlanWithScore(
+      priorityMissingBucketPlans[(index + Math.floor(attempt / 5)) % priorityMissingBucketPlans.length]
+    )
+  }
+
   if (challengePlans.length > 0 && attempt % 5 !== 4) {
     return getParameterPlanWithScore(
       challengePlans[(index + Math.floor(attempt / 5)) % challengePlans.length]
@@ -2731,6 +2881,11 @@ async function main() {
     )
   }
 
+  const orderedGenerated = await renumberChallengeMazesBySolutionLength(generated)
+
+  generated.length = 0
+  generated.push(...orderedGenerated)
+
   const files = generated.map((entry) => entry.fileName)
   const imports = files.map((fileName, index) => `import maze${index} from './${fileName}'`).join('\n')
   const exportList = files.map((_, index) => `maze${index}`).join(', ')
@@ -2740,6 +2895,7 @@ async function main() {
     `${imports}\n\nexport const CHALLENGE_MAZES = [${exportList}]\n`
   )
 
+  publishChallengePlaytestArtifacts()
   const report = writeReport('completed')
   console.log(`wrote ${path.relative(rootDir, reportPath)}`)
   for (const entry of report.failureFrequency.slice(0, 20)) {

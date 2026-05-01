@@ -1,14 +1,54 @@
 export default {
-  "gates": [],
-  "height": 4,
+  "gates": [
+    {
+      "from": {
+        "x": 1,
+        "y": 1
+      },
+      "id": "1,1|1,2",
+      "to": {
+        "x": 1,
+        "y": 2
+      }
+    }
+  ],
+  "height": 6,
   "id": "challenge-026",
   "lights": [
     {
       "cell": {
-        "x": 3,
-        "y": 2
+        "x": 1,
+        "y": 4
+      },
+      "side": "east"
+    },
+    {
+      "cell": {
+        "x": 1,
+        "y": 3
+      },
+      "side": "north"
+    },
+    {
+      "cell": {
+        "x": 0,
+        "y": 5
       },
       "side": "south"
+    },
+    {
+      "cell": {
+        "x": 2,
+        "y": 4
+      },
+      "side": "west"
+    },
+    {
+      "cell": {
+        "x": 1,
+        "y": 2
+      },
+      "side": "west"
     },
     {
       "cell": {
@@ -22,57 +62,22 @@ export default {
         "x": 1,
         "y": 0
       },
-      "side": "east"
-    },
-    {
-      "cell": {
-        "x": 1,
-        "y": 3
-      },
       "side": "north"
     },
     {
       "cell": {
         "x": 2,
-        "y": 2
-      },
-      "side": "south"
-    },
-    {
-      "cell": {
-        "x": 4,
-        "y": 3
-      },
-      "side": "north"
-    },
-    {
-      "cell": {
-        "x": 3,
-        "y": 0
-      },
-      "side": "south"
-    },
-    {
-      "cell": {
-        "x": 4,
         "y": 1
       },
       "side": "south"
-    },
-    {
-      "cell": {
-        "x": 5,
-        "y": 1
-      },
-      "side": "west"
     }
   ],
   "opening": {
     "cell": {
-      "x": 5,
-      "y": 0
+      "x": 2,
+      "y": 1
     },
-    "side": "north"
+    "side": "east"
   },
   "openEdges": [
     {
@@ -101,17 +106,7 @@ export default {
         "y": 0
       },
       "to": {
-        "x": 1,
-        "y": 1
-      }
-    },
-    {
-      "from": {
         "x": 2,
-        "y": 0
-      },
-      "to": {
-        "x": 3,
         "y": 0
       }
     },
@@ -122,46 +117,6 @@ export default {
       },
       "to": {
         "x": 2,
-        "y": 1
-      }
-    },
-    {
-      "from": {
-        "x": 3,
-        "y": 0
-      },
-      "to": {
-        "x": 4,
-        "y": 0
-      }
-    },
-    {
-      "from": {
-        "x": 4,
-        "y": 0
-      },
-      "to": {
-        "x": 5,
-        "y": 0
-      }
-    },
-    {
-      "from": {
-        "x": 4,
-        "y": 0
-      },
-      "to": {
-        "x": 4,
-        "y": 1
-      }
-    },
-    {
-      "from": {
-        "x": 5,
-        "y": 0
-      },
-      "to": {
-        "x": 5,
         "y": 1
       }
     },
@@ -181,47 +136,17 @@ export default {
         "y": 1
       },
       "to": {
+        "x": 2,
+        "y": 1
+      }
+    },
+    {
+      "from": {
         "x": 1,
-        "y": 2
-      }
-    },
-    {
-      "from": {
-        "x": 2,
         "y": 1
       },
       "to": {
-        "x": 2,
-        "y": 2
-      }
-    },
-    {
-      "from": {
-        "x": 3,
-        "y": 1
-      },
-      "to": {
-        "x": 4,
-        "y": 1
-      }
-    },
-    {
-      "from": {
-        "x": 3,
-        "y": 1
-      },
-      "to": {
-        "x": 3,
-        "y": 2
-      }
-    },
-    {
-      "from": {
-        "x": 5,
-        "y": 1
-      },
-      "to": {
-        "x": 5,
+        "x": 1,
         "y": 2
       }
     },
@@ -247,31 +172,11 @@ export default {
     },
     {
       "from": {
-        "x": 3,
+        "x": 2,
         "y": 2
       },
       "to": {
-        "x": 4,
-        "y": 2
-      }
-    },
-    {
-      "from": {
-        "x": 4,
-        "y": 2
-      },
-      "to": {
-        "x": 5,
-        "y": 2
-      }
-    },
-    {
-      "from": {
-        "x": 5,
-        "y": 2
-      },
-      "to": {
-        "x": 5,
+        "x": 2,
         "y": 3
       }
     },
@@ -281,8 +186,8 @@ export default {
         "y": 3
       },
       "to": {
-        "x": 1,
-        "y": 3
+        "x": 0,
+        "y": 4
       }
     },
     {
@@ -297,82 +202,144 @@ export default {
     },
     {
       "from": {
+        "x": 1,
+        "y": 3
+      },
+      "to": {
+        "x": 1,
+        "y": 4
+      }
+    },
+    {
+      "from": {
         "x": 2,
         "y": 3
       },
       "to": {
-        "x": 3,
-        "y": 3
+        "x": 2,
+        "y": 4
       }
     },
     {
       "from": {
-        "x": 3,
-        "y": 3
+        "x": 0,
+        "y": 4
       },
       "to": {
-        "x": 4,
-        "y": 3
+        "x": 0,
+        "y": 5
       }
     },
     {
       "from": {
-        "x": 4,
-        "y": 3
+        "x": 1,
+        "y": 4
       },
       "to": {
-        "x": 5,
-        "y": 3
+        "x": 1,
+        "y": 5
+      }
+    },
+    {
+      "from": {
+        "x": 2,
+        "y": 4
+      },
+      "to": {
+        "x": 2,
+        "y": 5
+      }
+    },
+    {
+      "from": {
+        "x": 0,
+        "y": 5
+      },
+      "to": {
+        "x": 1,
+        "y": 5
+      }
+    },
+    {
+      "from": {
+        "x": 1,
+        "y": 5
+      },
+      "to": {
+        "x": 2,
+        "y": 5
       }
     }
   ],
-  "seed": 337979,
-  "width": 6,
+  "seed": 485137,
+  "width": 3,
   "contentProfile": {
-    "gateCount": 0,
+    "gateCount": 1,
     "monsterTypes": [
       "minotaur",
-      "minotaur",
+      "spider",
+      "spider",
       "werewolf"
     ],
-    "swordCount": 1
+    "swordCount": 2
   },
   "generatedByChallengeTool": true,
-  "items": [],
-  "monsters": [
+  "items": [
     {
       "cell": {
-        "x": 0,
-        "y": 0
+        "x": 1,
+        "y": 4
       },
-      "type": "minotaur"
-    },
-    {
-      "cell": {
-        "x": 0,
-        "y": 2
-      },
-      "type": "minotaur"
+      "id": "extra-sword-1",
+      "type": "sword"
     },
     {
       "cell": {
         "x": 1,
-        "y": 0
+        "y": 3
+      },
+      "id": "extra-sword-2",
+      "type": "sword"
+    }
+  ],
+  "monsters": [
+    {
+      "cell": {
+        "x": 1,
+        "y": 5
+      },
+      "type": "minotaur"
+    },
+    {
+      "cell": {
+        "x": 2,
+        "y": 4
+      },
+      "hand": "left",
+      "type": "spider"
+    },
+    {
+      "cell": {
+        "x": 1,
+        "y": 2
+      },
+      "hand": "right",
+      "type": "spider"
+    },
+    {
+      "cell": {
+        "x": 0,
+        "y": 1
       },
       "type": "werewolf",
       "direction": "east"
     }
   ],
-  "sword": {
-    "cell": {
-      "x": 3,
-      "y": 2
-    }
-  },
+  "sword": null,
   "trophy": {
     "cell": {
       "x": 0,
-      "y": 1
+      "y": 5
     }
   },
   "visibility": {
@@ -382,303 +349,208 @@ export default {
         "0,1",
         "0,2",
         "0,3",
+        "0,4",
+        "0,5",
         "1,0",
-        "1,1",
-        "1,2",
-        "1,3",
-        "2,2"
+        "1,5",
+        "2,0",
+        "2,1"
       ],
       "1,0": [
         "0,0",
         "0,1",
         "0,2",
         "0,3",
+        "0,4",
+        "0,5",
+        "1,0",
+        "2,0",
+        "2,1"
+      ],
+      "2,0": [
+        "0,0",
+        "0,1",
         "1,0",
         "1,1",
         "1,2",
-        "2,2"
-      ],
-      "2,0": [
-        "1,2",
         "2,0",
-        "2,1",
-        "2,2",
-        "3,0",
-        "4,0",
-        "4,1",
-        "5,0",
-        "5,1"
-      ],
-      "3,0": [
-        "1,2",
-        "2,0",
-        "2,1",
-        "2,2",
-        "3,0",
-        "4,0",
-        "4,1",
-        "5,0",
-        "5,1"
-      ],
-      "4,0": [
-        "2,0",
-        "2,1",
-        "3,0",
-        "3,1",
-        "3,2",
-        "4,0",
-        "4,1",
-        "5,0",
-        "5,1",
-        "5,2",
-        "5,3"
-      ],
-      "5,0": [
-        "2,0",
-        "2,1",
-        "3,0",
-        "3,1",
-        "3,2",
-        "4,0",
-        "4,1",
-        "4,2",
-        "4,3",
-        "5,0",
-        "5,1",
-        "5,2",
-        "5,3"
+        "2,1"
       ],
       "0,1": [
         "0,0",
         "0,1",
         "0,2",
         "0,3",
+        "0,4",
+        "0,5",
         "1,0",
-        "1,3"
+        "1,5",
+        "2,0"
       ],
       "1,1": [
-        "0,0",
-        "1,0",
         "1,1",
-        "1,2",
-        "2,2"
-      ],
-      "2,1": [
         "1,2",
         "2,0",
         "2,1",
         "2,2",
-        "3,0",
-        "4,0",
-        "5,0"
+        "2,3",
+        "2,4",
+        "2,5"
       ],
-      "3,1": [
-        "3,1",
-        "3,2",
-        "4,0",
-        "4,1",
-        "4,2",
-        "5,0",
-        "5,2",
-        "5,3"
-      ],
-      "4,1": [
+      "2,1": [
+        "0,0",
+        "1,0",
+        "1,1",
+        "1,2",
         "2,0",
-        "3,0",
-        "3,1",
-        "3,2",
-        "4,0",
-        "4,1",
-        "5,0"
-      ],
-      "5,1": [
-        "2,0",
-        "3,0",
-        "3,2",
-        "4,0",
-        "4,2",
-        "4,3",
-        "5,0",
-        "5,1",
-        "5,2",
-        "5,3"
+        "2,1"
       ],
       "0,2": [
         "0,0",
         "0,1",
         "0,2",
         "0,3",
+        "0,4",
+        "0,5",
         "1,0",
-        "1,3",
-        "2,3",
-        "3,3",
-        "4,3",
-        "5,3"
+        "1,5"
       ],
       "1,2": [
-        "0,0",
-        "1,0",
         "1,1",
         "1,2",
         "2,0",
         "2,1",
         "2,2",
-        "3,0"
+        "2,3",
+        "2,4",
+        "2,5"
       ],
       "2,2": [
-        "0,0",
-        "1,0",
+        "0,5",
         "1,1",
         "1,2",
-        "2,0",
-        "2,1",
-        "2,2",
-        "3,0"
-      ],
-      "3,2": [
-        "3,1",
-        "3,2",
-        "4,0",
-        "4,1",
-        "4,2",
-        "5,0",
-        "5,1",
-        "5,2",
-        "5,3"
-      ],
-      "4,2": [
-        "3,1",
-        "3,2",
-        "4,2",
-        "5,0",
-        "5,1",
-        "5,2",
-        "5,3"
-      ],
-      "5,2": [
-        "0,3",
         "1,3",
+        "1,4",
+        "1,5",
+        "2,2",
         "2,3",
-        "3,1",
-        "3,2",
-        "3,3",
-        "4,0",
-        "4,2",
-        "4,3",
-        "5,0",
-        "5,1",
-        "5,2",
-        "5,3"
+        "2,4",
+        "2,5"
       ],
       "0,3": [
         "0,0",
         "0,1",
         "0,2",
         "0,3",
+        "0,4",
+        "0,5",
         "1,0",
-        "1,3",
-        "2,3",
-        "3,3",
-        "4,3",
-        "5,2",
-        "5,3"
+        "1,5"
       ],
       "1,3": [
+        "0,5",
+        "1,3",
+        "1,4",
+        "1,5",
+        "2,2",
+        "2,3",
+        "2,4",
+        "2,5"
+      ],
+      "2,3": [
+        "0,5",
+        "1,1",
+        "1,2",
+        "1,3",
+        "1,4",
+        "1,5",
+        "2,2",
+        "2,3",
+        "2,4",
+        "2,5"
+      ],
+      "0,4": [
         "0,0",
         "0,1",
         "0,2",
         "0,3",
-        "1,3",
-        "2,3",
-        "3,3",
-        "4,3",
-        "5,2",
-        "5,3"
+        "0,4",
+        "0,5",
+        "1,0",
+        "1,5",
+        "2,5"
       ],
-      "2,3": [
+      "1,4": [
+        "0,5",
+        "1,3",
+        "1,4",
+        "1,5",
+        "2,2",
+        "2,3",
+        "2,5"
+      ],
+      "2,4": [
+        "0,5",
+        "1,1",
+        "1,2",
+        "1,3",
+        "1,5",
+        "2,2",
+        "2,3",
+        "2,4",
+        "2,5"
+      ],
+      "0,5": [
+        "0,0",
+        "0,1",
         "0,2",
         "0,3",
+        "0,4",
+        "0,5",
+        "1,0",
         "1,3",
+        "1,4",
+        "1,5",
+        "2,2",
         "2,3",
-        "3,3",
-        "4,3",
-        "5,2",
-        "5,3"
+        "2,4",
+        "2,5"
       ],
-      "3,3": [
+      "1,5": [
+        "0,0",
+        "0,1",
         "0,2",
         "0,3",
+        "0,4",
+        "0,5",
         "1,3",
+        "1,4",
+        "1,5",
+        "2,2",
         "2,3",
-        "3,3",
-        "4,3",
-        "5,2",
-        "5,3"
+        "2,4",
+        "2,5"
       ],
-      "4,3": [
-        "0,2",
-        "0,3",
+      "2,5": [
+        "0,4",
+        "0,5",
+        "1,1",
+        "1,2",
         "1,3",
+        "1,4",
+        "1,5",
+        "2,2",
         "2,3",
-        "3,3",
-        "4,3",
-        "5,0",
-        "5,1",
-        "5,2",
-        "5,3"
-      ],
-      "5,3": [
-        "0,2",
-        "0,3",
-        "1,3",
-        "2,3",
-        "3,1",
-        "3,2",
-        "3,3",
-        "4,0",
-        "4,2",
-        "4,3",
-        "5,0",
-        "5,1",
-        "5,2",
-        "5,3"
+        "2,4",
+        "2,5"
       ]
     },
     "version": 1
   },
   "solution": {
     "actions": [
-      "rotate-right",
-      "move-forward",
-      "move-forward",
-      "move-forward",
-      "rotate-left",
       "move-forward",
       "rotate-right",
-      "rotate-right",
-      "move-forward",
-      "rotate-right",
-      "move-forward",
-      "move-forward",
-      "rotate-right",
-      "move-forward",
-      "rotate-right",
-      "move-forward",
-      "rotate-left",
-      "move-forward",
-      "rotate-right",
-      "rotate-right",
-      "move-forward",
-      "rotate-right",
-      "move-forward",
-      "rotate-left",
-      "move-forward",
-      "rotate-left",
-      "move-forward",
-      "move-forward",
-      "rotate-left",
-      "move-forward",
-      "move-forward",
       "rotate-right",
       "move-forward",
       "rotate-right",
@@ -686,26 +558,39 @@ export default {
       "move-forward",
       "rotate-left",
       "move-forward",
-      "move-forward",
-      "rotate-right",
-      "move-forward",
-      "move-forward",
-      "move-forward",
-      "rotate-right",
-      "move-forward",
-      "move-forward",
-      "move-forward",
-      "rotate-right",
-      "move-forward",
-      "move-forward",
-      "move-forward",
-      "move-forward",
+      "rotate-left",
       "move-forward",
       "rotate-right",
       "rotate-right",
       "move-forward",
+      "rotate-right",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
+      "rotate-right",
+      "rotate-right",
+      "move-forward",
+      "rotate-right",
+      "rotate-right",
+      "move-forward",
+      "rotate-right",
+      "rotate-right",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
+      "rotate-left",
       "move-forward",
       "move-forward",
+      "rotate-right",
+      "move-forward",
+      "rotate-right",
+      "rotate-right",
       "move-forward",
       "move-forward",
       "rotate-left",
@@ -714,38 +599,16 @@ export default {
       "move-forward",
       "rotate-left",
       "move-forward",
-      "move-forward",
-      "move-forward",
-      "rotate-left",
-      "move-forward",
-      "move-forward",
       "rotate-right",
       "move-forward",
       "rotate-right",
-      "move-forward",
-      "move-forward",
-      "rotate-left",
-      "move-forward",
-      "rotate-left",
-      "move-forward",
-      "move-forward",
-      "move-forward",
-      "rotate-left",
-      "move-forward",
-      "move-forward",
-      "move-forward",
-      "move-forward",
-      "move-forward",
-      "rotate-left",
-      "move-forward",
-      "move-forward",
       "move-forward",
       "move-forward"
     ],
-    "moveCount": 61,
-    "observedCellCount": 24,
+    "moveCount": 27,
+    "observedCellCount": 18,
     "visibilityLimited": true
   },
-  "name": "Challenge 26: 6x4, 2 minotaurs, 0 spiders, 1 wolf, 1 sword, 0 gates",
-  "description": "6x4, 2 minotaurs, 0 spiders, 1 wolf, 1 sword, 0 gates"
+  "name": "Challenge 26: 3x6, 1 minotaur, 2 spiders, 1 wolf, 2 swords, 1 gate",
+  "description": "3x6, 1 minotaur, 2 spiders, 1 wolf, 2 swords, 1 gate"
 }
