@@ -236,8 +236,7 @@ const RUNTIME_MODEL_URLS = [
 const STARTUP_CRITICAL_RUNTIME_MODEL_URLS = [
   GATE_MODEL_URL,
   SWORD_MODEL_URL,
-  TROPHY_MODEL_URL,
-  DROOP_CUP_MODEL_URL
+  TROPHY_MODEL_URL
 ] as const
 const startupCriticalRuntimeModelPreloadPromise = Promise.all(
   STARTUP_CRITICAL_RUNTIME_MODEL_URLS.map((url) => loadCachedGltfRoot(url))
@@ -252,6 +251,14 @@ function preloadBackgroundRuntimeModels() {
   }
 
   return backgroundRuntimeModelPreloadPromise
+}
+
+function preloadBackgroundRuntimeModelsAfterIntro() {
+  return new Promise<unknown[]>((resolve, reject) => {
+    onIntroFadeTriggered(() => {
+      preloadBackgroundRuntimeModels().then(resolve, reject)
+    })
+  })
 }
 
 void startupCriticalRuntimeModelPreloadPromise.catch(() => {
@@ -864,6 +871,62 @@ function recordStartupMarker(name: string) {
     0,
     performance.now() - STARTUP_MARKER_ORIGIN
   ).toFixed(1)
+}
+
+function hasIntroFadeTriggered() {
+  const triggeredAt = document.body.dataset.introFadeTriggeredAt
+
+  return Boolean(triggeredAt && triggeredAt !== 'pending')
+}
+
+function recordIntroFadeTriggered() {
+  const alreadyTriggered = hasIntroFadeTriggered()
+
+  recordStartupMarker('introFadeTriggeredAt')
+  if (!alreadyTriggered && hasIntroFadeTriggered()) {
+    window.dispatchEvent(new Event('levelsjam:intro-fade-triggered'))
+  }
+}
+
+function onIntroFadeTriggered(callback: () => void) {
+  if (hasIntroFadeTriggered()) {
+    callback()
+    return () => {}
+  }
+
+  let called = false
+  let pollHandle = 0
+
+  const runIfTriggered = () => {
+    if (called || !hasIntroFadeTriggered()) {
+      return
+    }
+
+    called = true
+    window.clearTimeout(pollHandle)
+    window.removeEventListener('levelsjam:intro-fade-triggered', listener)
+    callback()
+  }
+
+  const listener = () => {
+    runIfTriggered()
+  }
+
+  const poll = () => {
+    runIfTriggered()
+    if (!called) {
+      pollHandle = window.setTimeout(poll, 250)
+    }
+  }
+
+  window.addEventListener('levelsjam:intro-fade-triggered', listener, { once: true })
+  pollHandle = window.setTimeout(poll, 250)
+
+  return () => {
+    called = true
+    window.clearTimeout(pollHandle)
+    window.removeEventListener('levelsjam:intro-fade-triggered', listener)
+  }
 }
 
 function toClampedHalfFloat(value: number) {
@@ -6582,8 +6645,6 @@ function useFireFlipbookTexture() {
 
   useEffect(() => {
     let cancelled = false
-    let overlayPollHandle = 0
-    let loadDelayHandle = 0
 
     const configureTexture = (nextTexture: Texture) => {
       if (cancelled) {
@@ -6608,27 +6669,10 @@ function useFireFlipbookTexture() {
         })
     }
 
-    const scheduleAfterOverlay = () => {
-      if (cancelled) {
-        return
-      }
-
-      const overlayCompleteAt = document.body.dataset.loadingOverlayCompleteAt
-
-      if (overlayCompleteAt && overlayCompleteAt !== 'pending') {
-        loadDelayHandle = window.setTimeout(startLoading, 0)
-        return
-      }
-
-      overlayPollHandle = window.setTimeout(scheduleAfterOverlay, 250)
-    }
-
-    scheduleAfterOverlay()
+    startLoading()
 
     return () => {
       cancelled = true
-      window.clearTimeout(overlayPollHandle)
-      window.clearTimeout(loadDelayHandle)
       if (!sharedFireFlipbookTexture) {
         delete document.body.dataset.fireFlipbookReady
       }
@@ -6647,7 +6691,6 @@ function useFrescoDecalTextures() {
 
   useEffect(() => {
     let cancelled = false
-    let overlayPollHandle = 0
     let loadDelayHandle = 0
 
     const publishCachedTextures = () => {
@@ -6675,27 +6718,20 @@ function useFrescoDecalTextures() {
       })
     }
 
-    const scheduleAfterOverlay = () => {
+    const scheduleAfterIntro = () => {
       if (cancelled) {
         return
       }
 
-      const overlayCompleteAt = document.body.dataset.loadingOverlayCompleteAt
-
-      if (overlayCompleteAt && overlayCompleteAt !== 'pending') {
-        loadDelayHandle = window.setTimeout(startLoading, 1000)
-        return
-      }
-
-      overlayPollHandle = window.setTimeout(scheduleAfterOverlay, 250)
+      loadDelayHandle = window.setTimeout(startLoading, 1000)
     }
 
-    scheduleAfterOverlay()
+    const removeIntroListener = onIntroFadeTriggered(scheduleAfterIntro)
 
     return () => {
       cancelled = true
-      window.clearTimeout(overlayPollHandle)
       window.clearTimeout(loadDelayHandle)
+      removeIntroListener()
     }
   }, [maxAnisotropy])
 
@@ -7285,8 +7321,6 @@ async function loadRgbEImageDataTexture(url: string) {
     image.close()
   })
 
-  recordStartupMarker('loadingOverlayCompleteAt')
-
   return configureLightmapTexture(texture)
 }
 
@@ -7310,8 +7344,6 @@ async function loadRgbEByteDataTexture(url: string, width: number, height: numbe
   }
 
   const texture = new DataTexture(bytes, width, height, RGBAFormat, UnsignedByteType)
-
-  recordStartupMarker('loadingOverlayCompleteAt')
 
   return configureLightmapTexture(texture)
 }
@@ -7464,11 +7496,51 @@ function SceneEnvironmentBackground({
   intensity: number
 }) {
   const scene = useThree((state) => state.scene)
-  const hdrTexture = useLoader(EXRLoader, ENVIRONMENT_URL, (loader) => {
-    loader.setDataType(FloatType)
-  })
+  const [hdrTexture, setHdrTexture] = useState<Texture | null>(null)
 
   useEffect(() => {
+    let cancelled = false
+
+    const loadEnvironment = () => {
+      if (cancelled) {
+        return
+      }
+
+      const loader = new EXRLoader()
+
+      loader.setDataType(FloatType)
+      void loader.loadAsync(ENVIRONMENT_URL)
+        .then((texture) => {
+          if (cancelled) {
+            texture.dispose()
+            return
+          }
+
+          setHdrTexture(texture)
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            console.error(error)
+          }
+        })
+    }
+
+    const removeIntroListener = onIntroFadeTriggered(loadEnvironment)
+
+    return () => {
+      cancelled = true
+      removeIntroListener()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!hdrTexture) {
+      scene.background = null
+      scene.environment = null
+      scene.environmentIntensity = 0
+      return undefined
+    }
+
     hdrTexture.mapping = EquirectangularReflectionMapping
     scene.background = hdrTexture
     scene.backgroundRotation.set(0, SKYBOX_ROTATION_Y_RADIANS, 0)
@@ -7487,10 +7559,12 @@ function SceneEnvironmentBackground({
   }, [hdrTexture, intensity, scene])
 
   useEffect(() => {
-    scene.backgroundRotation.set(0, SKYBOX_ROTATION_Y_RADIANS, 0)
+    if (scene.background === hdrTexture) {
+      scene.backgroundRotation.set(0, SKYBOX_ROTATION_Y_RADIANS, 0)
+    }
     scene.backgroundIntensity = intensity
     scene.environmentIntensity = 0
-  }, [intensity, scene])
+  }, [hdrTexture, intensity, scene])
 
   return null
 }
@@ -8747,10 +8821,14 @@ function LoadingOverlay({
 
   useEffect(() => {
     if (visiblyComplete) {
+      recordIntroFadeTriggered()
       recordStartupMarker('loadingOverlayCompleteAt')
       return
     }
 
+    if (!document.body.dataset.introFadeTriggeredAt) {
+      document.body.dataset.introFadeTriggeredAt = 'pending'
+    }
     if (!document.body.dataset.loadingOverlayCompleteAt) {
       document.body.dataset.loadingOverlayCompleteAt = 'pending'
     }
@@ -19393,7 +19471,7 @@ function Scene({
         if (!cancelled) {
           recordStartupMarker('startupRuntimeModelsReadyAt')
           setRuntimeModelAssetsReady(true)
-          void preloadBackgroundRuntimeModels().catch((error) => {
+          void preloadBackgroundRuntimeModelsAfterIntro().catch((error) => {
             if (!cancelled) {
               console.error(error)
             }
@@ -19648,13 +19726,19 @@ function Scene({
         }
       )
 
+      const captureSceneState = getReflectionCaptureSceneState(scene, layout, {
+        requireTorchBillboards: true
+      })
+
       if (
-        !getReflectionCaptureSceneState(scene, layout).ready ||
+        !captureSceneState.ready ||
         !renderedLightingReady
       ) {
         document.body.dataset.startupWaitState = JSON.stringify({
-          captureReady: getReflectionCaptureSceneState(scene, layout).ready,
+          captureReady: captureSceneState.ready,
+          readyTorchBillboardCount: captureSceneState.readyTorchBillboardCount,
           renderedLightingReady,
+          torchBillboardCount: captureSceneState.torchBillboardCount,
           runtimeModelAssetsReady
         })
         rafId = window.requestAnimationFrame(waitForSceneObjects)
@@ -25418,7 +25502,7 @@ export default function App() {
 
   const onAssetsReady = useCallback(() => {
     recordStartupMarker('sceneAssetsReadyAt')
-    recordStartupMarker('loadingOverlayCompleteAt')
+    recordIntroFadeTriggered()
     setSceneLoaded(true)
   }, [])
   const activeGlobalTurnState = globalTurnStateRef.current ?? globalTurnState
