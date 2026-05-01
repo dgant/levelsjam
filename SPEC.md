@@ -28,6 +28,7 @@
 - Runtime gameplay state is one continuous world state, not one independent state per level.
 - Runtime gameplay state is represented by one global rules state with a canonical player, inventory, checkpoint, turn counter, and per-level entity/pickup slices used only as authored-world contents.
 - Runtime gameplay state can be saved and resumed from browser-local storage.
+- During Vite development, maze layout fetches bypass browser and in-memory layout caches so authored level edits are visible after reloading or reloading a level in the same dev tab.
 - Browser-local save data records the set of levels the player has entered and the set of altars that have been lit.
 - Resuming a game places the player at the starting position and direction of the latest entered non-maze level in the directed runtime level graph, while preserving permanent level-progress facts such as lit altars and passageways opened by those altars.
 - When browser-local save data shows that the player has entered any level beyond `Entrance`, startup presents `New Game` and `Continue` choices before loading the player into the world.
@@ -118,6 +119,7 @@
 - The authored Entrance level has a closed outer wall wherever it does not connect to `Hallway 1-1`.
 - Authored progression levels render doors only for authored `levelExits`; legacy maze `opening` metadata must not create extra doors in authored rooms.
 - Authored progression level seams render one physical door from the directed source level rather than duplicate doors from both connected levels.
+- Authored progression level exits may remain traversable while suppressing their physical door mesh when the `LEVELS.md` diagram does not draw a door at that seam.
 - Authored Entrance and Hallway levels follow the playable-cell topology shown in `LEVELS.md` rather than using placeholder rectangular rooms.
 - `Hallway 1-2` has a connected playable loop and accepts movement immediately after the player enters it.
 - `Hallway 1-2` has a recorded solution that reaches the `Hallway 1-3` exit under the normal monster rules.

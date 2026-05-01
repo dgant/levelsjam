@@ -542,7 +542,7 @@ function createAuthoredMazeDefinition(id) {
       id,
       levelExits: [
         { cell: { x: 0, y: 2 }, side: 'south', targetLevelId: 'entrance' },
-        { cell: { x: 3, y: 0 }, side: 'north', targetLevelId: 'hallway-1-2' }
+        { cell: { x: 3, y: 0 }, renderDoor: false, side: 'north', targetLevelId: 'hallway-1-2' }
       ],
       lights: [
         { cell: { x: 3, y: 0 }, side: 'west' },
@@ -570,7 +570,7 @@ function createAuthoredMazeDefinition(id) {
       height: 4,
       id,
       levelExits: [
-        { cell: { x: 0, y: 3 }, side: 'south', targetLevelId: 'hallway-1-1' },
+        { cell: { x: 0, y: 3 }, renderDoor: true, side: 'south', targetLevelId: 'hallway-1-1' },
         { cell: { x: 0, y: 0 }, side: 'north', targetLevelId: 'hallway-1-3' }
       ],
       lights: [

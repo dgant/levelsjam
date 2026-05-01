@@ -13439,6 +13439,7 @@ function getMazeDoors(layout: MazeLayout): MazeRuntimeDoor[] {
   const addDoor = (
     boundary: {
       cell: MazeCell
+      renderDoor?: boolean
       side: CardinalDirection
       targetLevelId?: string
     } | null | undefined,
@@ -13463,7 +13464,16 @@ function getMazeDoors(layout: MazeLayout): MazeRuntimeDoor[] {
   }
 
   for (const exit of layout.maze.levelExits ?? []) {
-    if (layout.maze.isAuthoredLevel && exit.targetLevelId && !directedTargets.has(exit.targetLevelId)) {
+    if (exit.renderDoor === false) {
+      continue
+    }
+
+    if (
+      layout.maze.isAuthoredLevel &&
+      exit.targetLevelId &&
+      !directedTargets.has(exit.targetLevelId) &&
+      exit.renderDoor !== true
+    ) {
       continue
     }
 
@@ -25804,6 +25814,24 @@ export default function App() {
         replayActive,
         sceneLoaded
       }),
+      getActiveMazeLayoutSummary: () => {
+        const activeLevelId = instantiatedMazeId ?? globalTurnStateRef.current?.activeLevelId ?? mazeLayout?.maze.id ?? null
+        const activeLayout = activeLevelId
+          ? loadedMazeLayoutsRef.current.get(activeLevelId) ?? mazeLayout
+          : mazeLayout
+
+        return activeLayout
+          ? {
+              cellCount: activeLayout.maze.cells?.length ?? activeLayout.maze.width * activeLayout.maze.height,
+              cells: activeLayout.maze.cells ?? null,
+              height: activeLayout.maze.height,
+              id: activeLayout.maze.id,
+              levelExits: activeLayout.maze.levelExits ?? [],
+              playerStart: activeLayout.maze.playerStart ?? null,
+              width: activeLayout.maze.width
+            }
+          : null
+      },
       getRuntimeMemoryHighWater: () => ({
         current: readCurrentMemory(),
         highWater: { ...memoryHighWaterRef.current }
@@ -25845,6 +25873,10 @@ export default function App() {
         return true
       },
       loadMazeData: async (id) => {
+        if (import.meta.env.DEV) {
+          loadedMazeLayoutsRef.current.delete(id)
+          unloadMazeLayoutById(id)
+        }
         const layout = await loadMazeLayoutById(id)
 
         if (!layout) {

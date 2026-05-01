@@ -84,6 +84,7 @@ export declare function applyTurnAction(
     direction: CardinalDirection
     exit: {
       cell: MazeCell
+      renderDoor?: boolean
       side: CardinalDirection
       targetLevelId?: string
     }
@@ -126,6 +127,7 @@ export declare function getExitForMove(
   direction: CardinalDirection
 ): {
   cell: MazeCell
+  renderDoor?: boolean
   side: CardinalDirection
   targetLevelId?: string
 } | null

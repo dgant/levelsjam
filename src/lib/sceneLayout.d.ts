@@ -130,6 +130,7 @@ export type MazeLayout = {
     }
     levelExits?: Array<{
       cell: { x: number; y: number }
+      renderDoor?: boolean
       side: 'north' | 'east' | 'south' | 'west'
       targetLevelId?: string
     }>

@@ -210,7 +210,12 @@ test('doors use generated Minoan-door ORM textures and baked dynamic lighting', 
   )
   assert.match(
     appSource,
-    /layout\.maze\.isAuthoredLevel && exit\.targetLevelId && !directedTargets\.has\(exit\.targetLevelId\)/,
+    /exit\.renderDoor === false/,
+    'authored progression exits can suppress physical door meshes while remaining traversable'
+  )
+  assert.match(
+    appSource,
+    /layout\.maze\.isAuthoredLevel &&[\s\S]*?exit\.targetLevelId &&[\s\S]*?!directedTargets\.has\(exit\.targetLevelId\) &&[\s\S]*?exit\.renderDoor !== true/,
     'authored progression seams should render one directed door instead of duplicate doors from both sides'
   )
 })

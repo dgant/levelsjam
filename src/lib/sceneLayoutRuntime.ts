@@ -51,6 +51,7 @@ type PersistedMaze = {
   isAuthoredLevel?: boolean
   levelExits?: Array<{
     cell: { x: number; y: number }
+    renderDoor?: boolean
     side: 'north' | 'east' | 'south' | 'west'
     targetLevelId?: string
   }>
@@ -79,6 +80,7 @@ type MazeManifest = {
 
 const MAZE_DATA_BASE_URL = `${import.meta.env.BASE_URL}maze-data`
 const MAZE_MANIFEST_URL = `${MAZE_DATA_BASE_URL}/index.json`
+const DEV_BYPASS_MAZE_LAYOUT_CACHE = import.meta.env.DEV
 const AVAILABLE_MAZE_IDS: string[] = []
 let mazeManifestPromise: Promise<MazeManifest> | null = null
 const mazeLayoutPromiseCache = new Map<string, Promise<MazeLayout | null>>()
@@ -161,7 +163,9 @@ async function loadPersistedMaze(id: string) {
     return maze
   }
 
-  const response = await fetch(resolveMazeDataUrl(`${id}.json`))
+  const response = await fetch(resolveMazeDataUrl(`${id}.json`), {
+    cache: import.meta.env.DEV ? 'no-store' : 'default'
+  })
 
   if (!response.ok) {
     if (response.status === 404) {
@@ -253,6 +257,11 @@ export function getDebugMazeLayoutById(id: string): MazeLayout | null {
 }
 
 export async function loadMazeLayoutById(id: string): Promise<MazeLayout | null> {
+  if (DEV_BYPASS_MAZE_LAYOUT_CACHE) {
+    mazeLayoutPromiseCache.delete(id)
+    mazeLayoutCache.delete(id)
+  }
+
   const cachedLayout = mazeLayoutCache.get(id)
 
   if (cachedLayout) {
