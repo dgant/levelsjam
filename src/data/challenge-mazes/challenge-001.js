@@ -13,16 +13,16 @@ export default {
     {
       "cell": {
         "x": 1,
-        "y": 2
+        "y": 3
       },
-      "side": "east"
+      "side": "south"
     },
     {
       "cell": {
         "x": 2,
         "y": 2
       },
-      "side": "east"
+      "side": "west"
     },
     {
       "cell": {
@@ -36,21 +36,14 @@ export default {
         "x": 2,
         "y": 5
       },
-      "side": "east"
+      "side": "south"
     },
     {
       "cell": {
         "x": 1,
         "y": 4
       },
-      "side": "north"
-    },
-    {
-      "cell": {
-        "x": 0,
-        "y": 3
-      },
-      "side": "north"
+      "side": "south"
     }
   ],
   "opening": {
@@ -262,7 +255,7 @@ export default {
       }
     }
   ],
-  "seed": 300006,
+  "seed": 300005,
   "width": 3,
   "contentProfile": {
     "gateCount": 0,
@@ -277,10 +270,10 @@ export default {
     {
       "cell": {
         "x": 1,
-        "y": 2
+        "y": 3
       },
       "type": "werewolf",
-      "direction": "east"
+      "direction": "south"
     }
   ],
   "sword": null,
@@ -557,23 +550,19 @@ export default {
       "move-forward",
       "rotate-left",
       "move-forward",
-      "rotate-right",
-      "rotate-right",
-      "move-forward",
-      "rotate-right",
-      "move-forward",
-      "move-forward",
-      "move-forward",
-      "move-forward",
-      "rotate-right",
-      "move-forward",
-      "move-forward",
-      "rotate-right",
       "move-forward",
       "rotate-left",
+      "move-forward",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
       "move-forward"
     ],
-    "moveCount": 19,
+    "moveCount": 17,
     "observedCellCount": 18,
     "visibilityLimited": true
   },

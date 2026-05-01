@@ -1,17 +1,5 @@
 export default {
-  "gates": [
-    {
-      "from": {
-        "x": 2,
-        "y": 2
-      },
-      "id": "1,2|2,2",
-      "to": {
-        "x": 1,
-        "y": 2
-      }
-    }
-  ],
+  "gates": [],
   "height": 5,
   "id": "challenge-003",
   "lights": [
@@ -223,7 +211,7 @@ export default {
   "seed": 333896,
   "width": 3,
   "contentProfile": {
-    "gateCount": 1,
+    "gateCount": 0,
     "monsterTypes": [
       "minotaur"
     ],
@@ -444,24 +432,22 @@ export default {
       "move-forward",
       "move-forward",
       "rotate-right",
-      "rotate-right",
-      "move-forward",
-      "move-forward",
-      "move-forward",
-      "move-forward",
-      "rotate-left",
-      "move-forward",
-      "move-forward",
-      "rotate-left",
       "move-forward",
       "move-forward",
       "rotate-right",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
       "move-forward"
     ],
-    "moveCount": 17,
+    "moveCount": 15,
     "observedCellCount": 15,
     "visibilityLimited": true
   },
-  "name": "Challenge 03: 3x5, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 1 gate",
-  "description": "3x5, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 1 gate"
+  "name": "Challenge 03: 3x5, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates",
+  "description": "3x5, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates"
 }

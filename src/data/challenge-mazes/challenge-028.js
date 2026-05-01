@@ -25,7 +25,7 @@ export default {
     {
       "cell": {
         "x": 0,
-        "y": 1
+        "y": 3
       },
       "side": "west"
     },
@@ -41,14 +41,14 @@ export default {
         "x": 1,
         "y": 3
       },
-      "side": "west"
+      "side": "south"
     },
     {
       "cell": {
         "x": 1,
         "y": 0
       },
-      "side": "north"
+      "side": "south"
     },
     {
       "cell": {
@@ -62,7 +62,7 @@ export default {
         "x": 0,
         "y": 5
       },
-      "side": "north"
+      "side": "west"
     },
     {
       "cell": {
@@ -301,7 +301,7 @@ export default {
       }
     }
   ],
-  "seed": 397374,
+  "seed": 397376,
   "width": 3,
   "contentProfile": {
     "gateCount": 1,
@@ -317,9 +317,9 @@ export default {
     {
       "cell": {
         "x": 0,
-        "y": 1
+        "y": 3
       },
-      "hand": "right",
+      "hand": "left",
       "type": "spider"
     },
     {
@@ -652,14 +652,6 @@ export default {
       "move-forward",
       "move-forward",
       "move-forward",
-      "move-forward",
-      "rotate-right",
-      "move-forward",
-      "move-forward",
-      "rotate-right",
-      "move-forward",
-      "move-forward",
-      "move-forward",
       "rotate-right",
       "move-forward",
       "rotate-right",
@@ -668,6 +660,14 @@ export default {
       "rotate-left",
       "move-forward",
       "rotate-left",
+      "move-forward",
+      "move-forward",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
       "move-forward",
       "move-forward",
       "move-forward",

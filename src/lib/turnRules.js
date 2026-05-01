@@ -967,6 +967,27 @@ function resolveMonsterPhase(maze, next, outcome) {
   return outcome
 }
 
+function resolveEnteredPlayerCell(maze, next, outcome) {
+  const blockingMonster = getMonsterAt(next.monsters, next.player.cell)
+
+  if (blockingMonster) {
+    if (!next.player.hasSword) {
+      next.dead = true
+      outcome.killed = true
+      outcome.playerEffect = 'death'
+      return outcome
+    }
+
+    removeMonsterById(next.monsters, blockingMonster.id)
+    consumeSword(next)
+    outcome.playerEffect = 'sword-strike'
+  }
+
+  resolvePlayerPickups(maze, next, outcome)
+
+  return resolveMonsterPhase(maze, next, outcome)
+}
+
 export function applyTurnAction(maze, state, action) {
   const playerMoveEdges = createPlayerMoveEdgeSet(maze, state)
   const next = cloneState(state)
@@ -1009,26 +1030,9 @@ export function applyTurnAction(maze, state, action) {
   }
 
   const nextPlayerCell = getNeighbor(next.player.cell, moveDirection)
-  const blockingMonster = getMonsterAt(next.monsters, nextPlayerCell)
-
-  if (blockingMonster) {
-    if (!next.player.hasSword) {
-      next.player.cell = nextPlayerCell
-      next.dead = true
-      outcome.killed = true
-      outcome.playerEffect = 'death'
-      return outcome
-    }
-
-    removeMonsterById(next.monsters, blockingMonster.id)
-    consumeSword(next)
-    outcome.playerEffect = 'sword-strike'
-  }
-
   next.player.cell = nextPlayerCell
-  resolvePlayerPickups(maze, next, outcome)
 
-  return resolveMonsterPhase(maze, next, outcome)
+  return resolveEnteredPlayerCell(maze, next, outcome)
 }
 
 export function applyMonsterTurn(maze, state) {
@@ -1042,22 +1046,33 @@ export function applyMonsterTurn(maze, state) {
   return resolveMonsterPhase(maze, next, outcome)
 }
 
-export function createChallengeTurnState(maze) {
-  const entryWake = applyMonsterTurn(maze, createInitialTurnState(maze)).state
+export function applyEntryTurn(maze, state) {
+  const next = cloneState(state)
+  const outcome = createTurnOutcome(state, next)
 
-  return applyMonsterTurn(maze, entryWake).state
+  if (state.dead || state.escaped) {
+    return outcome
+  }
+
+  return resolveEnteredPlayerCell(maze, next, outcome)
 }
+
+export function createEnteredTurnState(maze) {
+  return applyEntryTurn(maze, createInitialTurnState(maze)).state
+}
+
+export const createChallengeTurnState = createEnteredTurnState
 
 export function resetTurnStateToCheckpoint(maze, state) {
   const resetState = createInitialTurnState(maze)
 
-  return {
+  return applyEntryTurn(maze, {
     ...resetState,
     checkpoint: {
       cell: { ...state.checkpoint.cell },
       direction: state.checkpoint.direction
     }
-  }
+  }).state
 }
 
 export {

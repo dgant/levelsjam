@@ -58,6 +58,20 @@ export declare function applyMonsterTurn(
   previous: TurnState
   state: TurnState
 }
+export declare function applyEntryTurn(
+  maze: unknown,
+  state: TurnState
+): {
+  blocked: boolean
+  escaped: boolean
+  killed: boolean
+  levelTransition: null
+  pickedUpSword: boolean
+  pickedUpTrophy: boolean
+  playerEffect: 'death' | 'sword-strike' | null
+  previous: TurnState
+  state: TurnState
+}
 export declare function applyTurnAction(
   maze: unknown,
   state: TurnState,
@@ -101,6 +115,7 @@ export declare function chooseSpiderDirection(
 ): CardinalDirection | null
 export declare function createBaseOpenEdgeSet(maze: unknown): Set<string>
 export declare function createChallengeTurnState(maze: unknown): TurnState
+export declare function createEnteredTurnState(maze: unknown): TurnState
 export declare function createInitialTurnState(maze: unknown): TurnState
 export declare function createMonsterMoveEdgeSet(maze: unknown): Set<string>
 export declare function createPlayerMoveEdgeSet(maze: unknown, state: TurnState): Set<string>

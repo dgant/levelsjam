@@ -24,10 +24,10 @@ export default {
     },
     {
       "cell": {
-        "x": 2,
+        "x": 3,
         "y": 0
       },
-      "side": "north"
+      "side": "south"
     },
     {
       "cell": {
@@ -83,14 +83,21 @@ export default {
         "x": 3,
         "y": 3
       },
-      "side": "south"
+      "side": "west"
+    },
+    {
+      "cell": {
+        "x": 2,
+        "y": 1
+      },
+      "side": "west"
     },
     {
       "cell": {
         "x": 4,
         "y": 1
       },
-      "side": "east"
+      "side": "south"
     }
   ],
   "opening": {
@@ -432,7 +439,7 @@ export default {
       }
     }
   ],
-  "seed": 357424,
+  "seed": 357421,
   "width": 5,
   "contentProfile": {
     "gateCount": 1,
@@ -447,11 +454,11 @@ export default {
   "monsters": [
     {
       "cell": {
-        "x": 2,
+        "x": 3,
         "y": 0
       },
       "type": "minotaur",
-      "direction": "north"
+      "direction": "south"
     },
     {
       "cell": {

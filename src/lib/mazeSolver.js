@@ -1,7 +1,7 @@
 import {
   applyTurnAction,
   createBaseOpenEdgeSet,
-  createChallengeTurnState,
+  createEnteredTurnState,
   createInitialTurnState,
   getNeighbor,
   getVisibleCells
@@ -32,7 +32,7 @@ function usesChallengeStart(maze) {
 
 function createSolverInitialTurnState(maze) {
   return usesChallengeStart(maze)
-    ? createChallengeTurnState(maze)
+    ? createEnteredTurnState(maze)
     : createInitialTurnState(maze)
 }
 

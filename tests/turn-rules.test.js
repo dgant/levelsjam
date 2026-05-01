@@ -6,7 +6,7 @@ import {
   applyTurnAction,
   canSeeCell,
   chooseSpiderDirection,
-  createChallengeTurnState,
+  createEnteredTurnState,
   createInitialTurnState,
   createMonsterMoveEdgeSet,
   createPlayerMoveEdgeSet,
@@ -370,7 +370,7 @@ test('newly awakened monsters do not move until their next monster turn', () => 
   assert.deepEqual(moveAfterWake.state.monsters[0].cell, { x: 1, y: 0 })
 })
 
-test('challenge turn state resolves entry wakeup and first monster phase before player input', () => {
+test('entered turn state resolves the post-move entry phase before player input', () => {
   const maze = testMaze({
     gates: [],
     height: 1,
@@ -391,10 +391,12 @@ test('challenge turn state resolves entry wakeup and first monster phase before 
     trophy: null,
     width: 3
   })
-  const state = createChallengeTurnState(maze)
+  const state = createEnteredTurnState(maze)
 
-  assert.equal(state.dead, true)
-  assert.deepEqual(state.monsters[0].cell, { x: 1, y: 0 })
+  assert.equal(state.dead, false)
+  assert.equal(state.turn, 1)
+  assert.equal(state.monsters[0].awake, true)
+  assert.deepEqual(state.monsters[0].cell, { x: 2, y: 0 })
 })
 
 test('rotation changes player direction without advancing monster turns', () => {
@@ -759,4 +761,6 @@ test('reset restores monsters and items to the initial maze state', () => {
   assert.equal(reset.player.hasSword, false)
   assert.equal(reset.swordState, 'ground')
   assert.equal(reset.monsters.length, 1)
+  assert.equal(reset.turn, 1)
+  assert.equal(reset.monsters[0].awake, true)
 })

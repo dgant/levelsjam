@@ -46,6 +46,14 @@ export declare function applyGlobalTurnActionForLevel(
   state: GlobalTurnState
 }
 export declare function cloneTurnStateForGlobal(state: TurnState): TurnState
+export declare function createChallengeGlobalTurnState(
+  activeLayout: MazeLayout,
+  additionalLayouts?: MazeLayout[]
+): GlobalTurnState
+export declare function createEnteredGlobalTurnState(
+  activeLayout: MazeLayout,
+  additionalLayouts?: MazeLayout[]
+): GlobalTurnState
 export declare function createInitialGlobalTurnState(
   activeLayout: MazeLayout,
   additionalLayouts?: MazeLayout[]
