@@ -350,14 +350,34 @@ async function captureMazeReflectionArtifacts(
 
   const captureProbe = async (probeIndex) => {
     const capture = await withTimeout(
-      page.evaluate(
-        async ({ probeIndex, size }) =>
-          await window.__levelsjamDebug?.bakeReflectionProbeAssets?.(
-            probeIndex,
-            size
-          ),
-        { probeIndex, size: faceSize }
-      ),
+      (async () => {
+        let latestState = null
+
+        while (true) {
+          const result = await page.evaluate(
+            async ({ probeIndex, size }) => ({
+              capture: await window.__levelsjamDebug?.bakeReflectionProbeAssets?.(
+                probeIndex,
+                size
+              ),
+              state: {
+                captureSceneState: window.__levelsjamDebug?.getReflectionCaptureSceneState?.({
+                  requireTorchBillboards: true
+                }) ?? null,
+                reflectionProbeState: window.__levelsjamDebug?.getReflectionProbeState?.() ?? null
+              }
+            }),
+            { probeIndex, size: faceSize }
+          )
+
+          latestState = result?.state ?? null
+          if (result?.capture) {
+            return result.capture
+          }
+
+          await page.waitForTimeout(250)
+        }
+      })(),
       probeCaptureTimeoutMs,
       `${maze.id} probe ${probeIndex}`
     )
@@ -583,6 +603,12 @@ async function main() {
     MAZES
   } = await import('../src/data/mazes/index.js')
   const {
+    CHALLENGE_MAZES
+  } = await import('../src/data/challenge-mazes/index.js')
+  const werewolfTutorial = (
+    await import('../src/data/challenge-mazes/keepers/werewolf-tutorial.js')
+  ).default
+  const {
     createAuthoredRuntimeMaze,
     getAuthoredRuntimeLevelIds
   } = await import('../src/lib/levels.js')
@@ -670,7 +696,12 @@ async function main() {
         getAuthoredRuntimeLevelIds().map((id) => createAuthoredRuntimeMaze(id))
       )
     ).filter(Boolean)
-    const allMazes = [...authoredMazes, ...MAZES]
+    const allMazes = [
+      ...authoredMazes,
+      ...MAZES,
+      ...CHALLENGE_MAZES,
+      { ...werewolfTutorial, id: 'werewolf-tutorial' }
+    ]
     const mazesToCapture = requestedMazeIds.length > 0
       ? allMazes.filter((maze) => requestedMazeIds.includes(maze.id))
       : allMazes

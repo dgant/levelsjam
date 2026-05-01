@@ -174,13 +174,14 @@ test('Chambers place torches on walls adjacent to doors instead of on doorway ed
   }
 })
 
-test('Chamber 1 publishes a neutral lightmap while progression e2e is prioritized', async () => {
+test('Chamber 1 publishes baked altar lightmap rectangles for story lighting', async () => {
   const chamber = JSON.parse(fs.readFileSync('maze-data/chamber-1.json', 'utf8'))
 
   assert.equal(chamber.altars.length, 4)
   assert.equal(chamber.lightmap.encoding, 'rgb16f')
-  assert.deepEqual(chamber.lightmap.altarRects, {})
-  assert.ok(chamber.sourceSignature.startsWith('neutral-authored:chamber-1'))
+  assert.ok(!chamber.sourceSignature.startsWith('neutral-'))
+  assert.equal(Object.keys(chamber.lightmap.altarRects).length, 4)
+  assert.equal(typeof chamber.lightmap.bakeRenderer, 'string')
 })
 
 test('Hallway 1-2 matches the minotaur-door ASCII topology', async () => {

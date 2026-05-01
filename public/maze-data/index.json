@@ -1,6 +1,62 @@
 {
-  "challengeMazeIds": [],
-  "challenges": [],
+  "challengeMazeIds": [
+    "challenge-028",
+    "challenge-031",
+    "challenge-036",
+    "challenge-040",
+    "challenge-043",
+    "challenge-059",
+    "challenge-095",
+    "challenge-098",
+    "challenge-100"
+  ],
+  "challenges": [
+    {
+      "description": "3x5, 2 minotaurs, 0 spiders, 0 wolves, 0 swords, 0 gates",
+      "id": "challenge-028",
+      "name": "Challenge 28: 3x5, 2 minotaurs, 0 spiders, 0 wolves, 0 swords, 0 gates"
+    },
+    {
+      "description": "3x6, 3 minotaurs, 0 spiders, 0 wolves, 2 swords, 0 gates",
+      "id": "challenge-031",
+      "name": "Challenge 31: 3x6, 3 minotaurs, 0 spiders, 0 wolves, 2 swords, 0 gates"
+    },
+    {
+      "description": "3x7, 3 minotaurs, 0 spiders, 0 wolves, 1 sword, 1 gate",
+      "id": "challenge-036",
+      "name": "Challenge 36: 3x7, 3 minotaurs, 0 spiders, 0 wolves, 1 sword, 1 gate"
+    },
+    {
+      "description": "3x5, 3 minotaurs, 1 spider, 0 wolves, 1 sword, 2 gates",
+      "id": "challenge-040",
+      "name": "Challenge 40: 3x5, 3 minotaurs, 1 spider, 0 wolves, 1 sword, 2 gates"
+    },
+    {
+      "description": "3x6, 0 minotaurs, 3 spiders, 1 wolf, 1 sword, 1 gate",
+      "id": "challenge-043",
+      "name": "Challenge 43: 3x6, 0 minotaurs, 3 spiders, 1 wolf, 1 sword, 1 gate"
+    },
+    {
+      "description": "3x5, 2 minotaurs, 0 spiders, 0 wolves, 0 swords, 1 gate",
+      "id": "challenge-059",
+      "name": "Challenge 59: 3x5, 2 minotaurs, 0 spiders, 0 wolves, 0 swords, 1 gate"
+    },
+    {
+      "description": "6x7, 0 minotaurs, 1 spider, 1 wolf, 0 swords, 0 gates",
+      "id": "challenge-095",
+      "name": "Challenge 95: 6x7, 0 minotaurs, 1 spider, 1 wolf, 0 swords, 0 gates"
+    },
+    {
+      "description": "6x4, 2 minotaurs, 0 spiders, 1 wolf, 1 sword, 0 gates",
+      "id": "challenge-098",
+      "name": "Challenge 98: 6x4, 2 minotaurs, 0 spiders, 1 wolf, 1 sword, 0 gates"
+    },
+    {
+      "description": "5x6, 2 minotaurs, 0 spiders, 1 wolf, 0 swords, 1 gate",
+      "id": "challenge-100",
+      "name": "Challenge 100: 5x6, 2 minotaurs, 0 spiders, 1 wolf, 0 swords, 1 gate"
+    }
+  ],
   "mazeIds": [
     "entrance",
     "hallway-1-1",
@@ -16,6 +72,15 @@
     "maze-003",
     "maze-004",
     "maze-005",
+    "challenge-028",
+    "challenge-031",
+    "challenge-036",
+    "challenge-040",
+    "challenge-043",
+    "challenge-059",
+    "challenge-095",
+    "challenge-098",
+    "challenge-100",
     "werewolf-tutorial"
   ],
   "storyMazeIds": [

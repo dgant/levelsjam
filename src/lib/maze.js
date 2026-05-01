@@ -174,10 +174,31 @@ const BASE_EAR = [
   { x: 3, y: 4 }
 ]
 
+function getLightmapWallTileWidth(options = {}) {
+  return Number.isFinite(options.wallTileWidth)
+    ? Math.max(1, Math.floor(options.wallTileWidth))
+    : MAZE_LIGHTMAP_WALL_TILE_WIDTH
+}
+
+function getLightmapWallTileHeight(options = {}) {
+  return Number.isFinite(options.wallTileHeight)
+    ? Math.max(1, Math.floor(options.wallTileHeight))
+    : MAZE_LIGHTMAP_WALL_TILE_HEIGHT
+}
+
+function getLightmapIndirectRayCount(options = {}) {
+  return Number.isFinite(options.indirectRayCount)
+    ? Math.max(1, Math.floor(options.indirectRayCount))
+    : 64
+}
+
 export function getMazeLightmapBakeQualityParameters(options = {}) {
   const bakeModes = Array.isArray(options.bakeModes) && options.bakeModes.length > 0
     ? options.bakeModes
     : [{ key: 'default', mode: 1 }]
+  const wallTileWidth = getLightmapWallTileWidth(options)
+  const wallTileHeight = getLightmapWallTileHeight(options)
+  const indirectRayCount = getLightmapIndirectRayCount(options)
 
   return {
     bakeModes,
@@ -185,8 +206,8 @@ export function getMazeLightmapBakeQualityParameters(options = {}) {
     groundAmbientSampleGrid: MAZE_LIGHTMAP_GROUND_AMBIENT_SAMPLE_GRID,
     groundSupersampleGrid: MAZE_LIGHTMAP_GROUND_SUPERSAMPLE_GRID,
     groundTileSize: MAZE_LIGHTMAP_GROUND_TILE_SIZE,
-    indirectReleasePassRayCount: 32,
-    indirectReleaseSequenceSampleCount: 64,
+    indirectReleasePassRayCount: Math.min(32, indirectRayCount),
+    indirectReleaseSequenceSampleCount: indirectRayCount,
     lightmapVersion: MAZE_LIGHTMAP_VERSION,
     neutralTileSize: MAZE_LIGHTMAP_NEUTRAL_TILE_SIZE,
     altarTileSize: MAZE_LIGHTMAP_ALTAR_TILE_SIZE,
@@ -194,8 +215,8 @@ export function getMazeLightmapBakeQualityParameters(options = {}) {
     skyRayDistance: MAZE_LIGHTMAP_SKY_RAY_DISTANCE,
     wallAmbientSampleGrid: MAZE_LIGHTMAP_WALL_AMBIENT_SAMPLE_GRID,
     wallSupersampleGrid: MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID,
-    wallTileHeight: MAZE_LIGHTMAP_WALL_TILE_HEIGHT,
-    wallTileWidth: MAZE_LIGHTMAP_WALL_TILE_WIDTH
+    wallTileHeight,
+    wallTileWidth
   }
 }
 
@@ -2031,15 +2052,19 @@ function nextPowerOfTwo(value) {
   return 2 ** Math.ceil(Math.log2(Math.max(1, value)))
 }
 
-function getPreferredLightmapAtlasWidth(wallCount) {
+function getPreferredLightmapAtlasWidth(
+  wallCount,
+  wallTileWidth = MAZE_LIGHTMAP_WALL_TILE_WIDTH,
+  wallTileHeight = MAZE_LIGHTMAP_WALL_TILE_HEIGHT
+) {
   const totalTexelCount =
     (MAZE_LIGHTMAP_GROUND_TILE_SIZE * MAZE_LIGHTMAP_GROUND_TILE_SIZE) +
     (MAZE_LIGHTMAP_NEUTRAL_TILE_SIZE * MAZE_LIGHTMAP_NEUTRAL_TILE_SIZE) +
     (
       wallCount *
       (
-        (2 * MAZE_LIGHTMAP_WALL_TILE_WIDTH * MAZE_LIGHTMAP_WALL_TILE_HEIGHT) +
-        (2 * MAZE_LIGHTMAP_WALL_TILE_HEIGHT * MAZE_LIGHTMAP_WALL_TILE_HEIGHT)
+        (2 * wallTileWidth * wallTileHeight) +
+        (2 * wallTileHeight * wallTileHeight)
       )
     )
 
@@ -2805,7 +2830,10 @@ export async function bakeMazeLightmap(
   const surfaceGroups = getWallSurfaceGroups(walls)
   const torchPlacements = getMazeTorchPlacements(maze, sconceRadius)
   const groundBounds = getMazeFloorLightmapBounds(maze)
-  const atlasWidth = getPreferredLightmapAtlasWidth(walls.length)
+  const wallTileWidth = getLightmapWallTileWidth(options)
+  const wallTileHeight = getLightmapWallTileHeight(options)
+  const indirectRayCount = getLightmapIndirectRayCount(options)
+  const atlasWidth = getPreferredLightmapAtlasWidth(walls.length, wallTileWidth, wallTileHeight)
   const packer = {
     atlasWidth,
     cursorX: 0,
@@ -2841,8 +2869,8 @@ export async function bakeMazeLightmap(
 
   for (const surfaceGroup of surfaceGroups) {
     const groupWidth = surfaceGroup.walls.length === 1
-      ? MAZE_LIGHTMAP_WALL_TILE_WIDTH
-      : (surfaceGroup.walls.length * (MAZE_LIGHTMAP_WALL_TILE_WIDTH - 1)) + 1
+      ? wallTileWidth
+      : (surfaceGroup.walls.length * (wallTileWidth - 1)) + 1
     const groupRects = {}
 
     for (const faceKey of ['nz', 'pz']) {
@@ -2854,7 +2882,7 @@ export async function bakeMazeLightmap(
         groupRects[faceKey] = allocateLightmapRect(
           packer,
           groupWidth,
-          MAZE_LIGHTMAP_WALL_TILE_HEIGHT
+          wallTileHeight
         )
       }
     }
@@ -2863,14 +2891,14 @@ export async function bakeMazeLightmap(
 
     for (let index = 0; index < surfaceGroup.walls.length; index += 1) {
       const wall = surfaceGroup.walls[index]
-      const offsetX = index * (MAZE_LIGHTMAP_WALL_TILE_WIDTH - 1)
+      const offsetX = index * (wallTileWidth - 1)
 
       wallRects[wall.id] = {}
 
       if (groupRects.nz && shouldLightmapWallLongFace(wall, 'nz')) {
         wallRects[wall.id].nz = {
-          height: MAZE_LIGHTMAP_WALL_TILE_HEIGHT,
-          width: MAZE_LIGHTMAP_WALL_TILE_WIDTH,
+          height: wallTileHeight,
+          width: wallTileWidth,
           x: groupRects.nz.x + offsetX,
           y: groupRects.nz.y
         }
@@ -2878,8 +2906,8 @@ export async function bakeMazeLightmap(
 
       if (groupRects.pz && shouldLightmapWallLongFace(wall, 'pz')) {
         wallRects[wall.id].pz = {
-          height: MAZE_LIGHTMAP_WALL_TILE_HEIGHT,
-          width: MAZE_LIGHTMAP_WALL_TILE_WIDTH,
+          height: wallTileHeight,
+          width: wallTileWidth,
           x: groupRects.pz.x + offsetX,
           y: groupRects.pz.y
         }
@@ -2918,13 +2946,13 @@ export async function bakeMazeLightmap(
       ...existingRects,
       nx: allocateLightmapRect(
         packer,
-        MAZE_LIGHTMAP_WALL_TILE_HEIGHT,
-        MAZE_LIGHTMAP_WALL_TILE_HEIGHT
+        wallTileHeight,
+        wallTileHeight
       ),
       px: allocateLightmapRect(
         packer,
-        MAZE_LIGHTMAP_WALL_TILE_HEIGHT,
-        MAZE_LIGHTMAP_WALL_TILE_HEIGHT
+        wallTileHeight,
+        wallTileHeight
       )
     }
 
@@ -3063,6 +3091,10 @@ export async function bakeMazeLightmap(
       wallThickness: MAZE_WALL_THICKNESS
     },
     surfaces,
+    renderTileSize: Number.isFinite(options.gpuRenderTileSize)
+      ? options.gpuRenderTileSize
+      : undefined,
+    indirectRayCount,
     torches: torchPlacements,
     walls: walls.map((wall) => ({
       maxX: wall.bounds.maxX,

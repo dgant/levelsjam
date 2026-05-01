@@ -963,6 +963,7 @@
 - Challenge maze compact runtime payloads can be published without baked-lighting assets for immediate local browser playtesting.
 - Non-story challenge and test levels may use dummy neutral lightmaps, empty probe manifests, or unlit visual mode during iteration.
 - Levels reachable through the directed main gameplay graph from `Entrance` use real baked lighting assets in normal gameplay.
+- Levels reachable through the directed main gameplay graph from `Entrance` ship with GPU-baked surface lightmaps, reflection-probe manifests, and volumetric-lightmap coefficients rather than neutral placeholder lighting.
 - Standalone maze playtest loading that teleports the player into a maze initializes the turn state as if the player has just completed the entrance movement: destination monster collision, pickups, and the normal monster phase resolve before player input is accepted.
 - Standalone maze playtest loading publishes the post-entry gate state before player input is accepted, so safe gates adjacent to the loaded player cell are already open in both rules state and rendered state.
 - Challenge maze playtest levels accept repeated keyboard and touch turn commands after an initial rotation.

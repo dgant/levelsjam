@@ -12,7 +12,27 @@ const mazeFilePattern = /^maze-\d{3}\.js$/
 const challengeMazeFilePattern = /^challenge-\d{3}\.js$/
 const bakeChallengeMazes = process.env.LEVELSJAM_SYNC_CHALLENGE_LIGHTMAPS === '1'
 const bakeChallengeMazesCpu = process.env.LEVELSJAM_SYNC_CHALLENGE_LIGHTMAPS_CPU === '1'
+const bakeStoryLighting = process.env.LEVELSJAM_SYNC_STORY_LIGHTING === '1'
+const bakeStoryLightingCpu = process.env.LEVELSJAM_SYNC_STORY_LIGHTING_CPU === '1'
+const storyLightingRenderTileSize = Number(process.env.LEVELSJAM_STORY_LIGHTING_RENDER_TILE_SIZE ?? '256')
+const storyLightingWallTileSize = Number(process.env.LEVELSJAM_STORY_LIGHTING_WALL_TILE_SIZE ?? '64')
+const storyLightingIndirectRayCount = Number(process.env.LEVELSJAM_STORY_LIGHTING_INDIRECT_RAYS ?? '32')
+const requestedSyncIds = new Set(
+  (process.env.LEVELSJAM_SYNC_IDS ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean)
+)
 const NEUTRAL_LIGHTMAP_SIZE = 4
+
+function logLightmapProgress(progress) {
+  const details = [
+    progress.mazeId,
+    progress.action
+  ].filter(Boolean).join(' ')
+
+  console.log(`[sync-maze-runtime-data] ${new Date().toISOString()} lightmap ${details}`)
+}
 
 function createNeutralLightmapDataBase64() {
   const bytes = Buffer.alloc(NEUTRAL_LIGHTMAP_SIZE * NEUTRAL_LIGHTMAP_SIZE * 3 * 2)
@@ -66,6 +86,27 @@ function createNeutralRuntimeLightmap(maze) {
     version: 32,
     wallRects: {}
   }
+}
+
+function isReusableGpuBakedMaze(maze, sourceSignature) {
+  const hasEmbeddedLightmap = typeof maze?.lightmap?.dataBase64 === 'string' &&
+    maze.lightmap.dataBase64.length > 0
+  const hasRuntimeLightmap = typeof maze?.lightmap?.atlasUrl === 'string' &&
+    maze.lightmap.atlasUrl.length > 0
+
+  return (
+    maze?.sourceSignature === sourceSignature &&
+    typeof maze.sourceSignature === 'string' &&
+    !maze.sourceSignature.startsWith('neutral-') &&
+    maze.lightmap?.encoding === 'rgb16f' &&
+    (hasEmbeddedLightmap || hasRuntimeLightmap) &&
+    typeof maze.lightmap.bakeRenderer === 'string' &&
+    maze.lightmap.bakeRenderer.length > 0
+  )
+}
+
+function shouldSyncRuntimeId(id) {
+  return requestedSyncIds.size === 0 || requestedSyncIds.has(id)
 }
 
 async function importMazeModule(filePath) {
@@ -135,7 +176,8 @@ async function main() {
   } = await import('../src/lib/mazePersistence.js')
   const {
     createAuthoredRuntimeMaze,
-    getAuthoredRuntimeLevelIds
+    getAuthoredRuntimeLevelIds,
+    getStoryRuntimeMazeIds
   } = await import('../src/lib/levels.js')
   const {
     bakeMazeLightmap,
@@ -146,14 +188,21 @@ async function main() {
   fs.mkdirSync(outputDirectory, { recursive: true })
 
   const authoredLevelIds = getAuthoredRuntimeLevelIds()
+    .filter((id) => shouldSyncRuntimeId(id))
+  const storyRuntimeMazeIdSet = new Set(getStoryRuntimeMazeIds())
   const mazeFileNames = fs.readdirSync(sourceDirectory)
     .filter((fileName) => mazeFilePattern.test(fileName))
+    .filter((fileName) => shouldSyncRuntimeId(path.basename(fileName, '.js')))
     .sort()
   const challengeMazeFileNames = fs.existsSync(challengeSourceDirectory)
     ? fs.readdirSync(challengeSourceDirectory)
       .filter((fileName) => challengeMazeFilePattern.test(fileName))
+      .filter((fileName) => shouldSyncRuntimeId(path.basename(fileName, '.js')))
       .sort()
     : []
+  const storyChallengeMazeFileNames = challengeMazeFileNames.filter((fileName) =>
+    storyRuntimeMazeIdSet.has(path.basename(fileName, '.js'))
+  )
   const mazeIds = []
   const storyMazeIds = []
   const challengeMazeIds = []
@@ -230,9 +279,10 @@ async function main() {
     mazeIds.push(mazeId)
   }
 
-  const ensureMazeHasRuntimeLightmap = async (maze, mazeId) => {
+  const ensureMazeHasRuntimeLightmap = async (maze, mazeId, options = {}) => {
     const runtimePayloadPath = path.join(outputDirectory, `${mazeId}.json`)
     const sourceSignature = getMazeSignature(maze)
+    const shouldBakeMaze = bakeChallengeMazes || options.bakeLightmap === true
 
     if (maze.lightmap?.dataBase64) {
       return maze
@@ -264,14 +314,19 @@ async function main() {
           visibility: computeMazeCellVisibility(maze)
         }
 
-    if (!bakeChallengeMazes) {
+    if (!shouldBakeMaze) {
       return null
     }
 
     return {
       ...mazeWithVisibility,
       lightmap: await bakeMazeLightmap(mazeWithVisibility, undefined, {
-        forceCpu: bakeChallengeMazesCpu
+        forceCpu: bakeChallengeMazesCpu || bakeStoryLightingCpu,
+        indirectRayCount: bakeStoryLighting ? storyLightingIndirectRayCount : undefined,
+        gpuRenderTileSize: bakeStoryLighting ? storyLightingRenderTileSize : undefined,
+        wallTileHeight: bakeStoryLighting ? storyLightingWallTileSize : undefined,
+        wallTileWidth: bakeStoryLighting ? storyLightingWallTileSize : undefined,
+        onProgress: logLightmapProgress
       }),
       sourceSignature
     }
@@ -281,16 +336,41 @@ async function main() {
     authoredLevelIds.length +
     mazeFileNames.length +
     1 +
-    (bakeChallengeMazes ? challengeMazeFileNames.length : 0)
+    (bakeChallengeMazes
+      ? challengeMazeFileNames.length
+      : (bakeStoryLighting ? storyChallengeMazeFileNames.length : 0))
 
   for (let index = 0; index < authoredLevelIds.length; index += 1) {
     const authoredLevelId = authoredLevelIds[index]
-    const authoredMaze = await createAuthoredRuntimeMaze(authoredLevelId, { bakeLightmap: false })
+    const existingAuthoredMaze = bakeStoryLighting
+      ? loadPersistedAuthoredMaze(authoredLevelId)
+      : null
+    const unbakedAuthoredMaze = await createAuthoredRuntimeMaze(authoredLevelId, {
+      bakeLightmap: false
+    })
+    const authoredSourceSignature = unbakedAuthoredMaze
+      ? getMazeSignature(unbakedAuthoredMaze)
+      : null
+    const authoredMaze = isReusableGpuBakedMaze(existingAuthoredMaze, authoredSourceSignature)
+      ? existingAuthoredMaze
+      : await createAuthoredRuntimeMaze(authoredLevelId, {
+          bakeLightmap: bakeStoryLighting,
+          forceCpuLightmap: bakeStoryLightingCpu,
+          gpuRenderTileSize: storyLightingRenderTileSize,
+          indirectRayCount: storyLightingIndirectRayCount,
+          onLightmapProgress: logLightmapProgress,
+          wallTileHeight: storyLightingWallTileSize,
+          wallTileWidth: storyLightingWallTileSize
+        })
     const maze = authoredMaze
       ? {
           ...authoredMaze,
-          lightmap: createNeutralRuntimeLightmap(authoredMaze),
-          sourceSignature: `neutral-authored:${authoredLevelId}`
+          lightmap: bakeStoryLighting
+            ? authoredMaze.lightmap
+            : createNeutralRuntimeLightmap(authoredMaze),
+          sourceSignature: bakeStoryLighting
+            ? getMazeSignature(authoredMaze)
+            : `neutral-authored:${authoredLevelId}`
         }
       : null
 
@@ -331,7 +411,10 @@ async function main() {
         ...sourceMaze,
         id: mazeId
       },
-      mazeId
+      mazeId,
+      {
+        bakeLightmap: bakeStoryLighting && storyRuntimeMazeIdSet.has(mazeId)
+      }
     )
 
     if (!maze) {
@@ -353,31 +436,46 @@ async function main() {
     })
   }
 
-  const werewolfTutorial = await importMazeModule(
-    path.join(keeperChallengeSourceDirectory, 'werewolf-tutorial.js')
-  )
-  writeRuntimeMaze(
-    {
-      ...werewolfTutorial,
-      id: 'werewolf-tutorial',
-      lightmap: createNeutralRuntimeLightmap(werewolfTutorial),
-      sourceSignature: 'neutral-story:werewolf-tutorial'
-    },
-    'werewolf-tutorial',
-    authoredLevelIds.length + mazeFileNames.length + 1,
-    totalPayloads
-  )
-  storyMazeIds.push('werewolf-tutorial')
+  if (shouldSyncRuntimeId('werewolf-tutorial')) {
+    const werewolfTutorial = await importMazeModule(
+      path.join(keeperChallengeSourceDirectory, 'werewolf-tutorial.js')
+    )
+    const werewolfMaze = bakeStoryLighting
+      ? await ensureMazeHasRuntimeLightmap(
+          {
+            ...werewolfTutorial,
+            id: 'werewolf-tutorial'
+          },
+          'werewolf-tutorial',
+          { bakeLightmap: true }
+        )
+      : {
+          ...werewolfTutorial,
+          id: 'werewolf-tutorial',
+          lightmap: createNeutralRuntimeLightmap(werewolfTutorial),
+          sourceSignature: 'neutral-story:werewolf-tutorial'
+        }
 
-  fs.writeFileSync(
-    path.join(outputDirectory, 'index.json'),
-    JSON.stringify({
-      challengeMazeIds,
-      challenges,
-      mazeIds,
-      storyMazeIds
-    }, null, 2)
-  )
+    writeRuntimeMaze(
+      werewolfMaze,
+      'werewolf-tutorial',
+      authoredLevelIds.length + mazeFileNames.length + 1,
+      totalPayloads
+    )
+    storyMazeIds.push('werewolf-tutorial')
+  }
+
+  if (requestedSyncIds.size === 0) {
+    fs.writeFileSync(
+      path.join(outputDirectory, 'index.json'),
+      JSON.stringify({
+        challengeMazeIds,
+        challenges,
+        mazeIds,
+        storyMazeIds
+      }, null, 2)
+    )
+  }
 
   console.log(
     `[sync-maze-runtime-data] wrote ${mazeIds.length} maze payloads to ${outputDirectory}`

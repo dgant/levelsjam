@@ -1127,7 +1127,9 @@ void main() {
     gl.disable(gl.BLEND)
     gl.disable(gl.DEPTH_TEST)
     gl.enable(gl.SCISSOR_TEST)
-    const renderTileSize = 32
+    const renderTileSize = Number.isFinite(bakeJob.renderTileSize)
+      ? Math.max(1, Math.floor(bakeJob.renderTileSize))
+      : 32
 
     const toHalfFloat = (value) => {
       if (Number.isNaN(value)) {
@@ -1183,10 +1185,17 @@ void main() {
 
     const getModePasses = (mode) => {
       if (mode === 1) {
-        return [
-          { offset: 0, sequenceSampleCount: 64 },
-          { offset: 32, sequenceSampleCount: 64 }
-        ]
+        const indirectRayCount = Number.isFinite(bakeJob.indirectRayCount)
+          ? Math.max(1, Math.floor(bakeJob.indirectRayCount))
+          : 64
+        const passRayCount = 32
+        const passes = []
+
+        for (let offset = 0; offset < indirectRayCount; offset += passRayCount) {
+          passes.push({ offset, sequenceSampleCount: indirectRayCount })
+        }
+
+        return passes
       }
 
       if (mode === 4) {

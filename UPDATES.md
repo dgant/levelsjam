@@ -143,3 +143,4 @@
 - 2026-04-30: For challenge maze generation, log each rejected candidate's parameters, easy/hard rejection class, and difficulty score, then periodically use the accumulated data to adjust the parameter-selection heuristic.
 - Do not change authored post-process default settings unless the task is specifically to tune those defaults. Temporary post-process overrides for testing are allowed, but they must be applied at runtime or reverted before handoff or commit.
 - For agent browser checks, host the current repository on a private headless server using a non-5173 port and test only against that server. Do not use `localhost:5173`, because the human may run unrelated experiments there.
+- Monitor GPU utilization during offline lighting bakes and parallelize independent surface/probe workers when utilization and memory headroom remain low.

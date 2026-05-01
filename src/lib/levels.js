@@ -914,9 +914,22 @@ export async function createAuthoredRuntimeMaze(id, options = {}) {
   }
 
   const bakeLightmap = options.bakeLightmap === true
+  const forceCpuLightmap = options.forceCpuLightmap === true
+  const gpuRenderTileSize = Number.isFinite(options.gpuRenderTileSize)
+    ? options.gpuRenderTileSize
+    : undefined
+  const wallTileWidth = Number.isFinite(options.wallTileWidth)
+    ? options.wallTileWidth
+    : undefined
+  const wallTileHeight = Number.isFinite(options.wallTileHeight)
+    ? options.wallTileHeight
+    : undefined
+  const indirectRayCount = Number.isFinite(options.indirectRayCount)
+    ? options.indirectRayCount
+    : undefined
   const cached = authoredLevelMazeCache.get(id)
 
-  if (bakeLightmap && cached) {
+  if (bakeLightmap && cached && !forceCpuLightmap) {
     return {
       ...cached,
       levelConnections: (cached.levelConnections ?? []).map((connection) => ({
@@ -938,7 +951,14 @@ export async function createAuthoredRuntimeMaze(id, options = {}) {
 
   maze.visibility = computeMazeCellVisibility(maze)
   if (bakeLightmap) {
-    maze.lightmap = await bakeMazeLightmap(maze)
+    maze.lightmap = await bakeMazeLightmap(maze, undefined, {
+      forceCpu: forceCpuLightmap,
+      gpuRenderTileSize,
+      indirectRayCount,
+      wallTileHeight,
+      wallTileWidth,
+      onProgress: options.onLightmapProgress
+    })
     authoredLevelMazeCache.set(id, maze)
   }
 

@@ -22,6 +22,7 @@ import {
   WALL_WIDTH
 } from '../src/lib/sceneConstants.js'
 import { getDebugMazeLayoutById } from '../src/lib/debugMazeLayouts.js'
+import { getStoryRuntimeMazeIds } from '../src/lib/levels.js'
 import { decodeRgbE8 } from '../src/lib/probeSphericalHarmonics.js'
 
 const mazeDirectory = path.join(process.cwd(), 'src', 'data', 'mazes')
@@ -122,6 +123,7 @@ test('builds a scene layout from a persisted maze with walls, lights, probes, an
 test('runtime reflection-probe manifests match their maze dimensions', () => {
   const runtimeMazeDirectory = path.join(process.cwd(), 'public', 'maze-data')
   const mazeFiles = fs.readdirSync(runtimeMazeDirectory).filter((fileName) => /^.+\.json$/.test(fileName) && fileName !== 'index.json')
+  const storyRuntimeMazeIds = new Set(getStoryRuntimeMazeIds())
 
   for (const fileName of mazeFiles) {
     const maze = JSON.parse(
@@ -131,7 +133,7 @@ test('runtime reflection-probe manifests match their maze dimensions', () => {
       fs.readFileSync(path.join(runtimeMazeDirectory, maze.id, 'probe-assets.json'), 'utf8')
     )
     const expectedProbeCount = maze.width * maze.height
-    const isChallengePlaytestMaze = maze.id.startsWith('challenge-')
+    const isChallengePlaytestMaze = maze.id.startsWith('challenge-') && !storyRuntimeMazeIds.has(maze.id)
     const isNeutralMaze = maze.sourceSignature?.startsWith('neutral-')
 
     if (isChallengePlaytestMaze || isNeutralMaze) {
