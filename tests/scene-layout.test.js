@@ -132,17 +132,18 @@ test('runtime reflection-probe manifests match their maze dimensions', () => {
     )
     const expectedProbeCount = maze.width * maze.height
     const isChallengePlaytestMaze = maze.id.startsWith('challenge-')
+    const isNeutralMaze = maze.sourceSignature?.startsWith('neutral-')
 
-    if (isChallengePlaytestMaze) {
+    if (isChallengePlaytestMaze || isNeutralMaze) {
       assert.equal(
         manifest.probes.length,
         0,
-        `${maze.id} playtest probe asset manifest should use the empty placeholder manifest`
+        `${maze.id} probe asset manifest should use the empty placeholder manifest`
       )
       assert.equal(
         manifest.probeCount,
         0,
-        `${maze.id} playtest manifest probeCount should use the empty placeholder manifest`
+        `${maze.id} manifest probeCount should use the empty placeholder manifest`
       )
       continue
     }

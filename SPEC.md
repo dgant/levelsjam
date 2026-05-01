@@ -15,7 +15,13 @@
 - If a requested maze cannot be loaded, the runtime fails that request explicitly instead of swapping to another maze.
 - `LEVELS.md` is the plain-English source for the authored level order.
 - The runtime parses `LEVELS.md` into an ordered level list using each `+ Level Name` heading as one selectable level entry and the following prose as that level's description.
-- Authored levels named `Entrance` and `Chamber 1` are real runtime levels rather than aliases for numbered maze payloads.
+- Authored non-maze levels named `Entrance`, `Hallway 1-1`, `Hallway 1-2`, `Hallway 1-3`, `Hallway 1-4`, `Hallway 1-5`, `Chamber 1`, `Chamber 2`, and `Throne Room` are real runtime levels rather than aliases for numbered maze payloads.
+- The core story progression starts at `Entrance`, proceeds through the five hallway levels, then `Chamber 1`, `Chamber 2`, and ends in `Throne Room`.
+- Story mazes connected from chambers use their recorded maze solutions unchanged; completing a chamber requires solving every connected story maze, returning each trophy to its chamber altar, and leaving through the chamber's north exit.
+- `Chamber 1` connects to `challenge-028`, `challenge-031`, `challenge-059`, and `challenge-036`.
+- `Chamber 2` connects to `werewolf-tutorial`, `challenge-098`, `challenge-095`, `challenge-043`, `challenge-040`, and `challenge-100`.
+- Beating the game requires lighting the altar in the `Throne Room`.
+- After the `Throne Room` altar animation completes, the runtime shows a final black thank-you credits screen.
 - Selecting a level through the runtime menu resets that level's character and maze state before placing the player at that level's entrance.
 - The game begins in the authored `Entrance` level.
 - Player movement through an authored level exit transitions seamlessly into the connected level without fading, showing a loading transition, or exposing the boundary between levels.

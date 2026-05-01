@@ -15,8 +15,8 @@ test('challenge playtest levels use isolated runtime state and are not restored 
 
   assert.match(
     appSource,
-    /function isChallengeRuntimeLevelId\(id: string \| null \| undefined\)/,
-    'challenge runtime level detection should be explicit'
+    /function isChallengeRuntimeLevelId\(id: string \| null \| undefined\)[\s\S]*!getStoryMazeParentLevelId\(id\)/,
+    'challenge runtime level detection should be explicit and should exclude story mazes'
   )
   assert.match(
     appSource,

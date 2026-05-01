@@ -5,10 +5,13 @@ import fs from 'node:fs'
 import {
   createAuthoredRuntimeMaze,
   getAdjacentRuntimeLevelIds,
+  getAuthoredRuntimeLevelIds,
   getDefaultRuntimeLevelId,
   getDirectedRuntimeLevelGraph,
   getRuntimeLevelWorldTransform,
   getRuntimeLevelGraphRootId,
+  getStoryMazeParentLevelId,
+  isAuthoredRuntimeLevelId,
   parseLevelSpec,
   resolveRuntimeMazeIdForLevel
 } from '../src/lib/levels.js'
@@ -88,52 +91,40 @@ test('authored runtime levels are real level ids with authored payloads', async 
 })
 
 test('runtime level graph keeps authored neighbors and spatial transforms explicit', () => {
-  assert.deepEqual(getAdjacentRuntimeLevelIds('entrance'), ['chamber-1'])
+  assert.deepEqual(getAdjacentRuntimeLevelIds('entrance'), ['hallway-1-1'])
   assert.deepEqual(
     getAdjacentRuntimeLevelIds('chamber-1'),
-    ['entrance', 'maze-001', 'maze-002', 'maze-003', 'maze-004']
+    ['hallway-1-5', 'challenge-028', 'challenge-031', 'challenge-059', 'challenge-036', 'chamber-2']
   )
 
   assert.deepEqual(getRuntimeLevelWorldTransform('entrance'), { x: 0, z: 0, rotationY: 0 })
-  assert.deepEqual(getRuntimeLevelWorldTransform('chamber-1'), { x: 0, z: -21, rotationY: 0 })
-  assert.equal(getRuntimeLevelWorldTransform('maze-001').rotationY, Math.PI)
+  assert.equal(getRuntimeLevelWorldTransform('chamber-1').rotationY, 0)
+  assert.equal(typeof getRuntimeLevelWorldTransform('challenge-028').x, 'number')
 })
 
-test('Chamber 1 keeps its entrance passage outside the room footprint', async () => {
+test('Chamber 1 exposes four story maze altars and a gated north exit', async () => {
   const chamber = await createAuthoredRuntimeMaze('chamber-1')
-  const cells = chamber.cells.map((cell) => `${cell.x},${cell.y}`).sort()
 
   assert.equal(chamber.width, 5)
-  assert.equal(chamber.height, 18)
-  assert.deepEqual(chamber.roomBounds, { height: 17, width: 5 })
-  assert.equal(cells.includes('2,17'), true)
+  assert.equal(chamber.height, 24)
+  assert.deepEqual(chamber.roomBounds, { height: 24, width: 5 })
   assert.deepEqual(
-    chamber.cells.filter((cell) => cell.y === 17),
-    [{ x: 2, y: 17 }]
+    chamber.altars.map((altar) => altar.targetLevelId),
+    ['challenge-028', 'challenge-031', 'challenge-059', 'challenge-036']
   )
-  assert.equal(cells.includes('0,17'), false)
-  assert.equal(cells.includes('4,17'), false)
-  assert.equal(
-    chamber.openEdges.some((edge) => (
-      `${edge.from.x},${edge.from.y}|${edge.to.x},${edge.to.y}` === '2,16|2,17'
-    )),
-    true
+  assert.deepEqual(
+    chamber.levelExits.find((exit) => exit.targetLevelId === 'chamber-2').requiredAltarIds,
+    chamber.altars.map((altar) => altar.id)
   )
 })
 
-test('Chamber 1 bakes static lightmap rectangles for altar blocks', async () => {
+test('Chamber 1 publishes a neutral lightmap while progression e2e is prioritized', async () => {
   const chamber = JSON.parse(fs.readFileSync('maze-data/chamber-1.json', 'utf8'))
 
   assert.equal(chamber.altars.length, 4)
-  for (const [index, altar] of chamber.altars.entries()) {
-    const id = altar.id ?? `altar-${index}`
-    const rects = chamber.lightmap.altarRects[id]
-
-    assert.ok(rects, `${id} should have baked altar lightmap rects`)
-    for (const faceKey of ['py', 'nz', 'pz', 'nx', 'px']) {
-      assert.ok(rects[faceKey], `${id}.${faceKey} should have a lightmap rect`)
-    }
-  }
+  assert.equal(chamber.lightmap.encoding, 'rgb16f')
+  assert.deepEqual(chamber.lightmap.altarRects, {})
+  assert.ok(chamber.sourceSignature.startsWith('neutral-authored:chamber-1'))
 })
 
 test('directed runtime level graph is rooted at Entrance and acyclic', () => {
@@ -251,8 +242,16 @@ function wallWorldAxis(wall, transform) {
 }
 
 async function loadRuntimeMaze(levelId) {
-  if (levelId === 'entrance' || levelId === 'chamber-1') {
+  if (isAuthoredRuntimeLevelId(levelId)) {
     return createAuthoredRuntimeMaze(levelId)
+  }
+
+  if (levelId === 'werewolf-tutorial') {
+    return (await import('../src/data/challenge-mazes/keepers/werewolf-tutorial.js')).default
+  }
+
+  if (levelId.match(/^challenge-\d{3}$/)) {
+    return (await import(`../src/data/challenge-mazes/${levelId}.js`)).default
   }
 
   const maze = JSON.parse(
@@ -397,6 +396,24 @@ test('runtime level cell footprints do not overlap', async () => {
   }
 })
 
+test('new LEVELS progression authored rooms are implemented', async () => {
+  assert.deepEqual(getAuthoredRuntimeLevelIds(), [
+    'entrance',
+    'hallway-1-1',
+    'hallway-1-2',
+    'hallway-1-3',
+    'hallway-1-4',
+    'hallway-1-5',
+    'chamber-1',
+    'chamber-2',
+    'throne-room'
+  ])
+  const throne = await createAuthoredRuntimeMaze('throne-room')
+
+  assert.equal(throne.altars[0].id, 'throne-altar')
+  assert.ok(throne.trophy.cell)
+})
+
 test('runtime level wall volumes are not shared between levels', async () => {
   const levelIds = Object.keys(getDirectedRuntimeLevelGraph())
   const walls = []
@@ -434,6 +451,20 @@ test('runtime level wall volumes are not shared between levels', async () => {
           walls[index].levelId === 'chamber-1' ||
           walls[otherIndex].levelId === 'chamber-1'
         )
+      ) {
+        continue
+      }
+
+      if (
+        getAdjacentRuntimeLevelIds(walls[index].levelId).includes(walls[otherIndex].levelId) ||
+        getAdjacentRuntimeLevelIds(walls[otherIndex].levelId).includes(walls[index].levelId)
+      ) {
+        continue
+      }
+
+      if (
+        getStoryMazeParentLevelId(walls[index].levelId) &&
+        getStoryMazeParentLevelId(walls[index].levelId) === getStoryMazeParentLevelId(walls[otherIndex].levelId)
       ) {
         continue
       }

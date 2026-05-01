@@ -1,5 +1,9 @@
 const { defineConfig } = require('@playwright/test')
 
+const port = Number(process.env.PLAYWRIGHT_PORT ?? 42731)
+const host = process.env.PLAYWRIGHT_HOST ?? '127.0.0.1'
+const baseURL = `http://${host}:${port}`
+
 module.exports = defineConfig({
   testDir: './tests',
   testMatch: /.*\.spec\.cjs$/,
@@ -9,7 +13,7 @@ module.exports = defineConfig({
   ],
   timeout: 30_000,
   use: {
-    baseURL: 'http://127.0.0.1:42731',
+    baseURL,
     headless: true,
     launchOptions: {
       args: [
@@ -24,8 +28,8 @@ module.exports = defineConfig({
     viewport: { width: 800, height: 450 }
   },
   webServer: {
-    command: 'node scripts/serve-root.cjs 42731',
-    port: 42731,
+    command: `node scripts/serve-root.cjs ${port}`,
+    port,
     reuseExistingServer: false,
     timeout: 120_000
   }

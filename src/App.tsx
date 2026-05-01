@@ -118,6 +118,7 @@ import {
   getDefaultRuntimeLevelId,
   getLatestDirectedNonMazeLevelId,
   getRuntimeLevelWorldTransform,
+  getStoryMazeParentLevelId,
   parseLevelSpec,
   resolveRuntimeMazeIdForLevel,
   type AuthoredLevel
@@ -18166,6 +18167,10 @@ function FlightRig({
           cell: { x: number; y: number },
           direction?: CardinalDirection
         ) => boolean
+        setDebugPlayerCell?: (
+          cell: { x: number; y: number },
+          direction?: CardinalDirection
+        ) => boolean
         getCameraState?: () => {
           pitch: number
           position: [number, number, number]
@@ -18748,6 +18753,29 @@ function FlightRig({
         setTurnState(nextState)
         return true
       },
+      setDebugPlayerCell: (cell, direction) => {
+        const nextState: TurnState = {
+          ...turnStateRef.current,
+          checkpoint: {
+            cell: { ...turnStateRef.current.checkpoint.cell },
+            direction: turnStateRef.current.checkpoint.direction
+          },
+          monsters: turnStateRef.current.monsters.map((monster) => ({
+            ...monster,
+            cell: { ...monster.cell },
+            lastPath: [...(monster.lastPath ?? [])]
+          })),
+          player: {
+            ...turnStateRef.current.player,
+            cell: { x: cell.x, y: cell.y },
+            direction: direction ?? turnStateRef.current.player.direction
+          }
+        }
+
+        turnStateRef.current = nextState
+        setTurnState(nextState)
+        return true
+      },
       getCameraState: () => ({
         pitch: pitch.current,
         position: [
@@ -18807,6 +18835,7 @@ function FlightRig({
       delete globalWindow.__levelsjamDebug.getTurnStateSummary
       delete globalWindow.__levelsjamDebug.getReplayControllerState
       delete globalWindow.__levelsjamDebug.setDebugMonsterCell
+      delete globalWindow.__levelsjamDebug.setDebugPlayerCell
       delete globalWindow.__levelsjamDebug.getCameraState
       delete globalWindow.__levelsjamDebug.setAnimationSpeedMultiplier
       delete globalWindow.__levelsjamDebug.getDebugProgramUniformState
@@ -24168,8 +24197,10 @@ function SfxLibraryManager({
 }
 
 function CreditsModal({
+  final = false,
   open
 }: {
+  final?: boolean
   open: boolean
 }) {
   if (!open) {
@@ -24179,7 +24210,12 @@ function CreditsModal({
   return (
     <div className="credits-modal" role="dialog" aria-modal="true" aria-label="Credits">
       <div className="credits-panel">
-        <h2>Credits</h2>
+        <h2>{final ? 'Thank you for playing.' : 'Credits'}</h2>
+        {final ? (
+          <p>
+            <a href="https://x.com/dgant">https://x.com/dgant</a>
+          </p>
+        ) : null}
         <p>
           "Minotaur" (<a href="https://skfb.ly/6TK77">https://skfb.ly/6TK77</a>) by yanbelmont is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
         </p>
@@ -24708,7 +24744,11 @@ function directionFromCellToCell(
 }
 
 function isChallengeRuntimeLevelId(id: string | null | undefined) {
-  return typeof id === 'string' && id.startsWith('challenge-')
+  return (
+    typeof id === 'string' &&
+    id.startsWith('challenge-') &&
+    !getStoryMazeParentLevelId(id)
+  )
 }
 
 function AltarCutsceneOverlay({
@@ -24727,6 +24767,7 @@ function AltarCutsceneOverlay({
 export default function App() {
   const [controlsOpen, setControlsOpen] = useState(false)
   const [creditsOpen, setCreditsOpen] = useState(false)
+  const [gameComplete, setGameComplete] = useState(false)
   const [levelMenuOpen, setLevelMenuOpen] = useState(false)
   const [fps, setFps] = useState(0)
   const [overlayVisible, setOverlayVisible] = useState(true)
@@ -25457,8 +25498,13 @@ export default function App() {
             rendererTextures: number
           }
         }
+        setGlobalDebugPlayerCell?: (
+          cell: { x: number; y: number },
+          direction?: CardinalDirection
+        ) => boolean
         instantiateMaze?: (id: string) => boolean
         loadMazeData?: (id: string) => Promise<boolean>
+        offerHeldTrophyToAdjacentAltar?: () => boolean
         resetMaze?: () => boolean
         startSolutionReplay?: () => boolean
         uninstantiateMaze?: () => boolean
@@ -25523,6 +25569,38 @@ export default function App() {
         current: readCurrentMemory(),
         highWater: { ...memoryHighWaterRef.current }
       }),
+      setGlobalDebugPlayerCell: (cell, direction) => {
+        const activeLevelId = instantiatedMazeId ?? globalTurnStateRef.current?.activeLevelId ?? mazeLayout?.maze.id ?? null
+        const activeLayout = activeLevelId
+          ? loadedMazeLayoutsRef.current.get(activeLevelId) ?? mazeLayout
+          : mazeLayout
+
+        if (!activeLayout) {
+          return false
+        }
+
+        setGlobalTurnState((current) => {
+          if (!current) {
+            return current
+          }
+
+          const levelTurnState = getGlobalTurnStateForLevel(
+            current,
+            activeLayout.maze.id,
+            activeLayout.maze
+          )
+
+          return replaceGlobalTurnStateForLevel(current, activeLayout.maze.id, {
+            ...levelTurnState,
+            player: {
+              ...levelTurnState.player,
+              cell: { x: cell.x, y: cell.y },
+              direction: direction ?? levelTurnState.player.direction
+            }
+          })
+        }, { transition: false })
+        return true
+      },
       instantiateMaze: (id) => {
         instantiateLoadedMaze(id)
         return true
@@ -25535,6 +25613,93 @@ export default function App() {
         }
 
         loadedMazeLayoutsRef.current.set(id, layout)
+        setGlobalTurnState((current) => current
+          ? ensureGlobalTurnStateLevels(current, [layout])
+          : current
+        , { transition: false })
+        updateRenderedMazeLayouts(instantiatedMazeId ?? id)
+        return true
+      },
+      offerHeldTrophyToAdjacentAltar: () => {
+        const activeLevelId = instantiatedMazeId ?? globalTurnStateRef.current?.activeLevelId ?? mazeLayout?.maze.id ?? null
+        const activeLayout = activeLevelId
+          ? loadedMazeLayoutsRef.current.get(activeLevelId) ?? mazeLayout
+          : mazeLayout
+
+        if (!activeLayout || !globalTurnStateRef.current) {
+          return false
+        }
+
+        const levelTurnState = getGlobalTurnStateForLevel(
+          globalTurnStateRef.current,
+          activeLayout.maze.id,
+          activeLayout.maze
+        )
+
+        const unlitAltars = (activeLayout.maze.altars ?? []).filter((candidate) =>
+          !activatedAltarIds.has(candidate.id)
+        )
+        const altar = unlitAltars.find((candidate) =>
+          !activatedAltarIds.has(candidate.id) &&
+          areCellsCardinallyAdjacent(levelTurnState.player.cell, candidate.cell)
+        ) ?? unlitAltars[0]
+
+        if (!altar) {
+          return false
+        }
+
+        const facingDirection = directionFromCellToCell(levelTurnState.player.cell, altar.cell)
+
+        setGlobalTurnState((current) => {
+          if (!current) {
+            return current
+          }
+
+          const currentTurnState = getGlobalTurnStateForLevel(
+            current,
+            activeLayout.maze.id,
+            activeLayout.maze
+          )
+          const nextGlobalState = replaceGlobalTurnStateForLevel(current, activeLayout.maze.id, {
+            ...currentTurnState,
+            player: {
+              ...currentTurnState.player,
+              ...(facingDirection ? { direction: facingDirection } : {}),
+              hasTrophy: false
+            },
+            trophyState: 'consumed'
+          })
+          const nextItemStates = { ...(nextGlobalState.worldTurnState.itemStates ?? {}) }
+
+          for (const [itemId, itemState] of Object.entries(nextItemStates)) {
+            if (itemState === 'held' && itemId.endsWith(':trophy')) {
+              nextItemStates[itemId] = 'consumed'
+            }
+          }
+
+          return {
+            ...nextGlobalState,
+            player: {
+              ...nextGlobalState.player,
+              hasTrophy: false
+            },
+            worldTurnState: {
+              ...nextGlobalState.worldTurnState,
+              itemStates: nextItemStates,
+              player: {
+                ...nextGlobalState.worldTurnState.player,
+                hasTrophy: false
+              }
+            }
+          }
+        })
+        document.body.dataset.altarCutsceneActive = 'true'
+        document.body.dataset.altarCutsceneStartedAt = performance.now().toFixed(1)
+        setAltarCutscene({
+          altarId: altar.id,
+          levelId: activeLayout.maze.id,
+          startedAt: Number(document.body.dataset.altarCutsceneStartedAt)
+        })
         return true
       },
       resetMaze: () => {
@@ -25573,8 +25738,10 @@ export default function App() {
 
       delete globalWindow.__levelsjamDebug.getMazeLifecycleState
       delete globalWindow.__levelsjamDebug.getRuntimeMemoryHighWater
+      delete globalWindow.__levelsjamDebug.setGlobalDebugPlayerCell
       delete globalWindow.__levelsjamDebug.instantiateMaze
       delete globalWindow.__levelsjamDebug.loadMazeData
+      delete globalWindow.__levelsjamDebug.offerHeldTrophyToAdjacentAltar
       delete globalWindow.__levelsjamDebug.resetMaze
       delete globalWindow.__levelsjamDebug.startSolutionReplay
       delete globalWindow.__levelsjamDebug.uninstantiateMaze
@@ -25583,7 +25750,16 @@ export default function App() {
         delete globalWindow.__levelsjamDebug
       }
     }
-  }, [instantiatedMazeId, mazeLoadError, replayActive, renderedMazeLayouts, sceneLoaded, mazeLayout])
+  }, [
+    instantiatedMazeId,
+    mazeLoadError,
+    replayActive,
+    renderedMazeLayouts,
+    sceneLoaded,
+    mazeLayout,
+    setGlobalTurnState,
+    updateRenderedMazeLayouts
+  ])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -26309,6 +26485,9 @@ export default function App() {
         next.add(altarCutscene.altarId)
         return next
       })
+      if (levelId === 'throne-room' && altarCutscene.altarId === 'throne-altar') {
+        setGameComplete(true)
+      }
       if (layoutForCutscene) {
         setGlobalTurnState((current) => {
           if (!current) {
@@ -26442,7 +26621,7 @@ export default function App() {
       ) : null}
       <LoadingOverlay complete={sceneLoaded} />
       <AltarCutsceneOverlay active={activeAltarCutscene} />
-          <CreditsModal open={creditsOpen} />
+          <CreditsModal final={gameComplete} open={creditsOpen || gameComplete} />
           <MusicManager
             enabled={sceneLoaded}
             levelId={activeMusicLevelId}

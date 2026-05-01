@@ -3,18 +3,27 @@
   "challenges": [],
   "mazeIds": [
     "entrance",
+    "hallway-1-1",
+    "hallway-1-2",
+    "hallway-1-3",
+    "hallway-1-4",
+    "hallway-1-5",
     "chamber-1",
+    "chamber-2",
+    "throne-room",
     "maze-001",
     "maze-002",
     "maze-003",
     "maze-004",
-    "maze-005"
+    "maze-005",
+    "werewolf-tutorial"
   ],
   "storyMazeIds": [
     "maze-001",
     "maze-002",
     "maze-003",
     "maze-004",
-    "maze-005"
+    "maze-005",
+    "werewolf-tutorial"
   ]
 }

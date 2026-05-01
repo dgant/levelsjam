@@ -1,8 +1,23 @@
 import { bakeMazeLightmap, computeMazeCellVisibility } from './maze.js'
 
+const CARDINAL_SIDES = ['north', 'east', 'south', 'west']
+const DELTAS = {
+  east: { x: 1, y: 0 },
+  north: { x: 0, y: -1 },
+  south: { x: 0, y: 1 },
+  west: { x: -1, y: 0 }
+}
+
 const AUTHORED_LEVEL_IDS = Object.freeze({
   Entrance: 'entrance',
-  'Chamber 1': 'chamber-1'
+  'Hallway 1-1': 'hallway-1-1',
+  'Hallway 1-2': 'hallway-1-2',
+  'Hallway 1-3': 'hallway-1-3',
+  'Hallway 1-4': 'hallway-1-4',
+  'Hallway 1-5': 'hallway-1-5',
+  'Chamber 1': 'chamber-1',
+  'Chamber 2': 'chamber-2',
+  'Throne Room': 'throne-room'
 })
 
 const AUTHORED_LEVEL_NAMES = Object.freeze(
@@ -11,34 +26,238 @@ const AUTHORED_LEVEL_NAMES = Object.freeze(
   )
 )
 
+export const STORY_MAZE_PARENT_LEVEL_IDS = Object.freeze({
+  'challenge-028': 'chamber-1',
+  'challenge-031': 'chamber-1',
+  'challenge-059': 'chamber-1',
+  'challenge-036': 'chamber-1',
+  'werewolf-tutorial': 'chamber-2',
+  'challenge-098': 'chamber-2',
+  'challenge-095': 'chamber-2',
+  'challenge-043': 'chamber-2',
+  'challenge-040': 'chamber-2',
+  'challenge-100': 'chamber-2'
+})
+
+const CHAMBER_1_MAZES = ['challenge-028', 'challenge-031', 'challenge-059', 'challenge-036']
+const CHAMBER_2_MAZES = [
+  'werewolf-tutorial',
+  'challenge-098',
+  'challenge-095',
+  'challenge-043',
+  'challenge-040',
+  'challenge-100'
+]
+
 const RUNTIME_LEVEL_GRAPH = Object.freeze({
-  entrance: ['chamber-1'],
-  'chamber-1': ['maze-001', 'maze-002', 'maze-003', 'maze-004'],
-  'maze-001': [],
-  'maze-002': [],
-  'maze-003': [],
-  'maze-004': []
+  entrance: ['hallway-1-1'],
+  'hallway-1-1': ['hallway-1-2'],
+  'hallway-1-2': ['hallway-1-3'],
+  'hallway-1-3': ['hallway-1-4'],
+  'hallway-1-4': ['hallway-1-5'],
+  'hallway-1-5': ['chamber-1'],
+  'chamber-1': [...CHAMBER_1_MAZES, 'chamber-2'],
+  'challenge-028': [],
+  'challenge-031': [],
+  'challenge-059': [],
+  'challenge-036': [],
+  'chamber-2': [...CHAMBER_2_MAZES, 'throne-room'],
+  'werewolf-tutorial': [],
+  'challenge-098': [],
+  'challenge-095': [],
+  'challenge-043': [],
+  'challenge-040': [],
+  'challenge-100': [],
+  'throne-room': []
 })
 
 const RUNTIME_LEVEL_ADJACENCY = Object.freeze({
-  entrance: ['chamber-1'],
-  'chamber-1': ['entrance', 'maze-001', 'maze-002', 'maze-003', 'maze-004'],
-  'maze-001': ['chamber-1'],
-  'maze-002': ['chamber-1'],
-  'maze-003': ['chamber-1'],
-  'maze-004': ['chamber-1']
+  entrance: ['hallway-1-1'],
+  'hallway-1-1': ['entrance', 'hallway-1-2'],
+  'hallway-1-2': ['hallway-1-1', 'hallway-1-3'],
+  'hallway-1-3': ['hallway-1-2', 'hallway-1-4'],
+  'hallway-1-4': ['hallway-1-3', 'hallway-1-5'],
+  'hallway-1-5': ['hallway-1-4', 'chamber-1'],
+  'chamber-1': ['hallway-1-5', ...CHAMBER_1_MAZES, 'chamber-2'],
+  'challenge-028': ['chamber-1'],
+  'challenge-031': ['chamber-1'],
+  'challenge-059': ['chamber-1'],
+  'challenge-036': ['chamber-1'],
+  'chamber-2': ['chamber-1', ...CHAMBER_2_MAZES, 'throne-room'],
+  'werewolf-tutorial': ['chamber-2'],
+  'challenge-098': ['chamber-2'],
+  'challenge-095': ['chamber-2'],
+  'challenge-043': ['chamber-2'],
+  'challenge-040': ['chamber-2'],
+  'challenge-100': ['chamber-2'],
+  'throne-room': ['chamber-2']
 })
 
-const RUNTIME_LEVEL_WORLD_TRANSFORMS = Object.freeze({
-  entrance: { x: 0, z: 0, rotationY: 0 },
-  'chamber-1': { x: 0, z: -21, rotationY: 0 },
-  'maze-001': { x: -12, z: -28, rotationY: Math.PI },
-  'maze-002': { x: -12, z: -10, rotationY: Math.PI },
-  'maze-003': { x: 12, z: -30, rotationY: 0 },
-  'maze-004': { x: 12, z: -12, rotationY: 0 }
+const STORY_MAZE_SPECS = Object.freeze({
+  'challenge-028': { height: 5, opening: { cell: { x: 0, y: 0 }, side: 'north' }, width: 3 },
+  'challenge-031': { height: 6, opening: { cell: { x: 0, y: 1 }, side: 'west' }, width: 3 },
+  'challenge-059': { height: 5, opening: { cell: { x: 0, y: 2 }, side: 'west' }, width: 3 },
+  'challenge-036': { height: 7, opening: { cell: { x: 2, y: 1 }, side: 'east' }, width: 3 },
+  'werewolf-tutorial': { height: 3, opening: { cell: { x: 1, y: 0 }, side: 'north' }, width: 8 },
+  'challenge-098': { height: 4, opening: { cell: { x: 5, y: 0 }, side: 'north' }, width: 6 },
+  'challenge-095': { height: 7, opening: { cell: { x: 1, y: 0 }, side: 'north' }, width: 6 },
+  'challenge-043': { height: 6, opening: { cell: { x: 2, y: 0 }, side: 'north' }, width: 3 },
+  'challenge-040': { height: 5, opening: { cell: { x: 2, y: 2 }, side: 'east' }, width: 3 },
+  'challenge-100': { height: 6, opening: { cell: { x: 4, y: 2 }, side: 'east' }, width: 5 }
 })
 
 const authoredLevelMazeCache = new Map()
+
+function sideAfterRotation(side, rotationY) {
+  const quarterTurns = ((Math.round(rotationY / (Math.PI / 2)) % 4) + 4) % 4
+  const index = CARDINAL_SIDES.indexOf(side)
+
+  return CARDINAL_SIDES[(index - quarterTurns + CARDINAL_SIDES.length) % CARDINAL_SIDES.length]
+}
+
+function rotationForWorldSide(localSide, worldSide) {
+  const localIndex = CARDINAL_SIDES.indexOf(localSide)
+  const worldIndex = CARDINAL_SIDES.indexOf(worldSide)
+  const quarterTurns = (localIndex - worldIndex + CARDINAL_SIDES.length) % CARDINAL_SIDES.length
+
+  return quarterTurns * (Math.PI / 2)
+}
+
+function getNeighbor(cell, side) {
+  const delta = DELTAS[side]
+
+  return { x: cell.x + delta.x, y: cell.y + delta.y }
+}
+
+function localCellCenter(width, height, cell) {
+  return {
+    x: -width + 1 + (cell.x * 2),
+    z: -height + 1 + (cell.y * 2)
+  }
+}
+
+function localCellToWorldCell(maze, transform, cell) {
+  const point = localCellCenter(maze.width, maze.height, cell)
+  const cos = Math.cos(transform.rotationY)
+  const sin = Math.sin(transform.rotationY)
+
+  return {
+    x: Math.round((transform.x + (point.x * cos) + (point.z * sin)) / 2),
+    y: Math.round((transform.z - (point.x * sin) + (point.z * cos)) / 2)
+  }
+}
+
+function transformForLocalCellAtWorldCell(width, height, localCell, worldCell, rotationY = 0) {
+  const point = localCellCenter(width, height, localCell)
+  const cos = Math.cos(rotationY)
+  const sin = Math.sin(rotationY)
+
+  return {
+    rotationY,
+    x: (worldCell.x * 2) - ((point.x * cos) + (point.z * sin)),
+    z: (worldCell.y * 2) - ((-point.x * sin) + (point.z * cos))
+  }
+}
+
+function transformForMazeConnection(spec, chamberMaze, chamberTransform, exit) {
+  const openingWorldSide = {
+    east: 'west',
+    north: 'south',
+    south: 'north',
+    west: 'east'
+  }[exit.side]
+  const rotationY = rotationForWorldSide(spec.opening.side, openingWorldSide)
+  const chamberExitCell = localCellToWorldCell(chamberMaze, chamberTransform, exit.cell)
+  const mazeOpeningWorldCell = getNeighbor(chamberExitCell, exit.side)
+
+  return transformForLocalCellAtWorldCell(
+    spec.width,
+    spec.height,
+    spec.opening.cell,
+    mazeOpeningWorldCell,
+    rotationY
+  )
+}
+
+function createLineTransform(index) {
+  return transformForLocalCellAtWorldCell(
+    3,
+    3,
+    { x: 1, y: 2 },
+    { x: 0, y: index === 0 ? 1 : 1 - (index * 3) },
+    0
+  )
+}
+
+function createChamberTransform(chamberMaze, entryWorldCell) {
+  return transformForLocalCellAtWorldCell(
+    chamberMaze.width,
+    chamberMaze.height,
+    chamberMaze.playerStart.cell,
+    entryWorldCell,
+    0
+  )
+}
+
+function createRuntimeTransforms() {
+  const transforms = {
+    entrance: createLineTransform(0),
+    'hallway-1-1': createLineTransform(1),
+    'hallway-1-2': createLineTransform(2),
+    'hallway-1-3': createLineTransform(3),
+    'hallway-1-4': createLineTransform(4),
+    'hallway-1-5': createLineTransform(5)
+  }
+  const hallway5 = createSimpleHallwayMaze('hallway-1-5', 'hallway-1-4', 'chamber-1')
+  const chamber1Entry = localCellToWorldCell(
+    hallway5,
+    transforms['hallway-1-5'],
+    { x: 1, y: -1 }
+  )
+  const chamber1 = createChamberMazeDefinition(
+    'chamber-1',
+    'hallway-1-5',
+    'chamber-2',
+    CHAMBER_1_MAZES,
+    4
+  )
+
+  transforms['chamber-1'] = createChamberTransform(chamber1, chamber1Entry)
+  for (const exit of chamber1.levelExits.filter((candidate) => STORY_MAZE_SPECS[candidate.targetLevelId])) {
+    transforms[exit.targetLevelId] = transformForMazeConnection(
+      STORY_MAZE_SPECS[exit.targetLevelId],
+      chamber1,
+      transforms['chamber-1'],
+      exit
+    )
+  }
+
+  const chamber2Entry = localCellToWorldCell(chamber1, transforms['chamber-1'], { x: 2, y: -1 })
+  const chamber2 = createChamberMazeDefinition(
+    'chamber-2',
+    'chamber-1',
+    'throne-room',
+    CHAMBER_2_MAZES,
+    6
+  )
+
+  transforms['chamber-2'] = createChamberTransform(chamber2, chamber2Entry)
+  for (const exit of chamber2.levelExits.filter((candidate) => STORY_MAZE_SPECS[candidate.targetLevelId])) {
+    transforms[exit.targetLevelId] = transformForMazeConnection(
+      STORY_MAZE_SPECS[exit.targetLevelId],
+      chamber2,
+      transforms['chamber-2'],
+      exit
+    )
+  }
+
+  const throneEntry = localCellToWorldCell(chamber2, transforms['chamber-2'], { x: 2, y: -1 })
+
+  transforms['throne-room'] = transformForLocalCellAtWorldCell(5, 8, { x: 2, y: 7 }, throneEntry, 0)
+  return Object.freeze(transforms)
+}
+
+const RUNTIME_LEVEL_WORLD_TRANSFORMS = createRuntimeTransforms()
 
 export function parseLevelSpec(markdown) {
   const levels = []
@@ -78,10 +297,6 @@ function cloneCell(cell) {
   return { x: cell.x, y: cell.y }
 }
 
-function openRoomEdges(width, height) {
-  return openEdgesForCells(rectangularCells(width, height))
-}
-
 function rectangularCells(width, height) {
   const cells = []
 
@@ -105,113 +320,211 @@ function openEdgesForCells(cells) {
     ]) {
       const to = { x: cell.x + delta.x, y: cell.y + delta.y }
 
-      if (!cellKeys.has(`${to.x},${to.y}`)) {
-        continue
+      if (cellKeys.has(`${to.x},${to.y}`)) {
+        edges.push({ from: { ...cell }, to })
       }
-
-      edges.push({
-        from: { ...cell },
-        to
-      })
     }
   }
 
   return edges
 }
 
-function createAuthoredMazeDefinition(id) {
-  if (id === 'entrance') {
-    return {
-      exitRequiresTrophy: false,
-      gates: [],
-      height: 3,
-      id,
-      isAuthoredLevel: true,
-      levelExits: [
-        {
-          cell: { x: 1, y: 0 },
-          side: 'north',
-          targetLevelId: 'chamber-1'
-        }
-      ],
-      levelName: AUTHORED_LEVEL_NAMES[id],
-      lights: [
-        { cell: { x: 0, y: 0 }, side: 'north' },
-        { cell: { x: 2, y: 0 }, side: 'north' }
-      ],
-      monsters: [],
-      openEdges: openRoomEdges(3, 3),
-      opening: {
-        cell: { x: 1, y: 0 },
-        side: 'north'
-      },
-      playerStart: {
-        cell: { x: 1, y: 2 },
-        direction: 'north'
-      },
-      sword: null,
-      trophy: null,
-      width: 3
-    }
+function openRoomEdges(width, height) {
+  return openEdgesForCells(rectangularCells(width, height))
+}
+
+function createSimpleHallwayMaze(id, previousLevelId, nextLevelId, options = {}) {
+  return {
+    exitRequiresTrophy: false,
+    gates: options.gates ?? [],
+    height: 3,
+    id,
+    indoor: id !== 'entrance',
+    isAuthoredLevel: true,
+    levelExits: [
+      { cell: { x: 1, y: 2 }, side: 'south', targetLevelId: previousLevelId },
+      { cell: { x: 1, y: 0 }, side: 'north', targetLevelId: nextLevelId }
+    ],
+    levelName: AUTHORED_LEVEL_NAMES[id],
+    lights: [
+      { cell: { x: 0, y: 0 }, side: 'north' },
+      { cell: { x: 2, y: 0 }, side: 'north' }
+    ],
+    monsters: options.monsters ?? [],
+    openEdges: openRoomEdges(3, 3),
+    opening: {
+      cell: { x: 1, y: 2 },
+      side: 'south'
+    },
+    playerStart: {
+      cell: { x: 1, y: 2 },
+      direction: 'north'
+    },
+    solution: {
+      actions: ['move-forward', 'move-forward', 'move-forward']
+    },
+    sword: options.sword ?? null,
+    trophy: options.trophy ?? null,
+    width: 3
+  }
+}
+
+function chamberSideSlots(count) {
+  if (count === 4) {
+    return [
+      { altar: { x: 1, y: 2 }, exit: { x: 0, y: 2 }, side: 'west' },
+      { altar: { x: 1, y: 17 }, exit: { x: 0, y: 17 }, side: 'west' },
+      { altar: { x: 3, y: 2 }, exit: { x: 4, y: 2 }, side: 'east' },
+      { altar: { x: 3, y: 17 }, exit: { x: 4, y: 17 }, side: 'east' }
+    ]
   }
 
-  if (id === 'chamber-1') {
-    const roomCells = rectangularCells(5, 17)
-    const connectorCell = { x: 2, y: 17 }
-    const cells = [
-      ...roomCells,
-      connectorCell
-    ]
+  return [
+    { altar: { x: 1, y: 2 }, exit: { x: 0, y: 2 }, side: 'west' },
+    { altar: { x: 1, y: 14 }, exit: { x: 0, y: 14 }, side: 'west' },
+    { altar: { x: 1, y: 26 }, exit: { x: 0, y: 26 }, side: 'west' },
+    { altar: { x: 3, y: 2 }, exit: { x: 4, y: 2 }, side: 'east' },
+    { altar: { x: 3, y: 14 }, exit: { x: 4, y: 14 }, side: 'east' },
+    { altar: { x: 3, y: 26 }, exit: { x: 4, y: 26 }, side: 'east' }
+  ]
+}
 
+function createChamberMazeDefinition(id, previousLevelId, nextLevelId, mazeIds, requiredAltarCount) {
+  const height = mazeIds.length === 4 ? 24 : 36
+  const cells = rectangularCells(5, height)
+  const slots = chamberSideSlots(mazeIds.length)
+  const altars = mazeIds.map((mazeId, index) => ({
+    cell: slots[index].altar,
+    id: `${id}-altar-${mazeId}`,
+    targetLevelId: mazeId
+  }))
+
+  return {
+    altars,
+    cells,
+    exitRequiresTrophy: false,
+    gates: [],
+    height,
+    id,
+    isAuthoredLevel: true,
+    levelExits: [
+      { cell: { x: 2, y: height - 1 }, side: 'south', targetLevelId: previousLevelId },
+      {
+        cell: { x: 2, y: 0 },
+        requiredAltarIds: altars.slice(0, requiredAltarCount).map((altar) => altar.id),
+        side: 'north',
+        targetLevelId: nextLevelId
+      },
+      ...mazeIds.map((mazeId, index) => ({
+        cell: slots[index].exit,
+        side: slots[index].side,
+        targetLevelId: mazeId
+      }))
+    ],
+    levelName: AUTHORED_LEVEL_NAMES[id],
+    lights: slots.flatMap((slot) => [
+      { cell: slot.exit, side: slot.side },
+      { cell: slot.altar, side: slot.side === 'west' ? 'east' : 'west' }
+    ]),
+    monsters: [],
+    openEdges: openEdgesForCells(cells),
+    opening: {
+      cell: { x: 2, y: height - 1 },
+      side: 'south'
+    },
+    playerStart: {
+      cell: { x: 2, y: height - 1 },
+      direction: 'north'
+    },
+    roomBounds: { height, width: 5 },
+    sword: null,
+    trophy: null,
+    width: 5
+  }
+}
+
+function createThroneRoomDefinition() {
+  return {
+    altars: [{ cell: { x: 2, y: 0 }, id: 'throne-altar' }],
+    exitRequiresTrophy: false,
+    gates: [],
+    height: 8,
+    id: 'throne-room',
+    indoor: true,
+    isAuthoredLevel: true,
+    levelExits: [
+      { cell: { x: 2, y: 7 }, side: 'south', targetLevelId: 'chamber-2' }
+    ],
+    levelName: AUTHORED_LEVEL_NAMES['throne-room'],
+    lights: [
+      { cell: { x: 0, y: 0 }, side: 'west' },
+      { cell: { x: 4, y: 0 }, side: 'east' },
+      { cell: { x: 0, y: 4 }, side: 'west' },
+      { cell: { x: 4, y: 4 }, side: 'east' }
+    ],
+    monsters: [
+      { cell: { x: 1, y: 2 }, type: 'minotaur' },
+      { cell: { x: 3, y: 2 }, type: 'minotaur' }
+    ],
+    openEdges: openRoomEdges(5, 8),
+    opening: {
+      cell: { x: 2, y: 7 },
+      side: 'south'
+    },
+    playerStart: {
+      cell: { x: 2, y: 7 },
+      direction: 'north'
+    },
+    solution: {
+      actions: ['move-forward', 'move-forward', 'move-forward', 'move-forward', 'move-forward', 'move-forward']
+    },
+    sword: null,
+    trophy: { cell: { x: 2, y: 1 } },
+    width: 5
+  }
+}
+
+function createAuthoredMazeDefinition(id) {
+  if (id === 'entrance') {
+    return createSimpleHallwayMaze('entrance', 'entrance', 'hallway-1-1')
+  }
+  if (id === 'hallway-1-1') {
+    return createSimpleHallwayMaze(id, 'entrance', 'hallway-1-2', {
+      monsters: [{ cell: { x: 2, y: 0 }, type: 'minotaur' }]
+    })
+  }
+  if (id === 'hallway-1-2') {
+    return createSimpleHallwayMaze(id, 'hallway-1-1', 'hallway-1-3', {
+      monsters: [{ cell: { x: 0, y: 1 }, type: 'minotaur' }]
+    })
+  }
+  if (id === 'hallway-1-3') {
+    return createSimpleHallwayMaze(id, 'hallway-1-2', 'hallway-1-4', {
+      gates: [{ from: { x: 1, y: 1 }, id: `${id}:gate`, to: { x: 1, y: 0 } }],
+      monsters: [{ cell: { x: 0, y: 0 }, type: 'minotaur' }]
+    })
+  }
+  if (id === 'hallway-1-4') {
+    return createSimpleHallwayMaze(id, 'hallway-1-3', 'hallway-1-5', {
+      monsters: [{ cell: { x: 1, y: 0 }, type: 'minotaur' }],
+      sword: { cell: { x: 1, y: 1 } }
+    })
+  }
+  if (id === 'hallway-1-5') {
     return {
-      altars: [
-        { cell: { x: 0, y: 2 }, targetLevelId: 'maze-001' },
-        { cell: { x: 0, y: 11 }, targetLevelId: 'maze-002' },
-        { cell: { x: 4, y: 2 }, targetLevelId: 'maze-003' },
-        { cell: { x: 4, y: 11 }, targetLevelId: 'maze-004' }
-      ],
-      cells,
-      exitRequiresTrophy: false,
-      gates: [],
-      height: 18,
-      id,
-      isAuthoredLevel: true,
-      levelExits: [
-        { cell: { x: 2, y: 17 }, side: 'south', targetLevelId: 'entrance' },
-        { cell: { x: 0, y: 3 }, side: 'west', targetLevelId: 'maze-001' },
-        { cell: { x: 0, y: 12 }, side: 'west', targetLevelId: 'maze-002' },
-        { cell: { x: 4, y: 3 }, side: 'east', targetLevelId: 'maze-003' },
-        { cell: { x: 4, y: 12 }, side: 'east', targetLevelId: 'maze-004' }
-      ],
-      levelName: AUTHORED_LEVEL_NAMES[id],
-      lights: [
-        { cell: { x: 0, y: 2 }, side: 'west' },
-        { cell: { x: 0, y: 4 }, side: 'west' },
-        { cell: { x: 0, y: 11 }, side: 'west' },
-        { cell: { x: 0, y: 13 }, side: 'west' },
-        { cell: { x: 4, y: 2 }, side: 'east' },
-        { cell: { x: 4, y: 4 }, side: 'east' },
-        { cell: { x: 4, y: 11 }, side: 'east' },
-        { cell: { x: 4, y: 13 }, side: 'east' }
-      ],
-      monsters: [],
-      openEdges: openEdgesForCells(cells),
-      opening: {
-        cell: { x: 2, y: 17 },
-        side: 'south'
-      },
-      roomBounds: {
-        height: 17,
-        width: 5
-      },
-      playerStart: {
-        cell: { x: 2, y: 17 },
-        direction: 'north'
-      },
-      sword: null,
-      trophy: null,
-      width: 5
+      ...createSimpleHallwayMaze(id, 'hallway-1-4', 'chamber-1'),
+      altars: [{ cell: { x: 0, y: 1 }, id: 'hallway-1-5-altar' }],
+      trophy: { cell: { x: 1, y: 1 } }
     }
+  }
+  if (id === 'chamber-1') {
+    return createChamberMazeDefinition(id, 'hallway-1-5', 'chamber-2', CHAMBER_1_MAZES, 4)
+  }
+  if (id === 'chamber-2') {
+    return createChamberMazeDefinition(id, 'chamber-1', 'throne-room', CHAMBER_2_MAZES, 6)
+  }
+  if (id === 'throne-room') {
+    return createThroneRoomDefinition()
   }
 
   return null
@@ -233,6 +546,10 @@ export function getAuthoredRuntimeLevelIds() {
   return Object.values(AUTHORED_LEVEL_IDS)
 }
 
+export function getStoryMazeParentLevelId(id) {
+  return STORY_MAZE_PARENT_LEVEL_IDS[id] ?? null
+}
+
 export function getAdjacentRuntimeLevelIds(id) {
   return [...(RUNTIME_LEVEL_ADJACENCY[id] ?? [])]
 }
@@ -248,7 +565,7 @@ export function getRuntimeLevelGraphRootId() {
 }
 
 export function isRuntimeMazeLevelId(id) {
-  return /^maze-\d+$/i.test(String(id ?? '')) || /^challenge-\d+$/i.test(String(id ?? ''))
+  return /^maze-\d+$/i.test(String(id ?? '')) || /^challenge-\d+$/i.test(String(id ?? '')) || id === 'werewolf-tutorial'
 }
 
 export function getLatestDirectedNonMazeLevelId(enteredLevelIds, options = {}) {
@@ -277,22 +594,14 @@ export function getLatestDirectedNonMazeLevelId(enteredLevelIds, options = {}) {
 
     visited.add(current.id)
     if (entered.has(current.id) && !isRuntimeMazeLevelId(current.id)) {
-      if (
-        !best ||
-        current.depth > best.depth ||
-        (current.depth === best.depth && current.order > best.order)
-      ) {
+      if (!best || current.depth > best.depth || (current.depth === best.depth && current.order > best.order)) {
         best = { depth: current.depth, id: current.id, order: current.order }
       }
     }
 
     for (const targetId of RUNTIME_LEVEL_GRAPH[current.id] ?? []) {
       traversalOrder += 1
-      queue.push({
-        depth: current.depth + 1,
-        id: targetId,
-        order: traversalOrder
-      })
+      queue.push({ depth: current.depth + 1, id: targetId, order: traversalOrder })
     }
   }
 
@@ -354,11 +663,7 @@ export function resolveRuntimeMazeIdForLevel(levelName, levelIndex, mazeIds, fal
   }
 
   const availableMazeIds = Array.isArray(mazeIds)
-    ? mazeIds.filter((id) => (
-        typeof id === 'string' &&
-        id.length > 0 &&
-        !isAuthoredRuntimeLevelId(id)
-      ))
+    ? mazeIds.filter((id) => typeof id === 'string' && id.length > 0 && !isAuthoredRuntimeLevelId(id))
     : []
 
   if (availableMazeIds.length === 0) {

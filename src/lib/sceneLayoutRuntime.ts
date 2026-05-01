@@ -21,6 +21,7 @@ import {
 import {
   createAuthoredRuntimeMaze,
   getAuthoredRuntimeLevelIds,
+  getStoryMazeParentLevelId,
   isAuthoredRuntimeLevelId
 } from './levels.js'
 import type { MazeLayout, WallBounds } from './sceneLayout.js'
@@ -87,6 +88,9 @@ const DEBUG_MAZE_LOADERS = Object.freeze({
   'debug-probe-occlusion-3x3-no-lights': () => import('../data/debug-mazes/debug-probe-occlusion-3x3-no-lights.js'),
   'debug-probe-occlusion-3x3-open-north': () => import('../data/debug-mazes/debug-probe-occlusion-3x3-open-north.js'),
   'debug-probe-occlusion-3x3-sealed': () => import('../data/debug-mazes/debug-probe-occlusion-3x3-sealed.js')
+} satisfies Record<string, () => Promise<{ default: PersistedMaze }>>)
+const STORY_MAZE_LOADERS = Object.freeze({
+  'werewolf-tutorial': () => import('../data/challenge-mazes/keepers/werewolf-tutorial.js')
 } satisfies Record<string, () => Promise<{ default: PersistedMaze }>>)
 
 export function resolveMazeDataUrl(relativePath: string) {
@@ -161,6 +165,14 @@ async function loadPersistedMaze(id: string) {
 
   if (!response.ok) {
     if (response.status === 404) {
+      const loadStoryMaze = STORY_MAZE_LOADERS[id]
+
+      if (loadStoryMaze) {
+        const module = await loadStoryMaze()
+
+        return module.default
+      }
+
       if (isAuthoredRuntimeLevelId(id)) {
         return (await createAuthoredRuntimeMaze(id)) as PersistedMaze | null
       }
@@ -187,6 +199,29 @@ async function loadPersistedMaze(id: string) {
 }
 
 function withRuntimeLevelExits(maze: PersistedMaze) {
+  const storyParentLevelId = getStoryMazeParentLevelId(maze.id)
+
+  if (storyParentLevelId && maze.opening) {
+    return {
+      ...maze,
+      exteriorOpenings: [
+        {
+          cell: { ...maze.opening.cell },
+          side: maze.opening.side
+        }
+      ],
+      exitRequiresTrophy: false,
+      levelExits: [
+        ...(maze.levelExits ?? []).filter((exit) => exit.targetLevelId !== storyParentLevelId),
+        {
+          cell: { ...maze.opening.cell },
+          side: maze.opening.side,
+          targetLevelId: storyParentLevelId
+        }
+      ]
+    }
+  }
+
   if (
     !maze.id.match(/^maze-\d{3}$/) ||
     !maze.opening ||

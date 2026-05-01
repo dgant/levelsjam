@@ -17,27 +17,27 @@ async function authoredLayout(id) {
   }
 }
 
-test('world grid aligns the Entrance to Chamber 1 seam as one continuous cell edge', async () => {
+test('world grid aligns the Entrance to first hallway seam as one continuous cell edge', async () => {
   const entrance = await authoredLayout('entrance')
-  const chamber = await authoredLayout('chamber-1')
-  const worldGrid = buildWorldGridFromLayouts([entrance, chamber])
-  const entranceExit = entrance.maze.levelExits.find((exit) => exit.targetLevelId === 'chamber-1')
-  const chamberIngress = chamber.maze.levelExits.find((exit) => exit.targetLevelId === 'entrance')
+  const hallway = await authoredLayout('hallway-1-1')
+  const worldGrid = buildWorldGridFromLayouts([entrance, hallway])
+  const entranceExit = entrance.maze.levelExits.find((exit) => exit.targetLevelId === 'hallway-1-1')
+  const hallwayIngress = hallway.maze.levelExits.find((exit) => exit.targetLevelId === 'entrance')
   const entranceExitWorldCell = localCellToWorldCell(entrance, entranceExit.cell)
   const seamWorldCell = localCellToWorldCell(entrance, getNeighbor(entranceExit.cell, entranceExit.side))
-  const chamberIngressWorldCell = localCellToWorldCell(chamber, chamberIngress.cell)
+  const hallwayIngressWorldCell = localCellToWorldCell(hallway, hallwayIngress.cell)
 
-  assert.deepEqual(seamWorldCell, chamberIngressWorldCell)
+  assert.deepEqual(seamWorldCell, hallwayIngressWorldCell)
   assert.equal(worldGrid.openEdges.has(normalizeEdge(entranceExitWorldCell, seamWorldCell)), false)
   assert.ok(worldGrid.playerOnlyOpenEdges.has(normalizeEdge(entranceExitWorldCell, seamWorldCell)))
 
   const seamOwner = getWorldCellOwner(worldGrid, seamWorldCell)
 
   assert.ok(seamOwner)
-  assert.ok(seamOwner.owners.some((owner) => owner.levelId === 'chamber-1'))
+  assert.ok(seamOwner.owners.some((owner) => owner.levelId === 'hallway-1-1'))
   assert.deepEqual(
-    getLevelLocalCellForWorldCell(worldGrid, 'chamber-1', seamWorldCell),
-    chamberIngress.cell
+    getLevelLocalCellForWorldCell(worldGrid, 'hallway-1-1', seamWorldCell),
+    hallwayIngress.cell
   )
 })
 
@@ -49,16 +49,10 @@ test('world grid rotates level-local directions into canonical world directions'
     'north'
   )
 
-  const rotatedMaze = {
-    ...entrance,
-    maze: {
-      ...entrance.maze,
-      id: 'maze-001'
-    }
-  }
+  const rotatedMaze = await authoredLayout('throne-room')
 
   assert.equal(
-    getWorldDirectionForLocalDirection(rotatedMaze, { x: 1, y: 0 }, 'north'),
-    'south'
+    getWorldDirectionForLocalDirection(rotatedMaze, { x: 2, y: 7 }, 'north'),
+    'north'
   )
 })

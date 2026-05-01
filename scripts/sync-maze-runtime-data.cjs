@@ -6,11 +6,67 @@ const rootDir = path.resolve(__dirname, '..')
 const authoredMazeDirectory = path.join(rootDir, 'maze-data')
 const sourceDirectory = path.join(rootDir, 'src', 'data', 'mazes')
 const challengeSourceDirectory = path.join(rootDir, 'src', 'data', 'challenge-mazes')
+const keeperChallengeSourceDirectory = path.join(challengeSourceDirectory, 'keepers')
 const outputDirectory = path.join(rootDir, 'public', 'maze-data')
 const mazeFilePattern = /^maze-\d{3}\.js$/
 const challengeMazeFilePattern = /^challenge-\d{3}\.js$/
 const bakeChallengeMazes = process.env.LEVELSJAM_SYNC_CHALLENGE_LIGHTMAPS === '1'
 const bakeChallengeMazesCpu = process.env.LEVELSJAM_SYNC_CHALLENGE_LIGHTMAPS_CPU === '1'
+const NEUTRAL_LIGHTMAP_SIZE = 4
+
+function createNeutralLightmapDataBase64() {
+  const bytes = Buffer.alloc(NEUTRAL_LIGHTMAP_SIZE * NEUTRAL_LIGHTMAP_SIZE * 3 * 2)
+
+  for (let index = 0; index < bytes.length; index += 2) {
+    bytes[index] = 0x00
+    bytes[index + 1] = 0x3c
+  }
+
+  return bytes.toString('base64')
+}
+
+function createNeutralRuntimeLightmap(maze) {
+  const worldWidth = Math.max(maze.width * 2, 1)
+  const worldDepth = Math.max(maze.height * 2, 1)
+  const margin = 2
+  const boundsWidth = worldWidth + (margin * 2)
+  const boundsDepth = worldDepth + (margin * 2)
+
+  return {
+    atlasHeight: NEUTRAL_LIGHTMAP_SIZE,
+    atlasWidth: NEUTRAL_LIGHTMAP_SIZE,
+    bakeMs: 0,
+    dataBase64: createNeutralLightmapDataBase64(),
+    encoding: 'rgb16f',
+    groundBounds: {
+      centerX: 0,
+      centerZ: 0,
+      depth: boundsDepth,
+      height: boundsDepth,
+      margin,
+      maxX: boundsWidth / 2,
+      maxZ: boundsDepth / 2,
+      minX: -boundsWidth / 2,
+      minZ: -boundsDepth / 2,
+      width: boundsWidth
+    },
+    groundRect: {
+      height: NEUTRAL_LIGHTMAP_SIZE,
+      width: NEUTRAL_LIGHTMAP_SIZE,
+      x: 0,
+      y: 0
+    },
+    neutralRect: {
+      height: NEUTRAL_LIGHTMAP_SIZE,
+      width: NEUTRAL_LIGHTMAP_SIZE,
+      x: 0,
+      y: 0
+    },
+    altarRects: {},
+    version: 32,
+    wallRects: {}
+  }
+}
 
 async function importMazeModule(filePath) {
   const moduleUrl = `${pathToFileURL(filePath).href}?cacheBust=${Date.now()}-${Math.random()}`
@@ -108,11 +164,24 @@ async function main() {
     const mazeOutputDirectory = path.join(outputDirectory, mazeId)
     const runtimeMaze = replaceMazeLightmapWithRuntimeAssetUrls(maze)
     const lightmapBuffers = buildMazeLightmapArtifactBuffers(maze)
+    const probeManifestPath = path.join(mazeOutputDirectory, 'probe-assets.json')
 
     console.log(
       `[sync-maze-runtime-data] writing ${position}/${total} ${mazeId}.json`
     )
     fs.mkdirSync(mazeOutputDirectory, { recursive: true })
+    if (maze.sourceSignature?.startsWith('neutral-') || !fs.existsSync(probeManifestPath)) {
+      fs.writeFileSync(
+        probeManifestPath,
+        JSON.stringify({
+          faceSize: 0,
+          generatedAt: new Date(0).toISOString(),
+          mazeId,
+          probeCount: 0,
+          probes: []
+        }, null, 2)
+      )
+    }
     if (lightmapBuffers) {
       if (lightmapBuffers.runtimeAtlasBytes) {
         fs.writeFileSync(
@@ -211,27 +280,28 @@ async function main() {
   const totalPayloads =
     authoredLevelIds.length +
     mazeFileNames.length +
+    1 +
     (bakeChallengeMazes ? challengeMazeFileNames.length : 0)
 
   for (let index = 0; index < authoredLevelIds.length; index += 1) {
     const authoredLevelId = authoredLevelIds[index]
-    const persistedMaze = loadPersistedAuthoredMaze(authoredLevelId)
-    const needsAuthoredRebake =
-      !persistedMaze || authoredMazeNeedsRebake(authoredLevelId, persistedMaze)
-    const maze = persistedMaze && !needsAuthoredRebake
-      ? persistedMaze
-      : await createAuthoredRuntimeMaze(authoredLevelId, { bakeLightmap: true })
+    const authoredMaze = await createAuthoredRuntimeMaze(authoredLevelId, { bakeLightmap: false })
+    const maze = authoredMaze
+      ? {
+          ...authoredMaze,
+          lightmap: createNeutralRuntimeLightmap(authoredMaze),
+          sourceSignature: `neutral-authored:${authoredLevelId}`
+        }
+      : null
 
     if (!maze) {
       throw new Error(`Failed to create authored runtime level ${authoredLevelId}`)
     }
 
-    if (needsAuthoredRebake) {
-      fs.writeFileSync(
-        path.join(authoredMazeDirectory, `${authoredLevelId}.json`),
-        JSON.stringify(maze, null, 2)
-      )
-    }
+    fs.writeFileSync(
+      path.join(authoredMazeDirectory, `${authoredLevelId}.json`),
+      JSON.stringify(maze, null, 2)
+    )
 
     writeRuntimeMaze(maze, authoredLevelId, index + 1, totalPayloads)
   }
@@ -282,6 +352,22 @@ async function main() {
       name: sourceMaze.name ?? mazeId
     })
   }
+
+  const werewolfTutorial = await importMazeModule(
+    path.join(keeperChallengeSourceDirectory, 'werewolf-tutorial.js')
+  )
+  writeRuntimeMaze(
+    {
+      ...werewolfTutorial,
+      id: 'werewolf-tutorial',
+      lightmap: createNeutralRuntimeLightmap(werewolfTutorial),
+      sourceSignature: 'neutral-story:werewolf-tutorial'
+    },
+    'werewolf-tutorial',
+    authoredLevelIds.length + mazeFileNames.length + 1,
+    totalPayloads
+  )
+  storyMazeIds.push('werewolf-tutorial')
 
   fs.writeFileSync(
     path.join(outputDirectory, 'index.json'),

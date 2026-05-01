@@ -46,8 +46,8 @@ function layout(maze) {
 
 test('global turns move the canonical player across authored level seams without teleporting', async () => {
   const entrance = await authoredLayout('entrance')
-  const chamber = await authoredLayout('chamber-1')
-  let globalState = createInitialGlobalTurnState(entrance, [chamber])
+  const hallway = await authoredLayout('hallway-1-1')
+  let globalState = createInitialGlobalTurnState(entrance, [hallway])
 
   assert.equal(Object.prototype.hasOwnProperty.call(globalState, 'levelStates'), false)
 
@@ -63,19 +63,19 @@ test('global turns move the canonical player across authored level seams without
   result = applyGlobalTurnActionForLevel(globalState, entrance.maze.id, entrance.maze, 'move-forward')
 
   assert.equal(result.outcome.blocked, false)
-  assert.deepEqual(result.outcome.levelTransition, { targetLevelId: 'chamber-1' })
+  assert.deepEqual(result.outcome.levelTransition, { targetLevelId: 'hallway-1-1' })
   assert.deepEqual(
     result.state.player.cell,
     localCellToWorldCell(entrance, { x: 1, y: -1 })
   )
 
-  const focused = activateGlobalTurnStateLevel(result.state, chamber)
-  const chamberState = getGlobalTurnStateForLevel(focused, chamber.maze.id, chamber.maze)
+  const focused = activateGlobalTurnStateLevel(result.state, hallway)
+  const hallwayState = getGlobalTurnStateForLevel(focused, hallway.maze.id, hallway.maze)
 
-  assert.equal(focused.activeLevelId, 'chamber-1')
+  assert.equal(focused.activeLevelId, 'hallway-1-1')
   assert.deepEqual(focused.player.cell, result.state.player.cell)
-  assert.deepEqual(chamberState.player.cell, { x: 2, y: 17 })
-  assert.equal(chamberState.player.direction, 'north')
+  assert.deepEqual(hallwayState.player.cell, { x: 1, y: 2 })
+  assert.equal(hallwayState.player.direction, 'north')
 })
 
 test('adding a loaded level does not reset existing global pickup state', () => {
