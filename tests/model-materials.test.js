@@ -340,10 +340,36 @@ test('mobile menu exposes compact graphics controls and swipe-safe touch zones',
   assert.match(appSource, /onEffectSettingChange\('volumetricLighting'/)
   assert.match(appSource, /onAmbientOcclusionModeChange\(event\.target\.checked \? 'n8ao' : 'off'\)/)
   assert.match(appSource, /aria-label="Close Menu"/)
+  assert.match(appSource, /createInitialVisualSettings/)
+  assert.match(appSource, /ambientOcclusionMode: 'off'/)
+  assert.match(appSource, /unlitMode: true/)
+  assert.match(appSource, /volumetricLighting:\s*\{\s*enabled: false/)
   assert.match(appSource, /&#9776;/)
   assert.match(appSource, /swipeThreshold = 42/)
+  assert.doesNotMatch(stylesSource, /\.mobile-touch-controls\s*\{\s*display: none;/)
+  assert.match(stylesSource, /\.mobile-touch-controls\s*\{[\s\S]*?display: grid;/)
   assert.match(stylesSource, /-webkit-tap-highlight-color: transparent/)
   assert.match(stylesSource, /touch-action: none/)
+})
+
+test('level menu categories match the requested gameplay grouping', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(appSource, /useState<'graphics' \| 'audio' \| 'gameplay' \| 'cheat'>\('graphics'\)/)
+  assert.match(appSource, />\s*Graphics\s*<\/button>[\s\S]*>\s*Audio\s*<\/button>[\s\S]*>\s*Gameplay\s*<\/button>[\s\S]*>\s*Cheat\s*<\/button>[\s\S]*>\s*Credits\s*<\/button>/)
+  assert.match(appSource, /activeTab === 'gameplay'/)
+  assert.match(appSource, /activeTab === 'cheat'/)
+  assert.match(appSource, /onOpenCredits=\{\(\) => \{[\s\S]*?setLevelMenuOpen\(false\)[\s\S]*?setCreditsOpen\(true\)/)
+})
+
+test('indoor exterior walls bypass per-cell visibility culling', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(appSource, /function isIndoorExteriorWallVisible/)
+  assert.match(appSource, /isIndoorLayout\(layout\) && wall\.id\.endsWith\(':exterior'\)/)
+  assert.match(appSource, /function isMazeWallVisible/)
+  assert.match(appSource, /isIndoorExteriorWallVisible\(layout, wall\) \|\| isWallVisible\(visibility, wall\)/)
+  assert.match(appSource, /visible=\{isMazeWallVisible\(layout, visibilityState, mazeWall\)\}/)
 })
 
 test('minotaur runtime materials use the authored dark base tint', () => {
@@ -366,23 +392,27 @@ test('minotaur runtime materials use the authored dark base tint', () => {
   }
 })
 
-test('minotaur runtime model stays within the runtime triangle budget', () => {
+test('minotaur runtime model uses the last hole-free topology', () => {
   const gltf = readGltf('public/models/minotaur-runtime/scene.gltf')
+  const specSource = fs.readFileSync(path.join(rootDir, 'SPEC.md'), 'utf8')
 
   assert.ok(
-    getGltfTriangleCount(gltf) <= 30_000,
-    `runtime minotaur should stay under 30k triangles, got ${getGltfTriangleCount(gltf)}`
+    getGltfTriangleCount(gltf) >= 100_000,
+    `runtime minotaur should use the restored hole-free topology, got ${getGltfTriangleCount(gltf)} triangles`
   )
+  assert.match(specSource, /prioritizes intact, hole-free topology/)
 })
 
 test('werewolf runtime model is simplified to the tall-monster triangle budget', () => {
   const gltf = readGltf('public/models/pale_dread_white_werewolf_runtime/scene.gltf')
   const simplifySource = fs.readFileSync(path.join(rootDir, 'scripts/simplify-werewolf.mjs'), 'utf8')
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
 
   assert.ok(
     getGltfTriangleCount(gltf) <= 10_000,
     `runtime werewolf should stay under 10k triangles, got ${getGltfTriangleCount(gltf)}`
   )
+  assert.match(appSource, /modelRotationY: monster\.type === 'werewolf' \? Math\.PI \* 1\.5 : 0/)
   assert.doesNotMatch(
     simplifySource,
     /simplifyDocument\(relaxedDocument,\s*RELAXED_SIMPLIFY_FLAGS,\s*false\)/,
@@ -453,14 +483,18 @@ test('N8AO preserves skybox pixels without scene depth', () => {
   assert.match(appSource, /patchN8AOCompositerSkyDepth\(pass\)/)
 })
 
-test('bloom prefilter uses depth to suppress skybox pixels', () => {
+test('bloom uses the whole scene source so enabling it preserves the skybox', () => {
   const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+  const bloomCompatSource = appSource.slice(
+    appSource.indexOf('class ThreeBloomCompatPass'),
+    appSource.indexOf('function getNormalizedBloomResolutionScale')
+  )
 
   assert.match(appSource, /class ThreeBloomCompatPass/)
-  assert.match(appSource, /this\.needsDepthTexture = true/)
-  assert.match(appSource, /uniform sampler2D depthBuffer/)
-  assert.match(appSource, /if \(depth >= 0\.999999\) \{\s*gl_FragColor = vec4\(0\.0\);\s*return;/)
-  assert.match(appSource, /setDepthTexture\(depthTexture: Texture \| null\)/)
+  assert.match(bloomCompatSource, /this\.needsDepthTexture = false/)
+  assert.doesNotMatch(bloomCompatSource, /uniform sampler2D depthBuffer/)
+  assert.doesNotMatch(bloomCompatSource, /depth >= 0\.999999/)
+  assert.doesNotMatch(bloomCompatSource, /setDepthTexture\(depthTexture: Texture \| null\)/)
 })
 
 test('radial chromatic aberration uses seven tinted unit-sum samples', () => {
@@ -731,7 +765,14 @@ test('player death fade-in uses the requested longer duration', () => {
   const specSource = fs.readFileSync(path.join(rootDir, 'SPEC.md'), 'utf8')
 
   assert.match(appSource, /const PLAYER_DEATH_FADE_IN_MS = 6000/)
+  assert.match(appSource, /const PLAYER_DEATH_FADE_TO_BLACK_MS = TURN_ANIMATION_DURATION_MS/)
+  assert.match(appSource, /const MONSTER_KILL_FADE_TO_RED_MS = 1000/)
+  assert.match(appSource, /const MONSTER_KILL_FADE_OUT_MS = 3000/)
   assert.match(appSource, /elapsed \/ PLAYER_DEATH_FADE_IN_MS/)
+  assert.match(appSource, /elapsed \/ PLAYER_DEATH_FADE_TO_BLACK_MS/)
+  assert.match(appSource, /elapsed \/ MONSTER_KILL_FADE_TO_RED_MS/)
+  assert.match(appSource, /elapsed \/ MONSTER_KILL_FADE_OUT_MS/)
+  assert.match(appSource, /document\.body\.dataset\.playerEffect === 'death-out'/)
   assert.match(specSource, /fades back in over `6s`/)
 })
 

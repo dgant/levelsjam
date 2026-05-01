@@ -674,4 +674,13 @@ Go implement this. We need robust central camera control with an architecture th
 [x] Play this sound when a gate opens. Pitch it down two semitones and play that sound when a gate closes. Pan appropriately. Credit appropriately. https://freesound.org/people/redpanda69/sounds/686187/
 [x] Play this sound on loop continuously and attenuate based on cell distance of nearest torch or lit altar. Double the volume if it's a lit altar https://freesound.org/people/PhreaKsAccount/sounds/46273/
 [x] Add a debug tab for volume and a slider for each sound effect, slider ranging from 0 to 4 and defaulting to 1
-[] On mobile, disable lighting, fog, and ambient occlusion by default
+[x] When bloom is enabled the HDRI is totally invisible instead of simply not contributing to bloom. If there's not a good and performant way to achieve the goal of "don't bloom the HDRI" then revert the behavior to the default bloom behavior with no special skybox treatment
+[x] The exterior walls of indoor levels should always be rendered from anywhere in their level or an adjacent level
+[x] On mobile, disable lighting, fog, and ambient occlusion by default
+[x] The player death animation is too fast. Disable player control when it begins. After fading to black, it should take six seconds for the camera to fade back in. When it ends, the player regains control
+[x] The monster kill animation should last four total seconds, one to fade to red, three to fade back to regular vision
+[x] We're somehow back on the bad decimated minotaur model with holes. Revert to the last known-good model.
+[x] Rotate the Werewolf model 90 degrees to the right
+[x] Towards the end of the the altar-lighting animation, the camera winds up in an inconsistent state. The trophy turns into the flame, then the camera snaps back to the direction the player was facing before the animation began, but that does not seem to be the actual direction the player is facing, and when you press forward it moves you in a different direction. Leaving a maze with the altar to the right of the exit, the animation turns towards the altar in letterbox (good), but then at the same time the letterbox fades, the camera snaps back to the direction the player was facing when they walked next to the altar (bad) instead of the letterbox ending with the camera and player both facing the altar (that would be the intended behavior)
+[x] Menu: Name the categories "Graphics" (first) then "Audio" (second) then "Gameplay" (third) which contains the reset/show solution, "Cheat" (fourth) which allows jumping to any of the levels in the main progression, and "Credits" (fifth) which closes the menu and opens the credits
+[x] The buttons and menu that are visible only on mobile? Show them on desktop too.

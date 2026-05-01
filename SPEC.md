@@ -98,6 +98,7 @@
 - Indoor levels render double-height walls by stacking a second wall-height segment above each ordinary wall while preserving wall-material texel density.
 - Indoor levels render double-height exterior walls with the same stacked-wall treatment as interior walls.
 - Indoor level exterior walls remain closed on every exterior boundary cell except an explicit single-cell level doorway.
+- Indoor level exterior walls render whenever their owning level or an adjacent level is rendered, independent of ordinary per-cell precomputed visibility culling.
 - Indoor levels render a downward-facing ceiling plane over each playable cell using the same PBR texture family as the walls.
 - Indoor ceiling planes use the same static surface-lightmap material path as other lightmapped static geometry.
 - Indoor levels render at most one ground-level torch assembly per wall face.
@@ -339,7 +340,7 @@
 - The held sword is shifted `0.5m` backward along its own axis from the prior forward pose so it stays inside the player's cell and avoids clipping through nearby walls.
 - The held trophy is positioned in the player's left hand within the camera frustum and points upward from the player perspective.
 - If the player would die by intersecting a monster while holding the sword, the monster dies instead, the sword is consumed, and the strike fade plays to dark red before restoring gameplay.
-- The sword-strike fade animates to linear RGB `(0.5, 0, 0)` over `125ms`, then fades back to the camera view over `375ms`, without flashing or transitioning through black.
+- The sword-strike fade animates to linear RGB `(0.5, 0, 0)` over `1s`, then fades back to the camera view over `3s`, without flashing or transitioning through black.
 - A maze is beaten only when the player acquires the trophy and exits the maze while still holding it.
 - When the player leaves a maze and its entrance door closes while the player is outside that maze and its transition cell, the maze resets its monsters, pickups, doors, and gates; a held sword from that maze is removed.
 - Characters are either the player or monsters.
@@ -359,6 +360,7 @@
 - Monster render actors remain mounted across visibility-culling changes so a monster that becomes visible after moving still has its previous rendered pose available for interpolation.
 - Runtime monster actors are rendered for the current gameplay-focus level; adjacent streamed levels keep their monster rules state loaded but do not render off-level monster meshes until that level becomes active.
 - Monster visibility culling may hide an actor after its current animation completes, but it must not unmount or reinitialize the actor at the target cell during ordinary turn updates.
+- The runtime minotaur model prioritizes intact, hole-free topology over aggressive decimation artifacts.
 - Minotaurs check line of sight to the player before and after their move. If a minotaur gains line of sight after moving, it updates its remembered player direction and final facing direction from the post-move cell.
 - The player has no rendered character model.
 - Player inputs are buffered and consumed in order when the rules engine is ready for the next player action.
@@ -376,7 +378,7 @@
 - If the player attempts to move into a cell containing a monster, the player dies.
 - If a monster attempts to move into the player cell, the player dies.
 - Player death fades the viewport to black during the movement animation, resets the current maze state to the last checkpoint, and fades back in over `6s`.
-- Player death fades to black over `125ms` and fades back to the camera view over `6s`.
+- Player death fades to black over the killing movement animation, disables player control while the fade is active, and fades back to the camera view over `6s` before restoring player control.
 - Player death clears transient camera shake and queued movement commands when the maze state resets, so movement after resurrection cannot inherit effects from the killing turn or from buffered pre-death input.
 - The sword-strike and player-death fade overlays are applied before the vignette effect so the vignette is still visible on top of the fade color.
 - The current checkpoint is the maze entrance position and entrance-facing direction.
@@ -440,6 +442,7 @@
 - Challenge-maze generation may search candidates in parallel across worker threads and uses no more than half of the available CPU cores by default.
 - Boundary-spanning static and dynamic geometry uses the boundary volumetric-lightmap sampling path, which blends probe candidates on both sides of the boundary rather than aliasing to the ordinary single-cell sampler.
 - Awake minotaurs and werewolves face the player during idle, rotation, and movement animations.
+- The werewolf runtime model is rotated 90 degrees to the right relative to its previous forward-facing import orientation.
 - Pressing `1` toggles a free-camera inspection mode that detaches the camera from the player.
 - Free-camera inspection mode uses WASD plus mouse look, has no collisions, supports the arrow keys as movement aliases, and maps `E` to move down and `Q` to move up.
 - Pressing `C` opens a centered credits modal.
@@ -450,15 +453,21 @@
 - The level menu lists the levels parsed from `LEVELS.md` in their authored order.
 - Clicking a level name closes the level menu, loads the corresponding authored level or numbered runtime maze, resets its state, and teleports the player to that level's entrance.
 - The menu fits inside the viewport on mobile and desktop and includes a visible close button.
-- The menu is tabbed, with a Graphics tab containing Lighting, Fog, and Ambient Occlusion toggles, and a Levels tab containing the level-selection list.
+- The menu is tabbed into `Graphics`, `Audio`, `Gameplay`, `Cheat`, and `Credits` categories in that order.
+- The `Graphics` menu category contains Lighting, Fog, and Ambient Occlusion toggles.
+- The `Audio` menu category contains music and sound controls.
+- The `Gameplay` menu category contains `Reset` and `Show Solution` actions.
+- The `Cheat` menu category allows jumping to authored main-progression levels and available challenge levels.
+- The `Credits` menu category closes the menu and opens the credits modal.
 - The level menu exposes a `Reset` action that uses the same reset path as player death, returning the current level to its initial position and state.
 - When the current level has a recorded solution, the level menu exposes a `Show Solution` action beside `Reset` that starts the same solution replay as the debug panel.
-- On touch/mobile layouts, the bottom of the screen displays left-turn, forward, and right-turn controls.
+- On touch/mobile and desktop layouts, the bottom of the screen displays left-turn, forward, and right-turn controls.
 - Pressing a touch/mobile movement zone does not draw a browser tap highlight or pressed-state wash over the whole control region.
 - Mobile turn controls have large click/touch hit regions that divide the full screen into playable control areas while their visible labels remain along the bottom.
 - Mobile turn controls do not show browser tap-highlight selection when touched.
 - Mobile turn controls accept left, right, and upward swipes as alternate rotate-left, rotate-right, and move-forward commands.
 - Mobile layouts include a top-left hamburger menu button that opens the level menu.
+- Mobile layouts default to lighting, volumetric fog, and ambient occlusion disabled so the first rendered scene prioritizes compatibility and responsiveness.
 - The first-person held sword is oriented with the blade pointing forward and is pulled back far enough to remain inside the player's current cell.
 - The first-person held trophy appears lower and farther left on screen than the held sword.
 - The character collision volume is a capsule that is 1.75 meters tall and 0.25 meters in radius.
@@ -500,7 +509,7 @@
 - The debug controls include an anamorphic tab backed by a live WebGL post effect derived from the official three.js anamorphic implementation.
 - Bloom defaults to enabled with intensity `1.0`, kernel `Huge`, threshold `0.7`, smoothing `0.5`, and resolution scale `0.25x`.
 - Bloom preserves the same effective scene color precision when enabled at zero or near-zero contribution and must not introduce visible color banding merely by being enabled.
-- Bloom prefilters against scene depth so skybox pixels do not create bloom.
+- Bloom uses the default whole-scene bloom source so enabling bloom never makes the HDRI invisible; if skybox suppression is reintroduced, the HDRI must remain visibly present in the final scene.
 - Depth of Field defaults to disabled.
 - Lens Flares default to enabled with strength `0.01`, internal color gain `1.0`, flare size `0.0015`, glare size `0`, ghost scale `0`, flare shape `0.03`, animated mode off, anamorphic mode on, extra streaks off, secondary ghosts on, star points `3`, star burst off, and star-burst intensity `1.0`.
 - SSR defaults to disabled.

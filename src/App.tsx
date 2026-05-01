@@ -345,6 +345,9 @@ const FIRE_FLIPBOOK_GRID = 6
 const FIRE_FLIPBOOK_FRAME_COUNT = FIRE_FLIPBOOK_GRID * FIRE_FLIPBOOK_GRID
 const FIRE_FLIPBOOK_DURATION_SECONDS = 0.5
 const TURN_ANIMATION_DURATION_MS = 250
+const PLAYER_DEATH_FADE_TO_BLACK_MS = TURN_ANIMATION_DURATION_MS
+const MONSTER_KILL_FADE_TO_RED_MS = 1000
+const MONSTER_KILL_FADE_OUT_MS = 3000
 let globalAnimationSpeedMultiplier = 1
 
 const MONSTER_EYE_RADIUS = 0.0075
@@ -3092,6 +3095,33 @@ function createDefaultVisualSettings(): VisualSettings {
   }, defaultVisualSettingsConfig as VisualSettingsPatch)
 }
 
+function shouldUseMobileVisualDefaults() {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  return (
+    window.matchMedia?.('(pointer: coarse)').matches ||
+    window.matchMedia?.('(max-width: 760px)').matches
+  )
+}
+
+function createInitialVisualSettings(): VisualSettings {
+  const defaults = createDefaultVisualSettings()
+
+  if (!shouldUseMobileVisualDefaults()) {
+    return defaults
+  }
+
+  return applyVisualSettingsPatch(defaults, {
+    ambientOcclusionMode: 'off',
+    unlitMode: true,
+    volumetricLighting: {
+      enabled: false
+    }
+  })
+}
+
 function isEffectActive(effect: EffectSettings) {
   return effect.enabled && effect.intensity > EFFECT_EPSILON
 }
@@ -3207,6 +3237,9 @@ function applyVisualSettingsPatch(
     ...(patch.torchBillboardIntensity === undefined
       ? null
       : { torchBillboardIntensity: patch.torchBillboardIntensity }),
+    ...(patch.unlitMode === undefined
+      ? null
+      : { unlitMode: patch.unlitMode }),
     ...(patch.saturation === undefined
       ? null
       : { saturation: patch.saturation }),
@@ -5218,6 +5251,21 @@ function isWallVisible(
   wall: MazeLayout['walls'][number]
 ) {
   return getWallVisibilityCells(wall.id).some((cell) => isCellVisible(visibility, cell))
+}
+
+function isIndoorExteriorWallVisible(
+  layout: MazeLayout,
+  wall: MazeLayout['walls'][number]
+) {
+  return isIndoorLayout(layout) && wall.id.endsWith(':exterior')
+}
+
+function isMazeWallVisible(
+  layout: MazeLayout,
+  visibility: PrecomputedVisibilityState,
+  wall: MazeLayout['walls'][number]
+) {
+  return isIndoorExteriorWallVisible(layout, wall) || isWallVisible(visibility, wall)
 }
 
 function isPositionCellVisible(
@@ -11957,8 +12005,8 @@ function MazeWalls({
   const torchTexture = useFireFlipbookTexture()
   const decalTextures = useFrescoDecalTextures()
   const visibleWalls = useMemo(
-    () => layout.walls.filter((mazeWall) => isWallVisible(visibilityState, mazeWall)),
-    [layout.walls, visibilityState]
+    () => layout.walls.filter((mazeWall) => isMazeWallVisible(layout, visibilityState, mazeWall)),
+    [layout, layout.walls, visibilityState]
   )
   const visibleWallIds = useMemo(
     () => new Set(visibleWalls.map((mazeWall) => mazeWall.id)),
@@ -12011,7 +12059,7 @@ function MazeWalls({
           reflectionProbeCoefficients={reflectionProbeCoefficients}
           reflectionProbeDepthTextures={reflectionProbeDepthTextures}
           reflectionProbeTextures={reflectionProbeTextures}
-          visible={isWallVisible(visibilityState, mazeWall)}
+          visible={isMazeWallVisible(layout, visibilityState, mazeWall)}
           wallIndex={wallIndex}
           wallMaterialMaps={wall}
         />
@@ -12035,7 +12083,7 @@ function MazeWalls({
           reflectionProbeDepthTextures={reflectionProbeDepthTextures}
           reflectionProbeTextures={reflectionProbeTextures}
           verticalOffset={WALL_HEIGHT}
-          visible={isWallVisible(visibilityState, mazeWall)}
+          visible={isMazeWallVisible(layout, visibilityState, mazeWall)}
           wallIndex={wallIndex}
           wallMaterialMaps={wall}
         />
@@ -14941,7 +14989,7 @@ function MonsterModel({
           spiderFloorLift,
         (-center.z * scale) + (monster.type === 'spider' ? 0.5 : 0)
       ),
-      modelRotationY: monster.type === 'werewolf' ? Math.PI : 0,
+      modelRotationY: monster.type === 'werewolf' ? Math.PI * 1.5 : 0,
       modelRotationZ:
         monster.type === 'spider'
           ? spiderLeanRadians * spiderLeanSign
@@ -15480,41 +15528,27 @@ class ThreeBloomCompatPass<TThreePass extends {
   copyMaterial: ShaderMaterial
   copyScene: ThreeScene
   copyQuad: Mesh
-  depthTexture: Texture | null
   tempRenderTarget: WebGLRenderTarget
 
   constructor(name: string, inner: TThreePass) {
     super(name)
     this.inner = inner
     this.needsSwap = true
-    this.needsDepthTexture = true
-    this.depthTexture = null
+    this.needsDepthTexture = false
     this.copyCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1)
     this.copyMaterial = new ShaderMaterial({
       depthTest: false,
       depthWrite: false,
       fragmentShader: `
 uniform sampler2D inputBuffer;
-uniform sampler2D depthBuffer;
-uniform bool useDepthMask;
 varying vec2 vUv;
 
 void main() {
-  if (useDepthMask) {
-    float depth = texture2D(depthBuffer, vUv).r;
-    if (depth >= 0.999999) {
-      gl_FragColor = vec4(0.0);
-      return;
-    }
-  }
-
   gl_FragColor = texture2D(inputBuffer, vUv);
 }
 `,
       uniforms: {
-        depthBuffer: new Uniform<Texture | null>(null),
-        inputBuffer: new Uniform<Texture | null>(null),
-        useDepthMask: new Uniform(false)
+        inputBuffer: new Uniform<Texture | null>(null)
       },
       vertexShader: `
 varying vec2 vUv;
@@ -15548,8 +15582,6 @@ void main() {
 
     renderer.autoClear = false
     this.copyMaterial.uniforms.inputBuffer.value = inputBuffer.texture
-    this.copyMaterial.uniforms.depthBuffer.value = this.depthTexture
-    this.copyMaterial.uniforms.useDepthMask.value = this.depthTexture !== null
     withFrameProfileScope('copy input to bloom target', () => {
       renderer.setRenderTarget(this.tempRenderTarget)
       renderer.render(this.copyScene, this.copyCamera)
@@ -15567,7 +15599,6 @@ void main() {
     })
 
     this.copyMaterial.uniforms.inputBuffer.value = this.tempRenderTarget.texture
-    this.copyMaterial.uniforms.useDepthMask.value = false
     withFrameProfileScope('copy bloom output', () => {
       renderer.setRenderTarget(this.renderToScreen ? null : outputBuffer)
       renderer.render(this.copyScene, this.copyCamera)
@@ -15578,14 +15609,6 @@ void main() {
   override setSize(width: number, height: number) {
     this.inner.setSize(width, height)
     this.tempRenderTarget.setSize(width, height)
-  }
-
-  override getDepthTexture() {
-    return this.depthTexture
-  }
-
-  override setDepthTexture(depthTexture: Texture | null) {
-    this.depthTexture = depthTexture
   }
 
   override dispose() {
@@ -16925,17 +16948,17 @@ function PlayerFadeEffectPrimitive() {
       const elapsed = now - stateRef.current.startedAt
 
       if (name === 'sword-strike') {
-        setFade(strikeColor, elapsed / 125)
+        setFade(strikeColor, elapsed / MONSTER_KILL_FADE_TO_RED_MS)
         return
       }
 
       if (name === 'sword-strike-out') {
-        setFade(strikeColor, 1 - (elapsed / 375))
+        setFade(strikeColor, 1 - (elapsed / MONSTER_KILL_FADE_OUT_MS))
         return
       }
 
       if (name === 'death') {
-        setFade(deathColor, elapsed / 125)
+        setFade(deathColor, elapsed / PLAYER_DEATH_FADE_TO_BLACK_MS)
         return
       }
 
@@ -17732,8 +17755,12 @@ function FlightRig({
         turnState.player.hasSword !== currentState.player.hasSword ||
         turnState.player.hasTrophy !== currentState.player.hasTrophy
       )
+    const altarCutsceneSyncActive = document.body.dataset.altarCutsceneActive === 'true'
 
-    if (!layoutChanged && (propIsOlderTurn || propPlayerDiffersAtSameTurn)) {
+    if (
+      !layoutChanged &&
+      (propIsOlderTurn || (propPlayerDiffersAtSameTurn && !altarCutsceneSyncActive))
+    ) {
       return
     }
 
@@ -17896,6 +17923,10 @@ function FlightRig({
         eventTimeStamp < inputEnabledAt.current ||
         freeCamera.current ||
         replayActive.current ||
+        document.body.dataset.playerEffect === 'death' ||
+        document.body.dataset.playerEffect === 'death-out' ||
+        document.body.dataset.playerEffect === 'sword-strike' ||
+        document.body.dataset.playerEffect === 'sword-strike-out' ||
         inputQueue.current.length >= MAX_BUFFERED_TURN_COMMANDS
       ) {
         return false
@@ -18855,10 +18886,19 @@ function FlightRig({
       altarLookAnimation.current = null
       if (!playerAnimation.current) {
         const transitionCommitBlocked = levelTransitionCommitTarget.current !== null
-        const replayAction = inputEnabledRef.current && !transitionCommitBlocked
+        const playerEffectActive = (
+          document.body.dataset.playerEffect === 'death' ||
+          document.body.dataset.playerEffect === 'death-out' ||
+          document.body.dataset.playerEffect === 'sword-strike' ||
+          document.body.dataset.playerEffect === 'sword-strike-out'
+        )
+        const gameplayInputEnabled = inputEnabledRef.current &&
+          !transitionCommitBlocked &&
+          !playerEffectActive
+        const replayAction = gameplayInputEnabled
           ? replayQueue.current.shift()
           : undefined
-        const action = inputEnabledRef.current && !transitionCommitBlocked
+        const action = gameplayInputEnabled
           ? replayAction ?? inputQueue.current.shift()
           : undefined
 
@@ -19191,7 +19231,7 @@ function FlightRig({
                     delete document.body.dataset.playerEffect
                   }
                   playerEffectClearTimeout.current = null
-                }, 375)
+                }, MONSTER_KILL_FADE_OUT_MS)
               } else {
                 document.body.dataset.playerEffect = 'death-out'
                 playerEffectClearTimeout.current = window.setTimeout(() => {
@@ -24230,6 +24270,7 @@ function LevelMenuModal({
   onBooleanSettingChange,
   onClose,
   onEffectSettingChange,
+  onOpenCredits,
   onReplaySolution,
   onResetLevel,
   onSelectLevel,
@@ -24248,6 +24289,7 @@ function LevelMenuModal({
     key: GenericEffectSettingKey,
     patch: Partial<EffectSettings>
   ) => void
+  onOpenCredits: () => void
   onReplaySolution: () => void
   onResetLevel: () => void
   onSelectLevel: (level: AuthoredLevel, index: number) => void
@@ -24255,7 +24297,7 @@ function LevelMenuModal({
   replayAvailable: boolean
   visualSettings: VisualSettings
 }) {
-  const [activeTab, setActiveTab] = useState<'graphics' | 'audio' | 'levels'>('graphics')
+  const [activeTab, setActiveTab] = useState<'graphics' | 'audio' | 'gameplay' | 'cheat'>('graphics')
 
   if (!open) {
     return null
@@ -24286,15 +24328,6 @@ function LevelMenuModal({
             Graphics
           </button>
           <button
-            aria-selected={activeTab === 'levels'}
-            className={`level-menu-tab${activeTab === 'levels' ? ' level-menu-tab-active' : ''}`}
-            onClick={() => setActiveTab('levels')}
-            role="tab"
-            type="button"
-          >
-            Levels
-          </button>
-          <button
             aria-selected={activeTab === 'audio'}
             className={`level-menu-tab${activeTab === 'audio' ? ' level-menu-tab-active' : ''}`}
             onClick={() => setActiveTab('audio')}
@@ -24302,6 +24335,33 @@ function LevelMenuModal({
             type="button"
           >
             Audio
+          </button>
+          <button
+            aria-selected={activeTab === 'gameplay'}
+            className={`level-menu-tab${activeTab === 'gameplay' ? ' level-menu-tab-active' : ''}`}
+            onClick={() => setActiveTab('gameplay')}
+            role="tab"
+            type="button"
+          >
+            Gameplay
+          </button>
+          <button
+            aria-selected={activeTab === 'cheat'}
+            className={`level-menu-tab${activeTab === 'cheat' ? ' level-menu-tab-active' : ''}`}
+            onClick={() => setActiveTab('cheat')}
+            role="tab"
+            type="button"
+          >
+            Cheat
+          </button>
+          <button
+            aria-selected={false}
+            className="level-menu-tab"
+            onClick={onOpenCredits}
+            role="tab"
+            type="button"
+          >
+            Credits
           </button>
         </div>
         {activeTab === 'graphics' ? (
@@ -24408,7 +24468,7 @@ function LevelMenuModal({
               />
             </label>
           </div>
-        ) : (
+        ) : activeTab === 'gameplay' ? (
           <div className="level-menu-list" role="tabpanel">
             <div className="level-menu-actions">
               <button
@@ -24430,6 +24490,9 @@ function LevelMenuModal({
                 </button>
               ) : null}
             </div>
+          </div>
+        ) : (
+          <div className="level-menu-list" role="tabpanel">
             {levels.map((level, index) => (
               <button
                 className="level-menu-button"
@@ -24722,7 +24785,7 @@ export default function App() {
   const [replayRequestMazeId, setReplayRequestMazeId] = useState<string | null>(null)
   const [mazeSceneKey, setMazeSceneKey] = useState(0)
   const [sceneLoaded, setSceneLoaded] = useState(false)
-  const [visualSettings, setVisualSettings] = useState(createDefaultVisualSettings)
+  const [visualSettings, setVisualSettings] = useState(createInitialVisualSettings)
   const [audioSettings, setAudioSettings] = useState<AudioSettings>(DEFAULT_AUDIO_SETTINGS)
   const handleAudioSettingChange = useCallback((patch: Partial<AudioSettings>) => {
     setAudioSettings((current) => ({
@@ -26085,7 +26148,7 @@ export default function App() {
       ...existing,
       getVisualSettings: () => visualSettings,
       resetVisualSettings: () => {
-        setVisualSettings(createDefaultVisualSettings())
+        setVisualSettings(createInitialVisualSettings())
       },
       setVisualSettings: (patch) => {
         setVisualSettings((current) => applyVisualSettingsPatch(current, patch))
@@ -26093,7 +26156,7 @@ export default function App() {
     }
     globalWindow.__levelsjamGetVisualSettings = () => visualSettings
     globalWindow.__levelsjamResetVisualSettings = () => {
-      setVisualSettings(createDefaultVisualSettings())
+      setVisualSettings(createInitialVisualSettings())
     }
     globalWindow.__levelsjamSetVisualSettings = (patch) => {
       setVisualSettings((current) => applyVisualSettingsPatch(current, patch))
@@ -26395,24 +26458,28 @@ export default function App() {
             levels={authoredLevels}
             onAudioSettingChange={handleAudioSettingChange}
             onAmbientOcclusionModeChange={onAmbientOcclusionModeChange}
-        onBooleanSettingChange={onBooleanSettingChange}
-        onClose={() => setLevelMenuOpen(false)}
-        onEffectSettingChange={onEffectSettingChange}
-        onReplaySolution={() => {
-          startCurrentSolutionReplay()
-          setLevelMenuOpen(false)
-        }}
-        onResetLevel={() => {
-          resetInstantiatedMaze()
-          setLevelMenuOpen(false)
-        }}
-        onSelectLevel={(level, index) => {
-          void loadAndActivateLevel(level, index)
-        }}
-        open={levelMenuOpen}
-        replayAvailable={Boolean(mazeLayout.maze.solution?.actions?.length)}
-        visualSettings={visualSettings}
-      />
+            onBooleanSettingChange={onBooleanSettingChange}
+            onClose={() => setLevelMenuOpen(false)}
+            onEffectSettingChange={onEffectSettingChange}
+            onOpenCredits={() => {
+              setLevelMenuOpen(false)
+              setCreditsOpen(true)
+            }}
+            onReplaySolution={() => {
+              startCurrentSolutionReplay()
+              setLevelMenuOpen(false)
+            }}
+            onResetLevel={() => {
+              resetInstantiatedMaze()
+              setLevelMenuOpen(false)
+            }}
+            onSelectLevel={(level, index) => {
+              void loadAndActivateLevel(level, index)
+            }}
+            open={levelMenuOpen}
+            replayAvailable={Boolean(mazeLayout.maze.solution?.actions?.length)}
+            visualSettings={visualSettings}
+          />
       <MobileTouchControls
         onOpenMenu={() => {
           setLevelMenuOpen(true)
