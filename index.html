@@ -161,7 +161,7 @@
     <script>
       const isLocalHost = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
       const detectViteDevServer = async () => {
-        if (!isLocalHost || !['5173', '5174'].includes(window.location.port)) {
+        if (!isLocalHost) {
           return false
         }
 

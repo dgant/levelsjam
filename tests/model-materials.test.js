@@ -448,11 +448,14 @@ test('altar cup runtime model is simplified to the requested triangle budget', (
 
 test('debug visual defaults live in the editable source config', () => {
   const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+  const indexSource = fs.readFileSync(path.join(rootDir, 'index.html'), 'utf8')
   const defaults = JSON.parse(
     fs.readFileSync(path.join(rootDir, 'src/visual-settings.defaults.json'), 'utf8')
   )
 
   assert.match(appSource, /visual-settings\.defaults\.json/)
+  assert.match(indexSource, /fetch\('\/@vite\/client'/)
+  assert.doesNotMatch(indexSource, /\['5173', '5174'\]\.includes\(window\.location\.port\)/)
   assert.equal(defaults.reflectionContribution.intensity, 1)
   assert.equal(defaults.lightmapSaturation, 1)
   assert.equal(defaults.volumetricSaturation, 1)
@@ -521,11 +524,8 @@ test('monster screen shake uses shortest passable path distance', () => {
 
 test('chromatic aberration can be driven by screen shake', () => {
   const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
-  const defaults = JSON.parse(
-    fs.readFileSync(path.join(rootDir, 'src/visual-settings.defaults.json'), 'utf8')
-  )
 
-  assert.equal(defaults.chromaticAberration.screenShakeIntensity, 0)
+  assert.match(appSource, /screenShakeIntensity: 0/)
   assert.match(appSource, /screenShakeIntensity: number/)
   assert.match(appSource, /document\.body\.dataset\.screenShakeAmount/)
   assert.match(appSource, /settings\.intensity \+\s*\(Math\.max\(0, shakeAmount\) \* settings\.screenShakeIntensity\)/)
