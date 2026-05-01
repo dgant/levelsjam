@@ -17,7 +17,7 @@ const contentTypes = new Map([
 ])
 
 function isExpectedDisconnect(error) {
-  return ['ECONNABORTED', 'ECONNRESET', 'EPIPE'].includes(error?.code)
+  return ['ECANCELED', 'ECONNABORTED', 'ECONNRESET', 'EPIPE'].includes(error?.code)
 }
 
 function resolvePath(requestUrl) {
