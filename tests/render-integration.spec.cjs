@@ -435,13 +435,16 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
 
     await page.keyboard.press('Backquote')
     await page.keyboard.press('KeyC')
-    await expect(page.getByRole('dialog', { name: 'Credits' })).toBeVisible()
-    await expect(page.getByRole('dialog', { name: 'Credits' })).toContainText('Minotaur')
-    await expect(page.getByRole('dialog', { name: 'Credits' })).toContainText('PBR Jumping Spider Monster')
-    await expect(page.getByRole('dialog', { name: 'Credits' })).toContainText('Pale Dread White Werewolf')
-    await expect(page.getByRole('dialog', { name: 'Credits' })).toContainText('Qwantani Moon Noon Puresky')
+    const creditsScreen = page.locator('.credits-modal')
+
+    await expect(creditsScreen).toBeVisible()
+    await expect(creditsScreen.locator('.credits-title-image')).toBeVisible()
+    await expect(creditsScreen).toContainText('Minotaur')
+    await expect(creditsScreen).toContainText('PBR Jumping Spider Monster')
+    await expect(creditsScreen).toContainText('Pale Dread White Werewolf')
+    await expect(creditsScreen).toContainText('Qwantani Moon Noon Puresky')
     await page.keyboard.press('KeyX')
-    await expect(page.getByRole('dialog', { name: 'Credits' })).toBeHidden()
+    await expect(creditsScreen).toBeHidden()
     await page.keyboard.press('Backquote')
   })
 

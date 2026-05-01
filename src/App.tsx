@@ -2075,6 +2075,8 @@ const FOG_NOISE_TEXTURE_SIZE = 32
 const FOG_NOISE_VOLUME_URL = `${assetBase}textures/runtime/fog/noise-volume-32-r8.bin`
 const MAX_SIMULTANEOUS_LENS_FLARES = 5
 const MAX_BUFFERED_TURN_COMMANDS = 10
+const ENDGAME_CAMERA_ROTATION_DURATION_MS = 3000
+const ENDGAME_FADE_DURATION_MS = 3000
 const DEFAULT_MONSTER_EYES: MonsterEyeSettings = {
   minotaur: {
     left: { x: 0.16, y: 1.68, z: -0.54 },
@@ -17670,6 +17672,7 @@ function FlightRig({
   audioSettings,
   cameraTiltDegrees,
   commitGlobalTurnState,
+  endgameCameraTurn,
   inputEnabled,
   isLevelLightingReady,
   layout,
@@ -17705,6 +17708,7 @@ function FlightRig({
   audioSettings: AudioSettings
   cameraTiltDegrees: number
   commitGlobalTurnState: (state: GlobalTurnState) => void
+  endgameCameraTurn: { durationMs: number; startedAt: number } | null
   inputEnabled: boolean
   isLevelLightingReady: (mazeId: string) => boolean
   layout: MazeLayout
@@ -17757,6 +17761,11 @@ function FlightRig({
   const hasInitializedPose = useRef(false)
   const cameraShake = useRef({ amplitude: 0, endsAt: 0 })
   const altarLookAnimation = useRef<{
+    key: string
+    startYaw: number
+    targetYaw: number
+  } | null>(null)
+  const endgameTurnAnimation = useRef<{
     key: string
     startYaw: number
     targetYaw: number
@@ -19016,6 +19025,41 @@ function FlightRig({
         return
       }
       altarLookAnimation.current = null
+      if (endgameCameraTurn) {
+        const currentState = turnStateRef.current
+        const playerWorldPosition = getTransformedMazeCellWorldPosition(
+          layout.maze,
+          levelTransform,
+          currentState.player.cell,
+          GROUND_Y + PLAYER_EYE_HEIGHT
+        )
+        const animationKey = `${layout.maze.id}:endgame:${endgameCameraTurn.startedAt.toFixed(1)}`
+
+        if (endgameTurnAnimation.current?.key !== animationKey) {
+          endgameTurnAnimation.current = {
+            key: animationKey,
+            startYaw: yaw.current,
+            targetYaw: yaw.current + Math.PI
+          }
+        }
+
+        const elapsed = Math.max(0, performance.now() - endgameCameraTurn.startedAt)
+        const turnAlpha = MathUtils.smoothstep(
+          MathUtils.clamp(elapsed / endgameCameraTurn.durationMs, 0, 1),
+          0,
+          1
+        )
+        const startYaw = endgameTurnAnimation.current.startYaw
+        const yawDelta = normalizeAngleRadians(endgameTurnAnimation.current.targetYaw - startYaw)
+
+        applyCameraRigPose(
+          playerWorldPosition,
+          startYaw + (yawDelta * turnAlpha),
+          gameplayCameraPitch
+        )
+        return
+      }
+      endgameTurnAnimation.current = null
       if (!playerAnimation.current) {
         const transitionCommitBlocked = levelTransitionCommitTarget.current !== null
         const playerEffectActive = (
@@ -19688,6 +19732,7 @@ function Scene({
   commitGlobalTurnState,
   controlsOpen,
   cutsceneActive,
+  endgameSequence,
   layout,
   levelTransform,
   renderedLayouts,
@@ -19729,6 +19774,7 @@ function Scene({
   commitGlobalTurnState: (state: GlobalTurnState) => void
   controlsOpen: boolean
   cutsceneActive: boolean
+  endgameSequence: { fadeDurationMs: number; rotationDurationMs: number; startedAt: number } | null
   layout: MazeLayout
   levelTransform: LevelWorldTransform
   renderedLayouts: MazeLayout[]
@@ -21480,7 +21526,13 @@ function Scene({
             audioSettings={audioSettings}
             cameraTiltDegrees={visualSettings.cameraTiltDegrees}
             commitGlobalTurnState={commitGlobalTurnState}
-            inputEnabled={startupSceneReady && !cutsceneActive}
+            endgameCameraTurn={endgameSequence
+              ? {
+                  durationMs: endgameSequence.rotationDurationMs,
+                  startedAt: endgameSequence.startedAt
+                }
+              : null}
+            inputEnabled={startupSceneReady && !cutsceneActive && !endgameSequence}
             isLevelLightingReady={isLevelLightingReadyForTransition}
             layout={layout}
             levelTransform={levelTransform}
@@ -24345,92 +24397,98 @@ function CreditsModal({
     <div
       className="credits-modal"
       onPointerDown={final ? undefined : onClose}
-      role="dialog"
-      aria-modal="true"
       aria-label="Credits"
     >
       <div className="credits-panel">
+        <img
+          alt="MINOTAUR"
+          className="credits-title-image"
+          draggable={false}
+          src={TITLE_IMAGE_URL}
+        />
         <h2>{final ? 'Thank you for playing.' : 'Credits'}</h2>
         {final ? (
           <p>
             <a href="https://x.com/dgant">https://x.com/dgant</a>
           </p>
         ) : null}
-        <p>
-          "Minotaur" (<a href="https://skfb.ly/6TK77">https://skfb.ly/6TK77</a>) by yanbelmont is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
-        </p>
-        <p>
-          "PBR Jumping Spider Monster" (<a href="https://skfb.ly/6QVNq">https://skfb.ly/6QVNq</a>) by Toast is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
-        </p>
-        <p>
-          "Pale Dread White Werewolf" (<a href="https://skfb.ly/pFroV">https://skfb.ly/pFroV</a>) by Pigcraft is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
-        </p>
-        <p>
-          "Head of a Bull" (<a href="https://skfb.ly/6TOXX">https://skfb.ly/6TOXX</a>) by Kirk Hiatt is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
-        </p>
-        <p>
-          "Metal Gate" (<a href="https://skfb.ly/oK7QR">https://skfb.ly/oK7QR</a>) by i bull your wife is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
-        </p>
-        <p>
-          "Bronze Sword Mycean" (<a href="https://skfb.ly/6RZxG">https://skfb.ly/6RZxG</a>) by Ryoce is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
-        </p>
-        <p>
-          "Priest's Throne" (<a href="https://skfb.ly/QH8R">https://skfb.ly/QH8R</a>) by cachgill is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
-        </p>
-        <p>
-          "Droop cup 4th century BC" (<a href="https://skfb.ly/oyB9X">https://skfb.ly/oyB9X</a>) by The Hunt Museum is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
-        </p>
-        <p>
-          "Metal Rust" texture pack (<a href="https://www.sharetextures.com/textures/metal/metal-rust">https://www.sharetextures.com/textures/metal/metal-rust</a>) by ShareTextures is licensed under CC0.
-        </p>
-        <p>
-          "Qwantani Moon Noon Puresky" (<a href="https://polyhaven.com/a/qwantani_moon_noon_puresky">https://polyhaven.com/a/qwantani_moon_noon_puresky</a>) by Poly Haven is licensed under CC0.
-        </p>
-        <p>
-          "Timebender (Creepy Ambient Space)" (<a href="https://opengameart.org/content/timebender-creepy-ambient-space">https://opengameart.org/content/timebender-creepy-ambient-space</a>) by MouthlessGames / Christian DeTamble is licensed under CC-BY 3.0.
-        </p>
-        <p>
-          "Radakan - Mist Forest" (<a href="https://opengameart.org/content/radakan-mist-forest">https://opengameart.org/content/radakan-mist-forest</a>) by Janne Hanhisuanto for Radakan is licensed under CC-BY-SA 3.0.
-        </p>
-        <p>
-          "Mystery Manor" (<a href="https://opengameart.org/content/mystery-manor">https://opengameart.org/content/mystery-manor</a>) by Alexandr Zhelanov is licensed under CC-BY 3.0.
-        </p>
-        <p>
-          "(Dark) The Whispering Shadows Dungeon" (<a href="https://opengameart.org/content/dark-the-whispering-shadows-dungeon">https://opengameart.org/content/dark-the-whispering-shadows-dungeon</a>) by Clement Panchout is licensed under CC-BY 4.0.
-        </p>
-        <p>
-          "Stone Guardian" (<a href="https://opengameart.org/content/stone-guardian">https://opengameart.org/content/stone-guardian</a>) by Ronhul Maggot is licensed under CC-BY 4.0.
-        </p>
-        <p>
-          "Big Monster Stomp" (<a href="https://freesound.org/people/Yoyamen1212/sounds/812538/">https://freesound.org/people/Yoyamen1212/sounds/812538/</a>) by Yoyamen1212 is licensed under CC0.
-        </p>
-        <p>
-          "WetFootsteps.wav" (<a href="https://freesound.org/people/sqeeeek/sounds/326543/">https://freesound.org/people/sqeeeek/sounds/326543/</a>) by sqeeeek is licensed under CC0.
-        </p>
-        <p>
-          "Spider monster screech" (<a href="https://freesound.org/people/Patrick_Corra/sounds/540050/">https://freesound.org/people/Patrick_Corra/sounds/540050/</a>) by Patrick_Corra is licensed under Creative Commons Attribution-NonCommercial 4.0.
-        </p>
-        <p>
-          "Beetle Squark5.wav" (<a href="https://freesound.org/people/warrenXG/sounds/502211/">https://freesound.org/people/warrenXG/sounds/502211/</a>) by warrenXG is licensed under CC0.
-        </p>
-        <p>
-          "Jumpscare type roar.mp3" (<a href="https://freesound.org/people/Ritorex24/sounds/578958/">https://freesound.org/people/Ritorex24/sounds/578958/</a>) by Ritorex24 is licensed under CC0.
-        </p>
-        <p>
-          "dyingBeast" (<a href="https://freesound.org/people/QuantumFellow/sounds/734841/">https://freesound.org/people/QuantumFellow/sounds/734841/</a>) by QuantumFellow is licensed under CC0.
-        </p>
-        <p>
-          "SFX - Dragon Low Growls Breathing.wav" (<a href="https://freesound.org/people/Karma-Ron/sounds/486596/">https://freesound.org/people/Karma-Ron/sounds/486596/</a>) by Karma-Ron is licensed under CC0.
-        </p>
-        <p>
-          "Insect in a tree" (<a href="https://freesound.org/people/jymdavis/sounds/197329/">https://freesound.org/people/jymdavis/sounds/197329/</a>) by jymdavis is licensed under CC0.
-        </p>
-        <p>
-          "Staple release from paper" (<a href="https://freesound.org/people/redpanda69/sounds/686187/">https://freesound.org/people/redpanda69/sounds/686187/</a>) by redpanda69 is licensed under CC0.
-        </p>
-        <p>
-          "fire_small_loop.wav" (<a href="https://freesound.org/people/PhreaKsAccount/sounds/46273/">https://freesound.org/people/PhreaKsAccount/sounds/46273/</a>) by PhreaKsAccount is licensed under Creative Commons Attribution 3.0.
-        </p>
+        <div className="credits-list">
+          <p>
+            "Minotaur" (<a href="https://skfb.ly/6TK77">https://skfb.ly/6TK77</a>) by yanbelmont is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
+          </p>
+          <p>
+            "PBR Jumping Spider Monster" (<a href="https://skfb.ly/6QVNq">https://skfb.ly/6QVNq</a>) by Toast is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
+          </p>
+          <p>
+            "Pale Dread White Werewolf" (<a href="https://skfb.ly/pFroV">https://skfb.ly/pFroV</a>) by Pigcraft is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
+          </p>
+          <p>
+            "Head of a Bull" (<a href="https://skfb.ly/6TOXX">https://skfb.ly/6TOXX</a>) by Kirk Hiatt is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
+          </p>
+          <p>
+            "Metal Gate" (<a href="https://skfb.ly/oK7QR">https://skfb.ly/oK7QR</a>) by i bull your wife is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
+          </p>
+          <p>
+            "Bronze Sword Mycean" (<a href="https://skfb.ly/6RZxG">https://skfb.ly/6RZxG</a>) by Ryoce is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
+          </p>
+          <p>
+            "Priest's Throne" (<a href="https://skfb.ly/QH8R">https://skfb.ly/QH8R</a>) by cachgill is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
+          </p>
+          <p>
+            "Droop cup 4th century BC" (<a href="https://skfb.ly/oyB9X">https://skfb.ly/oyB9X</a>) by The Hunt Museum is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
+          </p>
+          <p>
+            "Metal Rust" texture pack (<a href="https://www.sharetextures.com/textures/metal/metal-rust">https://www.sharetextures.com/textures/metal/metal-rust</a>) by ShareTextures is licensed under CC0.
+          </p>
+          <p>
+            "Qwantani Moon Noon Puresky" (<a href="https://polyhaven.com/a/qwantani_moon_noon_puresky">https://polyhaven.com/a/qwantani_moon_noon_puresky</a>) by Poly Haven is licensed under CC0.
+          </p>
+          <p>
+            "Timebender (Creepy Ambient Space)" (<a href="https://opengameart.org/content/timebender-creepy-ambient-space">https://opengameart.org/content/timebender-creepy-ambient-space</a>) by MouthlessGames / Christian DeTamble is licensed under CC-BY 3.0.
+          </p>
+          <p>
+            "Radakan - Mist Forest" (<a href="https://opengameart.org/content/radakan-mist-forest">https://opengameart.org/content/radakan-mist-forest</a>) by Janne Hanhisuanto for Radakan is licensed under CC-BY-SA 3.0.
+          </p>
+          <p>
+            "Mystery Manor" (<a href="https://opengameart.org/content/mystery-manor">https://opengameart.org/content/mystery-manor</a>) by Alexandr Zhelanov is licensed under CC-BY 3.0.
+          </p>
+          <p>
+            "(Dark) The Whispering Shadows Dungeon" (<a href="https://opengameart.org/content/dark-the-whispering-shadows-dungeon">https://opengameart.org/content/dark-the-whispering-shadows-dungeon</a>) by Clement Panchout is licensed under CC-BY 4.0.
+          </p>
+          <p>
+            "Stone Guardian" (<a href="https://opengameart.org/content/stone-guardian">https://opengameart.org/content/stone-guardian</a>) by Ronhul Maggot is licensed under CC-BY 4.0.
+          </p>
+          <p>
+            "Big Monster Stomp" (<a href="https://freesound.org/people/Yoyamen1212/sounds/812538/">https://freesound.org/people/Yoyamen1212/sounds/812538/</a>) by Yoyamen1212 is licensed under CC0.
+          </p>
+          <p>
+            "WetFootsteps.wav" (<a href="https://freesound.org/people/sqeeeek/sounds/326543/">https://freesound.org/people/sqeeeek/sounds/326543/</a>) by sqeeeek is licensed under CC0.
+          </p>
+          <p>
+            "Spider monster screech" (<a href="https://freesound.org/people/Patrick_Corra/sounds/540050/">https://freesound.org/people/Patrick_Corra/sounds/540050/</a>) by Patrick_Corra is licensed under Creative Commons Attribution-NonCommercial 4.0.
+          </p>
+          <p>
+            "Beetle Squark5.wav" (<a href="https://freesound.org/people/warrenXG/sounds/502211/">https://freesound.org/people/warrenXG/sounds/502211/</a>) by warrenXG is licensed under CC0.
+          </p>
+          <p>
+            "Jumpscare type roar.mp3" (<a href="https://freesound.org/people/Ritorex24/sounds/578958/">https://freesound.org/people/Ritorex24/sounds/578958/</a>) by Ritorex24 is licensed under CC0.
+          </p>
+          <p>
+            "dyingBeast" (<a href="https://freesound.org/people/QuantumFellow/sounds/734841/">https://freesound.org/people/QuantumFellow/sounds/734841/</a>) by QuantumFellow is licensed under CC0.
+          </p>
+          <p>
+            "SFX - Dragon Low Growls Breathing.wav" (<a href="https://freesound.org/people/Karma-Ron/sounds/486596/">https://freesound.org/people/Karma-Ron/sounds/486596/</a>) by Karma-Ron is licensed under CC0.
+          </p>
+          <p>
+            "Insect in a tree" (<a href="https://freesound.org/people/jymdavis/sounds/197329/">https://freesound.org/people/jymdavis/sounds/197329/</a>) by jymdavis is licensed under CC0.
+          </p>
+          <p>
+            "Staple release from paper" (<a href="https://freesound.org/people/redpanda69/sounds/686187/">https://freesound.org/people/redpanda69/sounds/686187/</a>) by redpanda69 is licensed under CC0.
+          </p>
+          <p>
+            "fire_small_loop.wav" (<a href="https://freesound.org/people/PhreaKsAccount/sounds/46273/">https://freesound.org/people/PhreaKsAccount/sounds/46273/</a>) by PhreaKsAccount is licensed under Creative Commons Attribution 3.0.
+          </p>
+        </div>
         {final ? null : <small>Press any key or click to close.</small>}
       </div>
     </div>
@@ -24443,9 +24501,13 @@ function LevelMenuModal({
   levels,
   onAudioSettingChange,
   onAmbientOcclusionModeChange,
+  onBloomSettingChange,
   onBooleanSettingChange,
+  onChromaticAberrationSettingChange,
   onClose,
+  onDepthOfFieldSettingChange,
   onEffectSettingChange,
+  onLensFlareSettingChange,
   onOpenCredits,
   onPlayWalkthrough,
   onReplaySolution,
@@ -24461,12 +24523,16 @@ function LevelMenuModal({
   levels: AuthoredLevel[]
   onAudioSettingChange: (patch: Partial<AudioSettings>) => void
   onAmbientOcclusionModeChange: (mode: AmbientOcclusionMode) => void
+  onBloomSettingChange: (patch: Partial<BloomSettings>) => void
   onBooleanSettingChange: (key: BooleanSettingKey, value: boolean) => void
+  onChromaticAberrationSettingChange: (patch: Partial<ChromaticAberrationSettings>) => void
   onClose: () => void
+  onDepthOfFieldSettingChange: (patch: Partial<DepthOfFieldSettings>) => void
   onEffectSettingChange: (
     key: GenericEffectSettingKey,
     patch: Partial<EffectSettings>
   ) => void
+  onLensFlareSettingChange: (patch: Partial<LensFlareSettings>) => void
   onOpenCredits: () => void
   onPlayWalkthrough: () => void
   onReplaySolution: () => void
@@ -24531,7 +24597,7 @@ function LevelMenuModal({
             role="tab"
             type="button"
           >
-            Cheat
+            Skip
           </button>
           <button
             aria-selected={false}
@@ -24573,6 +24639,46 @@ function LevelMenuModal({
                 checked={visualSettings.ambientOcclusionMode !== 'off'}
                 onChange={(event) => {
                   onAmbientOcclusionModeChange(event.target.checked ? 'n8ao' : 'off')
+                }}
+                type="checkbox"
+              />
+            </label>
+            <label className="level-menu-setting">
+              <span>Bloom</span>
+              <input
+                checked={visualSettings.bloom.enabled}
+                onChange={(event) => {
+                  onBloomSettingChange({ enabled: event.target.checked })
+                }}
+                type="checkbox"
+              />
+            </label>
+            <label className="level-menu-setting">
+              <span>DOF</span>
+              <input
+                checked={visualSettings.depthOfField.enabled}
+                onChange={(event) => {
+                  onDepthOfFieldSettingChange({ enabled: event.target.checked })
+                }}
+                type="checkbox"
+              />
+            </label>
+            <label className="level-menu-setting">
+              <span>Lens Flares</span>
+              <input
+                checked={visualSettings.lensFlare.enabled}
+                onChange={(event) => {
+                  onLensFlareSettingChange({ enabled: event.target.checked })
+                }}
+                type="checkbox"
+              />
+            </label>
+            <label className="level-menu-setting">
+              <span>Chromatic Aberration</span>
+              <input
+                checked={visualSettings.chromaticAberration.enabled}
+                onChange={(event) => {
+                  onChromaticAberrationSettingChange({ enabled: event.target.checked })
                 }}
                 type="checkbox"
               />
@@ -24675,7 +24781,7 @@ function LevelMenuModal({
                 type="button"
               >
                 <span>Walkthrough</span>
-                <small>Reset and replay the full main path.</small>
+                <small>Watch a speedrun of the whole game</small>
               </button>
             </div>
           </div>
@@ -24689,7 +24795,6 @@ function LevelMenuModal({
                 type="button"
               >
                 <span>{level.name}</span>
-                {level.description ? <small>{level.description}</small> : null}
               </button>
             ))}
             {challengeLevels.length > 0 ? (
@@ -24703,7 +24808,6 @@ function LevelMenuModal({
                 type="button"
               >
                 <span>{level.name}</span>
-                {level.description ? <small>{level.description}</small> : null}
               </button>
             ))}
           </div>
@@ -24939,6 +25043,11 @@ export default function App() {
   const [controlsOpen, setControlsOpen] = useState(false)
   const [creditsOpen, setCreditsOpen] = useState(false)
   const [gameComplete, setGameComplete] = useState(false)
+  const [endgameSequence, setEndgameSequence] = useState<{
+    fadeDurationMs: number
+    rotationDurationMs: number
+    startedAt: number
+  } | null>(null)
   const gameCompleteRef = useRef(false)
   useEffect(() => {
     gameCompleteRef.current = gameComplete
@@ -25709,6 +25818,7 @@ export default function App() {
       setLevelMenuOpen(false)
       setCreditsOpen(false)
       setGameComplete(false)
+      setEndgameSequence(null)
       setReplayActive(false)
       setActivatedAltarIds(new Set())
       setEnteredLevelIds(new Set())
@@ -25792,6 +25902,8 @@ export default function App() {
     loadedMazeLayoutsRef.current.clear()
     setActivatedAltarIds(new Set())
     setEnteredLevelIds(new Set())
+    setGameComplete(false)
+    setEndgameSequence(null)
     setGlobalTurnState(null, { transition: false })
     setMazeLayout(null)
     setInstantiatedMazeId(null)
@@ -25989,6 +26101,8 @@ export default function App() {
 
     setLevelMenuOpen(false)
     setReplayActive(false)
+    setGameComplete(false)
+    setEndgameSequence(null)
     setSceneLoaded(false)
     setMazeLoadError(null)
     document.body.dataset.selectedLevelName = level.name
@@ -27121,6 +27235,10 @@ export default function App() {
       return undefined
     }
 
+    const finalThroneAltar =
+      altarCutscene.levelId === 'throne-room' &&
+      altarCutscene.altarId === 'throne-altar'
+
     const replaceWithFlameHandle = window.setTimeout(() => {
       const levelId = altarCutscene.levelId
       const layoutForCutscene = loadedMazeLayoutsRef.current.get(levelId)
@@ -27131,9 +27249,6 @@ export default function App() {
         next.add(altarCutscene.altarId)
         return next
       })
-      if (levelId === 'throne-room' && altarCutscene.altarId === 'throne-altar') {
-        setGameComplete(true)
-      }
       if (layoutForCutscene) {
         setGlobalTurnState((current) => {
           if (!current) {
@@ -27185,6 +27300,13 @@ export default function App() {
       setAltarCutscene(null)
       delete document.body.dataset.altarCutsceneActive
       delete document.body.dataset.altarCutsceneStartedAt
+      if (finalThroneAltar) {
+        setEndgameSequence({
+          fadeDurationMs: getScaledAnimationDuration(ENDGAME_FADE_DURATION_MS),
+          rotationDurationMs: getScaledAnimationDuration(ENDGAME_CAMERA_ROTATION_DURATION_MS),
+          startedAt: performance.now()
+        })
+      }
     }, getScaledAnimationDuration(4000))
 
     return () => {
@@ -27192,6 +27314,25 @@ export default function App() {
       window.clearTimeout(restoreControlHandle)
     }
   }, [altarCutscene, setGlobalTurnState])
+
+  useEffect(() => {
+    if (!endgameSequence) {
+      delete document.body.dataset.endgameSequenceActive
+      delete document.body.dataset.endgameSequenceStartedAt
+      return undefined
+    }
+
+    document.body.dataset.endgameSequenceActive = 'true'
+    document.body.dataset.endgameSequenceStartedAt = endgameSequence.startedAt.toFixed(1)
+    const completeHandle = window.setTimeout(() => {
+      setGameComplete(true)
+      setEndgameSequence(null)
+    }, endgameSequence.rotationDurationMs + endgameSequence.fadeDurationMs)
+
+    return () => {
+      window.clearTimeout(completeHandle)
+    }
+  }, [endgameSequence])
 
   useEffect(() => {
     if (!analyticsLevelId) {
@@ -27266,6 +27407,16 @@ export default function App() {
       ) : null}
       <LoadingOverlay complete={sceneLoaded} />
       <AltarCutsceneOverlay active={activeAltarCutscene} />
+      {endgameSequence ? (
+        <div
+          aria-hidden="true"
+          className="endgame-fade-overlay"
+          style={{
+            animationDelay: `${endgameSequence.rotationDurationMs}ms`,
+            animationDuration: `${endgameSequence.fadeDurationMs}ms`
+          }}
+        />
+      ) : null}
           <CreditsModal
             final={gameComplete}
             onClose={() => setCreditsOpen(false)}
@@ -27286,9 +27437,13 @@ export default function App() {
             levels={authoredLevels}
             onAudioSettingChange={handleAudioSettingChange}
             onAmbientOcclusionModeChange={onAmbientOcclusionModeChange}
+            onBloomSettingChange={onBloomSettingChange}
             onBooleanSettingChange={onBooleanSettingChange}
+            onChromaticAberrationSettingChange={onChromaticAberrationSettingChange}
             onClose={() => setLevelMenuOpen(false)}
+            onDepthOfFieldSettingChange={onDepthOfFieldSettingChange}
             onEffectSettingChange={onEffectSettingChange}
+            onLensFlareSettingChange={onLensFlareSettingChange}
             onOpenCredits={() => {
               setLevelMenuOpen(false)
               setCreditsOpen(true)
@@ -27406,6 +27561,7 @@ export default function App() {
                 commitGlobalTurnState={commitGlobalTurnState}
                 controlsOpen={controlsOpen}
                 cutsceneActive={activeAltarCutscene}
+                endgameSequence={endgameSequence}
                 key={`scene:${mazeSceneKey}`}
                 layout={mazeLayout}
                 levelTransform={activeLevelTransform}

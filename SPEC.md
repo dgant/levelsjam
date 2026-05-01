@@ -22,7 +22,7 @@
 - `Chamber 1` connects to `challenge-028`, `challenge-031`, `challenge-059`, and `challenge-036`, with each side's listed mazes ordered nearest-to-furthest from the chamber entry.
 - `Chamber 2` connects to `werewolf-tutorial`, `challenge-098`, `challenge-095`, `challenge-043`, `challenge-040`, and `challenge-100`, with each side's listed mazes ordered nearest-to-furthest from the chamber entry.
 - Beating the game requires carrying the throne-room trophy to the altar and lighting the altar in the `Throne Room`.
-- After the `Throne Room` altar animation completes, the runtime shows a final black thank-you credits screen.
+- After the `Throne Room` altar animation completes, the runtime rotates the camera `180` degrees toward the entrance over `3s`, fades to black over the next `3s`, then shows the final credits screen.
 - Selecting a level through the runtime menu resets that level's character and maze state before placing the player at that level's entrance.
 - The game begins in the authored `Entrance` level.
 - Player movement through an authored level exit transitions seamlessly into the connected level without fading, showing a loading transition, or exposing the boundary between levels.
@@ -481,25 +481,26 @@
 - The werewolf runtime model is rotated 90 degrees to the right relative to its previous forward-facing import orientation.
 - Pressing `1` toggles a free-camera inspection mode that detaches the camera from the player.
 - Free-camera inspection mode uses WASD plus mouse look, has no collisions, supports the arrow keys as movement aliases, and maps `E` to move down and `Q` to move up.
-- Pressing `C` opens a centered credits modal.
-- The credits modal closes on any key press or mouse click while it is open.
-- The credits modal lists the required model credits and license links.
+- Pressing `C` opens a full-screen credits screen with an all-black background.
+- The credits screen closes on any key press or mouse click while it is open outside the final game-complete state.
+- The credits screen lists the required model credits and license links in three columns.
+- The credits screen shows the MINOTAUR logo title image centered at the top.
 - Pressing `Escape` opens a centered level menu modal when the level menu is closed.
 - Pressing `Escape` closes the level menu modal when it is open.
 - The level menu does not display a `Menu` title word inside the modal panel.
 - The level menu lists the levels parsed from `LEVELS.md` in their authored order.
 - Clicking a level name closes the level menu, loads the corresponding authored level or numbered runtime maze, resets its state, and teleports the player to that level's entrance.
 - The menu fits inside the viewport on mobile and desktop and includes a visible close button.
-- The menu is tabbed into `Graphics`, `Audio`, `Gameplay`, `Cheat`, and `Credits` categories in that order.
-- The `Graphics` menu category contains Lighting, Fog, and Ambient Occlusion toggles.
+- The menu is tabbed into `Graphics`, `Audio`, `Gameplay`, `Skip`, and `Credits` categories in that order.
+- The `Graphics` menu category contains live toggles for Lighting, Fog, Ambient Occlusion, Bloom, Depth of Field, Lens Flares, and Chromatic Aberration.
 - The `Lighting` menu toggle's unlit mode renders both static and dynamic lit geometry with flat `1.0` white lighting rather than leaving dynamic objects black.
 - The `Audio` menu category contains music and sound controls.
 - The `Gameplay` menu category contains `Reset`, `Show Solution`, and `Walkthrough` actions.
-- The `Cheat` menu category allows jumping to authored main-progression levels and available challenge levels.
-- The `Credits` menu category closes the menu and opens the credits modal.
+- The `Skip` menu category allows jumping to authored main-progression levels and available challenge levels without showing level descriptions.
+- The `Credits` menu category closes the menu and opens the credits screen.
 - The level menu exposes a `Reset` action that uses the same reset path as player death, returning the current level to its initial position and state.
 - When the current level has a recorded solution, the level menu exposes a `Show Solution` action beside `Reset` that starts the same solution replay as the debug panel.
-- The `Walkthrough` action resets the game and replays the same full main-progression path used by the whole-game completion e2e test.
+- The `Walkthrough` action is described as `Watch a speedrun of the whole game` and resets the game and replays the same full main-progression path used by the whole-game completion e2e test.
 - On touch/mobile and desktop layouts, the bottom of the screen displays left-turn, forward, and right-turn controls.
 - Pressing a touch/mobile movement zone does not draw a browser tap highlight or pressed-state wash over the whole control region.
 - Mobile turn controls have large click/touch hit regions that divide the full screen into playable control areas while their visible labels remain along the bottom.
@@ -814,32 +815,32 @@
 - Minotaur actors outside the player's precomputed visible cell set and farther than five grid cells from the player are not rendered.
 
 ## Credits
-- The credits modal header is `Credits`.
-- The credits modal includes `"Minotaur" (https://skfb.ly/6TK77) by yanbelmont is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
-- The credits modal includes `"Pale Dread White Werewolf" (https://skfb.ly/pFroV) by Pigcraft is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
-- The credits modal includes `"Qwantani Moon Noon Puresky" (https://polyhaven.com/a/qwantani_moon_noon_puresky) by Poly Haven is licensed under CC0.`
-- The credits modal includes `"Timebender (Creepy Ambient Space)" (https://opengameart.org/content/timebender-creepy-ambient-space) by MouthlessGames / Christian DeTamble is licensed under CC-BY 3.0.`
-- The credits modal includes `"Radakan - Mist Forest" (https://opengameart.org/content/radakan-mist-forest) by Janne Hanhisuanto for Radakan is licensed under CC-BY-SA 3.0.`
-- The credits modal includes `"Mystery Manor" (https://opengameart.org/content/mystery-manor) by Alexandr Zhelanov is licensed under CC-BY 3.0.`
-- The credits modal includes `"(Dark) The Whispering Shadows Dungeon" (https://opengameart.org/content/dark-the-whispering-shadows-dungeon) by Clement Panchout is licensed under CC-BY 4.0.`
-- The credits modal includes `"Stone Guardian" (https://opengameart.org/content/stone-guardian) by Ronhul Maggot is licensed under CC-BY 4.0.`
-- The credits modal includes `"Big Monster Stomp" (https://freesound.org/people/Yoyamen1212/sounds/812538/) by Yoyamen1212 is licensed under CC0.`
-- The credits modal includes `"WetFootsteps.wav" (https://freesound.org/people/sqeeeek/sounds/326543/) by sqeeeek is licensed under CC0.`
-- The credits modal includes `"Spider monster screech" (https://freesound.org/people/Patrick_Corra/sounds/540050/) by Patrick_Corra is licensed under Creative Commons Attribution-NonCommercial 4.0.`
-- The credits modal includes `"Beetle Squark5.wav" (https://freesound.org/people/warrenXG/sounds/502211/) by warrenXG is licensed under CC0.`
-- The credits modal includes `"Jumpscare type roar.mp3" (https://freesound.org/people/Ritorex24/sounds/578958/) by Ritorex24 is licensed under CC0.`
-- The credits modal includes `"dyingBeast" (https://freesound.org/people/QuantumFellow/sounds/734841/) by QuantumFellow is licensed under CC0.`
-- The credits modal includes `"SFX - Dragon Low Growls Breathing.wav" (https://freesound.org/people/Karma-Ron/sounds/486596/) by Karma-Ron is licensed under CC0.`
-- The credits modal includes `"Insect in a tree" (https://freesound.org/people/jymdavis/sounds/197329/) by jymdavis is licensed under CC0.`
-- The credits modal includes `"Staple release from paper" (https://freesound.org/people/redpanda69/sounds/686187/) by redpanda69 is licensed under CC0.`
-- The credits modal includes `"fire_small_loop.wav" (https://freesound.org/people/PhreaKsAccount/sounds/46273/) by PhreaKsAccount is licensed under Creative Commons Attribution 3.0.`
-- The credits modal includes `"PBR Jumping Spider Monster" (https://skfb.ly/6QVNq) by Toast is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
-- The credits modal includes `"Head of a Bull" (https://skfb.ly/6TOXX) by Kirk Hiatt is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
-- The credits modal includes `"Metal Gate" (https://skfb.ly/oK7QR) by i bull your wife is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
-- The credits modal includes `"Bronze Sword Mycean" (https://skfb.ly/6RZxG) by Ryoce is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
-- The credits modal includes `"Priest's Throne" (https://skfb.ly/QH8R) by cachgill is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
-- The credits modal includes `"Droop cup 4th century BC" (https://skfb.ly/oyB9X) by The Hunt Museum is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
-- The credits modal includes the ShareTextures `metal-rust` texture pack credit for `https://www.sharetextures.com/textures/metal/metal-rust` as a CC0 asset.
+- The credits screen header is `Credits` when opened manually and `Thank you for playing.` when opened by completing the game.
+- The credits screen includes `"Minotaur" (https://skfb.ly/6TK77) by yanbelmont is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
+- The credits screen includes `"Pale Dread White Werewolf" (https://skfb.ly/pFroV) by Pigcraft is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
+- The credits screen includes `"Qwantani Moon Noon Puresky" (https://polyhaven.com/a/qwantani_moon_noon_puresky) by Poly Haven is licensed under CC0.`
+- The credits screen includes `"Timebender (Creepy Ambient Space)" (https://opengameart.org/content/timebender-creepy-ambient-space) by MouthlessGames / Christian DeTamble is licensed under CC-BY 3.0.`
+- The credits screen includes `"Radakan - Mist Forest" (https://opengameart.org/content/radakan-mist-forest) by Janne Hanhisuanto for Radakan is licensed under CC-BY-SA 3.0.`
+- The credits screen includes `"Mystery Manor" (https://opengameart.org/content/mystery-manor) by Alexandr Zhelanov is licensed under CC-BY 3.0.`
+- The credits screen includes `"(Dark) The Whispering Shadows Dungeon" (https://opengameart.org/content/dark-the-whispering-shadows-dungeon) by Clement Panchout is licensed under CC-BY 4.0.`
+- The credits screen includes `"Stone Guardian" (https://opengameart.org/content/stone-guardian) by Ronhul Maggot is licensed under CC-BY 4.0.`
+- The credits screen includes `"Big Monster Stomp" (https://freesound.org/people/Yoyamen1212/sounds/812538/) by Yoyamen1212 is licensed under CC0.`
+- The credits screen includes `"WetFootsteps.wav" (https://freesound.org/people/sqeeeek/sounds/326543/) by sqeeeek is licensed under CC0.`
+- The credits screen includes `"Spider monster screech" (https://freesound.org/people/Patrick_Corra/sounds/540050/) by Patrick_Corra is licensed under Creative Commons Attribution-NonCommercial 4.0.`
+- The credits screen includes `"Beetle Squark5.wav" (https://freesound.org/people/warrenXG/sounds/502211/) by warrenXG is licensed under CC0.`
+- The credits screen includes `"Jumpscare type roar.mp3" (https://freesound.org/people/Ritorex24/sounds/578958/) by Ritorex24 is licensed under CC0.`
+- The credits screen includes `"dyingBeast" (https://freesound.org/people/QuantumFellow/sounds/734841/) by QuantumFellow is licensed under CC0.`
+- The credits screen includes `"SFX - Dragon Low Growls Breathing.wav" (https://freesound.org/people/Karma-Ron/sounds/486596/) by Karma-Ron is licensed under CC0.`
+- The credits screen includes `"Insect in a tree" (https://freesound.org/people/jymdavis/sounds/197329/) by jymdavis is licensed under CC0.`
+- The credits screen includes `"Staple release from paper" (https://freesound.org/people/redpanda69/sounds/686187/) by redpanda69 is licensed under CC0.`
+- The credits screen includes `"fire_small_loop.wav" (https://freesound.org/people/PhreaKsAccount/sounds/46273/) by PhreaKsAccount is licensed under Creative Commons Attribution 3.0.`
+- The credits screen includes `"PBR Jumping Spider Monster" (https://skfb.ly/6QVNq) by Toast is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
+- The credits screen includes `"Head of a Bull" (https://skfb.ly/6TOXX) by Kirk Hiatt is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
+- The credits screen includes `"Metal Gate" (https://skfb.ly/oK7QR) by i bull your wife is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
+- The credits screen includes `"Bronze Sword Mycean" (https://skfb.ly/6RZxG) by Ryoce is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
+- The credits screen includes `"Priest's Throne" (https://skfb.ly/QH8R) by cachgill is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
+- The credits screen includes `"Droop cup 4th century BC" (https://skfb.ly/oyB9X) by The Hunt Museum is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
+- The credits screen includes the ShareTextures `metal-rust` texture pack credit for `https://www.sharetextures.com/textures/metal/metal-rust` as a CC0 asset.
 
 ## Debug Controls
 - The debug controls panel can be opened and closed with backquote.

@@ -146,14 +146,35 @@ body {
   transform: translateY(0);
 }
 
+.endgame-fade-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  background: #000;
+  opacity: 0;
+  animation-name: endgame-fade-to-black;
+  animation-fill-mode: forwards;
+  animation-timing-function: linear;
+}
+
+@keyframes endgame-fade-to-black {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
 .credits-modal {
   position: fixed;
   inset: 0;
   z-index: 5;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgb(0 0 0 / 68%);
+  overflow: auto;
+  padding: 28px clamp(18px, 4vw, 64px);
+  background: #000;
   color: #f5edda;
 }
 
@@ -169,14 +190,9 @@ body {
 }
 
 .credits-panel {
-  width: min(720px, calc(100vw - 48px));
-  max-height: calc(100vh - 48px);
-  overflow: auto;
-  padding: 28px;
-  background: rgb(8 11 16 / 94%);
-  border: 1px solid rgb(255 255 255 / 16%);
-  border-radius: 18px;
-  box-shadow: 0 24px 80px rgb(0 0 0 / 55%);
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  padding: 16px 0 32px;
 }
 
 .level-menu-panel {
@@ -199,7 +215,7 @@ body {
 }
 
 .credits-panel h2 {
-  margin: 0 0 18px;
+  margin: 8px 0 18px;
   text-align: center;
   text-transform: uppercase;
   letter-spacing: 0.16em;
@@ -256,9 +272,23 @@ body {
   border-radius: 12px;
 }
 
+.credits-title-image {
+  display: block;
+  width: min(68vw, 620px);
+  height: auto;
+  margin: 0 auto 10px;
+  user-select: none;
+}
+
+.credits-list {
+  column-count: 3;
+  column-gap: clamp(20px, 4vw, 52px);
+}
+
 .credits-panel p {
   margin: 0 0 12px;
   line-height: 1.45;
+  break-inside: avoid;
 }
 
 .credits-panel a {
@@ -588,5 +618,9 @@ body {
 
   .level-menu-header {
     align-items: flex-start;
+  }
+
+  .credits-list {
+    column-count: 1;
   }
 }
