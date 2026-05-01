@@ -1,4 +1,5 @@
 const { expect, test } = require('@playwright/test')
+const storyWalkthrough = require('../src/lib/storyWalkthrough.json')
 
 test.setTimeout(180_000)
 
@@ -115,26 +116,26 @@ test('story progression reaches the throne room credits screen', async ({ page }
   await page.evaluate(() => window.__levelsjamDebug.setAnimationSpeedMultiplier?.(100))
   await waitForLevel(page, 'entrance')
 
-  await activateLevel(page, 'hallway-1-1')
-  await activateLevel(page, 'hallway-1-2')
-  await activateLevel(page, 'hallway-1-3')
-  await activateLevel(page, 'hallway-1-4')
-  await activateLevel(page, 'hallway-1-5')
-  await activateLevel(page, 'chamber-1')
+  for (const levelId of storyWalkthrough.levelSequence) {
+    await activateLevel(page, levelId)
+  }
 
-  await solveStoryMaze(page, 'chamber-1', 'challenge-028', { x: 0, y: 2 }, 'west', 'east')
-  await solveStoryMaze(page, 'chamber-1', 'challenge-031', { x: 0, y: 17 }, 'west', 'east')
-  await solveStoryMaze(page, 'chamber-1', 'challenge-059', { x: 4, y: 2 }, 'east', 'west')
-  await solveStoryMaze(page, 'chamber-1', 'challenge-036', { x: 4, y: 17 }, 'east', 'west')
-  await activateLevel(page, 'chamber-2')
+  for (const step of storyWalkthrough.altarSteps) {
+    for (const levelId of step.activateAfter ?? []) {
+      await activateLevel(page, levelId)
+    }
 
-  await solveStoryMaze(page, 'chamber-2', 'werewolf-tutorial', { x: 0, y: 2 }, 'west', 'east')
-  await solveStoryMaze(page, 'chamber-2', 'challenge-098', { x: 0, y: 14 }, 'west', 'east')
-  await solveStoryMaze(page, 'chamber-2', 'challenge-095', { x: 0, y: 26 }, 'west', 'east')
-  await solveStoryMaze(page, 'chamber-2', 'challenge-043', { x: 4, y: 2 }, 'east', 'west')
-  await solveStoryMaze(page, 'chamber-2', 'challenge-040', { x: 4, y: 14 }, 'east', 'west')
-  await solveStoryMaze(page, 'chamber-2', 'challenge-100', { x: 4, y: 26 }, 'east', 'west')
-  await activateLevel(page, 'throne-room')
+    await solveStoryMaze(
+      page,
+      step.chamberId,
+      step.mazeId,
+      step.exitCell,
+      step.direction,
+      step.altarDirection
+    )
+  }
+
+  await activateLevel(page, storyWalkthrough.finalLevel)
 
   const offered = await page.evaluate(() => window.__levelsjamDebug.offerHeldTrophyToAdjacentAltar?.() ?? false)
 

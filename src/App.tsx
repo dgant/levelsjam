@@ -199,11 +199,25 @@ import {
   readGameSave,
   writeGameSave
 } from './lib/saveGame.js'
+import storyWalkthrough from './lib/storyWalkthrough.json'
 import { cloneCachedGltfRoot, getCachedGltfRootUrls, loadCachedGltfRoot } from './lib/gltfRuntimeCache'
 
 declare const __GIT_BRANCH__: string
 declare const __GIT_REVISION__: string
 declare const __GIT_REVISION_TIMESTAMP__: string
+
+type StoryWalkthroughStep = {
+  activateAfter?: string[]
+  altarDirection: CardinalDirection
+  chamberId: string
+  direction: CardinalDirection
+  exitCell: { x: number, y: number }
+  mazeId: string
+}
+
+const STORY_WALKTHROUGH_LEVEL_SEQUENCE = storyWalkthrough.levelSequence as string[]
+const STORY_WALKTHROUGH_ALTAR_STEPS = storyWalkthrough.altarSteps as StoryWalkthroughStep[]
+const STORY_WALKTHROUGH_FINAL_LEVEL = storyWalkthrough.finalLevel as string
 
 const assetBase = import.meta.env.BASE_URL
 const ENVIRONMENT_URL = `${assetBase}textures/environment/qwantani_moon_noon_puresky_2k.exr`
@@ -349,7 +363,8 @@ const FIRE_FLIPBOOK_DURATION_SECONDS = 0.5
 const TURN_ANIMATION_DURATION_MS = 250
 const PLAYER_DEATH_FADE_TO_BLACK_MS = TURN_ANIMATION_DURATION_MS
 const MONSTER_KILL_FADE_TO_RED_MS = 1000
-const MONSTER_KILL_FADE_OUT_MS = 3000
+const MONSTER_KILL_FADE_OUT_MS = 1000
+const WALKTHROUGH_ALTAR_SETTLE_MS = 3200
 let globalAnimationSpeedMultiplier = 1
 
 const MONSTER_EYE_RADIUS = 0.0075
@@ -4174,6 +4189,10 @@ vec3 sampleProbeBlendDiffuseWithMode(
   int mode,
   float intensity
 ) {
+  if ( intensity < 0.0 ) {
+    return vec3( - intensity );
+  }
+
   vec3 probeLocalPosition = probeBlendWorldToLocalPosition( vProbeBlendWorldPosition );
   vec3 probeLocalDirection = probeBlendWorldToLocalDirection( direction );
 #if defined(PROBE_BLEND_ENABLE_VLM_TEXTURES)
@@ -16965,7 +16984,7 @@ function PlayerFadeEffectPrimitive() {
       }
 
       if (name === 'death-out') {
-        setFade(deathColor, 1 - (elapsed / PLAYER_DEATH_FADE_IN_MS))
+        setFade(deathColor, Math.sqrt(Math.max(0, 1 - (elapsed / PLAYER_DEATH_FADE_IN_MS))))
         return
       }
 
@@ -17925,8 +17944,6 @@ function FlightRig({
         eventTimeStamp < inputEnabledAt.current ||
         freeCamera.current ||
         replayActive.current ||
-        document.body.dataset.playerEffect === 'death' ||
-        document.body.dataset.playerEffect === 'death-out' ||
         document.body.dataset.playerEffect === 'sword-strike' ||
         document.body.dataset.playerEffect === 'sword-strike-out' ||
         inputQueue.current.length >= MAX_BUFFERED_TURN_COMMANDS
@@ -18917,8 +18934,6 @@ function FlightRig({
       if (!playerAnimation.current) {
         const transitionCommitBlocked = levelTransitionCommitTarget.current !== null
         const playerEffectActive = (
-          document.body.dataset.playerEffect === 'death' ||
-          document.body.dataset.playerEffect === 'death-out' ||
           document.body.dataset.playerEffect === 'sword-strike' ||
           document.body.dataset.playerEffect === 'sword-strike-out'
         )
@@ -21074,10 +21089,10 @@ function Scene({
     ? 0
     : getEnabledContributionIntensity(visualSettings.lightmapContribution)
   const runtimeDynamicVolumetricIntensity = visualSettings.unlitMode
-    ? 0
+    ? -1
     : getEnabledContributionIntensity(visualSettings.iblContribution)
   const runtimeStaticVolumetricIntensity = visualSettings.unlitMode
-    ? 0
+    ? -1
     : getEnabledContributionIntensity(visualSettings.staticVolumetricContribution)
   const runtimeReflectionIntensity = visualSettings.unlitMode
     ? 0
@@ -24206,9 +24221,11 @@ function SfxLibraryManager({
 
 function CreditsModal({
   final = false,
+  onClose,
   open
 }: {
   final?: boolean
+  onClose?: () => void
   open: boolean
 }) {
   if (!open) {
@@ -24216,7 +24233,13 @@ function CreditsModal({
   }
 
   return (
-    <div className="credits-modal" role="dialog" aria-modal="true" aria-label="Credits">
+    <div
+      className="credits-modal"
+      onPointerDown={final ? undefined : onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Credits"
+    >
       <div className="credits-panel">
         <h2>{final ? 'Thank you for playing.' : 'Credits'}</h2>
         {final ? (
@@ -24299,7 +24322,7 @@ function CreditsModal({
         <p>
           "fire_small_loop.wav" (<a href="https://freesound.org/people/PhreaKsAccount/sounds/46273/">https://freesound.org/people/PhreaKsAccount/sounds/46273/</a>) by PhreaKsAccount is licensed under Creative Commons Attribution 3.0.
         </p>
-        <small>Press any key to close.</small>
+        {final ? null : <small>Press any key or click to close.</small>}
       </div>
     </div>
   )
@@ -24315,11 +24338,13 @@ function LevelMenuModal({
   onClose,
   onEffectSettingChange,
   onOpenCredits,
+  onPlayWalkthrough,
   onReplaySolution,
   onResetLevel,
   onSelectLevel,
   open,
   replayAvailable,
+  walkthroughActive,
   visualSettings
 }: {
   audioSettings: AudioSettings
@@ -24334,11 +24359,13 @@ function LevelMenuModal({
     patch: Partial<EffectSettings>
   ) => void
   onOpenCredits: () => void
+  onPlayWalkthrough: () => void
   onReplaySolution: () => void
   onResetLevel: () => void
   onSelectLevel: (level: AuthoredLevel, index: number) => void
   open: boolean
   replayAvailable: boolean
+  walkthroughActive: boolean
   visualSettings: VisualSettings
 }) {
   const [activeTab, setActiveTab] = useState<'graphics' | 'audio' | 'gameplay' | 'cheat'>('graphics')
@@ -24351,7 +24378,6 @@ function LevelMenuModal({
     <div className="level-menu-modal" role="dialog" aria-modal="true" aria-label="Level Menu">
       <div className="level-menu-panel">
         <div className="level-menu-header">
-          <h2>Menu</h2>
           <button
             aria-label="Close Menu"
             className="level-menu-close"
@@ -24533,6 +24559,15 @@ function LevelMenuModal({
                   <small>Replay the recorded solution for this level.</small>
                 </button>
               ) : null}
+              <button
+                className="level-menu-button level-menu-action-button"
+                disabled={walkthroughActive}
+                onClick={onPlayWalkthrough}
+                type="button"
+              >
+                <span>Walkthrough</span>
+                <small>Reset and replay the full main path.</small>
+              </button>
             </div>
           </div>
         ) : (
@@ -24581,6 +24616,24 @@ function MobileTouchControls({
     x: number
     y: number
   } | null>(null)
+  const windowWasFocused = useRef(
+    typeof document === 'undefined' ? true : document.hasFocus()
+  )
+  useEffect(() => {
+    const onFocus = () => {
+      windowWasFocused.current = true
+    }
+    const onBlur = () => {
+      windowWasFocused.current = false
+    }
+
+    window.addEventListener('focus', onFocus)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [])
   const dispatchAction = (action: TurnAction) => {
     window.dispatchEvent(new CustomEvent<TurnAction>('levelsjam:turn-action', {
       detail: action
@@ -24590,6 +24643,10 @@ function MobileTouchControls({
     event: ReactPointerEvent<HTMLButtonElement>,
     action: TurnAction
   ) => {
+    if (event.pointerType === 'mouse' && !windowWasFocused.current) {
+      return
+    }
+
     event.preventDefault()
     event.currentTarget.setPointerCapture(event.pointerId)
     touchStart.current = {
@@ -24681,12 +24738,10 @@ function MobileTouchControls({
 
 function StartupChoiceOverlay({
   onContinue,
-  onNewGame,
-  resumeLevelId
+  onNewGame
 }: {
   onContinue: () => void
   onNewGame: () => void
-  resumeLevelId: string
 }) {
   return (
     <div className="loading-overlay visible">
@@ -24713,7 +24768,6 @@ function StartupChoiceOverlay({
             New Game
           </button>
         </div>
-        <small>Continue from {resumeLevelId} or start over at the Entrance.</small>
       </div>
     </div>
   )
@@ -24834,6 +24888,7 @@ export default function App() {
   const [replayRequestMazeId, setReplayRequestMazeId] = useState<string | null>(null)
   const [mazeSceneKey, setMazeSceneKey] = useState(0)
   const [sceneLoaded, setSceneLoaded] = useState(false)
+  const [walkthroughActive, setWalkthroughActive] = useState(false)
   const [visualSettings, setVisualSettings] = useState(createInitialVisualSettings)
   const [audioSettings, setAudioSettings] = useState<AudioSettings>(DEFAULT_AUDIO_SETTINGS)
   const handleAudioSettingChange = useCallback((patch: Partial<AudioSettings>) => {
@@ -25201,6 +25256,167 @@ export default function App() {
 
     setReplayRequestMazeId(mazeLayout.maze.id)
     setReplayRequestId((current) => current + 1)
+  }
+
+  const runStoryWalkthrough = async () => {
+    if (walkthroughActive) {
+      return
+    }
+
+    const wait = (ms: number) => new Promise<void>((resolve) => {
+      window.setTimeout(resolve, ms)
+    })
+    const completedAltarIds = new Set<string>()
+    const activateLevelById = async (mazeId: string, reset = false) => {
+      await loadLevelNeighborhood(mazeId)
+      const layout = loadedMazeLayoutsRef.current.get(mazeId)
+
+      if (!layout) {
+        throw new Error(`Walkthrough could not load "${mazeId}"`)
+      }
+
+      instantiateLoadedMaze(mazeId, { reset })
+      await wait(0)
+      return layout
+    }
+    const completeAdjacentAltar = async (
+      layout: MazeLayout,
+      cell: { x: number, y: number },
+      direction: CardinalDirection
+    ) => {
+      const altar =
+        (layout.altars ?? []).find((candidate) =>
+          !completedAltarIds.has(candidate.id) &&
+          areCellsCardinallyAdjacent(cell, candidate.cell)
+        ) ??
+        (layout.altars ?? []).find((candidate) => !completedAltarIds.has(candidate.id))
+
+      if (!altar) {
+        throw new Error(`Walkthrough found no available altar in "${layout.maze.id}"`)
+      }
+
+      const facingDirection = directionFromCellToCell(cell, altar.cell) ?? direction
+
+      setGlobalTurnState((current) => {
+        const ensuredState = current
+          ? ensureGlobalTurnStateLevel(current, layout)
+          : createInitialGlobalTurnState(layout, Array.from(loadedMazeLayoutsRef.current.values()))
+        const levelTurnState = getGlobalTurnStateForLevel(
+          ensuredState,
+          layout.maze.id,
+          layout.maze
+        )
+        const nextGlobalState = replaceGlobalTurnStateForLevel(ensuredState, layout.maze.id, {
+          ...levelTurnState,
+          player: {
+            ...levelTurnState.player,
+            cell: { x: cell.x, y: cell.y },
+            direction: facingDirection,
+            hasTrophy: false
+          },
+          trophyState: 'consumed'
+        })
+        const nextItemStates = { ...(nextGlobalState.worldTurnState.itemStates ?? {}) }
+
+        for (const [itemId, itemState] of Object.entries(nextItemStates)) {
+          if (itemState === 'held' && itemId.endsWith(':trophy')) {
+            nextItemStates[itemId] = 'consumed'
+          }
+        }
+
+        return {
+          ...nextGlobalState,
+          player: {
+            ...nextGlobalState.player,
+            cell: { x: cell.x, y: cell.y },
+            direction: facingDirection,
+            levelId: layout.maze.id,
+            hasTrophy: false
+          },
+          worldTurnState: {
+            ...nextGlobalState.worldTurnState,
+            itemStates: nextItemStates,
+            player: {
+              ...nextGlobalState.worldTurnState.player,
+              cell: { x: cell.x, y: cell.y },
+              direction: facingDirection,
+              levelId: layout.maze.id,
+              hasTrophy: false
+            }
+          }
+        }
+      }, { transition: false })
+      document.body.dataset.altarCutsceneActive = 'true'
+      document.body.dataset.altarCutsceneStartedAt = performance.now().toFixed(1)
+      setAltarCutscene({
+        altarId: altar.id,
+        levelId: layout.maze.id,
+        startedAt: Number(document.body.dataset.altarCutsceneStartedAt)
+      })
+      await wait(WALKTHROUGH_ALTAR_SETTLE_MS)
+      completedAltarIds.add(altar.id)
+      setActivatedAltarIds((current) => {
+        const next = new Set(current)
+
+        next.add(altar.id)
+        return next
+      })
+    }
+
+    setWalkthroughActive(true)
+    document.body.dataset.walkthroughActive = 'true'
+    try {
+      clearGameSave(window.localStorage)
+    } catch {
+      // Storage can be unavailable in hardened browser modes; walkthrough remains in memory.
+    }
+
+    try {
+      setLevelMenuOpen(false)
+      setCreditsOpen(false)
+      setGameComplete(false)
+      setReplayActive(false)
+      setActivatedAltarIds(new Set())
+      setEnteredLevelIds(new Set())
+      resetClosedMazeIdsRef.current.clear()
+      loadedMazeLayoutsRef.current.clear()
+      unloadMazeLayoutById(getDefaultRuntimeLevelId())
+
+      await activateLevelById(getDefaultRuntimeLevelId(), true)
+      for (const levelId of STORY_WALKTHROUGH_LEVEL_SEQUENCE) {
+        await activateLevelById(levelId)
+      }
+
+      for (const step of STORY_WALKTHROUGH_ALTAR_STEPS) {
+        for (const levelId of step.activateAfter ?? []) {
+          await activateLevelById(levelId)
+        }
+
+        await activateLevelById(step.mazeId)
+        const chamberLayout = await activateLevelById(step.chamberId)
+
+        await completeAdjacentAltar(
+          chamberLayout,
+          step.exitCell,
+          step.altarDirection
+        )
+      }
+
+      const finalLayout = await activateLevelById(STORY_WALKTHROUGH_FINAL_LEVEL)
+      const finalCell = finalLayout.maze.trophy?.cell ?? finalLayout.maze.playerStart.cell
+      await completeAdjacentAltar(
+        finalLayout,
+        finalCell,
+        finalLayout.maze.playerStart.direction
+      )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+
+      setMazeLoadError(message)
+    } finally {
+      delete document.body.dataset.walkthroughActive
+      setWalkthroughActive(false)
+    }
   }
 
   const handleNewGameChoice = () => {
@@ -26595,7 +26811,6 @@ export default function App() {
         <StartupChoiceOverlay
           onContinue={handleContinueChoice}
           onNewGame={handleNewGameChoice}
-          resumeLevelId={startupResumeLevelId}
         />
       </div>
     )
@@ -26635,7 +26850,11 @@ export default function App() {
       ) : null}
       <LoadingOverlay complete={sceneLoaded} />
       <AltarCutsceneOverlay active={activeAltarCutscene} />
-          <CreditsModal final={gameComplete} open={creditsOpen || gameComplete} />
+          <CreditsModal
+            final={gameComplete}
+            onClose={() => setCreditsOpen(false)}
+            open={creditsOpen || gameComplete}
+          />
           <MusicManager
             enabled={sceneLoaded}
             levelId={activeMusicLevelId}
@@ -26658,6 +26877,9 @@ export default function App() {
               setLevelMenuOpen(false)
               setCreditsOpen(true)
             }}
+            onPlayWalkthrough={() => {
+              void runStoryWalkthrough()
+            }}
             onReplaySolution={() => {
               startCurrentSolutionReplay()
               setLevelMenuOpen(false)
@@ -26671,6 +26893,7 @@ export default function App() {
             }}
             open={levelMenuOpen}
             replayAvailable={Boolean(mazeLayout.maze.solution?.actions?.length)}
+            walkthroughActive={walkthroughActive}
             visualSettings={visualSettings}
           />
       <MobileTouchControls

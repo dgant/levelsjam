@@ -684,5 +684,12 @@ Go implement this. We need robust central camera control with an architecture th
 [x] Towards the end of the the altar-lighting animation, the camera winds up in an inconsistent state. The trophy turns into the flame, then the camera snaps back to the direction the player was facing before the animation began, but that does not seem to be the actual direction the player is facing, and when you press forward it moves you in a different direction. Leaving a maze with the altar to the right of the exit, the animation turns towards the altar in letterbox (good), but then at the same time the letterbox fades, the camera snaps back to the direction the player was facing when they walked next to the altar (bad) instead of the letterbox ending with the camera and player both facing the altar (that would be the intended behavior)
 [x] Menu: Name the categories "Graphics" (first) then "Audio" (second) then "Gameplay" (third) which contains the reset/show solution, "Cheat" (fourth) which allows jumping to any of the levels in the main progression, and "Credits" (fifth) which closes the menu and opens the credits
 [x] The buttons and menu that are visible only on mobile? Show them on desktop too.
-[] Remove the word "MENU" from the menu lol
-[] Just like how pressing any key closes the credits, so should any mouse click
+[x] Remove the word "MENU" from the menu lol
+[x] Just like how pressing any key closes the credits, so should any mouse click
+[x] "Continue from {level} or start over at the Entrance" <- Remove this text
+[x] Mouseleft/right/forward clicks should only work if the window is already focused
+[x] Let's speed up down the on-killing-monsters animation. Fade back from red in 1 second
+[x] Remove the prohibition on keyboard control during the death animation
+[x] Change the curve of the fade-in from death animation so the black is blacker longer, like if it's going from 1 -> 0 blackness, take the sqrt of the parametric time value
+[x] Dynamically lit objects are not being lit in unlit mode. They should be lit the same way as static objects are, using the flat 1.0 lighting
+[x] To the Gameplay menu add a Walkthrough button which resets and replays the whole game start to finish using the same path as the e2e whole-game completion test (and do verify that the button works

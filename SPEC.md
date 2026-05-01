@@ -352,7 +352,7 @@
 - The held sword is shifted `0.5m` backward along its own axis from the prior forward pose so it stays inside the player's cell and avoids clipping through nearby walls.
 - The held trophy is positioned in the player's left hand within the camera frustum and points upward from the player perspective.
 - If the player would die by intersecting a monster while holding the sword, the monster dies instead, the sword is consumed, and the strike fade plays to dark red before restoring gameplay.
-- The sword-strike fade animates to linear RGB `(0.5, 0, 0)` over `1s`, then fades back to the camera view over `3s`, without flashing or transitioning through black.
+- The sword-strike fade animates to linear RGB `(0.5, 0, 0)` over `1s`, then fades back to the camera view over `1s`, without flashing or transitioning through black.
 - A maze is beaten only when the player acquires the trophy and exits the maze while still holding it.
 - When the player leaves a maze and its entrance door closes while the player is outside that maze and its transition cell, the maze resets its monsters, pickups, doors, and gates; a held sword from that maze is removed.
 - Characters are either the player or monsters.
@@ -390,7 +390,8 @@
 - If the player attempts to move into a cell containing a monster, the player dies.
 - If a monster attempts to move into the player cell, the player dies.
 - Player death fades the viewport to black during the movement animation, resets the current maze state to the last checkpoint, and fades back in over `6s`.
-- Player death fades to black over the killing movement animation, disables player control while the fade is active, and fades back to the camera view over `6s` before restoring player control.
+- Player death fades to black over the killing movement animation and fades back to the camera view over `6s` while player control remains available during the fade-back animation.
+- Player death fade-back keeps the screen black longer by mapping remaining blackness through the square root of the remaining normalized fade time.
 - Player death clears transient camera shake and queued movement commands when the maze state resets, so movement after resurrection cannot inherit effects from the killing turn or from buffered pre-death input.
 - The sword-strike and player-death fade overlays are applied before the vignette effect so the vignette is still visible on top of the fade color.
 - The current checkpoint is the maze entrance position and entrance-facing direction.
@@ -458,21 +459,24 @@
 - Pressing `1` toggles a free-camera inspection mode that detaches the camera from the player.
 - Free-camera inspection mode uses WASD plus mouse look, has no collisions, supports the arrow keys as movement aliases, and maps `E` to move down and `Q` to move up.
 - Pressing `C` opens a centered credits modal.
-- The credits modal closes on any key press while it is open.
+- The credits modal closes on any key press or mouse click while it is open.
 - The credits modal lists the required model credits and license links.
 - Pressing `Escape` opens a centered level menu modal when the level menu is closed.
 - Pressing `Escape` closes the level menu modal when it is open.
+- The level menu does not display a `Menu` title word inside the modal panel.
 - The level menu lists the levels parsed from `LEVELS.md` in their authored order.
 - Clicking a level name closes the level menu, loads the corresponding authored level or numbered runtime maze, resets its state, and teleports the player to that level's entrance.
 - The menu fits inside the viewport on mobile and desktop and includes a visible close button.
 - The menu is tabbed into `Graphics`, `Audio`, `Gameplay`, `Cheat`, and `Credits` categories in that order.
 - The `Graphics` menu category contains Lighting, Fog, and Ambient Occlusion toggles.
+- The `Lighting` menu toggle's unlit mode renders both static and dynamic lit geometry with flat `1.0` white lighting rather than leaving dynamic objects black.
 - The `Audio` menu category contains music and sound controls.
-- The `Gameplay` menu category contains `Reset` and `Show Solution` actions.
+- The `Gameplay` menu category contains `Reset`, `Show Solution`, and `Walkthrough` actions.
 - The `Cheat` menu category allows jumping to authored main-progression levels and available challenge levels.
 - The `Credits` menu category closes the menu and opens the credits modal.
 - The level menu exposes a `Reset` action that uses the same reset path as player death, returning the current level to its initial position and state.
 - When the current level has a recorded solution, the level menu exposes a `Show Solution` action beside `Reset` that starts the same solution replay as the debug panel.
+- The `Walkthrough` action resets the game and replays the same full main-progression path used by the whole-game completion e2e test.
 - On touch/mobile and desktop layouts, the bottom of the screen displays left-turn, forward, and right-turn controls.
 - Pressing a touch/mobile movement zone does not draw a browser tap highlight or pressed-state wash over the whole control region.
 - Mobile turn controls have large click/touch hit regions that divide the full screen into playable control areas while their visible labels remain along the bottom.
@@ -661,6 +665,7 @@
 - Pressing backquote opens and closes the debug controls panel during play.
 - Pressing backquote is reserved for the debug controls panel and does not restore mouse lock.
 - Mouse lock is only requested from an explicit click on the scene canvas.
+- Desktop mouse clicks on the left, right, and forward movement zones only perform movement if the browser window is already focused before the click begins.
 - The game responds to movement and look input without requiring any preliminary button click.
 - Analytics page-view events include the exact visited URL and the `ref` query parameter when present so traffic-origin links can be attributed.
 

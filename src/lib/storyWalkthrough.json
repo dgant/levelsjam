@@ -1,0 +1,84 @@
+{
+  "levelSequence": [
+    "hallway-1-1",
+    "hallway-1-2",
+    "hallway-1-3",
+    "hallway-1-4",
+    "hallway-1-5",
+    "chamber-1"
+  ],
+  "altarSteps": [
+    {
+      "altarDirection": "east",
+      "chamberId": "chamber-1",
+      "direction": "west",
+      "exitCell": { "x": 0, "y": 2 },
+      "mazeId": "challenge-028"
+    },
+    {
+      "altarDirection": "east",
+      "chamberId": "chamber-1",
+      "direction": "west",
+      "exitCell": { "x": 0, "y": 17 },
+      "mazeId": "challenge-031"
+    },
+    {
+      "altarDirection": "west",
+      "chamberId": "chamber-1",
+      "direction": "east",
+      "exitCell": { "x": 4, "y": 2 },
+      "mazeId": "challenge-059"
+    },
+    {
+      "altarDirection": "west",
+      "chamberId": "chamber-1",
+      "direction": "east",
+      "exitCell": { "x": 4, "y": 17 },
+      "mazeId": "challenge-036"
+    },
+    {
+      "activateAfter": ["chamber-2"],
+      "altarDirection": "east",
+      "chamberId": "chamber-2",
+      "direction": "west",
+      "exitCell": { "x": 0, "y": 2 },
+      "mazeId": "werewolf-tutorial"
+    },
+    {
+      "altarDirection": "east",
+      "chamberId": "chamber-2",
+      "direction": "west",
+      "exitCell": { "x": 0, "y": 14 },
+      "mazeId": "challenge-098"
+    },
+    {
+      "altarDirection": "east",
+      "chamberId": "chamber-2",
+      "direction": "west",
+      "exitCell": { "x": 0, "y": 26 },
+      "mazeId": "challenge-095"
+    },
+    {
+      "altarDirection": "west",
+      "chamberId": "chamber-2",
+      "direction": "east",
+      "exitCell": { "x": 4, "y": 2 },
+      "mazeId": "challenge-043"
+    },
+    {
+      "altarDirection": "west",
+      "chamberId": "chamber-2",
+      "direction": "east",
+      "exitCell": { "x": 4, "y": 14 },
+      "mazeId": "challenge-040"
+    },
+    {
+      "altarDirection": "west",
+      "chamberId": "chamber-2",
+      "direction": "east",
+      "exitCell": { "x": 4, "y": 26 },
+      "mazeId": "challenge-100"
+    }
+  ],
+  "finalLevel": "throne-room"
+}
