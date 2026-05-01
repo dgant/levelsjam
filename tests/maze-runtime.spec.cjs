@@ -4,6 +4,10 @@ test.setTimeout(120_000)
 
 async function waitForSceneReady(page, mazeId = 'maze-001') {
   await page.goto(`/?maze=${mazeId}`, { waitUntil: 'domcontentloaded' })
+  await waitForCurrentSceneReady(page)
+}
+
+async function waitForCurrentSceneReady(page) {
   await expect
     .poll(async () => page.locator('#root .loading-overlay').getAttribute('data-loading-complete'), {
       timeout: 30_000,
@@ -236,6 +240,134 @@ test('maze runtime exposes gate/item/lifecycle and memory state', async ({ page 
     })
 
   expect(consoleErrors).toEqual([])
+  expect(pageErrors).toEqual([])
+})
+
+test('challenge menu loads isolated playtest rules without restoring challenge saves', async ({ page }) => {
+  const consoleErrors = []
+  const failedResponses = []
+  const pageErrors = []
+
+  page.on('console', (message) => {
+    if (message.type() === 'error') {
+      consoleErrors.push(message.text())
+    }
+  })
+  page.on('response', (response) => {
+    if (response.status() >= 400) {
+      failedResponses.push(response.url())
+    }
+  })
+
+  page.on('pageerror', (error) => {
+    pageErrors.push(String(error))
+  })
+
+  await page.addInitScript(() => {
+    window.localStorage.setItem('levelsjam:save:v1', JSON.stringify({
+      lastLevelId: 'challenge-001',
+      litAltars: [],
+      openedPassageways: [],
+      savedAt: new Date().toISOString(),
+      version: 1
+    }))
+  })
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await waitForCurrentSceneReady(page)
+
+  await expect
+    .poll(async () => page.evaluate(() => window.__levelsjamDebug.getMazeLifecycleState?.()?.instantiatedMazeId ?? null), {
+      timeout: 10_000,
+      intervals: [100, 250, 500]
+    })
+    .toBe('entrance')
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', {
+      bubbles: true,
+      cancelable: true,
+      code: 'Escape',
+      key: 'Escape'
+    }))
+  })
+  await page.evaluate(() => {
+    Array.from(document.querySelectorAll('button.level-menu-tab'))
+      .find((button) => button.textContent?.includes('Levels'))
+      ?.click()
+  })
+  await page.evaluate(() => {
+    Array.from(document.querySelectorAll('button.level-menu-button'))
+      .find((button) => button.textContent?.includes('Challenge 100:'))
+      ?.click()
+  })
+  await waitForCurrentSceneReady(page)
+
+  await expect
+    .poll(async () => page.evaluate(() => window.__levelsjamDebug.getMazeLifecycleState?.()?.instantiatedMazeId ?? null), {
+      timeout: 20_000,
+      intervals: [100, 250, 500]
+    })
+    .toBe('challenge-100')
+
+  const loadedChallenge = await page.evaluate(() => ({
+    save: JSON.parse(window.localStorage.getItem('levelsjam:save:v1') ?? 'null'),
+    turn: window.__levelsjamDebug.getTurnStateSummary?.()
+  }))
+
+  expect(loadedChallenge.save.lastLevelId).toBe('entrance')
+  expect(loadedChallenge.turn.player.cell).toEqual({ x: 4, y: 2 })
+
+  await page.keyboard.press('ArrowUp')
+  await expect
+    .poll(async () => page.evaluate(() => ({
+      pending: document.body.dataset.pendingLevelTransitionId ?? null,
+      player: window.__levelsjamDebug.getTurnStateSummary?.()?.player ?? null,
+      replay: window.__levelsjamDebug.getReplayControllerState?.() ?? null
+    })), {
+      timeout: 10_000,
+      intervals: [100, 250, 500]
+    })
+    .toMatchObject({
+      pending: null,
+      player: {
+        cell: { x: 3, y: 2 },
+        direction: 'west'
+      },
+      replay: {
+        playerAnimationAction: null
+      }
+    })
+
+  await page.keyboard.press('ArrowRight')
+  await expect
+    .poll(async () => page.evaluate(() => ({
+      pending: document.body.dataset.pendingLevelTransitionId ?? null,
+      player: window.__levelsjamDebug.getTurnStateSummary?.()?.player ?? null,
+      replay: window.__levelsjamDebug.getReplayControllerState?.() ?? null
+    })), {
+      timeout: 10_000,
+      intervals: [100, 250, 500]
+    })
+    .toMatchObject({
+      pending: null,
+      player: {
+        cell: { x: 3, y: 2 },
+        direction: 'north'
+      },
+      replay: {
+        playerAnimationAction: null
+      }
+    })
+
+  const expectedStaticViteProbeFailed =
+    failedResponses.length === 1 && failedResponses[0].endsWith('/@vite/client')
+  const relevantConsoleErrors = consoleErrors.filter((message) => !(
+    expectedStaticViteProbeFailed &&
+    message === 'Failed to load resource: the server responded with a status of 404 (Not Found)'
+  ))
+
+  expect(failedResponses.filter((url) => !url.endsWith('/@vite/client'))).toEqual([])
+  expect(relevantConsoleErrors).toEqual([])
   expect(pageErrors).toEqual([])
 })
 

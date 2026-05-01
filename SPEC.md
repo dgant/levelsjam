@@ -843,6 +843,8 @@
 - Standalone maze playtest loading publishes the post-entry gate state before player input is accepted, so safe gates adjacent to the loaded player cell are already open in both rules state and rendered state.
 - Challenge maze playtest levels accept repeated keyboard and touch turn commands after an initial rotation.
 - Challenge mazes are graph-excluded: loading one from the menu does not add it to the authored story level graph or normal seamless traversal path.
+- Loading a challenge maze creates an isolated active rules world containing that challenge maze only; previously loaded challenge or story layouts may remain cached but must not participate in movement, collision, ownership, or level-transition detection for the active challenge.
+- Challenge maze playtest levels are not restored as the default startup level from persistent save data.
 
 ## Testing Expectations
 - A production build succeeds before a change is considered complete.

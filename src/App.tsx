@@ -22331,6 +22331,10 @@ function directionFromCellToCell(
   return null
 }
 
+function isChallengeRuntimeLevelId(id: string | null | undefined) {
+  return typeof id === 'string' && id.startsWith('challenge-')
+}
+
 function AltarCutsceneOverlay({
   active
 }: {
@@ -22475,6 +22479,10 @@ export default function App() {
       return
     }
 
+    if (isChallengeRuntimeLevelId(globalTurnState.activeLevelId)) {
+      return
+    }
+
     try {
       writeGameSave(
         window.localStorage,
@@ -22571,6 +22579,15 @@ export default function App() {
     updateRenderedMazeLayouts(mazeId)
   }, [loadRuntimeLevelLayouts, updateRenderedMazeLayouts])
 
+  const getRuleWorldLayoutsForInstantiation = useCallback((layout: MazeLayout) => {
+    if (isChallengeRuntimeLevelId(layout.maze.id)) {
+      return [layout]
+    }
+
+    return Array.from(loadedMazeLayoutsRef.current.values())
+      .filter((candidate) => !isChallengeRuntimeLevelId(candidate.maze.id))
+  }, [])
+
   const instantiateLoadedMaze = (
     mazeId: string,
     options: { reset?: boolean } = {}
@@ -22587,16 +22604,22 @@ export default function App() {
     setInstantiatedMazeId(mazeId)
     setMazeSceneKey((current) => current + 1)
     setGlobalTurnState((current) => {
-      if (options.reset) {
+      const ruleWorldLayouts = getRuleWorldLayoutsForInstantiation(nextLayout)
+      const resetRuleWorld =
+        options.reset ||
+        isChallengeRuntimeLevelId(mazeId) ||
+        isChallengeRuntimeLevelId(current?.activeLevelId)
+
+      if (resetRuleWorld) {
         return createEnteredGlobalTurnState(
           nextLayout,
-          Array.from(loadedMazeLayoutsRef.current.values())
+          ruleWorldLayouts
         )
       }
 
       const nextState = current
         ? activateGlobalTurnStateLevel(current, nextLayout)
-        : createInitialGlobalTurnState(nextLayout, Array.from(loadedMazeLayoutsRef.current.values()))
+        : createInitialGlobalTurnState(nextLayout, ruleWorldLayouts)
 
       return nextState
     }, { transition: false })
@@ -22622,7 +22645,10 @@ export default function App() {
     setReplayActive(false)
     setSceneLoaded(false)
     setGlobalTurnState(
-      () => createEnteredGlobalTurnState(mazeLayout, Array.from(loadedMazeLayoutsRef.current.values())),
+      () => createEnteredGlobalTurnState(
+        mazeLayout,
+        getRuleWorldLayoutsForInstantiation(mazeLayout)
+      ),
       { transition: false }
     )
     setMazeSceneKey((current) => current + 1)
@@ -22814,7 +22840,9 @@ export default function App() {
       try {
         const savedLevelId = (() => {
           try {
-            return readGameSave(window.localStorage)?.lastLevelId ?? null
+            const lastLevelId = readGameSave(window.localStorage)?.lastLevelId ?? null
+
+            return isChallengeRuntimeLevelId(lastLevelId) ? null : lastLevelId
           } catch {
             return null
           }
@@ -22840,10 +22868,13 @@ export default function App() {
           setReplayActive(false)
           setGlobalTurnState(
             requestedMazeId
-              ? createEnteredGlobalTurnState(nextLayout, Array.from(loadedMazeLayoutsRef.current.values()))
+              ? createEnteredGlobalTurnState(
+                  nextLayout,
+                  getRuleWorldLayoutsForInstantiation(nextLayout)
+                )
               : createInitialGlobalTurnState(
                   nextLayout,
-                  Array.from(loadedMazeLayoutsRef.current.values())
+                  getRuleWorldLayoutsForInstantiation(nextLayout)
                 )
           )
           setMazeLayout(nextLayout)
@@ -22865,7 +22896,7 @@ export default function App() {
       cancelled = true
       document.body.dataset.mazeLayoutCancelledAt = performance.now().toFixed(1)
     }
-  }, [loadLevelNeighborhood, requestedMazeId, setGlobalTurnState])
+  }, [getRuleWorldLayoutsForInstantiation, loadLevelNeighborhood, requestedMazeId, setGlobalTurnState])
 
   useEffect(() => {
     const globalWindow = window as Window & {
