@@ -325,7 +325,11 @@
 - When the player leaves a maze and its entrance door closes while the player is outside that maze and its transition cell, the maze resets its monsters, pickups, doors, and gates; a held sword from that maze is removed.
 - Characters are either the player or monsters.
 - A character may move between adjacent cells only when the shared edge has no blocking obstacle.
-- Each player move consumes one turn, then every active monster resolves its turn in the stable category order `Player -> Minotaurs -> Werewolves -> Spiders`, with a stable authored order within each monster category.
+- Each player move consumes one turn, then every active monster resolves its turn in monster queue order.
+- Monster queue order is independent of monster type.
+- Sleeping monsters that see the player wake before the monster phase is resolved and move ahead of all still-sleeping monsters in the queue.
+- Monsters that wake during a monster phase do not move until their next monster turn.
+- When multiple sleeping monsters wake in the same phase, they enter the queue in ascending distance from the player, with closer monsters acting earlier on future turns.
 - Monsters cannot occupy the same cell as another monster.
 - Monsters treat cells occupied by other monsters as blocked in the same way they treat walls, raised gates, and altar cells as blocked.
 - Player rotation does not consume a turn.
@@ -833,6 +837,7 @@
 - Challenge maze compact runtime payloads can be published without baked-lighting assets for immediate local browser playtesting.
 - Non-story challenge and test levels may use dummy neutral lightmaps, empty probe manifests, or unlit visual mode during iteration.
 - Levels reachable through the directed main gameplay graph from `Entrance` use real baked lighting assets in normal gameplay.
+- Standalone challenge-maze playtest loading initializes the turn state as if the player has already walked through the entrance from outside the maze: visible monsters receive the entry wakeup phase, then one monster-only phase resolves before player input is accepted.
 - Challenge maze playtest levels accept repeated keyboard and touch turn commands after an initial rotation.
 - Challenge mazes are graph-excluded: loading one from the menu does not add it to the authored story level graph or normal seamless traversal path.
 

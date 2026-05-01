@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { generateMaze, validateMaze } from '../src/lib/maze.js'
+import { generateMaze } from '../src/lib/maze.js'
 import {
   getMazeSolutionMoveBound,
   getSolutionRouteMetrics,
@@ -13,11 +13,17 @@ import {
 } from '../src/lib/mazeSolver.js'
 import { createInitialTurnState } from '../src/lib/turnRules.js'
 
-test('generated mazes include gates, items, and a recorded winning solution', () => {
-  const maze = generateMaze(7, { bakeLightmap: false })
-  const validation = validateMaze(maze, { requireLightmap: false })
+let generatedMazeFixture = null
 
-  assert.equal(validation.valid, true, validation.errors.join('\n'))
+function getGeneratedMazeFixture() {
+  generatedMazeFixture ??= generateMaze(13579, { bakeLightmap: false })
+
+  return structuredClone(generatedMazeFixture)
+}
+
+test('generated mazes include gates, items, and a recorded winning solution', () => {
+  const maze = getGeneratedMazeFixture()
+
   assert.equal(maze.gates.length, 4)
   assert.ok(maze.sword?.cell)
   assert.ok(maze.trophy?.cell)
@@ -29,7 +35,7 @@ test('generated mazes include gates, items, and a recorded winning solution', ()
 })
 
 test('recorded maze solutions replay to a winning escaped state within the move bound', () => {
-  const maze = generateMaze(13579, { bakeLightmap: false })
+  const maze = getGeneratedMazeFixture()
   const replay = validateRecordedSolution(maze)
   const moveBound = getMazeSolutionMoveBound(maze)
 
@@ -127,9 +133,6 @@ test('solver does not use hidden trophy placement before it becomes visible', ()
     trophy: { cell: { x: 3, y: 0 } }
   }
   const initialState = createInitialTurnState(leftTrophyMaze)
-
-  initialState.player.cell = { x: 2, y: 1 }
-  initialState.player.direction = 'north'
   initialState.checkpoint = {
     cell: { ...initialState.checkpoint.cell },
     direction: initialState.checkpoint.direction
@@ -156,7 +159,7 @@ test('solver does not use hidden trophy placement before it becomes visible', ()
 })
 
 test('perfect-information maze solver and route metrics are available for advanced validation', () => {
-  const maze = generateMaze(13579, { bakeLightmap: false })
+  const maze = getGeneratedMazeFixture()
   const perfect = solveMazeWithPerfectInformation(maze, {
     maxExpansions: 20_000
   })

@@ -1,6 +1,7 @@
 import {
   applyTurnAction,
   createBaseOpenEdgeSet,
+  createChallengeTurnState,
   createInitialTurnState,
   getNeighbor,
   getVisibleCells
@@ -23,6 +24,16 @@ function cloneCell(cell) {
     x: cell.x,
     y: cell.y
   }
+}
+
+function usesChallengeStart(maze) {
+  return maze?.generatedByChallengeTool === true || String(maze?.id ?? '').startsWith('challenge-')
+}
+
+function createSolverInitialTurnState(maze) {
+  return usesChallengeStart(maze)
+    ? createChallengeTurnState(maze)
+    : createInitialTurnState(maze)
 }
 
 function cloneMonster(monster) {
@@ -236,6 +247,7 @@ function serializeState(state, options = {}) {
       monster.lastMoveDirection ?? '',
       monster.lastSeenDirection ?? '',
       monster.movedPreviousTurn ? '1' : '0',
+      Number.isInteger(monster.queueOrder) ? String(monster.queueOrder) : '',
       (monster.lastPath ?? []).join('.')
     ].join(':'))
     .sort()
@@ -1053,7 +1065,10 @@ export function solveMaze(maze, options = {}) {
     return null
   }
 
-  const initialState = options.initialState ?? createInitialTurnState(maze)
+  const initialState = options.initialState ?? createSolverInitialTurnState(maze)
+  if (initialState.dead || initialState.escaped) {
+    return null
+  }
   const distanceBetween = createDistanceLookup(maze)
   const maxActionCount = options.maxActionCount ?? Math.max(128, moveBound * 12)
   const actualState = cloneState(initialState)
@@ -1177,7 +1192,7 @@ export function solveMaze(maze, options = {}) {
 }
 
 export function getSolutionRouteMetrics(maze, actions = []) {
-  let state = createInitialTurnState(maze)
+  let state = createSolverInitialTurnState(maze)
   const walkedCells = new Set([cellKey(state.player.cell)])
   const seenCells = new Set(getVisibleCells(maze, state))
   const preTrophyWalkedCells = new Set([cellKey(state.player.cell)])
@@ -1286,7 +1301,13 @@ export function solveMazeWithPerfectInformation(maze, options = {}) {
 
 export function solveMazeWithPerfectInformationResult(maze, options = {}) {
   const moveBound = options.moveBound ?? getMazeSolutionMoveBound(maze)
-  const initialState = options.initialState ?? createInitialTurnState(maze)
+  const initialState = options.initialState ?? createSolverInitialTurnState(maze)
+  if (initialState.dead || initialState.escaped) {
+    return {
+      failureReason: 'unsolvable',
+      solution: null
+    }
+  }
   const distanceBetween = createDistanceLookup(maze)
   const legBounds = getMazeSolutionLegBounds(maze)
   const searchResult = searchTurnState(
@@ -1505,11 +1526,11 @@ export function validateRecordedSolution(maze) {
     return {
       escaped: false,
       moveCount: 0,
-      state: createInitialTurnState(maze)
+      state: createSolverInitialTurnState(maze)
     }
   }
 
-  let state = createInitialTurnState(maze)
+  let state = createSolverInitialTurnState(maze)
   let moveCount = 0
 
   for (const action of actions) {

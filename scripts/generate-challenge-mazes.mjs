@@ -44,44 +44,62 @@ const workerCount = Math.max(
   Number(process.env.LEVELSJAM_CHALLENGE_WORKERS ?? Math.floor((availableParallelism?.() ?? 2) / 2))
 )
 
-const challengePlans = [
-  { gateCount: 3, height: 6, minotaur: 3, spider: 0, swordCount: 3, werewolf: 0, width: 3 },
-  { gateCount: 2, height: 6, minotaur: 2, spider: 0, swordCount: 2, werewolf: 0, width: 3 },
-  { gateCount: 2, height: 7, minotaur: 2, spider: 0, swordCount: 2, werewolf: 0, width: 4 },
-  { gateCount: 2, height: 8, minotaur: 2, spider: 0, swordCount: 2, werewolf: 0, width: 3 },
-  { gateCount: 2, height: 5, minotaur: 2, spider: 0, swordCount: 2, werewolf: 0, width: 4 },
-  { gateCount: 1, height: 6, minotaur: 2, spider: 0, swordCount: 2, werewolf: 0, width: 4 },
-  { gateCount: 1, height: 7, minotaur: 1, spider: 0, swordCount: 1, werewolf: 0, width: 4 },
-  { gateCount: 1, height: 8, minotaur: 1, spider: 0, swordCount: 1, werewolf: 0, width: 4 },
-  { gateCount: 1, height: 6, minotaur: 1, spider: 0, swordCount: 1, werewolf: 0, width: 5 },
-  { gateCount: 1, height: 6, minotaur: 1, spider: 0, swordCount: 1, werewolf: 0, width: 5 },
-  { gateCount: 0, height: 7, minotaur: 0, spider: 3, swordCount: 1, werewolf: 0, width: 6 },
-  { gateCount: 0, height: 8, minotaur: 0, spider: 2, swordCount: 1, werewolf: 0, width: 5 },
-  { gateCount: 0, height: 5, minotaur: 0, spider: 2, swordCount: 1, werewolf: 0, width: 6 },
-  { gateCount: 0, height: 6, minotaur: 0, spider: 2, swordCount: 1, werewolf: 0, width: 6 },
-  { gateCount: 0, height: 7, minotaur: 0, spider: 2, swordCount: 1, werewolf: 0, width: 6 },
-  { gateCount: 0, height: 8, minotaur: 0, spider: 2, swordCount: 1, werewolf: 0, width: 6 },
-  { gateCount: 0, height: 6, minotaur: 0, spider: 1, swordCount: 1, werewolf: 0, width: 7 },
-  { gateCount: 0, height: 6, minotaur: 0, spider: 1, swordCount: 1, werewolf: 0, width: 7 },
-  { gateCount: 0, height: 7, minotaur: 0, spider: 1, swordCount: 1, werewolf: 0, width: 8 },
-  { gateCount: 0, height: 8, minotaur: 0, spider: 1, swordCount: 1, werewolf: 0, width: 7 },
-  { gateCount: 0, height: 5, minotaur: 0, spider: 0, swordCount: 1, werewolf: 3, width: 8 },
-  { gateCount: 0, height: 6, minotaur: 0, spider: 0, swordCount: 1, werewolf: 2, width: 8 },
-  { gateCount: 0, height: 7, minotaur: 0, spider: 0, swordCount: 1, werewolf: 2, width: 8 },
-  { gateCount: 0, height: 8, minotaur: 0, spider: 0, swordCount: 1, werewolf: 2, width: 8 },
-  { gateCount: 0, height: 4, minotaur: 0, spider: 0, swordCount: 1, werewolf: 2, width: 6 },
-  { gateCount: 0, height: 4, minotaur: 0, spider: 0, swordCount: 1, werewolf: 2, width: 7 },
-  { gateCount: 0, height: 4, minotaur: 0, spider: 0, swordCount: 1, werewolf: 1, width: 8 },
-  { gateCount: 0, height: 3, minotaur: 0, spider: 0, swordCount: 1, werewolf: 1, width: 8 },
-  { gateCount: 0, height: 6, minotaur: 0, spider: 0, swordCount: 1, werewolf: 1, width: 7 },
-  { gateCount: 0, height: 8, minotaur: 0, spider: 0, swordCount: 1, werewolf: 1, width: 8 },
-  { gateCount: 0, height: 5, minotaur: 2, spider: 1, swordCount: 1, werewolf: 0, width: 6 },
-  { gateCount: 0, height: 6, minotaur: 2, spider: 0, swordCount: 1, werewolf: 1, width: 6 },
-  { gateCount: 0, height: 5, minotaur: 1, spider: 1, swordCount: 1, werewolf: 1, width: 6 },
-  { gateCount: 0, height: 5, minotaur: 0, spider: 1, swordCount: 1, werewolf: 2, width: 6 },
-  { gateCount: 0, height: 6, minotaur: 1, spider: 2, swordCount: 1, werewolf: 0, width: 6 },
-  { gateCount: 0, height: 6, minotaur: 1, spider: 0, swordCount: 1, werewolf: 2, width: 6 }
+const challengePlanSizes = [
+  { height: 5, width: 3 },
+  { height: 6, width: 3 },
+  { height: 7, width: 3 },
+  { height: 8, width: 3 },
+  { height: 5, width: 4 },
+  { height: 6, width: 4 },
+  { height: 5, width: 5 },
+  { height: 6, width: 5 },
+  { height: 6, width: 6 },
+  { height: 7, width: 6 },
+  { height: 6, width: 7 },
+  { height: 8, width: 8 }
 ]
+const challengeContentPlans = [
+  { gateCount: 0, minotaur: 1, spider: 0, swordCount: 0, werewolf: 0 },
+  { gateCount: 0, minotaur: 0, spider: 0, swordCount: 0, werewolf: 1 },
+  { gateCount: 0, minotaur: 0, spider: 1, swordCount: 0, werewolf: 0 },
+  { gateCount: 0, minotaur: 2, spider: 0, swordCount: 0, werewolf: 0 },
+  { gateCount: 0, minotaur: 0, spider: 0, swordCount: 0, werewolf: 2 },
+  { gateCount: 0, minotaur: 0, spider: 2, swordCount: 0, werewolf: 0 },
+  { gateCount: 0, minotaur: 1, spider: 1, swordCount: 0, werewolf: 0 },
+  { gateCount: 0, minotaur: 1, spider: 0, swordCount: 0, werewolf: 1 },
+  { gateCount: 0, minotaur: 0, spider: 1, swordCount: 0, werewolf: 1 },
+  { gateCount: 0, minotaur: 1, spider: 0, swordCount: 1, werewolf: 0 },
+  { gateCount: 0, minotaur: 0, spider: 0, swordCount: 1, werewolf: 1 },
+  { gateCount: 0, minotaur: 0, spider: 1, swordCount: 1, werewolf: 0 },
+  { gateCount: 1, minotaur: 1, spider: 0, swordCount: 0, werewolf: 0 },
+  { gateCount: 1, minotaur: 0, spider: 0, swordCount: 0, werewolf: 1 },
+  { gateCount: 1, minotaur: 0, spider: 1, swordCount: 0, werewolf: 0 },
+  { gateCount: 0, minotaur: 2, spider: 0, swordCount: 1, werewolf: 0 },
+  { gateCount: 0, minotaur: 0, spider: 0, swordCount: 1, werewolf: 2 },
+  { gateCount: 0, minotaur: 0, spider: 2, swordCount: 1, werewolf: 0 },
+  { gateCount: 0, minotaur: 1, spider: 1, swordCount: 1, werewolf: 0 },
+  { gateCount: 0, minotaur: 1, spider: 0, swordCount: 1, werewolf: 1 },
+  { gateCount: 0, minotaur: 0, spider: 1, swordCount: 1, werewolf: 1 },
+  { gateCount: 1, minotaur: 1, spider: 1, swordCount: 0, werewolf: 0 },
+  { gateCount: 1, minotaur: 1, spider: 0, swordCount: 0, werewolf: 1 },
+  { gateCount: 1, minotaur: 0, spider: 1, swordCount: 0, werewolf: 1 },
+  { gateCount: 1, minotaur: 2, spider: 0, swordCount: 0, werewolf: 0 },
+  { gateCount: 1, minotaur: 0, spider: 0, swordCount: 0, werewolf: 2 },
+  { gateCount: 1, minotaur: 0, spider: 2, swordCount: 0, werewolf: 0 },
+  { gateCount: 0, minotaur: 1, spider: 1, swordCount: 0, werewolf: 1 },
+  { gateCount: 0, minotaur: 1, spider: 1, swordCount: 1, werewolf: 1 },
+  { gateCount: 1, minotaur: 1, spider: 1, swordCount: 0, werewolf: 1 },
+  { gateCount: 1, minotaur: 1, spider: 1, swordCount: 1, werewolf: 0 },
+  { gateCount: 1, minotaur: 1, spider: 0, swordCount: 1, werewolf: 1 },
+  { gateCount: 1, minotaur: 0, spider: 1, swordCount: 1, werewolf: 1 },
+  { gateCount: 2, minotaur: 1, spider: 1, swordCount: 1, werewolf: 1 },
+  { gateCount: 1, minotaur: 2, spider: 1, swordCount: 1, werewolf: 0 },
+  { gateCount: 1, minotaur: 0, spider: 1, swordCount: 1, werewolf: 2 }
+]
+const challengePlans = challengeContentPlans.map((plan, index) => ({
+  ...challengePlanSizes[index % challengePlanSizes.length],
+  ...plan
+}))
 const topologyCache = new Map()
 const initialDifficultyWeights = Object.freeze({
   area: -1 / 8,
@@ -1169,6 +1187,16 @@ function getPlanFromMaze(maze) {
   }
 }
 
+function getContentComboKey(parameters) {
+  return [
+    parameters.minotaur ?? getMonsterTypeCounts(parameters.monsterTypes).minotaur,
+    parameters.spider ?? getMonsterTypeCounts(parameters.monsterTypes).spider,
+    parameters.werewolf ?? getMonsterTypeCounts(parameters.monsterTypes).werewolf,
+    parameters.swordCount,
+    parameters.gateCount
+  ].join(':')
+}
+
 function updateMazeContentProfile(maze) {
   maze.contentProfile = {
     gateCount: (maze.gates ?? []).length,
@@ -1974,13 +2002,17 @@ function tryPruneAndValidateCandidate(candidate, timings) {
   }
 }
 
-function getExcludedCandidateReason(candidate, excludedSignatures, excludedStructuralSignatures) {
+function getExcludedCandidateReason(candidate, excludedSignatures, excludedStructuralSignatures, excludedContentCombos) {
   if (excludedSignatures.has(getMazeSignature(candidate))) {
     return 'duplicate-signature'
   }
 
   if (excludedStructuralSignatures.has(getStructuralSignature(candidate))) {
     return 'duplicate-geometry'
+  }
+
+  if (excludedContentCombos.has(getContentComboKey(getPlanFromMaze(candidate)))) {
+    return 'duplicate-content-combo'
   }
 
   return null
@@ -2074,6 +2106,7 @@ function searchChallengeCandidates({
   deadlineMs,
   difficultyWeights = currentDifficultyWeights,
   endAttempt = maxAttempts,
+  excludedContentCombos = [],
   excludedSignatures = [],
   excludedStructuralSignatures = [],
   index,
@@ -2084,6 +2117,7 @@ function searchChallengeCandidates({
   setDifficultyWeights(difficultyWeights)
   const excludedSignatureSet = new Set(excludedSignatures)
   const excludedStructuralSignatureSet = new Set(excludedStructuralSignatures)
+  const excludedContentComboSet = new Set(excludedContentCombos)
   const failureFrequency = new Map()
   const metricStats = createMetricStats()
   const parameterFailures = createParameterFailureStats()
@@ -2145,7 +2179,8 @@ function searchChallengeCandidates({
           const duplicateReason = getExcludedCandidateReason(
             pruned.candidate,
             excludedSignatureSet,
-            excludedStructuralSignatureSet
+            excludedStructuralSignatureSet,
+            excludedContentComboSet
           )
 
           if (duplicateReason) {
@@ -2205,7 +2240,8 @@ function searchChallengeCandidates({
           const duplicateReason = getExcludedCandidateReason(
             pruned.candidate,
             excludedSignatureSet,
-            excludedStructuralSignatureSet
+            excludedStructuralSignatureSet,
+            excludedContentComboSet
           )
 
           if (duplicateReason) {
@@ -2242,7 +2278,8 @@ function searchChallengeCandidates({
     const duplicateReason = getExcludedCandidateReason(
       candidate,
       excludedSignatureSet,
-      excludedStructuralSignatureSet
+      excludedStructuralSignatureSet,
+      excludedContentComboSet
     )
 
     if (duplicateReason) {
@@ -2291,6 +2328,7 @@ function runWorkerSearch() {
 function searchChallengeCandidatesInParallel({
   deadlineMs,
   difficultyWeights = currentDifficultyWeights,
+  excludedContentCombos = [],
   excludedSignatures = [],
   excludedStructuralSignatures = [],
   index,
@@ -2301,6 +2339,7 @@ function searchChallengeCandidatesInParallel({
   if (activeWorkerCount <= 1) {
     return Promise.resolve(searchChallengeCandidates({
       deadlineMs,
+      excludedContentCombos,
       excludedSignatures,
       excludedStructuralSignatures,
       index,
@@ -2347,6 +2386,7 @@ function searchChallengeCandidatesInParallel({
           deadlineMs,
           difficultyWeights,
           endAttempt,
+          excludedContentCombos,
           excludedSignatures,
           excludedStructuralSignatures,
           index,
@@ -2394,6 +2434,7 @@ async function main() {
   const generated = []
   const signatures = new Set()
   const structuralSignatures = new Set()
+  const contentComboSignatures = new Set()
   const failureFrequency = new Map()
   const metricStats = createMetricStats()
   const parameterFailures = createParameterFailureStats()
@@ -2489,6 +2530,7 @@ async function main() {
       if (trustedGenerated) {
         signatures.add(getMazeSignature(existing))
         structuralSignatures.add(getStructuralSignature(existing))
+        contentComboSignatures.add(getContentComboKey(getPlanFromMaze(existing)))
         generated.push({
           attemptCount: 0,
           durationMs: 0,
@@ -2529,6 +2571,7 @@ async function main() {
       if (validation.valid) {
         signatures.add(getMazeSignature(existing))
         structuralSignatures.add(getStructuralSignature(existing))
+        contentComboSignatures.add(getContentComboKey(getPlanFromMaze(existing)))
         generated.push({
           attemptCount: 0,
           durationMs: 0,
@@ -2566,6 +2609,7 @@ async function main() {
     const searchResult = await searchChallengeCandidatesInParallel({
       deadlineMs,
       difficultyWeights: currentDifficultyWeights,
+      excludedContentCombos: [...contentComboSignatures],
       excludedSignatures: [...signatures],
       excludedStructuralSignatures: [...structuralSignatures],
       index,
@@ -2629,8 +2673,20 @@ async function main() {
       throw new Error(`Worker candidate for ${fileName} duplicated an existing challenge geometry`)
     }
 
+    const contentComboSignature = getContentComboKey(plan)
+    if (contentComboSignatures.has(contentComboSignature)) {
+      addFailure(failureFrequency, 'duplicate-content-combo')
+      writeReport('failed', {
+        failureReason: 'duplicate-content-combo',
+        failedChallengeIndex: index + 1,
+        workerCount: searchResult.workerCount ?? 1
+      })
+      throw new Error(`Worker candidate for ${fileName} duplicated an existing challenge content combination`)
+    }
+
     signatures.add(signature)
     structuralSignatures.add(structuralSignature)
+    contentComboSignatures.add(contentComboSignature)
     const accepted = {
       attemptCount: (searchResult.winningAttempt ?? 0) + 1,
       fileName,

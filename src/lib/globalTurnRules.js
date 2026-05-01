@@ -1,4 +1,5 @@
 import {
+  applyMonsterTurn,
   applyTurnAction,
   createInitialTurnState
 } from './turnRules.js'
@@ -322,6 +323,36 @@ export function createInitialGlobalTurnState(activeLayout, additionalLayouts = [
   }
 
   return syncTopLevelState(globalState, activeLayout.maze.id)
+}
+
+export function applyGlobalMonsterTurn(state) {
+  const layouts = getRegisteredLayouts(state)
+  const worldGrid = buildWorldGridFromLayouts(layouts)
+  const worldMaze = createWorldRulesMaze(worldGrid, {
+    playerStart: {
+      cell: state.worldTurnState.player.cell,
+      direction: state.worldTurnState.player.direction
+    }
+  })
+  const result = applyMonsterTurn(worldMaze, state.worldTurnState)
+  const next = cloneGlobalState(state)
+
+  next.worldTurnState = cloneTurnStateForGlobal(result.state)
+  return {
+    outcome: {
+      ...result,
+      previous: cloneTurnStateForGlobal(result.previous),
+      state: cloneTurnStateForGlobal(result.state)
+    },
+    state: syncTopLevelState(next)
+  }
+}
+
+export function createChallengeGlobalTurnState(activeLayout, additionalLayouts = []) {
+  const initialState = createInitialGlobalTurnState(activeLayout, additionalLayouts)
+  const entryWake = applyGlobalMonsterTurn(initialState).state
+
+  return applyGlobalMonsterTurn(entryWake).state
 }
 
 export function ensureGlobalTurnStateLevel(state, layout) {

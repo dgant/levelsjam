@@ -5,20 +5,6 @@ export default {
   "lights": [
     {
       "cell": {
-        "x": 1,
-        "y": 0
-      },
-      "side": "north"
-    },
-    {
-      "cell": {
-        "x": 2,
-        "y": 4
-      },
-      "side": "east"
-    },
-    {
-      "cell": {
         "x": 0,
         "y": 1
       },
@@ -27,35 +13,49 @@ export default {
     {
       "cell": {
         "x": 2,
-        "y": 1
+        "y": 0
       },
       "side": "east"
     },
     {
       "cell": {
         "x": 1,
-        "y": 6
+        "y": 1
+      },
+      "side": "west"
+    },
+    {
+      "cell": {
+        "x": 0,
+        "y": 4
+      },
+      "side": "west"
+    },
+    {
+      "cell": {
+        "x": 2,
+        "y": 3
+      },
+      "side": "north"
+    },
+    {
+      "cell": {
+        "x": 0,
+        "y": 7
       },
       "side": "south"
     },
     {
       "cell": {
         "x": 1,
-        "y": 2
+        "y": 4
       },
       "side": "west"
     },
     {
       "cell": {
-        "x": 0,
-        "y": 5
-      },
-      "side": "west"
-    },
-    {
-      "cell": {
-        "x": 0,
-        "y": 7
+        "x": 2,
+        "y": 6
       },
       "side": "west"
     }
@@ -134,14 +134,14 @@ export default {
         "y": 1
       },
       "to": {
+        "x": 1,
+        "y": 2
+      }
+    },
+    {
+      "from": {
         "x": 2,
         "y": 1
-      }
-    },
-    {
-      "from": {
-        "x": 2,
-        "y": 1
       },
       "to": {
         "x": 2,
@@ -214,16 +214,6 @@ export default {
         "y": 4
       },
       "to": {
-        "x": 1,
-        "y": 4
-      }
-    },
-    {
-      "from": {
-        "x": 0,
-        "y": 4
-      },
-      "to": {
         "x": 0,
         "y": 5
       }
@@ -240,11 +230,11 @@ export default {
     },
     {
       "from": {
-        "x": 2,
+        "x": 1,
         "y": 4
       },
       "to": {
-        "x": 2,
+        "x": 1,
         "y": 5
       }
     },
@@ -254,7 +244,17 @@ export default {
         "y": 5
       },
       "to": {
+        "x": 0,
+        "y": 6
+      }
+    },
+    {
+      "from": {
         "x": 1,
+        "y": 5
+      },
+      "to": {
+        "x": 2,
         "y": 5
       }
     },
@@ -284,17 +284,17 @@ export default {
         "y": 6
       },
       "to": {
-        "x": 1,
-        "y": 6
+        "x": 0,
+        "y": 7
       }
     },
     {
       "from": {
-        "x": 0,
+        "x": 1,
         "y": 6
       },
       "to": {
-        "x": 0,
+        "x": 1,
         "y": 7
       }
     },
@@ -329,12 +329,11 @@ export default {
       }
     }
   ],
-  "seed": 304863,
+  "seed": 303027,
   "width": 3,
   "contentProfile": {
     "gateCount": 0,
     "monsterTypes": [
-      "minotaur",
       "minotaur"
     ],
     "swordCount": 0
@@ -342,14 +341,6 @@ export default {
   "generatedByChallengeTool": true,
   "items": [],
   "monsters": [
-    {
-      "cell": {
-        "x": 2,
-        "y": 4
-      },
-      "type": "minotaur",
-      "direction": "east"
-    },
     {
       "cell": {
         "x": 0,
@@ -361,8 +352,8 @@ export default {
   "sword": null,
   "trophy": {
     "cell": {
-      "x": 1,
-      "y": 0
+      "x": 0,
+      "y": 1
     }
   },
   "visibility": {
@@ -374,14 +365,18 @@ export default {
         "0,3",
         "0,4",
         "0,5",
+        "0,6",
+        "0,7",
         "1,0",
         "1,1",
-        "1,4",
-        "1,5",
-        "1,6",
+        "1,2",
+        "1,3",
+        "1,7",
         "2,0",
         "2,1",
-        "2,2"
+        "2,2",
+        "2,3",
+        "2,4"
       ],
       "1,0": [
         "0,0",
@@ -390,11 +385,17 @@ export default {
         "0,3",
         "0,4",
         "0,5",
+        "0,6",
+        "0,7",
         "1,0",
         "1,1",
+        "1,2",
+        "1,3",
         "2,0",
         "2,1",
-        "2,2"
+        "2,2",
+        "2,3",
+        "2,4"
       ],
       "2,0": [
         "0,0",
@@ -414,24 +415,26 @@ export default {
         "0,3",
         "0,4",
         "0,5",
+        "0,6",
+        "0,7",
         "1,0",
-        "1,4",
-        "1,5",
-        "1,6",
+        "1,7",
         "2,0"
       ],
       "1,1": [
         "0,0",
         "1,0",
         "1,1",
+        "1,2",
+        "1,3",
         "2,0",
-        "2,1",
-        "2,2"
+        "2,2",
+        "2,3",
+        "2,4"
       ],
       "2,1": [
         "0,0",
         "1,0",
-        "1,1",
         "1,2",
         "1,3",
         "2,0",
@@ -445,22 +448,22 @@ export default {
         "0,3",
         "0,4",
         "0,5",
+        "0,6",
+        "0,7",
         "1,0",
-        "1,4",
-        "1,5",
-        "1,6"
+        "1,7"
       ],
       "1,2": [
+        "0,0",
+        "1,0",
+        "1,1",
         "1,2",
         "1,3",
         "2,0",
         "2,1",
         "2,2",
         "2,3",
-        "2,4",
-        "2,5",
-        "2,6",
-        "2,7"
+        "2,4"
       ],
       "2,2": [
         "0,0",
@@ -479,37 +482,36 @@ export default {
         "0,3",
         "0,4",
         "0,5",
+        "0,6",
+        "0,7",
         "1,0",
-        "1,4",
-        "1,5",
-        "1,6",
-        "2,4",
-        "2,5"
+        "1,7"
       ],
       "1,3": [
+        "0,0",
+        "1,0",
+        "1,1",
         "1,2",
         "1,3",
         "2,0",
         "2,1",
         "2,2",
         "2,3",
-        "2,4",
-        "2,5",
-        "2,6",
-        "2,7"
+        "2,4"
       ],
       "2,3": [
-        "0,4",
-        "0,5",
+        "0,0",
+        "0,7",
+        "1,0",
+        "1,1",
         "1,2",
         "1,3",
         "1,4",
+        "1,5",
+        "1,6",
         "1,7",
         "2,3",
-        "2,4",
-        "2,5",
-        "2,6",
-        "2,7"
+        "2,4"
       ],
       "0,4": [
         "0,0",
@@ -518,22 +520,17 @@ export default {
         "0,3",
         "0,4",
         "0,5",
+        "0,6",
+        "0,7",
         "1,0",
+        "1,7"
+      ],
+      "1,4": [
+        "0,7",
         "1,4",
         "1,5",
         "1,6",
-        "2,3",
-        "2,4",
-        "2,5"
-      ],
-      "1,4": [
-        "0,0",
-        "0,1",
-        "0,2",
-        "0,3",
-        "0,4",
-        "0,5",
-        "1,4",
+        "1,7",
         "2,3",
         "2,4",
         "2,5",
@@ -541,18 +538,18 @@ export default {
         "2,7"
       ],
       "2,4": [
-        "0,3",
-        "0,4",
-        "0,5",
+        "0,0",
+        "0,7",
+        "1,0",
+        "1,1",
         "1,2",
         "1,3",
         "1,4",
+        "1,5",
+        "1,6",
         "1,7",
         "2,3",
-        "2,4",
-        "2,5",
-        "2,6",
-        "2,7"
+        "2,4"
       ],
       "0,5": [
         "0,0",
@@ -561,47 +558,34 @@ export default {
         "0,3",
         "0,4",
         "0,5",
+        "0,6",
+        "0,7",
         "1,0",
+        "1,7"
+      ],
+      "1,5": [
+        "0,7",
         "1,4",
         "1,5",
         "1,6",
-        "2,3",
-        "2,4"
-      ],
-      "1,5": [
-        "0,0",
-        "0,1",
-        "0,2",
-        "0,3",
-        "0,4",
-        "0,5",
-        "0,6",
-        "0,7",
-        "1,5",
-        "1,6"
-      ],
-      "2,5": [
-        "0,3",
-        "0,4",
-        "1,2",
-        "1,3",
-        "1,4",
         "1,7",
         "2,3",
         "2,4",
+        "2,5",
+        "2,6",
+        "2,7"
+      ],
+      "2,5": [
+        "0,7",
+        "1,4",
+        "1,5",
+        "1,6",
+        "1,7",
         "2,5",
         "2,6",
         "2,7"
       ],
       "0,6": [
-        "0,6",
-        "0,7",
-        "1,5",
-        "1,6",
-        "1,7",
-        "2,7"
-      ],
-      "1,6": [
         "0,0",
         "0,1",
         "0,2",
@@ -610,14 +594,43 @@ export default {
         "0,5",
         "0,6",
         "0,7",
+        "1,0",
+        "1,7",
+        "2,7"
+      ],
+      "1,6": [
+        "0,7",
+        "1,4",
         "1,5",
-        "1,6"
+        "1,6",
+        "1,7",
+        "2,3",
+        "2,4",
+        "2,5",
+        "2,7"
       ],
       "2,6": [
         "0,7",
-        "1,2",
-        "1,3",
         "1,4",
+        "1,5",
+        "1,7",
+        "2,5",
+        "2,6",
+        "2,7"
+      ],
+      "0,7": [
+        "0,0",
+        "0,1",
+        "0,2",
+        "0,3",
+        "0,4",
+        "0,5",
+        "0,6",
+        "0,7",
+        "1,0",
+        "1,4",
+        "1,5",
+        "1,6",
         "1,7",
         "2,3",
         "2,4",
@@ -625,18 +638,18 @@ export default {
         "2,6",
         "2,7"
       ],
-      "0,7": [
+      "1,7": [
+        "0,0",
+        "0,1",
+        "0,2",
+        "0,3",
+        "0,4",
+        "0,5",
         "0,6",
         "0,7",
+        "1,4",
         "1,5",
         "1,6",
-        "1,7",
-        "2,6",
-        "2,7"
-      ],
-      "1,7": [
-        "0,6",
-        "0,7",
         "1,7",
         "2,3",
         "2,4",
@@ -647,12 +660,10 @@ export default {
       "2,7": [
         "0,6",
         "0,7",
-        "1,2",
-        "1,3",
         "1,4",
+        "1,5",
+        "1,6",
         "1,7",
-        "2,3",
-        "2,4",
         "2,5",
         "2,6",
         "2,7"
@@ -662,43 +673,18 @@ export default {
   },
   "solution": {
     "actions": [
+      "move-forward",
       "rotate-left",
       "move-forward",
       "move-forward",
       "rotate-right",
       "move-forward",
-      "move-forward",
       "rotate-right",
-      "move-forward",
-      "rotate-right",
-      "move-forward",
-      "rotate-left",
-      "move-forward",
-      "rotate-left",
-      "move-forward",
-      "rotate-right",
-      "move-forward",
-      "rotate-right",
-      "move-forward",
-      "move-forward",
-      "rotate-left",
-      "move-forward",
-      "rotate-left",
-      "move-forward",
-      "rotate-right",
-      "move-forward",
       "rotate-right",
       "move-forward",
       "rotate-left",
       "move-forward",
       "move-forward",
-      "rotate-left",
-      "move-forward",
-      "rotate-left",
-      "move-forward",
-      "rotate-left",
-      "move-forward",
-      "rotate-right",
       "move-forward",
       "rotate-right",
       "move-forward",
@@ -709,13 +695,36 @@ export default {
       "rotate-right",
       "move-forward",
       "move-forward",
+      "move-forward",
       "rotate-left",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
+      "rotate-right",
+      "rotate-right",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
+      "move-forward",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
+      "rotate-right",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
+      "rotate-left",
+      "move-forward",
       "move-forward"
     ],
     "moveCount": 27,
     "observedCellCount": 24,
     "visibilityLimited": true
   },
-  "name": "Challenge 04: 3x8, 2 minotaurs, 0 spiders, 0 wolves, 0 swords, 0 gates",
-  "description": "3x8, 2 minotaurs, 0 spiders, 0 wolves, 0 swords, 0 gates"
+  "name": "Challenge 04: 3x8, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates",
+  "description": "3x8, 1 minotaur, 0 spiders, 0 wolves, 0 swords, 0 gates"
 }

@@ -1,6 +1,4 @@
 const DIRECTIONS = ['north', 'east', 'south', 'west']
-const MONSTER_TURN_TYPE_ORDER = ['minotaur', 'werewolf', 'spider']
-
 const DIRECTION_DELTAS = {
   east: { x: 1, y: 0 },
   north: { x: 0, y: -1 },
@@ -103,10 +101,8 @@ function sortMonstersForTurn(monsters) {
   return monsters
     .map((monster, index) => ({ index, monster }))
     .sort((a, b) => {
-      const aTypeOrder = MONSTER_TURN_TYPE_ORDER.indexOf(a.monster.type)
-      const bTypeOrder = MONSTER_TURN_TYPE_ORDER.indexOf(b.monster.type)
-      const aOrder = aTypeOrder === -1 ? MONSTER_TURN_TYPE_ORDER.length : aTypeOrder
-      const bOrder = bTypeOrder === -1 ? MONSTER_TURN_TYPE_ORDER.length : bTypeOrder
+      const aOrder = Number.isInteger(a.monster.queueOrder) ? a.monster.queueOrder : a.index
+      const bOrder = Number.isInteger(b.monster.queueOrder) ? b.monster.queueOrder : b.index
 
       return (aOrder - bOrder) || (a.index - b.index)
     })
@@ -385,6 +381,7 @@ export function createInitialTurnState(maze) {
       lastPath: [],
       lastSeenDirection: null,
       movedPreviousTurn: false,
+      queueOrder: monster.queueOrder ?? index,
       localMonsterIndex: monster.localMonsterIndex ?? null,
       ownerLevelId: monster.ownerLevelId ?? null,
       type: monster.type
@@ -689,7 +686,59 @@ function updateMinotaurSight(maze, visibilityEdges, monster, playerCell) {
   return true
 }
 
-function resolveMonsterTurn(maze, openEdges, visibilityEdges, monster, playerCell, blockedCellKeys = new Set()) {
+function getAwakeningDistance(monster, playerCell) {
+  return Math.abs(monster.cell.x - playerCell.x) + Math.abs(monster.cell.y - playerCell.y)
+}
+
+function prepareMonsterQueueForTurn(maze, visibilityEdges, monsters, playerCell) {
+  const queued = monsters.map((monster, index) => ({
+    ...monster,
+    queueOrder: Number.isInteger(monster.queueOrder) ? monster.queueOrder : index
+  }))
+  const newlyAwakenedIds = new Set()
+  const visibleSleeping = queued
+    .map((monster, index) => ({ index, monster }))
+    .filter(({ monster }) => !monster.awake && canSeeCell(maze, visibilityEdges, monster.cell, playerCell))
+    .sort((left, right) => (
+      getAwakeningDistance(left.monster, playerCell) - getAwakeningDistance(right.monster, playerCell) ||
+      left.monster.queueOrder - right.monster.queueOrder ||
+      left.index - right.index
+    ))
+    .map(({ monster }) => {
+      const nextMonster = cloneMonster(monster)
+      const seenDirection = directionBetween(nextMonster.cell, playerCell)
+
+      nextMonster.awake = true
+      nextMonster.lastSeenDirection = seenDirection
+      if (seenDirection) {
+        nextMonster.direction = seenDirection
+      }
+      newlyAwakenedIds.add(getMonsterIdentity(nextMonster))
+      return nextMonster
+    })
+  const visibleSleepingIds = new Set(visibleSleeping.map((monster) => getMonsterIdentity(monster)))
+  const alreadyAwake = queued
+    .filter((monster) => monster.awake)
+    .sort((left, right) => left.queueOrder - right.queueOrder)
+  const sleeping = queued
+    .filter((monster) => !monster.awake && !visibleSleepingIds.has(getMonsterIdentity(monster)))
+    .sort((left, right) => left.queueOrder - right.queueOrder)
+  const nextMonsters = [
+    ...alreadyAwake,
+    ...visibleSleeping,
+    ...sleeping
+  ].map((monster, index) => ({
+    ...monster,
+    queueOrder: index
+  }))
+
+  return {
+    monsters: nextMonsters,
+    newlyAwakenedIds
+  }
+}
+
+function resolveMonsterTurn(maze, openEdges, visibilityEdges, monster, playerCell, blockedCellKeys = new Set(), options = {}) {
   const nextMonster = cloneMonster(monster)
   const sawPlayer = canSeeCell(maze, visibilityEdges, monster.cell, playerCell)
   const wasAwake = monster.awake
@@ -702,7 +751,7 @@ function resolveMonsterTurn(maze, openEdges, visibilityEdges, monster, playerCel
     }
   }
 
-  if (!wasAwake) {
+  if (!wasAwake || options.skipMovement) {
     return nextMonster
   }
 
@@ -839,22 +888,89 @@ function resolvePlayerPickups(maze, state, outcome) {
   }
 }
 
-export function applyTurnAction(maze, state, action) {
-  const visibilityEdges = createBaseOpenEdgeSet(maze)
-  const playerMoveEdges = createPlayerMoveEdgeSet(maze, state)
-  const monsterMoveEdges = createMonsterMoveEdgeSet(maze)
-  const next = cloneState(state)
-  const outcome = {
+function createTurnOutcome(previous, state) {
+  return {
     blocked: false,
     escaped: false,
     killed: false,
     pickedUpSword: false,
     pickedUpTrophy: false,
     playerEffect: null,
-    previous: state,
+    previous,
     levelTransition: null,
-    state: next
+    state
   }
+}
+
+function resolveMonsterPhase(maze, next, outcome) {
+  const visibilityEdges = createBaseOpenEdgeSet(maze)
+  const monsterMoveEdges = createMonsterMoveEdgeSet(maze)
+  const preparedQueue = prepareMonsterQueueForTurn(
+    maze,
+    visibilityEdges,
+    next.monsters,
+    next.player.cell
+  )
+  const monsterStateById = new Map(
+    preparedQueue.monsters.map((monster, index) => [getMonsterIdentity(monster, index), monster])
+  )
+  const orderedMonsters = sortMonstersForTurn(preparedQueue.monsters)
+
+  for (const monster of orderedMonsters) {
+    const monsterId = getMonsterIdentity(monster)
+    const currentMonster = monsterStateById.get(monsterId)
+
+    if (!currentMonster) {
+      continue
+    }
+
+    const blockedCellKeys = new Set(
+      Array.from(monsterStateById.entries())
+        .filter(([candidateId]) => candidateId !== monsterId)
+        .map(([, candidate]) => cellKey(candidate.cell))
+    )
+    const movedMonster = resolveMonsterTurn(
+      maze,
+      monsterMoveEdges,
+      visibilityEdges,
+      currentMonster,
+      next.player.cell,
+      blockedCellKeys,
+      {
+        skipMovement: preparedQueue.newlyAwakenedIds.has(monsterId)
+      }
+    )
+
+    if (cellKey(movedMonster.cell) === cellKey(next.player.cell)) {
+      if (!next.player.hasSword) {
+        monsterStateById.set(monsterId, movedMonster)
+        next.dead = true
+        outcome.killed = true
+        outcome.playerEffect = 'death'
+        break
+      }
+
+      consumeSword(next)
+      outcome.playerEffect = 'sword-strike'
+      monsterStateById.delete(monsterId)
+      continue
+    }
+
+    monsterStateById.set(monsterId, movedMonster)
+  }
+
+  next.monsters = preparedQueue.monsters
+    .map((monster, index) => monsterStateById.get(getMonsterIdentity(monster, index)))
+    .filter(Boolean)
+  next.turn += 1
+
+  return outcome
+}
+
+export function applyTurnAction(maze, state, action) {
+  const playerMoveEdges = createPlayerMoveEdgeSet(maze, state)
+  const next = cloneState(state)
+  const outcome = createTurnOutcome(state, next)
 
   if (state.dead || state.escaped) {
     return outcome
@@ -912,57 +1028,24 @@ export function applyTurnAction(maze, state, action) {
   next.player.cell = nextPlayerCell
   resolvePlayerPickups(maze, next, outcome)
 
-  const monsterStateById = new Map(
-    next.monsters.map((monster, index) => [getMonsterIdentity(monster, index), monster])
-  )
-  const orderedMonsters = sortMonstersForTurn(next.monsters)
+  return resolveMonsterPhase(maze, next, outcome)
+}
 
-  for (const monster of orderedMonsters) {
-    const monsterId = getMonsterIdentity(monster)
-    const currentMonster = monsterStateById.get(monsterId)
+export function applyMonsterTurn(maze, state) {
+  const next = cloneState(state)
+  const outcome = createTurnOutcome(state, next)
 
-    if (!currentMonster) {
-      continue
-    }
-
-    const blockedCellKeys = new Set(
-      Array.from(monsterStateById.entries())
-        .filter(([candidateId]) => candidateId !== monsterId)
-        .map(([, candidate]) => cellKey(candidate.cell))
-    )
-    const movedMonster = resolveMonsterTurn(
-      maze,
-      monsterMoveEdges,
-      visibilityEdges,
-      currentMonster,
-      next.player.cell,
-      blockedCellKeys
-    )
-
-    if (cellKey(movedMonster.cell) === cellKey(next.player.cell)) {
-      if (!next.player.hasSword) {
-        monsterStateById.set(monsterId, movedMonster)
-        next.dead = true
-        outcome.killed = true
-        outcome.playerEffect = 'death'
-        break
-      }
-
-      consumeSword(next)
-      outcome.playerEffect = 'sword-strike'
-      monsterStateById.delete(monsterId)
-      continue
-    }
-
-    monsterStateById.set(monsterId, movedMonster)
+  if (state.dead || state.escaped) {
+    return outcome
   }
 
-  next.monsters = next.monsters
-    .map((monster, index) => monsterStateById.get(getMonsterIdentity(monster, index)))
-    .filter(Boolean)
-  next.turn += 1
+  return resolveMonsterPhase(maze, next, outcome)
+}
 
-  return outcome
+export function createChallengeTurnState(maze) {
+  const entryWake = applyMonsterTurn(maze, createInitialTurnState(maze)).state
+
+  return applyMonsterTurn(maze, entryWake).state
 }
 
 export function resetTurnStateToCheckpoint(maze, state) {

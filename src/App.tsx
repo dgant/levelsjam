@@ -176,6 +176,7 @@ import {
 import {
   activateGlobalTurnStateLevel,
   applyGlobalTurnActionForLevel,
+  createChallengeGlobalTurnState,
   createInitialGlobalTurnState,
   ensureGlobalTurnStateLevel,
   ensureGlobalTurnStateLevels,
@@ -22585,7 +22586,7 @@ export default function App() {
     setMazeSceneKey((current) => current + 1)
     setGlobalTurnState((current) => {
       if (options.reset && mazeId.startsWith('challenge-')) {
-        return createInitialGlobalTurnState(nextLayout)
+        return createChallengeGlobalTurnState(nextLayout)
       }
 
       const nextState = current
@@ -22619,8 +22620,16 @@ export default function App() {
     setSceneLoaded(false)
     setGlobalTurnState(
       (current) => current
-        ? resetGlobalTurnStateLevel(activateGlobalTurnStateLevel(current, mazeLayout), mazeLayout)
-        : createInitialGlobalTurnState(mazeLayout, Array.from(loadedMazeLayoutsRef.current.values())),
+        ? (
+            mazeLayout.maze.id.startsWith('challenge-')
+              ? createChallengeGlobalTurnState(mazeLayout, Array.from(loadedMazeLayoutsRef.current.values()))
+              : resetGlobalTurnStateLevel(activateGlobalTurnStateLevel(current, mazeLayout), mazeLayout)
+          )
+        : (
+            mazeLayout.maze.id.startsWith('challenge-')
+              ? createChallengeGlobalTurnState(mazeLayout, Array.from(loadedMazeLayoutsRef.current.values()))
+              : createInitialGlobalTurnState(mazeLayout, Array.from(loadedMazeLayoutsRef.current.values()))
+          ),
       { transition: false }
     )
     setMazeSceneKey((current) => current + 1)
@@ -22836,10 +22845,14 @@ export default function App() {
           await loadLevelNeighborhood(nextLayout.maze.id)
           setInstantiatedMazeId(nextLayout.maze.id)
           setReplayActive(false)
-          setGlobalTurnState(createInitialGlobalTurnState(
-            nextLayout,
-            Array.from(loadedMazeLayoutsRef.current.values())
-          ))
+          setGlobalTurnState(
+            nextLayout.maze.id.startsWith('challenge-')
+              ? createChallengeGlobalTurnState(nextLayout, Array.from(loadedMazeLayoutsRef.current.values()))
+              : createInitialGlobalTurnState(
+                  nextLayout,
+                  Array.from(loadedMazeLayoutsRef.current.values())
+                )
+          )
           setMazeLayout(nextLayout)
         }
       } catch (error) {

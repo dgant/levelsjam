@@ -18,6 +18,7 @@ export type TurnMonster = {
   lastPath: CardinalDirection[]
   lastSeenDirection: CardinalDirection | null
   movedPreviousTurn: boolean
+  queueOrder: number
   type: 'minotaur' | 'spider' | 'werewolf'
 }
 
@@ -43,6 +44,20 @@ export type TurnState = {
 
 export declare const DIRECTIONS: CardinalDirection[]
 export declare const OPPOSITE_DIRECTIONS: Record<CardinalDirection, CardinalDirection>
+export declare function applyMonsterTurn(
+  maze: unknown,
+  state: TurnState
+): {
+  blocked: boolean
+  escaped: boolean
+  killed: boolean
+  levelTransition: null
+  pickedUpSword: boolean
+  pickedUpTrophy: boolean
+  playerEffect: 'death' | 'sword-strike' | null
+  previous: TurnState
+  state: TurnState
+}
 export declare function applyTurnAction(
   maze: unknown,
   state: TurnState,
@@ -85,6 +100,7 @@ export declare function chooseSpiderDirection(
   monster: TurnMonster
 ): CardinalDirection | null
 export declare function createBaseOpenEdgeSet(maze: unknown): Set<string>
+export declare function createChallengeTurnState(maze: unknown): TurnState
 export declare function createInitialTurnState(maze: unknown): TurnState
 export declare function createMonsterMoveEdgeSet(maze: unknown): Set<string>
 export declare function createPlayerMoveEdgeSet(maze: unknown, state: TurnState): Set<string>
