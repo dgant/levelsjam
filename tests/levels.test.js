@@ -97,7 +97,7 @@ test('runtime level graph keeps authored neighbors and spatial transforms explic
     ['hallway-1-5', 'challenge-028', 'challenge-031', 'challenge-059', 'challenge-036', 'chamber-2']
   )
 
-  assert.deepEqual(getRuntimeLevelWorldTransform('entrance'), { x: 0, z: 0, rotationY: 0 })
+  assert.deepEqual(getRuntimeLevelWorldTransform('entrance'), { x: 0, z: -2, rotationY: 0 })
   assert.equal(getRuntimeLevelWorldTransform('chamber-1').rotationY, 0)
   assert.equal(typeof getRuntimeLevelWorldTransform('challenge-028').x, 'number')
 })

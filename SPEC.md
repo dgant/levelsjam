@@ -113,7 +113,9 @@
 - Player movement between connected levels is a level transition, not an escape state.
 - One-cell passages that connect levels are outside the rectangular gameplay layout of each connected level; authored level room rectangles contain only the room proper, not the connector passage.
 - Authored levels may define an explicit playable-cell footprint so connector cells can exist outside the room-proper rectangle without causing adjacent non-room cells to render floors, walls, or visibility entries.
-- The authored Entrance level has a closed outer wall wherever it does not connect to Chamber 1.
+- The authored Entrance level has a closed outer wall wherever it does not connect to `Hallway 1-1`.
+- Authored Entrance and Hallway levels follow the playable-cell topology shown in `LEVELS.md` rather than using placeholder rectangular rooms.
+- `Hallway 1-2` has a connected playable loop and accepts movement immediately after the player enters it.
 
 ## Current Scope
 - The scene uses image-based lighting from the Poly Haven `qwantani_moon_noon_puresky` environment.

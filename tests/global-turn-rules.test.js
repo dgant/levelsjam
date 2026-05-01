@@ -74,7 +74,7 @@ test('global turns move the canonical player across authored level seams without
 
   assert.equal(focused.activeLevelId, 'hallway-1-1')
   assert.deepEqual(focused.player.cell, result.state.player.cell)
-  assert.deepEqual(hallwayState.player.cell, { x: 1, y: 2 })
+  assert.deepEqual(hallwayState.player.cell, { x: 0, y: 2 })
   assert.equal(hallwayState.player.direction, 'north')
 })
 

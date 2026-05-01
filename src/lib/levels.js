@@ -179,16 +179,6 @@ function transformForMazeConnection(spec, chamberMaze, chamberTransform, exit) {
   )
 }
 
-function createLineTransform(index) {
-  return transformForLocalCellAtWorldCell(
-    3,
-    3,
-    { x: 1, y: 2 },
-    { x: 0, y: index === 0 ? 1 : 1 - (index * 3) },
-    0
-  )
-}
-
 function createChamberTransform(chamberMaze, entryWorldCell) {
   return transformForLocalCellAtWorldCell(
     chamberMaze.width,
@@ -200,19 +190,53 @@ function createChamberTransform(chamberMaze, entryWorldCell) {
 }
 
 function createRuntimeTransforms() {
-  const transforms = {
-    entrance: createLineTransform(0),
-    'hallway-1-1': createLineTransform(1),
-    'hallway-1-2': createLineTransform(2),
-    'hallway-1-3': createLineTransform(3),
-    'hallway-1-4': createLineTransform(4),
-    'hallway-1-5': createLineTransform(5)
+  const transforms = {}
+  const authoredLineIds = [
+    'entrance',
+    'hallway-1-1',
+    'hallway-1-2',
+    'hallway-1-3',
+    'hallway-1-4',
+    'hallway-1-5'
+  ]
+  const authoredLineMazes = Object.fromEntries(
+    authoredLineIds.map((id) => [id, createAuthoredMazeDefinition(id)])
+  )
+
+  transforms.entrance = transformForLocalCellAtWorldCell(
+    authoredLineMazes.entrance.width,
+    authoredLineMazes.entrance.height,
+    authoredLineMazes.entrance.playerStart.cell,
+    { x: 0, y: 0 },
+    0
+  )
+
+  for (let index = 1; index < authoredLineIds.length; index += 1) {
+    const previousId = authoredLineIds[index - 1]
+    const currentId = authoredLineIds[index]
+    const previousMaze = authoredLineMazes[previousId]
+    const currentMaze = authoredLineMazes[currentId]
+    const previousExit = previousMaze.levelExits.find((exit) => exit.targetLevelId === currentId)
+    const entryWorldCell = getNeighbor(
+      localCellToWorldCell(previousMaze, transforms[previousId], previousExit.cell),
+      previousExit.side
+    )
+
+    transforms[currentId] = transformForLocalCellAtWorldCell(
+      currentMaze.width,
+      currentMaze.height,
+      currentMaze.playerStart.cell,
+      entryWorldCell,
+      0
+    )
   }
-  const hallway5 = createSimpleHallwayMaze('hallway-1-5', 'hallway-1-4', 'chamber-1')
+
+  const hallway5 = authoredLineMazes['hallway-1-5']
+  const hallway5Exit = hallway5.levelExits.find((exit) => exit.targetLevelId === 'chamber-1')
   const chamber1Entry = localCellToWorldCell(
     hallway5,
     transforms['hallway-1-5'],
-    { x: 1, y: -1 }
+    getNeighbor(hallway5Exit.cell, hallway5Exit.side)
   )
   const chamber1 = createChamberMazeDefinition(
     'chamber-1',
@@ -333,39 +357,43 @@ function openRoomEdges(width, height) {
   return openEdgesForCells(rectangularCells(width, height))
 }
 
-function createSimpleHallwayMaze(id, previousLevelId, nextLevelId, options = {}) {
+function createAuthoredRoomMaze({
+  altars = [],
+  cells,
+  exitRequiresTrophy = false,
+  gates = [],
+  height,
+  id,
+  levelExits,
+  lights = [],
+  monsters = [],
+  opening,
+  playerStart,
+  solution = null,
+  sword = null,
+  trophy = null,
+  width
+}) {
   return {
-    exitRequiresTrophy: false,
-    gates: options.gates ?? [],
-    height: 3,
+    altars,
+    cells,
+    exitRequiresTrophy,
+    gates,
+    height,
     id,
     indoor: id !== 'entrance',
     isAuthoredLevel: true,
-    levelExits: [
-      { cell: { x: 1, y: 2 }, side: 'south', targetLevelId: previousLevelId },
-      { cell: { x: 1, y: 0 }, side: 'north', targetLevelId: nextLevelId }
-    ],
+    levelExits,
     levelName: AUTHORED_LEVEL_NAMES[id],
-    lights: [
-      { cell: { x: 0, y: 0 }, side: 'north' },
-      { cell: { x: 2, y: 0 }, side: 'north' }
-    ],
-    monsters: options.monsters ?? [],
-    openEdges: openRoomEdges(3, 3),
-    opening: {
-      cell: { x: 1, y: 2 },
-      side: 'south'
-    },
-    playerStart: {
-      cell: { x: 1, y: 2 },
-      direction: 'north'
-    },
-    solution: {
-      actions: ['move-forward', 'move-forward', 'move-forward']
-    },
-    sword: options.sword ?? null,
-    trophy: options.trophy ?? null,
-    width: 3
+    lights,
+    monsters,
+    openEdges: openEdgesForCells(cells),
+    opening,
+    playerStart,
+    ...(solution ? { solution } : {}),
+    sword,
+    trophy,
+    width
   }
 }
 
@@ -486,36 +514,133 @@ function createThroneRoomDefinition() {
 
 function createAuthoredMazeDefinition(id) {
   if (id === 'entrance') {
-    return createSimpleHallwayMaze('entrance', 'entrance', 'hallway-1-1')
+    return createAuthoredRoomMaze({
+      cells: rectangularCells(3, 3),
+      height: 3,
+      id,
+      levelExits: [
+        { cell: { x: 1, y: 0 }, side: 'north', targetLevelId: 'hallway-1-1' }
+      ],
+      lights: [
+        { cell: { x: 0, y: 0 }, side: 'north' },
+        { cell: { x: 2, y: 0 }, side: 'north' }
+      ],
+      opening: { cell: { x: 1, y: 2 }, side: 'south' },
+      playerStart: { cell: { x: 1, y: 2 }, direction: 'north' },
+      solution: { actions: ['move-forward', 'move-forward', 'move-forward'] },
+      width: 3
+    })
   }
   if (id === 'hallway-1-1') {
-    return createSimpleHallwayMaze(id, 'entrance', 'hallway-1-2', {
-      monsters: [{ cell: { x: 2, y: 0 }, type: 'minotaur' }]
+    return createAuthoredRoomMaze({
+      cells: [
+        { x: 3, y: 0 },
+        ...Array.from({ length: 8 }, (_, x) => ({ x, y: 1 })),
+        { x: 0, y: 2 }
+      ],
+      height: 3,
+      id,
+      levelExits: [
+        { cell: { x: 0, y: 2 }, side: 'south', targetLevelId: 'entrance' },
+        { cell: { x: 3, y: 0 }, side: 'north', targetLevelId: 'hallway-1-2' }
+      ],
+      lights: [
+        { cell: { x: 3, y: 0 }, side: 'west' },
+        { cell: { x: 7, y: 1 }, side: 'east' }
+      ],
+      monsters: [{ cell: { x: 7, y: 1 }, type: 'minotaur' }],
+      opening: { cell: { x: 0, y: 2 }, side: 'south' },
+      playerStart: { cell: { x: 0, y: 2 }, direction: 'north' },
+      solution: { actions: ['move-forward', 'move-forward', 'move-forward', 'move-forward', 'rotate-left', 'move-forward'] },
+      width: 8
     })
   }
   if (id === 'hallway-1-2') {
-    return createSimpleHallwayMaze(id, 'hallway-1-1', 'hallway-1-3', {
-      monsters: [{ cell: { x: 0, y: 1 }, type: 'minotaur' }]
+    return createAuthoredRoomMaze({
+      cells: rectangularCells(3, 3),
+      height: 3,
+      id,
+      levelExits: [
+        { cell: { x: 0, y: 2 }, side: 'south', targetLevelId: 'hallway-1-1' },
+        { cell: { x: 2, y: 0 }, side: 'north', targetLevelId: 'hallway-1-3' }
+      ],
+      lights: [
+        { cell: { x: 0, y: 0 }, side: 'west' },
+        { cell: { x: 2, y: 1 }, side: 'east' }
+      ],
+      monsters: [{ cell: { x: 0, y: 0 }, type: 'minotaur' }],
+      opening: { cell: { x: 0, y: 2 }, side: 'south' },
+      playerStart: { cell: { x: 0, y: 2 }, direction: 'north' },
+      solution: { actions: ['rotate-right', 'move-forward', 'move-forward', 'rotate-left', 'move-forward', 'move-forward', 'move-forward'] },
+      width: 3
     })
   }
   if (id === 'hallway-1-3') {
-    return createSimpleHallwayMaze(id, 'hallway-1-2', 'hallway-1-4', {
-      gates: [{ from: { x: 1, y: 1 }, id: `${id}:gate`, to: { x: 1, y: 0 } }],
-      monsters: [{ cell: { x: 0, y: 0 }, type: 'minotaur' }]
+    return createAuthoredRoomMaze({
+      cells: rectangularCells(4, 3),
+      gates: [{ from: { x: 1, y: 1 }, id: `${id}:gate`, to: { x: 2, y: 1 } }],
+      height: 3,
+      id,
+      levelExits: [
+        { cell: { x: 0, y: 2 }, side: 'south', targetLevelId: 'hallway-1-2' },
+        { cell: { x: 3, y: 0 }, side: 'north', targetLevelId: 'hallway-1-4' }
+      ],
+      lights: [
+        { cell: { x: 0, y: 0 }, side: 'west' },
+        { cell: { x: 3, y: 1 }, side: 'east' }
+      ],
+      monsters: [{ cell: { x: 0, y: 0 }, type: 'minotaur' }],
+      opening: { cell: { x: 0, y: 2 }, side: 'south' },
+      playerStart: { cell: { x: 0, y: 2 }, direction: 'north' },
+      solution: { actions: ['rotate-right', 'move-forward', 'move-forward', 'move-forward', 'rotate-left', 'move-forward', 'move-forward', 'move-forward'] },
+      width: 4
     })
   }
   if (id === 'hallway-1-4') {
-    return createSimpleHallwayMaze(id, 'hallway-1-3', 'hallway-1-5', {
-      monsters: [{ cell: { x: 1, y: 0 }, type: 'minotaur' }],
-      sword: { cell: { x: 1, y: 1 } }
+    return createAuthoredRoomMaze({
+      cells: [
+        { x: 4, y: 0 },
+        ...Array.from({ length: 5 }, (_, x) => ({ x, y: 1 })),
+        { x: 4, y: 2 }
+      ],
+      height: 3,
+      id,
+      levelExits: [
+        { cell: { x: 4, y: 2 }, side: 'south', targetLevelId: 'hallway-1-3' },
+        { cell: { x: 4, y: 0 }, side: 'north', targetLevelId: 'hallway-1-5' }
+      ],
+      lights: [
+        { cell: { x: 0, y: 1 }, side: 'west' },
+        { cell: { x: 4, y: 1 }, side: 'east' }
+      ],
+      monsters: [{ cell: { x: 4, y: 0 }, type: 'minotaur' }],
+      opening: { cell: { x: 4, y: 2 }, side: 'south' },
+      playerStart: { cell: { x: 4, y: 2 }, direction: 'north' },
+      solution: { actions: ['rotate-left', 'move-forward', 'move-forward', 'move-forward', 'move-forward', 'rotate-right', 'move-forward', 'move-forward'] },
+      sword: { cell: { x: 0, y: 1 } },
+      width: 5
     })
   }
   if (id === 'hallway-1-5') {
-    return {
-      ...createSimpleHallwayMaze(id, 'hallway-1-4', 'chamber-1'),
+    return createAuthoredRoomMaze({
       altars: [{ cell: { x: 0, y: 1 }, id: 'hallway-1-5-altar' }],
-      trophy: { cell: { x: 1, y: 1 } }
-    }
+      cells: rectangularCells(3, 3),
+      height: 3,
+      id,
+      levelExits: [
+        { cell: { x: 0, y: 2 }, side: 'south', targetLevelId: 'hallway-1-4' },
+        { cell: { x: 0, y: 0 }, side: 'north', targetLevelId: 'chamber-1' }
+      ],
+      lights: [
+        { cell: { x: 1, y: 0 }, side: 'north' },
+        { cell: { x: 2, y: 1 }, side: 'east' }
+      ],
+      opening: { cell: { x: 0, y: 2 }, side: 'south' },
+      playerStart: { cell: { x: 0, y: 2 }, direction: 'north' },
+      solution: { actions: ['rotate-right', 'move-forward', 'move-forward', 'move-forward', 'rotate-left', 'move-forward', 'move-forward'] },
+      trophy: { cell: { x: 2, y: 1 } },
+      width: 3
+    })
   }
   if (id === 'chamber-1') {
     return createChamberMazeDefinition(id, 'hallway-1-5', 'chamber-2', CHAMBER_1_MAZES, 4)
