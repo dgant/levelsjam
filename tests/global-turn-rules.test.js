@@ -213,6 +213,34 @@ test('Hallway 1-2 recorded solution reaches Hallway 1-3', async () => {
   assert.deepEqual(transition, { targetLevelId: 'hallway-1-3' })
 })
 
+test('Hallway 1-3 recorded solution reaches Hallway 1-4', async () => {
+  const hallway = await authoredLayout('hallway-1-3')
+  const previousHallway = await authoredLayout('hallway-1-2')
+  const nextHallway = await authoredLayout('hallway-1-4')
+  let globalState = createInitialGlobalTurnState(hallway, [previousHallway, nextHallway])
+  let transition = null
+
+  for (const action of hallway.maze.solution.actions) {
+    const result = applyGlobalTurnActionForLevel(
+      globalState,
+      hallway.maze.id,
+      hallway.maze,
+      action
+    )
+
+    assert.equal(result.outcome.blocked, false, `solution action blocked: ${action}`)
+    assert.equal(result.outcome.killed, false, `solution action killed player: ${action}`)
+    transition = result.outcome.levelTransition
+    globalState = result.state
+
+    if (transition) {
+      break
+    }
+  }
+
+  assert.deepEqual(transition, { targetLevelId: 'hallway-1-4' })
+})
+
 test('graph-excluded side levels do not inherit overlapping story layouts', () => {
   const sourceLayout = layout(testMaze())
   const sideLayout = layout(testMaze({

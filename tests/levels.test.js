@@ -148,6 +148,31 @@ test('Hallway 1-2 matches the minotaur-door ASCII topology', async () => {
   )
 })
 
+test('Hallway 1-3 matches the gate ASCII topology', async () => {
+  const hallway = await createAuthoredRuntimeMaze('hallway-1-3')
+
+  assert.deepEqual(
+    hallway.cells.filter((cell) => cell.y === 0),
+    [{ x: 0, y: 0 }]
+  )
+  assert.deepEqual(
+    hallway.cells.filter((cell) => cell.y === 3),
+    [{ x: 0, y: 3 }]
+  )
+  assert.deepEqual(hallway.monsters, [{ cell: { x: 0, y: 0 }, type: 'minotaur' }])
+  assert.deepEqual(hallway.gates, [
+    { from: { x: 1, y: 2 }, id: 'hallway-1-3:gate', to: { x: 2, y: 2 } }
+  ])
+  assert.deepEqual(
+    hallway.levelExits.find((exit) => exit.targetLevelId === 'hallway-1-4'),
+    { cell: { x: 0, y: 0 }, side: 'north', targetLevelId: 'hallway-1-4' }
+  )
+  assert.deepEqual(
+    hallway.levelExits.find((exit) => exit.targetLevelId === 'hallway-1-2'),
+    { cell: { x: 0, y: 3 }, side: 'south', targetLevelId: 'hallway-1-2' }
+  )
+})
+
 test('directed runtime level graph is rooted at Entrance and acyclic', () => {
   const graph = getDirectedRuntimeLevelGraph()
   const root = getRuntimeLevelGraphRootId()

@@ -13455,7 +13455,9 @@ function getMazeDoors(layout: MazeLayout): MazeRuntimeDoor[] {
     doors.push(getMazeDoorForBoundary(layout, boundary, id))
   }
 
-  addDoor(layout.maze.opening, `${layout.maze.id}:entrance-door`)
+  if (!layout.maze.isAuthoredLevel) {
+    addDoor(layout.maze.opening, `${layout.maze.id}:entrance-door`)
+  }
 
   for (const exit of layout.maze.levelExits ?? []) {
     addDoor(

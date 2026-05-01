@@ -203,6 +203,11 @@ test('doors use generated Minoan-door ORM textures and baked dynamic lighting', 
     /const DOOR_HEIGHT = 1\.8/,
     'door leaves should be 1.8m high'
   )
+  assert.match(
+    appSource,
+    /if \(!layout\.maze\.isAuthoredLevel\) \{\s*addDoor\(layout\.maze\.opening, `\$\{layout\.maze\.id\}:entrance-door`\)\s*\}/,
+    'authored progression rooms should render only levelExit doors, not legacy opening doors'
+  )
 })
 
 test('completed altar target mazes keep entrance doors closed after resume', () => {
