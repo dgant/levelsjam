@@ -134,10 +134,18 @@ test('Hallway 1-2 matches the minotaur-door ASCII topology', async () => {
     hallway.cells.filter((cell) => cell.y === 0),
     [{ x: 0, y: 0 }]
   )
+  assert.deepEqual(
+    hallway.cells.filter((cell) => cell.y === 3),
+    [{ x: 0, y: 3 }]
+  )
   assert.deepEqual(hallway.monsters, [{ cell: { x: 0, y: 0 }, type: 'minotaur' }])
   assert.deepEqual(
     hallway.levelExits.find((exit) => exit.targetLevelId === 'hallway-1-3'),
     { cell: { x: 0, y: 0 }, side: 'north', targetLevelId: 'hallway-1-3' }
+  )
+  assert.deepEqual(
+    hallway.levelExits.find((exit) => exit.targetLevelId === 'hallway-1-1'),
+    { cell: { x: 0, y: 3 }, side: 'south', targetLevelId: 'hallway-1-1' }
   )
   assert.deepEqual(
     hallway.lights.filter((light) => light.cell.x === 0 && light.cell.y === 0),

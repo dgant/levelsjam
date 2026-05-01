@@ -564,12 +564,13 @@ function createAuthoredMazeDefinition(id) {
         { x: 2, y: 1 },
         { x: 0, y: 2 },
         { x: 1, y: 2 },
-        { x: 2, y: 2 }
+        { x: 2, y: 2 },
+        { x: 0, y: 3 }
       ],
-      height: 3,
+      height: 4,
       id,
       levelExits: [
-        { cell: { x: 0, y: 2 }, side: 'south', targetLevelId: 'hallway-1-1' },
+        { cell: { x: 0, y: 3 }, side: 'south', targetLevelId: 'hallway-1-1' },
         { cell: { x: 0, y: 0 }, side: 'north', targetLevelId: 'hallway-1-3' }
       ],
       lights: [
@@ -578,9 +579,9 @@ function createAuthoredMazeDefinition(id) {
         { cell: { x: 2, y: 2 }, side: 'east' }
       ],
       monsters: [{ cell: { x: 0, y: 0 }, type: 'minotaur' }],
-      opening: { cell: { x: 0, y: 2 }, side: 'south' },
-      playerStart: { cell: { x: 0, y: 2 }, direction: 'north' },
-      solution: { actions: ['move-forward', 'move-backward', 'rotate-left', 'move-backward', 'rotate-left', 'move-backward', 'rotate-left', 'move-backward', 'rotate-left', 'move-forward', 'move-forward'] },
+      opening: { cell: { x: 0, y: 3 }, side: 'south' },
+      playerStart: { cell: { x: 0, y: 3 }, direction: 'north' },
+      solution: { actions: ['move-backward', 'move-forward', 'move-forward', 'rotate-left', 'move-backward', 'rotate-left', 'move-backward', 'rotate-left', 'move-backward', 'rotate-left', 'move-forward', 'move-forward'] },
       width: 3
     })
   }

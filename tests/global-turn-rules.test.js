@@ -179,7 +179,7 @@ test('resetting all global levels clears active monster state after death', asyn
     hallway.maze
   )
 
-  assert.deepEqual(resetHallwayState.player.cell, { x: 0, y: 2 })
+  assert.deepEqual(resetHallwayState.player.cell, { x: 0, y: 3 })
   assert.equal(resetHallwayState.player.direction, 'north')
   assert.deepEqual(resetHallwayState.monsters[0].cell, { x: 0, y: 0 })
   assert.equal(resetHallwayState.monsters[0].awake, false)

@@ -208,6 +208,11 @@ test('doors use generated Minoan-door ORM textures and baked dynamic lighting', 
     /if \(!layout\.maze\.isAuthoredLevel\) \{\s*addDoor\(layout\.maze\.opening, `\$\{layout\.maze\.id\}:entrance-door`\)\s*\}/,
     'authored progression rooms should render only levelExit doors, not legacy opening doors'
   )
+  assert.match(
+    appSource,
+    /layout\.maze\.isAuthoredLevel && exit\.targetLevelId && !directedTargets\.has\(exit\.targetLevelId\)/,
+    'authored progression seams should render one directed door instead of duplicate doors from both sides'
+  )
 })
 
 test('completed altar target mazes keep entrance doors closed after resume', () => {
