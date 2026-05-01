@@ -580,7 +580,7 @@ function createAuthoredMazeDefinition(id) {
       monsters: [{ cell: { x: 0, y: 0 }, type: 'minotaur' }],
       opening: { cell: { x: 0, y: 2 }, side: 'south' },
       playerStart: { cell: { x: 0, y: 2 }, direction: 'north' },
-      solution: { actions: ['rotate-right', 'move-forward', 'move-forward', 'rotate-left', 'move-forward', 'move-forward', 'move-forward'] },
+      solution: { actions: ['move-forward', 'move-backward', 'rotate-left', 'move-backward', 'rotate-left', 'move-backward', 'rotate-left', 'move-backward', 'rotate-left', 'move-forward', 'move-forward'] },
       width: 3
     })
   }

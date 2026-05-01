@@ -110,12 +110,15 @@
 - Indoor levels render at most one ground-level torch assembly per wall face.
 - Indoor levels do not mount torch assemblies on upper stacked wall segments.
 - Once a level's gameplay-rule state has been loaded, the runtime keeps that state available for the rest of the session instead of unloading or resetting it during ordinary level traversal.
+- When the player dies, every loaded level resets its monsters, pickups, gates, and local player checkpoint state to that level's initial entered state before control returns.
+- When the player leaves a level through a level transition, the source level resets before the player can re-enter it.
 - Player movement between connected levels is a level transition, not an escape state.
 - One-cell passages that connect levels are outside the rectangular gameplay layout of each connected level; authored level room rectangles contain only the room proper, not the connector passage.
 - Authored levels may define an explicit playable-cell footprint so connector cells can exist outside the room-proper rectangle without causing adjacent non-room cells to render floors, walls, or visibility entries.
 - The authored Entrance level has a closed outer wall wherever it does not connect to `Hallway 1-1`.
 - Authored Entrance and Hallway levels follow the playable-cell topology shown in `LEVELS.md` rather than using placeholder rectangular rooms.
 - `Hallway 1-2` has a connected playable loop and accepts movement immediately after the player enters it.
+- `Hallway 1-2` has a recorded solution that reaches the `Hallway 1-3` exit under the normal monster rules.
 - `Hallway 1-2` has a single upper-row cell containing the minotaur, with the exit door on that cell's north side and torch walls on both the west and east sides of that cell.
 
 ## Current Scope

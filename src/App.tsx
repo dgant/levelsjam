@@ -188,6 +188,7 @@ import {
   findIngressCellForGlobalTransition,
   getGlobalTurnStateForLevel,
   replaceGlobalTurnStateForLevel,
+  resetGlobalTurnStateAllLevels,
   resetGlobalTurnStateLevel,
   transitionGlobalTurnState,
   type GlobalTurnState
@@ -19216,9 +19217,14 @@ function FlightRig({
           }
 
           if (!waitingForLevelLighting) {
-            const finalState = activeAnimation.killed
-              ? resetTurnStateToCheckpoint(layout.maze, activeAnimation.to)
-              : activeAnimation.to
+            const resetGlobalState = activeAnimation.killed && activeAnimation.committedGlobalState
+              ? resetGlobalTurnStateAllLevels(activeAnimation.committedGlobalState)
+              : null
+            const finalState = resetGlobalState
+              ? getGlobalTurnStateForLevel(resetGlobalState, layout.maze.id, layout.maze)
+              : activeAnimation.killed
+                ? resetTurnStateToCheckpoint(layout.maze, activeAnimation.to)
+                : activeAnimation.to
 
             if (activeAnimation.killed) {
               cameraShake.current = {
@@ -19229,7 +19235,9 @@ function FlightRig({
             }
 
             turnStateRef.current = finalState
-            if (activeAnimation.committedGlobalState && !activeAnimation.killed) {
+            if (resetGlobalState) {
+              commitGlobalTurnState(resetGlobalState)
+            } else if (activeAnimation.committedGlobalState && !activeAnimation.killed) {
               commitGlobalTurnState(activeAnimation.committedGlobalState)
             } else {
               setTurnState(finalState)
@@ -25239,22 +25247,28 @@ export default function App() {
       loadedMazeLayoutsRef.current.set(request.targetLevelId, targetLayout)
       setGlobalTurnState((current) => {
         const committedState = request.committedGlobalState
+        const sourceLayout = loadedMazeLayoutsRef.current.get(request.sourceLevelId)
+        let nextState: GlobalTurnState
 
         if (committedState) {
-          return activateGlobalTurnStateLevel(
+          nextState = activateGlobalTurnStateLevel(
             ensureGlobalTurnStateLevel(committedState, targetLayout),
             targetLayout
           )
+        } else {
+          nextState = transitionGlobalTurnState({
+            sourceLevelId: request.sourceLevelId,
+            sourceLayout,
+            sourcePreviousState: request.sourcePreviousState,
+            sourceState: request.sourceState,
+            state: current ?? createInitialGlobalTurnState(targetLayout, Array.from(loadedMazeLayoutsRef.current.values())),
+            targetLayout
+          })
         }
 
-        return transitionGlobalTurnState({
-          sourceLevelId: request.sourceLevelId,
-          sourceLayout: loadedMazeLayoutsRef.current.get(request.sourceLevelId),
-          sourcePreviousState: request.sourcePreviousState,
-          sourceState: request.sourceState,
-          state: current ?? createInitialGlobalTurnState(targetLayout, Array.from(loadedMazeLayoutsRef.current.values())),
-          targetLayout
-        })
+        return sourceLayout && request.sourceLevelId !== request.targetLevelId
+          ? resetGlobalTurnStateLevel(nextState, sourceLayout)
+          : nextState
       })
       setInstantiatedMazeId(request.targetLevelId)
       setMazeLayout(targetLayout)

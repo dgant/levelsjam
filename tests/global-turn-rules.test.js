@@ -9,6 +9,7 @@ import {
   ensureGlobalTurnStateLevel,
   getGlobalTurnStateForLevel,
   replaceGlobalTurnStateForLevel,
+  resetGlobalTurnStateAllLevels,
   resetGlobalTurnStateLevel
 } from '../src/lib/globalTurnRules.js'
 import { localCellToWorldCell } from '../src/lib/worldGrid.js'
@@ -150,6 +151,66 @@ test('activating a reset side level uses that level player start', () => {
   assert.equal(resetSideState.activeLevelId, 'side-level')
   assert.deepEqual(sideTurnState.player.cell, { x: 0, y: 1 })
   assert.equal(sideTurnState.player.direction, 'east')
+})
+
+test('resetting all global levels clears active monster state after death', async () => {
+  const hallway = await authoredLayout('hallway-1-2')
+  const nextHallway = await authoredLayout('hallway-1-3')
+  let globalState = createInitialGlobalTurnState(hallway, [nextHallway])
+
+  for (const action of ['move-forward', 'move-backward', 'rotate-left', 'move-backward']) {
+    globalState = applyGlobalTurnActionForLevel(
+      globalState,
+      hallway.maze.id,
+      hallway.maze,
+      action
+    ).state
+  }
+
+  assert.notDeepEqual(
+    getGlobalTurnStateForLevel(globalState, hallway.maze.id, hallway.maze).monsters[0].cell,
+    { x: 0, y: 0 }
+  )
+
+  const resetState = resetGlobalTurnStateAllLevels(globalState)
+  const resetHallwayState = getGlobalTurnStateForLevel(
+    resetState,
+    hallway.maze.id,
+    hallway.maze
+  )
+
+  assert.deepEqual(resetHallwayState.player.cell, { x: 0, y: 2 })
+  assert.equal(resetHallwayState.player.direction, 'north')
+  assert.deepEqual(resetHallwayState.monsters[0].cell, { x: 0, y: 0 })
+  assert.equal(resetHallwayState.monsters[0].awake, false)
+  assert.equal(resetHallwayState.monsters[0].lastSeenDirection, null)
+})
+
+test('Hallway 1-2 recorded solution reaches Hallway 1-3', async () => {
+  const hallway = await authoredLayout('hallway-1-2')
+  const nextHallway = await authoredLayout('hallway-1-3')
+  let globalState = createInitialGlobalTurnState(hallway, [nextHallway])
+  let transition = null
+
+  for (const action of hallway.maze.solution.actions) {
+    const result = applyGlobalTurnActionForLevel(
+      globalState,
+      hallway.maze.id,
+      hallway.maze,
+      action
+    )
+
+    assert.equal(result.outcome.blocked, false, `solution action blocked: ${action}`)
+    assert.equal(result.outcome.killed, false, `solution action killed player: ${action}`)
+    transition = result.outcome.levelTransition
+    globalState = result.state
+
+    if (transition) {
+      break
+    }
+  }
+
+  assert.deepEqual(transition, { targetLevelId: 'hallway-1-3' })
 })
 
 test('graph-excluded side levels do not inherit overlapping story layouts', () => {

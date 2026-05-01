@@ -469,6 +469,13 @@ export function resetGlobalTurnStateLevel(state, layout) {
   return syncTopLevelState(next)
 }
 
+export function resetGlobalTurnStateAllLevels(state) {
+  return getRegisteredLayouts(state).reduce(
+    (next, layout) => resetGlobalTurnStateLevel(next, layout),
+    state
+  )
+}
+
 export function activateGlobalTurnStateLevel(state, layout) {
   const ensuredState = ensureGlobalTurnStateLevel(state, layout)
   const next = cloneGlobalState(ensuredState)

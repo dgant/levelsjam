@@ -220,6 +220,8 @@ test('closed completed mazes reset when player is outside them', () => {
   assert.match(appSource, /resetClosedMazeIdsRef/)
   assert.match(appSource, /resetGlobalTurnStateLevel\(next, targetLayout\)/)
   assert.match(appSource, /targetLevelId !== globalTurnStateRef\.current\?\.player\.levelId/)
+  assert.match(appSource, /resetGlobalTurnStateLevel\(nextState, sourceLayout\)/)
+  assert.match(appSource, /resetGlobalTurnStateAllLevels\(activeAnimation\.committedGlobalState\)/)
 })
 
 test('door back faces keep handles toward the doorway center', () => {
@@ -781,7 +783,7 @@ test('death reset clears transient camera shake before accepting post-resurrecti
 
   assert.match(
     appSource,
-    /const finalState = activeAnimation\.killed[\s\S]*?resetTurnStateToCheckpoint\(layout\.maze, activeAnimation\.to\)[\s\S]*?if \(activeAnimation\.killed\) \{\s*cameraShake\.current = \{\s*amplitude: 0,\s*endsAt: 0\s*\}\s*inputQueue\.current = \[\]\s*\}[\s\S]*?turnStateRef\.current = finalState/,
+    /const resetGlobalState = activeAnimation\.killed[\s\S]*?resetGlobalTurnStateAllLevels\(activeAnimation\.committedGlobalState\)[\s\S]*?const finalState = resetGlobalState[\s\S]*?resetTurnStateToCheckpoint\(layout\.maze, activeAnimation\.to\)[\s\S]*?if \(activeAnimation\.killed\) \{\s*cameraShake\.current = \{\s*amplitude: 0,\s*endsAt: 0\s*\}\s*inputQueue\.current = \[\]\s*\}[\s\S]*?turnStateRef\.current = finalState/,
     'camera shake and buffered inputs from the killing turn must be cleared when resurrection reset commits'
   )
   assert.match(
