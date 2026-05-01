@@ -652,3 +652,11 @@ Go implement this. We need robust central camera control with an architecture th
   [x] Music should not pause or reset or anything on death. Just keep it going.
 [x] Spiders should be tilted so they're leaning on the side they walk on. Increase the tilt to 60 degrees. Figure out analytically the right offset-from-cell for the model so the scaled and tilted spider would be just touching their wall and the floor.
 [x] When a maze's doors close, and the player is not inside the maze, reset the maze
+[x] Persist in browser local storage which levels the player has entered and which altars are lit
+[x] When the page loads, if the player has entered a level besides Entrance, before loading the player in, offer a choice of New Game or Continue. The Continue option should bring the player to the latest-in-the-directed-graph non-Maze level they have entered, and light all the same altars (with all the commensurate effects)
+[x] Add a menu option "Reset" which triggers the same behavior as when a player dies (thereby resetting and putting them back at the level initial position)
+[x] Don't know if this is true already, but when a level resets: reset now routes through the same current-level reset path used by the death/debug reset behavior, returning the active level to its initial entered turn state.
+[x] Next to the reset button, if inside a level with a solution, add a "Show Solution" button which does the same thing as the one in the debug menu
+[x] That top-right display with FPS and maze info? Only show that when the debug menu is open
+[x] Don't require music and sound to be downloaded for the intro screen to fade. In fact, don't even start start downloading music and sound until the intro screen fades. If a sound effect would play but it's not loaded, just don't play anything, that's fine. Start applying the music logic once all the music is loaded.
+[x] Double the length of the fade-in after you die

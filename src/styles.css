@@ -270,6 +270,13 @@ body {
   gap: 10px;
 }
 
+.level-menu-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
 .level-menu-button {
   display: grid;
   gap: 5px;
@@ -282,6 +289,10 @@ body {
   font: inherit;
   text-align: left;
   cursor: pointer;
+}
+
+.level-menu-action-button {
+  background: rgb(229 198 139 / 12%);
 }
 
 .level-menu-button:hover,
@@ -314,6 +325,44 @@ body {
   margin-top: 18px;
   text-align: center;
   color: rgb(245 237 218 / 70%);
+}
+
+.startup-choice-panel {
+  display: grid;
+  gap: 22px;
+  justify-items: center;
+  width: min(760px, calc(100vw - 48px));
+  padding: 28px;
+  color: #f5edda;
+}
+
+.startup-choice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 14px;
+}
+
+.startup-choice-button {
+  min-width: 150px;
+  padding: 12px 18px;
+  background: rgb(229 198 139 / 14%);
+  border: 1px solid rgb(229 198 139 / 38%);
+  border-radius: 999px;
+  color: inherit;
+  font:
+    700 14px/1.2 "Segoe UI",
+    system-ui,
+    sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.startup-choice-button:hover,
+.startup-choice-button:focus-visible {
+  background: rgb(229 198 139 / 24%);
+  outline: none;
 }
 
 .visual-controls {

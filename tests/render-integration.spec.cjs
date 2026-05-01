@@ -369,6 +369,11 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   const frameBrightness = await waitForBrightFrame(page, canvas, 8, 20, 7_000, timingProfile)
 
   await timedStep(timingProfile, 'debug-controls', async () => {
+    await expect(page.locator('.fps-counter')).toBeHidden({ timeout: 5_000 })
+    await page.keyboard.press('Backquote')
+    await expect(page.locator('[data-testid="visual-controls"]')).toBeVisible({
+      timeout: 5_000
+    })
     await expect(page.locator('.fps-counter')).toContainText('FPS', { timeout: 5_000 })
     await expect(page.locator('.fps-counter')).toContainText('maze-001')
     await expect(page.locator('.fps-counter')).not.toContainText('unknown')
@@ -377,11 +382,6 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.locator('.fps-counter')).toBeHidden({ timeout: 5_000 })
     await page.keyboard.press('F9')
     await expect(page.locator('.fps-counter')).toBeVisible({ timeout: 5_000 })
-
-    await page.keyboard.press('Backquote')
-    await expect(page.locator('[data-testid="visual-controls"]')).toBeVisible({
-      timeout: 5_000
-    })
 
     await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveValue('0')
     await expect(page.getByLabel('Surface Lightmap Enabled')).toBeVisible()

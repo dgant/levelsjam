@@ -19,6 +19,15 @@ export function getAuthoredRuntimeLevelIds(): string[]
 
 export function getAdjacentRuntimeLevelIds(id: string): string[]
 
+export function getRuntimeLevelGraphRootId(): string
+
+export function isRuntimeMazeLevelId(id: string): boolean
+
+export function getLatestDirectedNonMazeLevelId(
+  enteredLevelIds: string[],
+  options?: { rootId?: string }
+): string
+
 export function getRuntimeLevelWorldTransform(id: string): {
   rotationY: number
   x: number

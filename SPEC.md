@@ -22,7 +22,11 @@
 - Runtime gameplay state is one continuous world state, not one independent state per level.
 - Runtime gameplay state is represented by one global rules state with a canonical player, inventory, checkpoint, turn counter, and per-level entity/pickup slices used only as authored-world contents.
 - Runtime gameplay state can be saved and resumed from browser-local storage.
-- Resuming a game places the player at the starting position and direction of the last level they occupied, while preserving permanent level-progress facts such as lit altars and passageways opened by those altars.
+- Browser-local save data records the set of levels the player has entered and the set of altars that have been lit.
+- Resuming a game places the player at the starting position and direction of the latest entered non-maze level in the directed runtime level graph, while preserving permanent level-progress facts such as lit altars and passageways opened by those altars.
+- When browser-local save data shows that the player has entered any level beyond `Entrance`, startup presents `New Game` and `Continue` choices before loading the player into the world.
+- Choosing `New Game` starts from `Entrance` and clears persisted progress for the current browser profile.
+- Choosing `Continue` loads the resume level and lights the saved altars with all associated permanent effects.
 - Runtime gameplay rules operate on one canonical world grid of cells and edges between those cells.
 - Runtime gameplay rules do not give level exits special movement behavior; connected levels expose ordinary adjacent world-grid cells and ordinary open or blocked world-grid edges.
 - Runtime level identity is available to gameplay rules only for ownership, reset, authored solution metadata, and streaming/debug grouping.
@@ -368,8 +372,8 @@
 - Attempting to move into a blocking wall or gate without a monster present plays a `250ms` sinusoidal bump animation that travels halfway toward the blocked edge and back without consuming a turn.
 - If the player attempts to move into a cell containing a monster, the player dies.
 - If a monster attempts to move into the player cell, the player dies.
-- Player death fades the viewport to black during the movement animation, resets the current maze state to the last checkpoint, and fades back in over `3s`.
-- Player death fades to black over `125ms` and fades back to the camera view over `3s`.
+- Player death fades the viewport to black during the movement animation, resets the current maze state to the last checkpoint, and fades back in over `6s`.
+- Player death fades to black over `125ms` and fades back to the camera view over `6s`.
 - The sword-strike and player-death fade overlays are applied before the vignette effect so the vignette is still visible on top of the fade color.
 - The current checkpoint is the maze entrance position and entrance-facing direction.
 - Each generated maze places one minotaur, one werewolf, and one spider on distinct non-player tiles.
@@ -445,6 +449,8 @@
 - Clicking a level name closes the level menu, loads the corresponding authored level or numbered runtime maze, resets its state, and teleports the player to that level's entrance.
 - The menu fits inside the viewport on mobile and desktop and includes a visible close button.
 - The menu is tabbed, with a Graphics tab containing Lighting, Fog, and Ambient Occlusion toggles, and a Levels tab containing the level-selection list.
+- The level menu exposes a `Reset` action that uses the same reset path as player death, returning the current level to its initial position and state.
+- When the current level has a recorded solution, the level menu exposes a `Show Solution` action beside `Reset` that starts the same solution replay as the debug panel.
 - On touch/mobile layouts, the bottom of the screen displays left-turn, forward, and right-turn controls.
 - Pressing a touch/mobile movement zone does not draw a browser tap highlight or pressed-state wash over the whole control region.
 - Mobile turn controls have large click/touch hit regions that divide the full screen into playable control areas while their visible labels remain along the bottom.
@@ -547,9 +553,10 @@
 - The debug panel fog height-falloff control is denominated in meters per 50% fog-density drop, ranges from `0.01m` to `8m`, and is implemented using that same half-distance interpretation.
 - The debug panel fog height-falloff control defaults to `0.4m`.
 - The debug panel does not expose obsolete atmosphere or sun-direction controls.
-- The page shows an FPS counter in the top-right corner together with the active maze ID, current Git branch, current Git revision, and revision timestamp.
+- The debug-only top-right overlay shows an FPS counter together with the active maze ID, current Git branch, current Git revision, and revision timestamp.
 - The top-right overlay also shows the active maze ID.
-- Pressing `F9` toggles the visibility of the top-right overlay.
+- The top-right overlay is visible only while the debug menu is open.
+- Pressing `F9` toggles whether the top-right overlay is allowed to appear while the debug menu is open.
 
 ## Performance And Testing
 - With post-processing disabled, the interactive scene meets a 144 FPS performance target on the project's benchmark hardware unless a checked-in profiling report proves that the target is not currently achievable.
@@ -596,6 +603,10 @@
 - The settings menu includes an Audio tab with independent on/off radio controls and volume sliders for music and sound effects.
 - Music is assigned by level role: Entrance and Chamber levels use `Timebender.ogg`, maze levels use `radakan - mist forest.mp3`, hallway levels use `Mystery Manor.mp3`, and throne-room levels use `stone_guardian_loop.mp3`.
 - Music loops continuously while gameplay continues.
+- Music and sound assets do not block the loading overlay from fading.
+- Runtime audio downloads do not begin until after the intro overlay has completed its fade.
+- Music playback and crossfade logic starts only after all configured music tracks have loaded enough to play.
+- If a sound effect would play before its asset is loaded, the runtime skips that sound rather than blocking gameplay or the loading overlay.
 - Entering or teleporting to a level whose assigned track differs from the current track fades the previous track out over `8s` and fades the new track in over `4s`.
 - If a track that should start is already fading out, it reverses into a fade-in without restarting playback.
 - Player death does not pause, stop, or reset music.

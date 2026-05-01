@@ -247,6 +247,58 @@ export function getRuntimeLevelGraphRootId() {
   return AUTHORED_LEVEL_IDS.Entrance
 }
 
+export function isRuntimeMazeLevelId(id) {
+  return /^maze-\d+$/i.test(String(id ?? '')) || /^challenge-\d+$/i.test(String(id ?? ''))
+}
+
+export function getLatestDirectedNonMazeLevelId(enteredLevelIds, options = {}) {
+  const rootId = options.rootId ?? getRuntimeLevelGraphRootId()
+  const entered = new Set(
+    Array.isArray(enteredLevelIds)
+      ? enteredLevelIds.filter((id) => typeof id === 'string')
+      : []
+  )
+
+  if (entered.size === 0) {
+    return rootId
+  }
+
+  const visited = new Set()
+  const queue = [{ id: rootId, order: 0, depth: 0 }]
+  let traversalOrder = 0
+  let best = entered.has(rootId) ? { depth: 0, id: rootId, order: 0 } : null
+
+  while (queue.length > 0) {
+    const current = queue.shift()
+
+    if (!current || visited.has(current.id)) {
+      continue
+    }
+
+    visited.add(current.id)
+    if (entered.has(current.id) && !isRuntimeMazeLevelId(current.id)) {
+      if (
+        !best ||
+        current.depth > best.depth ||
+        (current.depth === best.depth && current.order > best.order)
+      ) {
+        best = { depth: current.depth, id: current.id, order: current.order }
+      }
+    }
+
+    for (const targetId of RUNTIME_LEVEL_GRAPH[current.id] ?? []) {
+      traversalOrder += 1
+      queue.push({
+        depth: current.depth + 1,
+        id: targetId,
+        order: traversalOrder
+      })
+    }
+  }
+
+  return best?.id ?? rootId
+}
+
 export function getRuntimeLevelWorldTransform(id) {
   const transform = RUNTIME_LEVEL_WORLD_TRANSFORMS[id]
 

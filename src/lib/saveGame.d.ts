@@ -4,6 +4,7 @@ export const GAME_SAVE_STORAGE_KEY: string
 export const GAME_SAVE_VERSION: number
 
 export type GameSave = {
+  enteredLevelIds: string[]
   lastLevelId: string
   litAltars: string[]
   openedPassageways: string[]
@@ -15,6 +16,7 @@ export function createGameSave(
   globalTurnState: GlobalTurnState | null | undefined,
   options?: {
     activatedAltarIds?: Iterable<string>
+    enteredLevelIds?: Iterable<string>
     lastLevelId?: string | null
     litAltars?: Iterable<string>
     openedPassageways?: Iterable<string>

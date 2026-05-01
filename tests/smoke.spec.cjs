@@ -2132,15 +2132,15 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
   })
 
   await timedStep(timingProfile, 'debug-controls', async () => {
-    await expect(page.locator('.fps-counter')).toContainText('FPS', { timeout: 5_000 })
-    await expect(page.locator('.fps-counter')).toContainText('maze-001')
-    await expect(page.locator('.fps-counter')).toContainText(`${CURRENT_GIT_BRANCH}@`)
-    await expect(page.locator('.fps-counter')).not.toContainText('unknown')
-
+    await expect(page.locator('.fps-counter')).toBeHidden({ timeout: 5_000 })
     await page.keyboard.press('Backquote')
     await expect(page.locator('[data-testid="visual-controls"]')).toBeVisible({
       timeout: 5_000
     })
+    await expect(page.locator('.fps-counter')).toContainText('FPS', { timeout: 5_000 })
+    await expect(page.locator('.fps-counter')).toContainText('maze-001')
+    await expect(page.locator('.fps-counter')).toContainText(`${CURRENT_GIT_BRANCH}@`)
+    await expect(page.locator('.fps-counter')).not.toContainText('unknown')
 
     await expect(page.getByRole('slider', { name: 'Exposure' })).toHaveValue('0')
     await expect(page.getByRole('slider', { name: 'Camera FOV' })).toHaveValue('80')
@@ -2518,8 +2518,8 @@ test('maze-003 remains responsive through background probe loading', async ({ pa
     })
     .toBe(true)
   await page.waitForTimeout(20_000)
-  await expect(page.locator('.fps-counter')).toContainText('maze-003')
   await page.keyboard.press('Backquote')
+  await expect(page.locator('.fps-counter')).toContainText('maze-003')
   await expect(page.locator('[data-testid="visual-controls"]')).toBeVisible({
     timeout: 5_000
   })

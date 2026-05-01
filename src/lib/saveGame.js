@@ -1,5 +1,5 @@
 export const GAME_SAVE_STORAGE_KEY = 'levelsjam:save:v1'
-export const GAME_SAVE_VERSION = 1
+export const GAME_SAVE_VERSION = 2
 
 function normalizeStringArray(value) {
   if (!value) {
@@ -25,6 +25,7 @@ export function createGameSave(globalTurnState, options = {}) {
   }
 
   return {
+    enteredLevelIds: normalizeStringArray(options.enteredLevelIds),
     lastLevelId,
     litAltars: normalizeStringArray(options.litAltars ?? options.activatedAltarIds),
     openedPassageways: normalizeStringArray(options.openedPassageways),
@@ -38,11 +39,19 @@ export function parseGameSave(value) {
     return null
   }
 
-  if (value.version !== GAME_SAVE_VERSION || typeof value.lastLevelId !== 'string') {
+  if (
+    typeof value.lastLevelId !== 'string' ||
+    (value.version !== GAME_SAVE_VERSION && value.version !== 1)
+  ) {
     return null
   }
 
+  const enteredLevelIds = normalizeStringArray(value.enteredLevelIds)
+
   return {
+    enteredLevelIds: enteredLevelIds.length > 0
+      ? enteredLevelIds
+      : normalizeStringArray([value.lastLevelId]),
     lastLevelId: value.lastLevelId,
     litAltars: normalizeStringArray(value.litAltars),
     openedPassageways: normalizeStringArray(value.openedPassageways),

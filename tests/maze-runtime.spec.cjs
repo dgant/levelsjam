@@ -169,6 +169,7 @@ test('maze runtime exposes gate/item/lifecycle and memory state', async ({ page 
       instantiatedMazeId: 'maze-002',
       loadedMazeIds: expect.arrayContaining(['maze-002', 'maze-003'])
     })
+  await page.keyboard.press('Backquote')
   await expect(page.locator('.fps-counter')).toContainText('maze-002')
 
   await page.evaluate(() => {

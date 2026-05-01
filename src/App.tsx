@@ -116,6 +116,7 @@ import {
 import {
   getAdjacentRuntimeLevelIds,
   getDefaultRuntimeLevelId,
+  getLatestDirectedNonMazeLevelId,
   getRuntimeLevelWorldTransform,
   parseLevelSpec,
   resolveRuntimeMazeIdForLevel,
@@ -191,6 +192,7 @@ import {
   type GlobalTurnState
 } from './lib/globalTurnRules.js'
 import {
+  clearGameSave,
   createGameSave,
   readGameSave,
   writeGameSave
@@ -305,6 +307,7 @@ const METAL_TEXTURE_REPEAT = 1
 const DOOR_HEIGHT = 1.8
 const DOOR_TEXTURE_REPEAT = 1
 const LOADING_FADE_DURATION_MS = 2000
+const PLAYER_DEATH_FADE_IN_MS = 6000
 const FIRE_FLIPBOOK_GRID = 6
 const FIRE_FLIPBOOK_FRAME_COUNT = FIRE_FLIPBOOK_GRID * FIRE_FLIPBOOK_GRID
 const FIRE_FLIPBOOK_DURATION_SECONDS = 0.5
@@ -16825,7 +16828,7 @@ function PlayerFadeEffectPrimitive() {
       }
 
       if (name === 'death-out') {
-        setFade(deathColor, 1 - (elapsed / 3000))
+        setFade(deathColor, 1 - (elapsed / PLAYER_DEATH_FADE_IN_MS))
         return
       }
 
@@ -18960,7 +18963,7 @@ function FlightRig({
                     delete document.body.dataset.playerEffect
                   }
                   playerEffectClearTimeout.current = null
-                }, 3000)
+                }, PLAYER_DEATH_FADE_IN_MS)
               }
             }
 
@@ -23275,15 +23278,18 @@ function getMusicTrackForLevelId(levelId: string | null) {
 }
 
 function MusicManager({
+  enabled,
   levelId,
   settings
 }: {
+  enabled: boolean
   levelId: string | null
   settings: AudioSettings
 }) {
   const audioByUrl = useRef(new Map<string, HTMLAudioElement>())
   const fadeAnimationFrame = useRef(0)
   const pendingPlayback = useRef(new Set<HTMLAudioElement>())
+  const [libraryReady, setLibraryReady] = useState(false)
 
   useEffect(() => {
     const tryResumePendingPlayback = () => {
@@ -23306,6 +23312,59 @@ function MusicManager({
   }, [])
 
   useEffect(() => {
+    if (!enabled || !settings.musicEnabled || libraryReady) {
+      return undefined
+    }
+
+    let cancelled = false
+    const startHandle = window.setTimeout(() => {
+      const loadTrack = (url: string) => new Promise<void>((resolve) => {
+        let audio = audioByUrl.current.get(url)
+
+        if (!audio) {
+          audio = new Audio()
+          audio.loop = true
+          audio.preload = 'auto'
+          audio.volume = 0
+          audioByUrl.current.set(url, audio)
+        }
+
+        if (audio.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+          resolve()
+          return
+        }
+
+        const finish = () => {
+          audio?.removeEventListener('canplaythrough', finish)
+          audio?.removeEventListener('error', finish)
+          resolve()
+        }
+
+        audio.addEventListener('canplaythrough', finish, { once: true })
+        audio.addEventListener('error', finish, { once: true })
+        audio.src = url
+        audio.load()
+      })
+
+      void Promise.all(Object.values(MUSIC_TRACK_URLS).map(loadTrack))
+        .then(() => {
+          if (!cancelled) {
+            setLibraryReady(true)
+          }
+        })
+    }, LOADING_FADE_DURATION_MS)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(startHandle)
+    }
+  }, [enabled, libraryReady, settings.musicEnabled])
+
+  useEffect(() => {
+    if (!enabled || !libraryReady) {
+      return undefined
+    }
+
     const targetTrack = settings.musicEnabled
       ? getMusicTrackForLevelId(levelId)
       : null
@@ -23315,11 +23374,15 @@ function MusicManager({
       let audio = audioByUrl.current.get(url)
 
       if (!audio) {
-        audio = new Audio(url)
+        return null
+      }
+
+      if (!audio.src) {
+        return null
+      }
+
+      if (!audio.loop) {
         audio.loop = true
-        audio.preload = 'auto'
-        audio.volume = 0
-        audioByUrl.current.set(url, audio)
       }
 
       const isTarget = url === targetTrack
@@ -23338,7 +23401,12 @@ function MusicManager({
         fromVolume: audio.volume,
         targetVolume
       }
-    })
+    }).filter((plan): plan is {
+      audio: HTMLAudioElement
+      durationMs: number
+      fromVolume: number
+      targetVolume: number
+    } => Boolean(plan))
 
     window.cancelAnimationFrame(fadeAnimationFrame.current)
 
@@ -23371,7 +23439,7 @@ function MusicManager({
     return () => {
       window.cancelAnimationFrame(fadeAnimationFrame.current)
     }
-  }, [levelId, settings.musicEnabled, settings.musicVolume])
+  }, [enabled, levelId, libraryReady, settings.musicEnabled, settings.musicVolume])
 
   useEffect(
     () => () => {
@@ -23459,8 +23527,11 @@ function LevelMenuModal({
   onBooleanSettingChange,
   onClose,
   onEffectSettingChange,
+  onReplaySolution,
+  onResetLevel,
   onSelectLevel,
   open,
+  replayAvailable,
   visualSettings
 }: {
   audioSettings: AudioSettings
@@ -23474,8 +23545,11 @@ function LevelMenuModal({
     key: GenericEffectSettingKey,
     patch: Partial<EffectSettings>
   ) => void
+  onReplaySolution: () => void
+  onResetLevel: () => void
   onSelectLevel: (level: AuthoredLevel, index: number) => void
   open: boolean
+  replayAvailable: boolean
   visualSettings: VisualSettings
 }) {
   const [activeTab, setActiveTab] = useState<'graphics' | 'audio' | 'levels'>('graphics')
@@ -23633,6 +23707,26 @@ function LevelMenuModal({
           </div>
         ) : (
           <div className="level-menu-list" role="tabpanel">
+            <div className="level-menu-actions">
+              <button
+                className="level-menu-button level-menu-action-button"
+                onClick={onResetLevel}
+                type="button"
+              >
+                <span>Reset</span>
+                <small>Return this level to its starting state.</small>
+              </button>
+              {replayAvailable ? (
+                <button
+                  className="level-menu-button level-menu-action-button"
+                  onClick={onReplaySolution}
+                  type="button"
+                >
+                  <span>Show Solution</span>
+                  <small>Replay the recorded solution for this level.</small>
+                </button>
+              ) : null}
+            </div>
             {levels.map((level, index) => (
               <button
                 className="level-menu-button"
@@ -23775,6 +23869,46 @@ function MobileTouchControls({
   )
 }
 
+function StartupChoiceOverlay({
+  onContinue,
+  onNewGame,
+  resumeLevelId
+}: {
+  onContinue: () => void
+  onNewGame: () => void
+  resumeLevelId: string
+}) {
+  return (
+    <div className="loading-overlay visible">
+      <div className="startup-choice-panel">
+        <img
+          alt="MINOTAUR"
+          className="loading-title-image"
+          draggable={false}
+          src={TITLE_IMAGE_URL}
+        />
+        <div className="startup-choice-actions" role="group" aria-label="Saved game choices">
+          <button
+            className="startup-choice-button"
+            onClick={onContinue}
+            type="button"
+          >
+            Continue
+          </button>
+          <button
+            className="startup-choice-button"
+            onClick={onNewGame}
+            type="button"
+          >
+            New Game
+          </button>
+        </div>
+        <small>Continue from {resumeLevelId} or start over at the Entrance.</small>
+      </div>
+    </div>
+  )
+}
+
 function areCellsCardinallyAdjacent(
   left: { x: number; y: number },
   right: { x: number; y: number }
@@ -23840,6 +23974,31 @@ export default function App() {
     () => new URLSearchParams(window.location.search).get('maze'),
     []
   )
+  const startupSave = useMemo(() => {
+    if (requestedMazeId) {
+      return null
+    }
+
+    try {
+      return readGameSave(window.localStorage)
+    } catch {
+      return null
+    }
+  }, [requestedMazeId])
+  const startupResumeLevelId = useMemo(
+    () => getLatestDirectedNonMazeLevelId(startupSave?.enteredLevelIds ?? []),
+    [startupSave]
+  )
+  const [startupChoice, setStartupChoice] = useState<'pending' | 'new' | 'continue'>(() => {
+    if (
+      !requestedMazeId &&
+      startupSave?.enteredLevelIds?.some((id) => id !== getDefaultRuntimeLevelId())
+    ) {
+      return 'pending'
+    }
+
+    return startupSave ? 'continue' : 'new'
+  })
   const [instantiatedMazeId, setInstantiatedMazeId] = useState<string | null>(null)
   const [mazeLayout, setMazeLayout] = useState<MazeLayout | null>(null)
   const [globalTurnState, setGlobalTurnStateRaw] = useState<GlobalTurnState | null>(null)
@@ -23861,6 +24020,9 @@ export default function App() {
       return new Set()
     }
   })
+  const [enteredLevelIds, setEnteredLevelIds] = useState<Set<string>>(
+    () => new Set(startupSave?.enteredLevelIds ?? [])
+  )
   const resetClosedMazeIdsRef = useRef(new Set<string>())
   const [altarCutscene, setAltarCutscene] = useState<{
     altarId: string
@@ -23953,17 +24115,37 @@ export default function App() {
       return
     }
 
+    setEnteredLevelIds((current) => {
+      const levelId = globalTurnState.activeLevelId ?? globalTurnState.player?.levelId
+
+      if (!levelId || current.has(levelId)) {
+        return current
+      }
+
+      const next = new Set(current)
+
+      next.add(levelId)
+      return next
+    })
+  }, [globalTurnState])
+
+  useEffect(() => {
+    if (!globalTurnState) {
+      return
+    }
+
     try {
       writeGameSave(
         window.localStorage,
         createGameSave(globalTurnState, {
-          activatedAltarIds
+          activatedAltarIds,
+          enteredLevelIds
         })
       )
     } catch {
       // Storage can be unavailable in hardened browser modes; gameplay continues without autosave.
     }
-  }, [activatedAltarIds, globalTurnState])
+  }, [activatedAltarIds, enteredLevelIds, globalTurnState])
 
   useEffect(() => {
     if (!globalTurnStateRef.current || activatedAltarIds.size === 0) {
@@ -24153,6 +24335,36 @@ export default function App() {
     setMazeSceneKey((current) => current + 1)
   }
 
+  const startCurrentSolutionReplay = () => {
+    if (!mazeLayout?.maze.solution?.actions?.length) {
+      return
+    }
+
+    setReplayRequestMazeId(mazeLayout.maze.id)
+    setReplayRequestId((current) => current + 1)
+  }
+
+  const handleNewGameChoice = () => {
+    try {
+      clearGameSave(window.localStorage)
+    } catch {
+      // Storage can be unavailable in hardened browser modes; new game still starts in memory.
+    }
+
+    loadedMazeLayoutsRef.current.clear()
+    setActivatedAltarIds(new Set())
+    setEnteredLevelIds(new Set())
+    setGlobalTurnState(null, { transition: false })
+    setMazeLayout(null)
+    setInstantiatedMazeId(null)
+    setRenderedMazeLayouts([])
+    setStartupChoice('new')
+  }
+
+  const handleContinueChoice = () => {
+    setStartupChoice('continue')
+  }
+
   const handleLevelTransition = useCallback(async (request: SeamlessLevelTransitionRequest) => {
     setReplayActive(false)
     setMazeLoadError(null)
@@ -24331,20 +24543,20 @@ export default function App() {
     let cancelled = false
 
     const loadLayout = async () => {
+      if (startupChoice === 'pending') {
+        return
+      }
+
       setSceneLoaded(false)
       setMazeLoadError(null)
       document.body.dataset.mazeLayoutRequestedAt = performance.now().toFixed(1)
       document.body.dataset.requestedMazeId = requestedMazeId ?? getDefaultRuntimeLevelId()
 
       try {
-        const savedLevelId = (() => {
-          try {
-            return readGameSave(window.localStorage)?.lastLevelId ?? null
-          } catch {
-            return null
-          }
-        })()
-        const defaultMazeId = requestedMazeId ?? savedLevelId ?? getDefaultRuntimeLevelId()
+        const resumeLevelId = startupChoice === 'continue'
+          ? startupResumeLevelId
+          : getDefaultRuntimeLevelId()
+        const defaultMazeId = requestedMazeId ?? resumeLevelId
         const nextLayout = requestedMazeId
           ? await loadMazeLayoutById(requestedMazeId)
           : await loadMazeLayoutById(defaultMazeId)
@@ -24366,7 +24578,12 @@ export default function App() {
           setGlobalTurnState(
             requestedMazeId
               ? createEnteredGlobalTurnState(nextLayout, Array.from(loadedMazeLayoutsRef.current.values()))
-              : createInitialGlobalTurnState(
+              : startupChoice === 'continue'
+                ? createInitialGlobalTurnState(
+                    nextLayout,
+                    Array.from(loadedMazeLayoutsRef.current.values())
+                  )
+                : createInitialGlobalTurnState(
                   nextLayout,
                   Array.from(loadedMazeLayoutsRef.current.values())
                 )
@@ -24390,7 +24607,7 @@ export default function App() {
       cancelled = true
       document.body.dataset.mazeLayoutCancelledAt = performance.now().toFixed(1)
     }
-  }, [loadLevelNeighborhood, requestedMazeId, setGlobalTurnState])
+  }, [loadLevelNeighborhood, requestedMazeId, setGlobalTurnState, startupChoice, startupResumeLevelId])
 
   useEffect(() => {
     const globalWindow = window as Window & {
@@ -24514,8 +24731,7 @@ export default function App() {
           return false
         }
 
-        setReplayRequestMazeId(mazeLayout.maze.id)
-        setReplayRequestId((current) => current + 1)
+        startCurrentSolutionReplay()
         return true
       },
       uninstantiateMaze: () => {
@@ -25365,6 +25581,18 @@ export default function App() {
     return () => window.clearInterval(interval)
   }, [analyticsLevelId, analyticsLevelName])
 
+  if (startupChoice === 'pending') {
+    return (
+      <div className="app-shell">
+        <StartupChoiceOverlay
+          onContinue={handleContinueChoice}
+          onNewGame={handleNewGameChoice}
+          resumeLevelId={startupResumeLevelId}
+        />
+      </div>
+    )
+  }
+
   if (!mazeLayout || !activeTurnState) {
     return (
       <div className="app-shell">
@@ -25389,7 +25617,7 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      {overlayVisible ? (
+      {controlsOpen && overlayVisible ? (
         <div className="fps-counter">
           <div>{Math.round(fps)} FPS</div>
           <div>{mazeLayout.maze.id}</div>
@@ -25401,6 +25629,7 @@ export default function App() {
       <AltarCutsceneOverlay active={activeAltarCutscene} />
           <CreditsModal open={creditsOpen} />
           <MusicManager
+            enabled={sceneLoaded}
             levelId={activeMusicLevelId}
             settings={audioSettings}
           />
@@ -25418,10 +25647,19 @@ export default function App() {
         onBooleanSettingChange={onBooleanSettingChange}
         onClose={() => setLevelMenuOpen(false)}
         onEffectSettingChange={onEffectSettingChange}
+        onReplaySolution={() => {
+          startCurrentSolutionReplay()
+          setLevelMenuOpen(false)
+        }}
+        onResetLevel={() => {
+          resetInstantiatedMaze()
+          setLevelMenuOpen(false)
+        }}
         onSelectLevel={(level, index) => {
           void loadAndActivateLevel(level, index)
         }}
         open={levelMenuOpen}
+        replayAvailable={Boolean(mazeLayout.maze.solution?.actions?.length)}
         visualSettings={visualSettings}
       />
       <MobileTouchControls
@@ -25459,10 +25697,7 @@ export default function App() {
         onResetSsrSettings={onResetSsrSettings}
         onResetToneMapping={onResetToneMapping}
         onReplaySolution={() => {
-          if (mazeLayout?.maze.solution?.actions?.length) {
-            setReplayRequestMazeId(mazeLayout.maze.id)
-            setReplayRequestId((current) => current + 1)
-          }
+          startCurrentSolutionReplay()
         }}
         onScalarSettingChange={onScalarSettingChange}
         onSsrSettingChange={onSsrSettingChange}
