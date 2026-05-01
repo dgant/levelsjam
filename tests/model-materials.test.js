@@ -582,6 +582,17 @@ test('settings menu exposes audio controls and continuous music crossfades', () 
   }
 })
 
+test('startup torch flipbook readiness waits only on mounted billboards', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(appSource, /!options\.requireTorchBillboards \|\|\s*readyTorchBillboardCount === torchBillboardCount/)
+  assert.doesNotMatch(
+    appSource,
+    /expectedTorchBillboardCount\s*=\s*layout\.lights\.length/,
+    'visibility culling can leave some authored torches unmounted, so startup must not wait on every light in the maze'
+  )
+})
+
 test('monster eyes are not rendered in normal gameplay', () => {
   const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
 

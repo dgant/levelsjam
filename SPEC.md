@@ -148,7 +148,7 @@
 - Each torch billboard uses the linked source flipbook asset rather than a procedurally generated placeholder.
 - Each torch billboard uses the local committed `CampFire_l_nosmoke_front_Loop_01_4K_6x6.png` atlas copied from the linked source asset.
 - The 4K torch flipbook atlas is the runtime source for flame billboards rather than a cropped or downsampled derivative.
-- The 4K torch flipbook atlas loads before the loading overlay is eligible to fade because torches are visible from the initial player position.
+- The 4K torch flipbook atlas loads before the loading overlay is eligible to fade when any initially mounted torch billboard depends on it.
 - Each torch billboard uses a 6x6 fire flipbook atlas.
 - Each torch billboard animation plays eight times faster than the previous 4-second loop.
 - Each torch billboard uses an unlit material.

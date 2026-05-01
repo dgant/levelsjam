@@ -6464,7 +6464,6 @@ function getReflectionCaptureSceneState(
   options: ReflectionCaptureSceneStateOptions = {}
 ) {
   const expectedGroundPatchCount = buildGroundReflectionProbeRects(layout).length
-  const expectedTorchBillboardCount = layout.lights.length
   let groundPatchCount = 0
   let readyGroundPatchCount = 0
   let wallCount = 0
@@ -6535,7 +6534,6 @@ function getReflectionCaptureSceneState(
   return (
     {
       expectedGroundPatchCount,
-      expectedTorchBillboardCount,
       groundPatchCount,
       readyGroundPatchCount,
       ready:
@@ -6546,10 +6544,7 @@ function getReflectionCaptureSceneState(
         readySconceCount === sconceCount &&
         (
           !options.requireTorchBillboards ||
-          (
-            readyTorchBillboardCount >= expectedTorchBillboardCount &&
-            torchBillboardCount >= expectedTorchBillboardCount
-          )
+          readyTorchBillboardCount === torchBillboardCount
         ),
       readySconceCount,
       readyTorchBillboardCount,
