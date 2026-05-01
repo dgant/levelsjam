@@ -287,7 +287,8 @@
 - Generated pickup cells are selected so each pickup can host a same-cell torch against a valid wall side.
 - Before the player resolves a move, every gate adjacent to the player opens if no monster occupies the cell on the opposite side of that gate.
 - After the player resolves a move, every gate closes unless it is already closed.
-- Gates start visually closed and raised when a level is first instantiated; adjacent safe gates open only as part of resolving the player's next movement command.
+- Gates that are closed by the current rules state render raised when a level is first instantiated.
+- Gates that are open in the current rules state, including safe gates adjacent to the player after standalone playtest entry, render in the lowered open position when a level is first instantiated.
 - Gates not adjacent to the player are closed in both the headless rules state and the rendered animation state.
 - Raised gates block player and monster movement exactly like walls.
 - Raised gates do not block monster line of sight to the player.
@@ -877,13 +878,14 @@
 - The checked-in challenge maze library contains only mazes that have passed the current advanced validation rules.
 - The checked-in challenge maze library may be temporarily empty after invalidated challenge mazes are removed and before replacement generation accepts new validated mazes.
 - Newly generated challenge mazes use independently generated maze geometry; rotations, flips, and other geometric transforms of an existing challenge maze are not accepted as new challenge mazes.
-- The thirty-maze challenge set uses a broad parameter distribution across minotaurs, spiders, werewolves, swords, and gates: each element appears in at least ten mazes, each element appears at least twice in at least five mazes, and each element appears at least three times in at least one maze.
-- Challenge maze generation covers rectangular dimensions from `3` through `8`, including narrow `3x5`, `3x6`, `3x7`, and `3x8` candidates when validation can produce playable puzzles for them.
+- The challenge set uses a broad parameter distribution across minotaurs, spiders, werewolves, swords, and gates: each element appears in at least ten mazes, each element appears at least twice in at least five mazes, and each element appears at least three times in at least one maze.
+- Challenge maze generation covers rectangular dimensions from `3` through `9`, including narrow `3x5`, `3x6`, `3x7`, and `3x8` candidates and square `9x9` candidates when validation can produce playable puzzles for them.
 - Challenge maze names and descriptions state the maze dimensions and the counts of minotaurs, spiders, werewolves, swords, and gates.
-- Challenge maze generation publishes the currently accepted validated maze subset to the runtime playtest manifest whenever a new maze is accepted, so browser playtesting can begin before the full thirty-maze batch finishes.
+- Challenge maze generation publishes the currently accepted validated maze subset to the runtime playtest manifest whenever a new maze is accepted, so browser playtesting can begin before the full batch finishes.
+- Challenge maze library expansion targets at least one hundred playable challenge mazes, and the published challenge list is ordered by ascending recorded solution move count.
 - Challenge mazes are selectable from the level menu without appearing in the default progression path.
 - The challenge maze menu and published runtime manifest expose every checked-in validated challenge maze and no unvalidated challenge maze.
-- The complete challenge maze set covers rectangular sizes from `3x3` through `8x8`, with narrow rectangular candidates such as `3x5`, `3x6`, `3x7`, and `3x8` used when validation can produce playable puzzles for them.
+- The complete challenge maze set covers rectangular sizes from `3x3` through `9x9`, with narrow rectangular candidates such as `3x5`, `3x6`, `3x7`, and `3x8` used when validation can produce playable puzzles for them.
 - Challenge maze names plainly describe their defining puzzle emphasis, such as spider-heavy, minotaur-heavy, gate-and-sword, or mixed-threat layouts.
 - Challenge mazes pass the same structural and solution validation rules as normal persisted mazes before they are exposed in the menu.
 - Persisted normal mazes and challenge mazes pass advanced difficulty validation before they are accepted by tests or publishing scripts.
@@ -896,8 +898,11 @@
 - Non-story challenge and test levels may use dummy neutral lightmaps, empty probe manifests, or unlit visual mode during iteration.
 - Levels reachable through the directed main gameplay graph from `Entrance` use real baked lighting assets in normal gameplay.
 - Standalone maze playtest loading that teleports the player into a maze initializes the turn state as if the player has just completed the entrance movement: destination monster collision, pickups, and the normal monster phase resolve before player input is accepted.
+- Standalone maze playtest loading publishes the post-entry gate state before player input is accepted, so safe gates adjacent to the loaded player cell are already open in both rules state and rendered state.
 - Challenge maze playtest levels accept repeated keyboard and touch turn commands after an initial rotation.
 - Challenge mazes are graph-excluded: loading one from the menu does not add it to the authored story level graph or normal seamless traversal path.
+- Loading a challenge maze creates an isolated active rules world containing that challenge maze only; previously loaded challenge or story layouts may remain cached but must not participate in movement, collision, ownership, or level-transition detection for the active challenge.
+- Challenge maze playtest levels are not restored as the default startup level from persistent save data.
 
 ## Testing Expectations
 - A production build succeeds before a change is considered complete.

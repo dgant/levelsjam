@@ -8,6 +8,7 @@ const nodeCommand = process.execPath
 const unitProfilePath = path.join(rootDir, 'logs', 'latest-unit-test-profile.json')
 const overallThresholdMs = 20_000
 const testFiles = [
+  'tests/app-runtime-source.test.js',
   'tests/billboard.test.js',
   'tests/bake-timing.test.js',
   'tests/global-turn-rules.test.js',
@@ -25,6 +26,7 @@ const testFiles = [
   'tests/world-grid.test.js'
 ]
 const perFileThresholdsMs = {
+  'tests/app-runtime-source.test.js': 3_000,
   'tests/billboard.test.js': 3_000,
   'tests/bake-timing.test.js': 3_000,
   'tests/global-turn-rules.test.js': 3_000,

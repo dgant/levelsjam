@@ -23,6 +23,9 @@ const PERFORMANCE_TRACE_PATH = path.resolve(
   'logs',
   'latest-performance-trace.json'
 )
+const VISUAL_DEFAULTS = JSON.parse(
+  fs.readFileSync(path.resolve(__dirname, '..', 'src', 'visual-settings.defaults.json'), 'utf8')
+)
 let activeSmokeTimingProfile = null
 const CURRENT_GIT_BRANCH = execSync('git branch --show-current', {
   cwd: path.resolve(__dirname, '..'),
@@ -2077,21 +2080,16 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     if (await loadingOverlay.count()) {
       await expect
         .poll(
-          async () => page.evaluate(() => {
-            const dots = document.querySelector('.loading-overlay-dots')
-
-            if (!dots) {
-              return null
-            }
-
-            return getComputedStyle(dots, '::after').animationName
-          }),
+          async () => page.evaluate(() => (
+            Boolean(document.querySelector('#root .loading-overlay .loading-title-image')) ||
+            document.querySelector('#root .loading-overlay')?.getAttribute('data-loading-complete') === 'true'
+          )),
           {
             timeout: 5_000,
             intervals: [100, 250, 500]
           }
         )
-        .toBe('loading-overlay-dots')
+        .toBe(true)
       await expect
         .poll(
           async () => loadingOverlay.getAttribute('data-loading-complete'),
@@ -2174,13 +2172,13 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
     await expect(page.getByLabel('Probe Debug', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'Fog' }).click()
     await expect(page.getByRole('slider', { name: 'Volumetric Fog Intensity' })).toBeVisible()
-    await expect(page.getByRole('slider', { name: 'Volumetric Fog Intensity' })).toHaveValue('0.75')
-    await expect(page.getByLabel('Fog Ambient Color Hex')).toHaveValue('#2c2c68')
-    await expect(page.getByLabel('Fog Ambient Color Picker')).toHaveValue('#2c2c68')
-    await expect(page.getByRole('slider', { name: 'Fog Distance' })).toHaveValue('12')
-    await expect(page.getByRole('slider', { name: 'Fog Noise Frequency' })).toHaveValue('0.25')
-    await expect(page.getByRole('slider', { name: 'Fog Noise Period' })).toHaveValue('0.75')
-    await expect(page.getByRole('slider', { name: 'Fog Height 50%' })).toHaveValue('0.4')
+    await expect(page.getByRole('slider', { name: 'Volumetric Fog Intensity' })).toHaveValue(String(VISUAL_DEFAULTS.volumetricLighting.intensity))
+    await expect(page.getByLabel('Fog Ambient Color Hex')).toHaveValue(VISUAL_DEFAULTS.volumetricAmbientHex)
+    await expect(page.getByLabel('Fog Ambient Color Picker')).toHaveValue(VISUAL_DEFAULTS.volumetricAmbientHex)
+    await expect(page.getByRole('slider', { name: 'Fog Distance' })).toHaveValue(String(VISUAL_DEFAULTS.volumetricDistance))
+    await expect(page.getByRole('slider', { name: 'Fog Noise Frequency' })).toHaveValue(String(VISUAL_DEFAULTS.volumetricNoiseFrequency))
+    await expect(page.getByRole('slider', { name: 'Fog Noise Period' })).toHaveValue(String(VISUAL_DEFAULTS.volumetricNoisePeriod))
+    await expect(page.getByRole('slider', { name: 'Fog Height 50%' })).toHaveValue(String(VISUAL_DEFAULTS.volumetricHeightFalloff))
     await page.getByRole('button', { name: 'Core' }).click()
     await expect(page.getByRole('slider', { name: 'Exposure' })).toBeVisible()
     await page.getByRole('button', { name: 'Eyes' }).click()
@@ -2449,10 +2447,10 @@ test('loads the maze scene and exposes working debug/render controls', async ({ 
         }
       )
       .toMatchObject({
-        density: 0.75,
-        heightFalloff: 0.4,
-        noiseFrequency: 0.25,
-        noisePeriod: 0.75,
+        density: VISUAL_DEFAULTS.volumetricLighting.intensity,
+        heightFalloff: VISUAL_DEFAULTS.volumetricHeightFalloff,
+        noiseFrequency: VISUAL_DEFAULTS.volumetricNoiseFrequency,
+        noisePeriod: VISUAL_DEFAULTS.volumetricNoisePeriod,
         useProbeAmbientTexture: 0
       })
   })

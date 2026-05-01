@@ -138,6 +138,21 @@ test('gate dynamic volumetric material variant stays under the WebGL sampler bud
   )
 })
 
+test('loaded open gates render from the current rules state', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(
+    appSource,
+    /useState<string\[\]>\(\s*\(\) => getOpenGateIds\(layout\.maze, turnState\)\s*\)/,
+    'runtime scenes should seed displayed gate ids from the loaded post-entry turn state'
+  )
+  assert.match(
+    appSource,
+    /openProgress\.current = isOpen \? 1 : 0[\s\S]*?MathUtils\.lerp\(transform\.closedY, transform\.openY, openProgress\.current\)/,
+    'gates that mount already open should start lowered instead of flashing closed'
+  )
+})
+
 test('doors use generated Minoan-door ORM textures and baked dynamic lighting', () => {
   const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
 
