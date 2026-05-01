@@ -3473,49 +3473,62 @@ function bakeMazeLightmapCpu(
 }
 
 export function getMazeTorchPlacements(maze, sconceRadius) {
-  return maze.lights
-    .filter((light) => !isFilteredExteriorMazeLight(maze, light))
-    .map((light, index) => {
-      const descriptor = getWallDescriptorFromCellSide(maze, light.cell, light.side)
-      const neighbor = getNeighbor(light.cell, light.side)
-      const wallId = isPlayableCell(maze, neighbor)
-        ? edgeKey(light.cell, neighbor)
-        : `${cellKey(light.cell)}:${light.side}:exterior`
-      const wallFaceKey =
-        descriptor.normal.x > 0 || descriptor.normal.z > 0
-          ? 'pz'
-          : 'nz'
-      const torchBillboardHalfSize =
-        ((MAZE_WALL_THICKNESS / 2) + sconceRadius) / 2
-      const sconcePosition = {
-        x:
-          descriptor.center.x +
-          (descriptor.normal.x * ((MAZE_WALL_THICKNESS / 2) + sconceRadius)),
-        y: GROUND_Y + 1.1,
-        z:
-          descriptor.center.z +
-          (descriptor.normal.z * ((MAZE_WALL_THICKNESS / 2) + sconceRadius))
-      }
-      const torchPosition = {
-        x: sconcePosition.x,
-        y: sconcePosition.y + torchBillboardHalfSize,
-        z: sconcePosition.z
-      }
+  const seenWallIds = new Set()
+  const placements = []
 
-      return {
-        cell: light.cell,
-        id: `maze-light-${index}`,
-        index,
-        normal: { ...descriptor.normal },
-        sconcePosition,
-        side: light.side,
-        torchPosition,
-        wallAxis: descriptor.axis,
-        wallCenter: { ...descriptor.center },
-        wallFaceKey,
-        wallId
-      }
+  for (const light of maze.lights) {
+    if (isFilteredExteriorMazeLight(maze, light)) {
+      continue
+    }
+
+    const descriptor = getWallDescriptorFromCellSide(maze, light.cell, light.side)
+    const neighbor = getNeighbor(light.cell, light.side)
+    const wallId = isPlayableCell(maze, neighbor)
+      ? edgeKey(light.cell, neighbor)
+      : `${cellKey(light.cell)}:${light.side}:exterior`
+
+    if (seenWallIds.has(wallId)) {
+      continue
+    }
+    seenWallIds.add(wallId)
+
+    const wallFaceKey =
+      descriptor.normal.x > 0 || descriptor.normal.z > 0
+        ? 'pz'
+        : 'nz'
+    const torchBillboardHalfSize =
+      ((MAZE_WALL_THICKNESS / 2) + sconceRadius) / 2
+    const sconcePosition = {
+      x:
+        descriptor.center.x +
+        (descriptor.normal.x * ((MAZE_WALL_THICKNESS / 2) + sconceRadius)),
+      y: GROUND_Y + 1.1,
+      z:
+        descriptor.center.z +
+        (descriptor.normal.z * ((MAZE_WALL_THICKNESS / 2) + sconceRadius))
+    }
+    const torchPosition = {
+      x: sconcePosition.x,
+      y: sconcePosition.y + torchBillboardHalfSize,
+      z: sconcePosition.z
+    }
+
+    placements.push({
+      cell: light.cell,
+      id: `maze-light-${placements.length}`,
+      index: placements.length,
+      normal: { ...descriptor.normal },
+      sconcePosition,
+      side: light.side,
+      torchPosition,
+      wallAxis: descriptor.axis,
+      wallCenter: { ...descriptor.center },
+      wallFaceKey,
+      wallId
     })
+  }
+
+  return placements
 }
 
 function isFilteredExteriorMazeLight(maze, light) {

@@ -97,9 +97,11 @@
 - Runtime entrance and chamber levels are treated as outdoor spaces.
 - Indoor levels render double-height walls by stacking a second wall-height segment above each ordinary wall while preserving wall-material texel density.
 - Indoor levels render double-height exterior walls with the same stacked-wall treatment as interior walls.
+- Indoor level exterior walls remain closed on every exterior boundary cell except an explicit single-cell level doorway.
 - Indoor levels render a downward-facing ceiling plane over each playable cell using the same PBR texture family as the walls.
 - Indoor ceiling planes use the same static surface-lightmap material path as other lightmapped static geometry.
 - Indoor levels render at most one ground-level torch assembly per wall face.
+- Indoor levels do not mount torch assemblies on upper stacked wall segments.
 - Once a level's gameplay-rule state has been loaded, the runtime keeps that state available for the rest of the session instead of unloading or resetting it during ordinary level traversal.
 - Player movement between connected levels is a level transition, not an escape state.
 - One-cell passages that connect levels are outside the rectangular gameplay layout of each connected level; authored level room rectangles contain only the room proper, not the connector passage.

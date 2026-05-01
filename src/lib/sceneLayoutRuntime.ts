@@ -197,20 +197,6 @@ function withRuntimeLevelExits(maze: PersistedMaze) {
 
   return {
     ...maze,
-    exteriorOpenings: Array.from(
-      { length: maze.opening.side === 'east' || maze.opening.side === 'west' ? maze.height : maze.width },
-      (_, index) => ({
-        cell:
-          maze.opening.side === 'west'
-            ? { x: 0, y: index }
-            : maze.opening.side === 'east'
-              ? { x: maze.width - 1, y: index }
-              : maze.opening.side === 'north'
-                ? { x: index, y: 0 }
-                : { x: index, y: maze.height - 1 },
-        side: maze.opening.side
-      })
-    ),
     exitRequiresTrophy: false,
     levelExits: [
       ...(maze.levelExits ?? []),

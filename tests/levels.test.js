@@ -13,7 +13,7 @@ import {
   resolveRuntimeMazeIdForLevel
 } from '../src/lib/levels.js'
 import { getAdjacentLevelVisibleCellKeys } from '../src/lib/levelVisibility.js'
-import { getMazeWallSegments } from '../src/lib/maze.js'
+import { getMazeTorchPlacements, getMazeWallSegments } from '../src/lib/maze.js'
 
 test('LEVELS markdown parser preserves authored order and descriptions', () => {
   const levels = parseLevelSpec(`
@@ -265,22 +265,110 @@ async function loadRuntimeMaze(levelId) {
 
   return {
     ...maze,
-    exteriorOpenings: Array.from(
-      { length: maze.opening.side === 'east' || maze.opening.side === 'west' ? maze.height : maze.width },
-      (_, index) => ({
-        cell:
-          maze.opening.side === 'west'
-            ? { x: 0, y: index }
-            : maze.opening.side === 'east'
-              ? { x: maze.width - 1, y: index }
-              : maze.opening.side === 'north'
-                ? { x: index, y: 0 }
-                : { x: index, y: maze.height - 1 },
-        side: maze.opening.side
-      })
-    )
+    exitRequiresTrophy: false,
+    levelExits: [
+      ...(maze.levelExits ?? []),
+      {
+        cell: { ...maze.opening.cell },
+        side: maze.opening.side,
+        targetLevelId: 'chamber-1'
+      }
+    ]
   }
 }
+
+function exteriorWallId(cell, side) {
+  return `${cell.x},${cell.y}:${side}:exterior`
+}
+
+function boundaryOpenings(maze) {
+  return [
+    maze.opening,
+    ...(Array.isArray(maze.levelExits) ? maze.levelExits : []),
+    ...(Array.isArray(maze.exteriorOpenings) ? maze.exteriorOpenings : [])
+  ].filter(Boolean)
+}
+
+function expectedExteriorWallIds(maze) {
+  const openings = new Set(
+    boundaryOpenings(maze).map((opening) => exteriorWallId(opening.cell, opening.side))
+  )
+  const ids = []
+
+  for (let x = 0; x < maze.width; x += 1) {
+    for (const side of ['north', 'south']) {
+      const cell = { x, y: side === 'north' ? 0 : maze.height - 1 }
+      const id = exteriorWallId(cell, side)
+
+      if (!openings.has(id)) {
+        ids.push(id)
+      }
+    }
+  }
+
+  for (let y = 0; y < maze.height; y += 1) {
+    for (const side of ['west', 'east']) {
+      const cell = { x: side === 'west' ? 0 : maze.width - 1, y }
+      const id = exteriorWallId(cell, side)
+
+      if (!openings.has(id)) {
+        ids.push(id)
+      }
+    }
+  }
+
+  return ids.sort()
+}
+
+test('interior numbered mazes keep exterior boundary walls except the doorway', async () => {
+  const manifest = JSON.parse(
+    fs.readFileSync(new URL('../public/maze-data/index.json', import.meta.url), 'utf8')
+  )
+
+  for (const levelId of manifest.mazeIds.filter((id) => /^maze-\d{3}$/.test(id))) {
+    const maze = await loadRuntimeMaze(levelId)
+    const exteriorWalls = getMazeWallSegments(maze)
+      .filter((wall) => wall.id.endsWith(':exterior'))
+      .map((wall) => wall.id)
+      .sort()
+
+    assert.deepEqual(
+      exteriorWalls,
+      expectedExteriorWallIds(maze),
+      `${levelId} should preserve every exterior wall except explicit level openings`
+    )
+  }
+})
+
+test('interior numbered maze torches are unique ground-level interior wall fixtures', async () => {
+  const manifest = JSON.parse(
+    fs.readFileSync(new URL('../public/maze-data/index.json', import.meta.url), 'utf8')
+  )
+
+  for (const levelId of manifest.mazeIds.filter((id) => /^maze-\d{3}$/.test(id))) {
+    const maze = await loadRuntimeMaze(levelId)
+    const wallIds = new Set()
+
+    for (const torch of getMazeTorchPlacements(maze, 0.1)) {
+      assert.equal(
+        torch.wallId.endsWith(':exterior'),
+        false,
+        `${levelId}:${torch.id} should not be mounted to an exterior wall`
+      )
+      assert.equal(
+        wallIds.has(torch.wallId),
+        false,
+        `${levelId}:${torch.wallId} should not receive more than one torch`
+      )
+      assert.equal(
+        torch.sconcePosition.y < 2,
+        true,
+        `${levelId}:${torch.id} should stay on the ground-level wall segment`
+      )
+      wallIds.add(torch.wallId)
+    }
+  }
+})
 
 test('runtime level cell footprints do not overlap', async () => {
   const levelIds = Object.keys(getDirectedRuntimeLevelGraph())
@@ -336,6 +424,17 @@ test('runtime level wall volumes are not shared between levels', async () => {
       }
 
       if (walls[index].axis !== walls[otherIndex].axis) {
+        continue
+      }
+
+      if (
+        walls[index].id.endsWith(':exterior') &&
+        walls[otherIndex].id.endsWith(':exterior') &&
+        (
+          walls[index].levelId === 'chamber-1' ||
+          walls[otherIndex].levelId === 'chamber-1'
+        )
+      ) {
         continue
       }
 
