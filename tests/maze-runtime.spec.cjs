@@ -40,6 +40,19 @@ async function waitForCurrentSceneReady(page) {
     })
 }
 
+function expectNoUnexpectedBrowserErrors({ consoleErrors, failedResponses = [], pageErrors }) {
+  const expectedStaticViteProbeFailed =
+    failedResponses.length === 1 && failedResponses[0].endsWith('/@vite/client')
+  const relevantConsoleErrors = consoleErrors.filter((message) => !(
+    expectedStaticViteProbeFailed &&
+    message === 'Failed to load resource: the server responded with a status of 404 (Not Found)'
+  ))
+
+  expect(failedResponses.filter((url) => !url.endsWith('/@vite/client'))).toEqual([])
+  expect(relevantConsoleErrors).toEqual([])
+  expect(pageErrors).toEqual([])
+}
+
 async function findDebugPosition(page, role, maxIndex = 8) {
   return page.evaluate(
     ({ maxIndex, role }) => {
@@ -72,11 +85,17 @@ async function pressAndWaitForPlayer(page, key, expectedPlayer) {
 
 test('maze runtime exposes gate/item/lifecycle and memory state', async ({ page }) => {
   const consoleErrors = []
+  const failedResponses = []
   const pageErrors = []
 
   page.on('console', (message) => {
     if (message.type() === 'error') {
       consoleErrors.push(message.text())
+    }
+  })
+  page.on('response', (response) => {
+    if (response.status() >= 400) {
+      failedResponses.push(response.url())
     }
   })
 
@@ -240,8 +259,7 @@ test('maze runtime exposes gate/item/lifecycle and memory state', async ({ page 
       turn: 0
     })
 
-  expect(consoleErrors).toEqual([])
-  expect(pageErrors).toEqual([])
+  expectNoUnexpectedBrowserErrors({ consoleErrors, failedResponses, pageErrors })
 })
 
 test('challenge menu loads isolated playtest rules without restoring challenge saves', async ({ page }) => {
@@ -360,25 +378,115 @@ test('challenge menu loads isolated playtest rules without restoring challenge s
       }
     })
 
-  const expectedStaticViteProbeFailed =
-    failedResponses.length === 1 && failedResponses[0].endsWith('/@vite/client')
-  const relevantConsoleErrors = consoleErrors.filter((message) => !(
-    expectedStaticViteProbeFailed &&
-    message === 'Failed to load resource: the server responded with a status of 404 (Not Found)'
-  ))
-
-  expect(failedResponses.filter((url) => !url.endsWith('/@vite/client'))).toEqual([])
-  expect(relevantConsoleErrors).toEqual([])
-  expect(pageErrors).toEqual([])
+  expectNoUnexpectedBrowserErrors({ consoleErrors, failedResponses, pageErrors })
 })
 
-test('maze 005 sword pickup swaps the floor sword for the held sword', async ({ page }) => {
+test('challenge 28 death reset clears camera shake before resurrection movement', async ({ page }) => {
   const consoleErrors = []
+  const failedResponses = []
   const pageErrors = []
 
   page.on('console', (message) => {
     if (message.type() === 'error') {
       consoleErrors.push(message.text())
+    }
+  })
+  page.on('response', (response) => {
+    if (response.status() >= 400) {
+      failedResponses.push(response.url())
+    }
+  })
+  page.on('pageerror', (error) => {
+    pageErrors.push(String(error))
+  })
+
+  await waitForSceneReady(page, 'challenge-028')
+  await page.evaluate(() => {
+    window.__levelsjamDebug.setAnimationSpeedMultiplier?.(20)
+  })
+
+  for (const key of ['ArrowLeft', 'ArrowUp', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowDown']) {
+    await page.keyboard.press(key)
+  }
+
+  await expect
+    .poll(async () => page.evaluate(() => ({
+      replay: window.__levelsjamDebug.getReplayControllerState?.() ?? null,
+      turn: window.__levelsjamDebug.getTurnStateSummary?.() ?? null
+    })), {
+      timeout: 15_000,
+      intervals: [50, 100, 250]
+    })
+    .toMatchObject({
+      replay: {
+        cameraShakeAmplitude: 0,
+        cameraShakeEndsAt: 0,
+        inputQueueLength: 0,
+        playerAnimationAction: null
+      },
+      turn: {
+        dead: false,
+        monsters: [
+          { awake: false },
+          { awake: false }
+        ],
+        player: {
+          cell: { x: 0, y: 0 },
+          direction: 'south'
+        },
+        turn: 1
+      }
+    })
+
+  await page.keyboard.press('ArrowUp')
+
+  await expect
+    .poll(async () => page.evaluate(() => ({
+      pending: document.body.dataset.pendingLevelTransitionId ?? null,
+      replay: window.__levelsjamDebug.getReplayControllerState?.() ?? null,
+      turn: window.__levelsjamDebug.getTurnStateSummary?.() ?? null
+    })), {
+      timeout: 10_000,
+      intervals: [50, 100, 250]
+    })
+    .toMatchObject({
+      pending: null,
+      replay: {
+        cameraShakeAmplitude: 0,
+        cameraShakeEndsAt: 0,
+        inputQueueLength: 0,
+        playerAnimationAction: null
+      },
+      turn: {
+        dead: false,
+        monsters: [
+          { awake: false },
+          { awake: false }
+        ],
+        player: {
+          cell: { x: 0, y: 1 },
+          direction: 'south'
+        },
+        turn: 2
+      }
+    })
+
+  expectNoUnexpectedBrowserErrors({ consoleErrors, failedResponses, pageErrors })
+})
+
+test('maze 005 sword pickup swaps the floor sword for the held sword', async ({ page }) => {
+  const consoleErrors = []
+  const failedResponses = []
+  const pageErrors = []
+
+  page.on('console', (message) => {
+    if (message.type() === 'error') {
+      consoleErrors.push(message.text())
+    }
+  })
+  page.on('response', (response) => {
+    if (response.status() >= 400) {
+      failedResponses.push(response.url())
     }
   })
 
@@ -390,17 +498,17 @@ test('maze 005 sword pickup swaps the floor sword for the held sword', async ({ 
   await page.evaluate(() => window.__levelsjamDebug.setAnimationSpeedMultiplier?.(20))
 
   await pressAndWaitForPlayer(page, 'ArrowRight', {
-    cell: { x: 0, y: 2 },
+    cell: { x: 0, y: 5 },
     direction: 'south',
     hasSword: false
   })
-  await pressAndWaitForPlayer(page, 'KeyW', {
-    cell: { x: 0, y: 3 },
-    direction: 'south',
-    hasSword: false
-  })
-  await pressAndWaitForPlayer(page, 'KeyW', {
+  await pressAndWaitForPlayer(page, 'ArrowDown', {
     cell: { x: 0, y: 4 },
+    direction: 'south',
+    hasSword: false
+  })
+  await pressAndWaitForPlayer(page, 'ArrowDown', {
+    cell: { x: 0, y: 3 },
     direction: 'south',
     hasSword: true
   })
@@ -438,17 +546,22 @@ test('maze 005 sword pickup swaps the floor sword for the held sword', async ({ 
 
   expect(heldSwordDistance).toBeLessThan(1.5)
 
-  expect(consoleErrors).toEqual([])
-  expect(pageErrors).toEqual([])
+  expectNoUnexpectedBrowserErrors({ consoleErrors, failedResponses, pageErrors })
 })
 
 test('monster movement renders intermediate positions instead of snapping', async ({ page }) => {
   const consoleErrors = []
+  const failedResponses = []
   const pageErrors = []
 
   page.on('console', (message) => {
     if (message.type() === 'error') {
       consoleErrors.push(message.text())
+    }
+  })
+  page.on('response', (response) => {
+    if (response.status() >= 400) {
+      failedResponses.push(response.url())
     }
   })
 
@@ -563,17 +676,22 @@ test('monster movement renders intermediate positions instead of snapping', asyn
 
   expect(hasIntermediatePose).toBe(true)
 
-  expect(consoleErrors).toEqual([])
-  expect(pageErrors).toEqual([])
+  expectNoUnexpectedBrowserErrors({ consoleErrors, failedResponses, pageErrors })
 })
 
 test('replay solution drives the maze to a winning escaped state', async ({ page }) => {
   const consoleErrors = []
+  const failedResponses = []
   const pageErrors = []
 
   page.on('console', (message) => {
     if (message.type() === 'error') {
       consoleErrors.push(message.text())
+    }
+  })
+  page.on('response', (response) => {
+    if (response.status() >= 400) {
+      failedResponses.push(response.url())
     }
   })
 
@@ -618,6 +736,5 @@ test('replay solution drives the maze to a winning escaped state', async ({ page
       }
     })
 
-  expect(consoleErrors).toEqual([])
-  expect(pageErrors).toEqual([])
+  expectNoUnexpectedBrowserErrors({ consoleErrors, failedResponses, pageErrors })
 })

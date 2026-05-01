@@ -673,3 +673,18 @@ test('player death fade-in uses the requested longer duration', () => {
   assert.match(appSource, /elapsed \/ PLAYER_DEATH_FADE_IN_MS/)
   assert.match(specSource, /fades back in over `6s`/)
 })
+
+test('death reset clears transient camera shake before accepting post-resurrection movement', () => {
+  const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
+
+  assert.match(
+    appSource,
+    /const finalState = activeAnimation\.killed[\s\S]*?resetTurnStateToCheckpoint\(layout\.maze, activeAnimation\.to\)[\s\S]*?if \(activeAnimation\.killed\) \{\s*cameraShake\.current = \{\s*amplitude: 0,\s*endsAt: 0\s*\}\s*inputQueue\.current = \[\]\s*\}[\s\S]*?turnStateRef\.current = finalState/,
+    'camera shake and buffered inputs from the killing turn must be cleared when resurrection reset commits'
+  )
+  assert.match(
+    appSource,
+    /const previousMonster = result\.previous\.monsters\.find\(\s*\(monster\) => monster\.id === nextMonster\.id\s*\) \?\? result\.previous\.monsters\[monsterIndex\]/,
+    'monster camera shake must compare matching monster identities instead of relying only on queue order'
+  )
+})

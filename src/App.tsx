@@ -18004,6 +18004,8 @@ function FlightRig({
           turn: number
         }
         getReplayControllerState?: () => {
+          cameraShakeAmplitude: number
+          cameraShakeEndsAt: number
           freeCamera: boolean
           animationSpeedMultiplier: number
           playerAnimationAction: TurnAction | null
@@ -18552,6 +18554,8 @@ function FlightRig({
       }),
       getReplayControllerState: () => ({
         animationSpeedMultiplier: globalAnimationSpeedMultiplier,
+        cameraShakeAmplitude: cameraShake.current.amplitude,
+        cameraShakeEndsAt: cameraShake.current.endsAt,
         freeCamera: freeCamera.current,
         inputEnabled: inputEnabledRef.current,
         inputEnabledAt: inputEnabledAt.current,
@@ -18923,6 +18927,14 @@ function FlightRig({
             const finalState = activeAnimation.killed
               ? resetTurnStateToCheckpoint(layout.maze, activeAnimation.to)
               : activeAnimation.to
+
+            if (activeAnimation.killed) {
+              cameraShake.current = {
+                amplitude: 0,
+                endsAt: 0
+              }
+              inputQueue.current = []
+            }
 
             turnStateRef.current = finalState
             if (activeAnimation.committedGlobalState && !activeAnimation.killed) {
