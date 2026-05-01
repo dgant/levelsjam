@@ -12625,6 +12625,7 @@ function GateActor({
       return
     }
 
+    openProgress.current = isOpen ? 1 : 0
     group.current.position.set(
       gate.center.x,
       MathUtils.lerp(transform.closedY, transform.openY, openProgress.current),
@@ -18159,7 +18160,9 @@ function Scene({
   visualSettings: VisualSettings
 }) {
   recordStartupMarker('sceneRenderStartedAt')
-  const [displayedOpenGateIds, setDisplayedOpenGateIds] = useState<string[]>([])
+  const [displayedOpenGateIds, setDisplayedOpenGateIds] = useState<string[]>(
+    () => getOpenGateIds(layout.maze, turnState)
+  )
   const setDisplayedOpenGateIdsIfChanged = useCallback((nextGateIds: string[]) => {
     setDisplayedOpenGateIds((currentGateIds) => {
       if (

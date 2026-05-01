@@ -272,7 +272,8 @@
 - Generated pickup cells are selected so each pickup can host a same-cell torch against a valid wall side.
 - Before the player resolves a move, every gate adjacent to the player opens if no monster occupies the cell on the opposite side of that gate.
 - After the player resolves a move, every gate closes unless it is already closed.
-- Gates start visually closed and raised when a level is first instantiated; adjacent safe gates open only as part of resolving the player's next movement command.
+- Gates that are closed by the current rules state render raised when a level is first instantiated.
+- Gates that are open in the current rules state, including safe gates adjacent to the player after standalone playtest entry, render in the lowered open position when a level is first instantiated.
 - Gates not adjacent to the player are closed in both the headless rules state and the rendered animation state.
 - Raised gates block player and monster movement exactly like walls.
 - Raised gates do not block monster line of sight to the player.
@@ -839,6 +840,7 @@
 - Non-story challenge and test levels may use dummy neutral lightmaps, empty probe manifests, or unlit visual mode during iteration.
 - Levels reachable through the directed main gameplay graph from `Entrance` use real baked lighting assets in normal gameplay.
 - Standalone maze playtest loading that teleports the player into a maze initializes the turn state as if the player has just completed the entrance movement: destination monster collision, pickups, and the normal monster phase resolve before player input is accepted.
+- Standalone maze playtest loading publishes the post-entry gate state before player input is accepted, so safe gates adjacent to the loaded player cell are already open in both rules state and rendered state.
 - Challenge maze playtest levels accept repeated keyboard and touch turn commands after an initial rotation.
 - Challenge mazes are graph-excluded: loading one from the menu does not add it to the authored story level graph or normal seamless traversal path.
 
