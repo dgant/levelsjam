@@ -12,28 +12,28 @@
       "altarDirection": "east",
       "chamberId": "chamber-1",
       "direction": "west",
-      "exitCell": { "x": 0, "y": 2 },
+      "exitCell": { "x": 0, "y": 17 },
       "mazeId": "challenge-028"
     },
     {
       "altarDirection": "east",
       "chamberId": "chamber-1",
       "direction": "west",
-      "exitCell": { "x": 0, "y": 17 },
+      "exitCell": { "x": 0, "y": 10 },
       "mazeId": "challenge-031"
     },
     {
       "altarDirection": "west",
       "chamberId": "chamber-1",
       "direction": "east",
-      "exitCell": { "x": 4, "y": 2 },
+      "exitCell": { "x": 4, "y": 17 },
       "mazeId": "challenge-059"
     },
     {
       "altarDirection": "west",
       "chamberId": "chamber-1",
       "direction": "east",
-      "exitCell": { "x": 4, "y": 17 },
+      "exitCell": { "x": 4, "y": 10 },
       "mazeId": "challenge-036"
     },
     {
@@ -41,42 +41,42 @@
       "altarDirection": "east",
       "chamberId": "chamber-2",
       "direction": "west",
-      "exitCell": { "x": 0, "y": 2 },
+      "exitCell": { "x": 0, "y": 26 },
       "mazeId": "werewolf-tutorial"
     },
     {
       "altarDirection": "east",
       "chamberId": "chamber-2",
       "direction": "west",
-      "exitCell": { "x": 0, "y": 14 },
+      "exitCell": { "x": 0, "y": 18 },
       "mazeId": "challenge-098"
     },
     {
       "altarDirection": "east",
       "chamberId": "chamber-2",
       "direction": "west",
-      "exitCell": { "x": 0, "y": 26 },
+      "exitCell": { "x": 0, "y": 8 },
       "mazeId": "challenge-095"
     },
     {
       "altarDirection": "west",
       "chamberId": "chamber-2",
       "direction": "east",
-      "exitCell": { "x": 4, "y": 2 },
+      "exitCell": { "x": 4, "y": 26 },
       "mazeId": "challenge-043"
     },
     {
       "altarDirection": "west",
       "chamberId": "chamber-2",
       "direction": "east",
-      "exitCell": { "x": 4, "y": 14 },
+      "exitCell": { "x": 4, "y": 18 },
       "mazeId": "challenge-040"
     },
     {
       "altarDirection": "west",
       "chamberId": "chamber-2",
       "direction": "east",
-      "exitCell": { "x": 4, "y": 26 },
+      "exitCell": { "x": 4, "y": 8 },
       "mazeId": "challenge-100"
     }
   ],

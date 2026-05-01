@@ -116,6 +116,62 @@ test('Chamber 1 exposes four story maze altars and a gated north exit', async ()
     chamber.levelExits.find((exit) => exit.targetLevelId === 'chamber-2').requiredAltarIds,
     chamber.altars.map((altar) => altar.id)
   )
+  assert.deepEqual(
+    chamber.levelExits
+      .filter((exit) => exit.side === 'west')
+      .map((exit) => `${exit.targetLevelId}:${exit.cell.y}`),
+    ['challenge-028:17', 'challenge-031:10']
+  )
+  assert.deepEqual(
+    chamber.levelExits
+      .filter((exit) => exit.side === 'east')
+      .map((exit) => `${exit.targetLevelId}:${exit.cell.y}`),
+    ['challenge-059:17', 'challenge-036:10']
+  )
+})
+
+test('Chamber 2 orders side mazes nearest-to-furthest from the entry', async () => {
+  const chamber = await createAuthoredRuntimeMaze('chamber-2')
+
+  assert.deepEqual(
+    chamber.levelExits
+      .filter((exit) => exit.side === 'west')
+      .map((exit) => `${exit.targetLevelId}:${exit.cell.y}`),
+    ['werewolf-tutorial:26', 'challenge-098:18', 'challenge-095:8']
+  )
+  assert.deepEqual(
+    chamber.levelExits
+      .filter((exit) => exit.side === 'east')
+      .map((exit) => `${exit.targetLevelId}:${exit.cell.y}`),
+    ['challenge-043:26', 'challenge-040:18', 'challenge-100:8']
+  )
+})
+
+test('Chambers place torches on walls adjacent to doors instead of on doorway edges', async () => {
+  for (const chamberId of ['chamber-1', 'chamber-2']) {
+    const chamber = await createAuthoredRuntimeMaze(chamberId)
+
+    for (const exit of chamber.levelExits) {
+      const doorKey = `${exit.cell.x},${exit.cell.y}:${exit.side}`
+
+      assert.equal(
+        chamber.lights.some((light) => `${light.cell.x},${light.cell.y}:${light.side}` === doorKey),
+        false,
+        `${chamberId} should not mount a torch on the ${doorKey} doorway`
+      )
+
+      const adjacentLights = chamber.lights.filter((light) => (
+        light.side === exit.side &&
+        Math.abs(light.cell.x - exit.cell.x) + Math.abs(light.cell.y - exit.cell.y) === 1
+      ))
+
+      assert.equal(
+        adjacentLights.length,
+        exit.side === 'north' || exit.side === 'south' ? 2 : 2,
+        `${chamberId}:${doorKey} should have two adjacent wall torches`
+      )
+    }
+  }
 })
 
 test('Chamber 1 publishes a neutral lightmap while progression e2e is prioritized', async () => {
@@ -167,6 +223,14 @@ test('Hallway 1-1 renders the single door into Hallway 1-2', async () => {
     hallway.levelExits.find((exit) => exit.targetLevelId === 'hallway-1-2'),
     { cell: { x: 3, y: 0 }, side: 'north', targetLevelId: 'hallway-1-2' }
   )
+  assert.ok(
+    hallway.lights.some((light) => (
+      light.cell.x === 1 &&
+      light.cell.y === 1 &&
+      light.side === 'south'
+    )),
+    'Hallway 1-1 should include the lower interior torch marker from LEVELS.md'
+  )
 })
 
 test('Hallway 1-3 matches the gate ASCII topology', async () => {
@@ -184,6 +248,15 @@ test('Hallway 1-3 matches the gate ASCII topology', async () => {
   assert.deepEqual(hallway.gates, [
     { from: { x: 1, y: 3 }, id: 'hallway-1-3:gate', to: { x: 2, y: 3 } }
   ])
+  assert.ok(
+    hallway.openEdges.some((edge) => (
+      edge.from.x === 1 &&
+      edge.from.y === 3 &&
+      edge.to.x === 2 &&
+      edge.to.y === 3
+    )),
+    'Hallway 1-3 gate edge should be an open passage with a gate, not a wall'
+  )
   assert.deepEqual(
     hallway.levelExits.find((exit) => exit.targetLevelId === 'hallway-1-4'),
     { cell: { x: 0, y: 0 }, side: 'north', targetLevelId: 'hallway-1-4' }
@@ -215,6 +288,31 @@ test('Hallway 1-4 uses the revised sword-tutorial bend', async () => {
   )
   assert.deepEqual(hallway.sword, { cell: { x: 5, y: 3 } })
   assert.equal(hallway.trophy, null)
+})
+
+test('Hallway 1-5 matches the altar tutorial ASCII topology', async () => {
+  const hallway = await createAuthoredRuntimeMaze('hallway-1-5')
+
+  assert.equal(hallway.width, 4)
+  assert.deepEqual(
+    hallway.cells.filter((cell) => cell.y === 0),
+    [{ x: 0, y: 0 }, { x: 1, y: 0 }]
+  )
+  assert.deepEqual(
+    hallway.cells.filter((cell) => cell.y === 1),
+    [{ x: 0, y: 1 }, { x: 1, y: 1 }, { x: 2, y: 1 }, { x: 3, y: 1 }]
+  )
+  assert.deepEqual(hallway.altars, [{ cell: { x: 1, y: 0 }, id: 'hallway-1-5-altar' }])
+  assert.deepEqual(hallway.trophy, { cell: { x: 3, y: 1 } })
+  assert.deepEqual(
+    hallway.levelExits.find((exit) => exit.targetLevelId === 'chamber-1'),
+    {
+      cell: { x: 0, y: 0 },
+      requiredAltarIds: ['hallway-1-5-altar'],
+      side: 'north',
+      targetLevelId: 'chamber-1'
+    }
+  )
 })
 
 test('directed runtime level graph is rooted at Entrance and acyclic', () => {
@@ -501,7 +599,11 @@ test('new LEVELS progression authored rooms are implemented', async () => {
   const throne = await createAuthoredRuntimeMaze('throne-room')
 
   assert.equal(throne.altars[0].id, 'throne-altar')
-  assert.ok(throne.trophy.cell)
+  assert.deepEqual(throne.playerStart, { cell: { x: 2, y: 11 }, direction: 'north' })
+  assert.deepEqual(throne.opening, { cell: { x: 2, y: 11 }, side: 'south' })
+  assert.deepEqual(throne.trophy, { cell: { x: 2, y: 2 } })
+  assert.equal(throne.monsters.length, 8)
+  assert.ok(throne.cells.some((cell) => cell.x === 2 && cell.y === 10))
 })
 
 test('runtime level wall volumes are not shared between levels', async () => {

@@ -284,7 +284,7 @@ function createRuntimeTransforms() {
 
   const throneEntry = localCellToWorldCell(chamber2, transforms['chamber-2'], { x: 2, y: -1 })
 
-  transforms['throne-room'] = transformForLocalCellAtWorldCell(5, 8, { x: 2, y: 7 }, throneEntry, 0)
+  transforms['throne-room'] = transformForLocalCellAtWorldCell(5, 12, { x: 2, y: 11 }, throneEntry, 0)
   return Object.freeze(transforms)
 }
 
@@ -410,32 +410,60 @@ function createAuthoredRoomMaze({
 function chamberSideSlots(count) {
   if (count === 4) {
     return [
-      { altar: { x: 1, y: 2 }, exit: { x: 0, y: 2 }, side: 'west' },
       { altar: { x: 1, y: 17 }, exit: { x: 0, y: 17 }, side: 'west' },
-      { altar: { x: 3, y: 2 }, exit: { x: 4, y: 2 }, side: 'east' },
-      { altar: { x: 3, y: 17 }, exit: { x: 4, y: 17 }, side: 'east' }
+      { altar: { x: 1, y: 10 }, exit: { x: 0, y: 10 }, side: 'west' },
+      { altar: { x: 3, y: 17 }, exit: { x: 4, y: 17 }, side: 'east' },
+      { altar: { x: 3, y: 10 }, exit: { x: 4, y: 10 }, side: 'east' }
     ]
   }
 
   return [
-    { altar: { x: 1, y: 2 }, exit: { x: 0, y: 2 }, side: 'west' },
-    { altar: { x: 1, y: 14 }, exit: { x: 0, y: 14 }, side: 'west' },
     { altar: { x: 1, y: 26 }, exit: { x: 0, y: 26 }, side: 'west' },
-    { altar: { x: 3, y: 2 }, exit: { x: 4, y: 2 }, side: 'east' },
-    { altar: { x: 3, y: 14 }, exit: { x: 4, y: 14 }, side: 'east' },
-    { altar: { x: 3, y: 26 }, exit: { x: 4, y: 26 }, side: 'east' }
+    { altar: { x: 1, y: 18 }, exit: { x: 0, y: 18 }, side: 'west' },
+    { altar: { x: 1, y: 8 }, exit: { x: 0, y: 8 }, side: 'west' },
+    { altar: { x: 3, y: 26 }, exit: { x: 4, y: 26 }, side: 'east' },
+    { altar: { x: 3, y: 18 }, exit: { x: 4, y: 18 }, side: 'east' },
+    { altar: { x: 3, y: 8 }, exit: { x: 4, y: 8 }, side: 'east' }
   ]
+}
+
+function chamberDoorTorchLights(exit, width, height) {
+  if (exit.side === 'west' || exit.side === 'east') {
+    return [
+      { cell: { x: exit.cell.x, y: exit.cell.y - 1 }, side: exit.side },
+      { cell: { x: exit.cell.x, y: exit.cell.y + 1 }, side: exit.side }
+    ].filter((light) => light.cell.y >= 0 && light.cell.y < height)
+  }
+
+  return [
+    { cell: { x: exit.cell.x - 1, y: exit.cell.y }, side: exit.side },
+    { cell: { x: exit.cell.x + 1, y: exit.cell.y }, side: exit.side }
+  ].filter((light) => light.cell.x >= 0 && light.cell.x < width)
 }
 
 function createChamberMazeDefinition(id, previousLevelId, nextLevelId, mazeIds, requiredAltarCount) {
   const height = mazeIds.length === 4 ? 24 : 36
-  const cells = rectangularCells(5, height)
+  const width = 5
+  const cells = rectangularCells(width, height)
   const slots = chamberSideSlots(mazeIds.length)
   const altars = mazeIds.map((mazeId, index) => ({
     cell: slots[index].altar,
     id: `${id}-altar-${mazeId}`,
     targetLevelId: mazeId
   }))
+  const levelExits = [
+    {
+      cell: { x: 2, y: 0 },
+      requiredAltarIds: altars.slice(0, requiredAltarCount).map((altar) => altar.id),
+      side: 'north',
+      targetLevelId: nextLevelId
+    },
+    ...mazeIds.map((mazeId, index) => ({
+      cell: slots[index].exit,
+      side: slots[index].side,
+      targetLevelId: mazeId
+    }))
+  ]
 
   return {
     altars,
@@ -448,24 +476,9 @@ function createChamberMazeDefinition(id, previousLevelId, nextLevelId, mazeIds, 
     levelConnections: [
       { cell: { x: 2, y: height - 1 }, side: 'south', targetLevelId: previousLevelId }
     ],
-    levelExits: [
-      {
-        cell: { x: 2, y: 0 },
-        requiredAltarIds: altars.slice(0, requiredAltarCount).map((altar) => altar.id),
-        side: 'north',
-        targetLevelId: nextLevelId
-      },
-      ...mazeIds.map((mazeId, index) => ({
-        cell: slots[index].exit,
-        side: slots[index].side,
-        targetLevelId: mazeId
-      }))
-    ],
+    levelExits,
     levelName: AUTHORED_LEVEL_NAMES[id],
-    lights: slots.flatMap((slot) => [
-      { cell: slot.exit, side: slot.side },
-      { cell: slot.altar, side: slot.side === 'west' ? 'east' : 'west' }
-    ]),
+    lights: levelExits.flatMap((exit) => chamberDoorTorchLights(exit, width, height)),
     monsters: [],
     openEdges: openEdgesForCells(cells),
     opening: {
@@ -476,51 +489,87 @@ function createChamberMazeDefinition(id, previousLevelId, nextLevelId, mazeIds, 
       cell: { x: 2, y: height - 1 },
       direction: 'north'
     },
-    roomBounds: { height, width: 5 },
+    roomBounds: { height, width },
     sword: null,
     trophy: null,
-    width: 5
+    width
   }
 }
 
 function createThroneRoomDefinition() {
+  const cells = [
+    ...rectangularCells(5, 10),
+    { x: 2, y: 10 },
+    { x: 2, y: 11 }
+  ]
+
   return {
     altars: [{ cell: { x: 2, y: 0 }, id: 'throne-altar' }],
+    cells,
     exitRequiresTrophy: false,
     gates: [],
-    height: 8,
+    height: 12,
     id: 'throne-room',
     indoor: true,
     isAuthoredLevel: true,
     levelConnections: [
-      { cell: { x: 2, y: 7 }, side: 'south', targetLevelId: 'chamber-2' }
+      { cell: { x: 2, y: 11 }, side: 'south', targetLevelId: 'chamber-2' }
     ],
     levelExits: [],
     levelName: AUTHORED_LEVEL_NAMES['throne-room'],
     lights: [
       { cell: { x: 0, y: 0 }, side: 'west' },
+      { cell: { x: 1, y: 0 }, side: 'north' },
+      { cell: { x: 3, y: 0 }, side: 'north' },
       { cell: { x: 4, y: 0 }, side: 'east' },
+      { cell: { x: 0, y: 2 }, side: 'west' },
+      { cell: { x: 4, y: 2 }, side: 'east' },
       { cell: { x: 0, y: 4 }, side: 'west' },
-      { cell: { x: 4, y: 4 }, side: 'east' }
+      { cell: { x: 4, y: 4 }, side: 'east' },
+      { cell: { x: 0, y: 6 }, side: 'west' },
+      { cell: { x: 4, y: 6 }, side: 'east' },
+      { cell: { x: 0, y: 8 }, side: 'west' },
+      { cell: { x: 4, y: 8 }, side: 'east' }
     ],
     monsters: [
-      { cell: { x: 1, y: 2 }, type: 'minotaur' },
-      { cell: { x: 3, y: 2 }, type: 'minotaur' }
+      { cell: { x: 1, y: 1 }, type: 'minotaur' },
+      { cell: { x: 3, y: 1 }, type: 'minotaur' },
+      { cell: { x: 0, y: 4 }, type: 'minotaur' },
+      { cell: { x: 4, y: 4 }, type: 'minotaur' },
+      { cell: { x: 0, y: 6 }, type: 'minotaur' },
+      { cell: { x: 4, y: 6 }, type: 'minotaur' },
+      { cell: { x: 0, y: 8 }, type: 'minotaur' },
+      { cell: { x: 4, y: 8 }, type: 'minotaur' }
     ],
-    openEdges: openRoomEdges(5, 8),
+    openEdges: [
+      ...openRoomEdges(5, 10),
+      { from: { x: 2, y: 9 }, to: { x: 2, y: 10 } },
+      { from: { x: 2, y: 10 }, to: { x: 2, y: 11 } }
+    ],
     opening: {
-      cell: { x: 2, y: 7 },
+      cell: { x: 2, y: 11 },
       side: 'south'
     },
     playerStart: {
-      cell: { x: 2, y: 7 },
+      cell: { x: 2, y: 11 },
       direction: 'north'
     },
     solution: {
-      actions: ['move-forward', 'move-forward', 'move-forward', 'move-forward', 'move-forward', 'move-forward']
+      actions: [
+        'move-forward',
+        'move-forward',
+        'move-forward',
+        'move-forward',
+        'move-forward',
+        'move-forward',
+        'move-forward',
+        'move-forward',
+        'move-forward',
+        'move-forward'
+      ]
     },
     sword: null,
-    trophy: { cell: { x: 2, y: 1 } },
+    trophy: { cell: { x: 2, y: 2 } },
     width: 5
   }
 }
@@ -561,12 +610,13 @@ function createAuthoredMazeDefinition(id) {
       ],
       lights: [
         { cell: { x: 3, y: 0 }, side: 'west' },
+        { cell: { x: 1, y: 1 }, side: 'south' },
         { cell: { x: 7, y: 1 }, side: 'east' }
       ],
       monsters: [{ cell: { x: 7, y: 1 }, type: 'minotaur' }],
       opening: { cell: { x: 0, y: 2 }, side: 'south' },
       playerStart: { cell: { x: 0, y: 2 }, direction: 'north' },
-      solution: { actions: ['move-forward', 'move-forward', 'move-forward', 'move-forward', 'rotate-left', 'move-forward'] },
+      solution: { actions: ['move-forward', 'rotate-left', 'move-backward', 'move-backward', 'move-backward', 'rotate-left', 'move-backward', 'move-backward'] },
       width: 8
     })
   }
@@ -612,7 +662,7 @@ function createAuthoredMazeDefinition(id) {
         { from: { x: 0, y: 3 }, to: { x: 0, y: 4 } }
       ],
       playerStart: { cell: { x: 0, y: 4 }, direction: 'north' },
-      solution: { actions: ['move-forward', 'rotate-left', 'move-backward', 'rotate-left', 'move-backward', 'rotate-left', 'move-backward', 'move-forward', 'rotate-left', 'move-forward', 'rotate-left', 'move-backward', 'move-forward', 'rotate-left', 'move-forward', 'move-backward', 'rotate-left', 'move-forward', 'rotate-left', 'move-backward', 'rotate-left', 'move-forward', 'move-forward', 'rotate-left', 'move-backward', 'move-backward', 'move-backward'] },
+      solution: { actions: ['move-backward', 'rotate-left', 'move-forward', 'rotate-left', 'move-forward', 'rotate-left', 'move-forward', 'move-backward', 'rotate-left', 'move-forward', 'rotate-left', 'move-backward', 'move-forward', 'rotate-left', 'move-forward', 'move-forward', 'rotate-left', 'move-backward', 'rotate-left', 'move-forward', 'rotate-left', 'move-backward', 'move-backward', 'rotate-left', 'move-forward', 'move-forward', 'move-forward'] },
       width: 3
     })
   }
@@ -658,6 +708,7 @@ function createAuthoredMazeDefinition(id) {
         { from: { x: 1, y: 2 }, to: { x: 1, y: 3 } },
         { from: { x: 3, y: 2 }, to: { x: 3, y: 3 } },
         { from: { x: 0, y: 3 }, to: { x: 1, y: 3 } },
+        { from: { x: 1, y: 3 }, to: { x: 2, y: 3 } },
         { from: { x: 2, y: 3 }, to: { x: 3, y: 3 } },
         { from: { x: 1, y: 3 }, to: { x: 1, y: 4 } },
         { from: { x: 0, y: 4 }, to: { x: 1, y: 4 } },
@@ -712,25 +763,46 @@ function createAuthoredMazeDefinition(id) {
   }
   if (id === 'hallway-1-5') {
     return createAuthoredRoomMaze({
-      altars: [{ cell: { x: 0, y: 1 }, id: 'hallway-1-5-altar' }],
-      cells: rectangularCells(3, 3),
+      altars: [{ cell: { x: 1, y: 0 }, id: 'hallway-1-5-altar' }],
+      cells: [
+        { x: 0, y: 0 },
+        { x: 1, y: 0 },
+        { x: 0, y: 1 },
+        { x: 1, y: 1 },
+        { x: 2, y: 1 },
+        { x: 3, y: 1 },
+        { x: 0, y: 2 }
+      ],
       height: 3,
       id,
       levelConnections: [
         { cell: { x: 0, y: 2 }, side: 'south', targetLevelId: 'hallway-1-4' }
       ],
       levelExits: [
-        { cell: { x: 0, y: 0 }, side: 'north', targetLevelId: 'chamber-1' }
+        {
+          cell: { x: 0, y: 0 },
+          requiredAltarIds: ['hallway-1-5-altar'],
+          side: 'north',
+          targetLevelId: 'chamber-1'
+        }
       ],
       lights: [
         { cell: { x: 1, y: 0 }, side: 'north' },
         { cell: { x: 2, y: 1 }, side: 'east' }
       ],
       opening: { cell: { x: 0, y: 2 }, side: 'south' },
+      openEdges: [
+        { from: { x: 0, y: 0 }, to: { x: 1, y: 0 } },
+        { from: { x: 0, y: 0 }, to: { x: 0, y: 1 } },
+        { from: { x: 0, y: 1 }, to: { x: 1, y: 1 } },
+        { from: { x: 1, y: 1 }, to: { x: 2, y: 1 } },
+        { from: { x: 2, y: 1 }, to: { x: 3, y: 1 } },
+        { from: { x: 0, y: 1 }, to: { x: 0, y: 2 } }
+      ],
       playerStart: { cell: { x: 0, y: 2 }, direction: 'north' },
-      solution: { actions: ['rotate-right', 'move-forward', 'move-forward', 'move-forward', 'rotate-left', 'move-forward', 'move-forward'] },
-      trophy: { cell: { x: 2, y: 1 } },
-      width: 3
+      solution: { actions: ['move-backward', 'rotate-left', 'move-forward', 'move-forward', 'move-forward', 'move-backward', 'move-backward', 'rotate-left', 'move-forward', 'rotate-right', 'move-forward', 'move-forward'] },
+      trophy: { cell: { x: 3, y: 1 } },
+      width: 4
     })
   }
   if (id === 'chamber-1') {
@@ -764,6 +836,10 @@ export function getAuthoredRuntimeLevelIds() {
 
 export function getStoryMazeParentLevelId(id) {
   return STORY_MAZE_PARENT_LEVEL_IDS[id] ?? null
+}
+
+export function getStoryRuntimeMazeIds() {
+  return Object.keys(STORY_MAZE_PARENT_LEVEL_IDS)
 }
 
 export function getAdjacentRuntimeLevelIds(id) {

@@ -365,6 +365,8 @@ const PLAYER_DEATH_FADE_TO_BLACK_MS = TURN_ANIMATION_DURATION_MS
 const MONSTER_KILL_FADE_TO_RED_MS = 1000
 const MONSTER_KILL_FADE_OUT_MS = 1000
 const WALKTHROUGH_ALTAR_SETTLE_MS = 3200
+const WALKTHROUGH_POLL_MS = 50
+const WALKTHROUGH_DISPATCH_RETRY_MS = 75
 let globalAnimationSpeedMultiplier = 1
 
 const MONSTER_EYE_RADIUS = 0.0075
@@ -13054,6 +13056,7 @@ function SceneGeometry({
             visibilityState={visibilityState}
           />
           <MazeDoors
+            activatedAltarIds={activatedAltarIds}
             activePlayerWorldPosition={activePlayerWorldPosition}
             activePlayerTurn={activePlayerTurn}
             completedMazeLevelIds={completedMazeLevelIds}
@@ -13390,6 +13393,7 @@ type MazeRuntimeDoor = {
   cell: MazeCell
   center: { x: number, z: number }
   id: string
+  requiredAltarIds: string[]
   side: CardinalDirection
   yaw: number
 }
@@ -13398,6 +13402,7 @@ function getMazeDoorForBoundary(
   layout: MazeLayout,
   boundary: {
     cell: MazeCell
+    requiredAltarIds?: string[]
     side: CardinalDirection
     targetLevelId?: string
   },
@@ -13423,6 +13428,7 @@ function getMazeDoorForBoundary(
     cell: boundary.cell,
     center,
     id,
+    requiredAltarIds: [...(boundary.requiredAltarIds ?? [])],
     side: boundary.side,
     yaw: boundary.side === 'east' || boundary.side === 'west'
       ? Math.PI / 2
@@ -13436,6 +13442,7 @@ function getMazeDoors(layout: MazeLayout): MazeRuntimeDoor[] {
   const addDoor = (
     boundary: {
       cell: MazeCell
+      requiredAltarIds?: string[]
       side: CardinalDirection
       targetLevelId?: string
     } | null | undefined,
@@ -13742,6 +13749,7 @@ function MazeDoorActor({
 }
 
 function MazeDoors({
+  activatedAltarIds,
   activePlayerWorldPosition,
   activePlayerTurn,
   completedMazeLevelIds,
@@ -13758,6 +13766,7 @@ function MazeDoors({
   turnState,
   visibilityState
 }: {
+  activatedAltarIds: Set<string>
   activePlayerWorldPosition: Vector3
   activePlayerTurn: number
   completedMazeLevelIds: Set<string>
@@ -13788,10 +13797,12 @@ function MazeDoors({
         const isAdjacentToActivePlayer = Boolean(
           activePlayerTurn > 0 &&
           !completedMazeLevelIds.has(layout.maze.id) &&
+          door.requiredAltarIds.every((altarId) => activatedAltarIds.has(altarId)) &&
           doorWorldPosition.distanceToSquared(activePlayerWorldPosition) <=
             ((MAZE_CELL_SIZE * 0.6) ** 2)
         )
         const isPermanentlyClosed = completedMazeLevelIds.has(layout.maze.id)
+        const isUnlocked = door.requiredAltarIds.every((altarId) => activatedAltarIds.has(altarId))
 
         return (
           <MazeDoorActor
@@ -13799,6 +13810,7 @@ function MazeDoors({
             iblContributionIntensity={iblContributionIntensity}
             isOpen={
               !isPermanentlyClosed &&
+              isUnlocked &&
               (
                 (isActive && isDoorOpenForTurnState(door, layout.maze, turnState)) ||
                 isAdjacentToActivePlayer
@@ -17967,7 +17979,7 @@ function FlightRig({
         action === 'rotate-left' ||
         action === 'rotate-right'
       ) {
-        queueTurnAction(action, event.timeStamp)
+        queueTurnAction(action, performance.now())
       }
     }
 
@@ -18950,7 +18962,9 @@ function FlightRig({
           : undefined
 
         if (action) {
-          if (!replayAction) {
+          if (!replayAction && document.body.dataset.walkthroughActive === 'true') {
+            globalAnimationSpeedMultiplier = 100
+          } else if (!replayAction) {
             globalAnimationSpeedMultiplier = MathUtils.clamp(
               1 + (inputQueue.current.length * 0.5),
               1,
@@ -19870,13 +19884,15 @@ function Scene({
   const isLevelLightingReadyForTransition = useCallback(
     (mazeId: string) => {
       const resources = levelLightingResources.get(mazeId)
+      const activeResources = levelLightingResources.get(layout.maze.id)
 
       return Boolean(
         resources?.surfaceLightmap.ready &&
-        resources.reflectionProbeState.ready
+        activeResources?.surfaceLightmap.ready &&
+        activeResources.reflectionProbeState.ready
       )
     },
-    [levelLightingResources]
+    [layout.maze.id, levelLightingResources]
   )
   const worldLightingRegistry = useMemo<WorldLightingRegistryEntry[]>(
     () => runtimeRenderedLayouts
@@ -23889,6 +23905,26 @@ function getShakeVolumeFromDistance(distanceCells: number, multiplier = 1) {
   return MathUtils.clamp((baseAmplitude * multiplier) / 0.12, 0, 1)
 }
 
+function getMoveDirectionForTurnAction(
+  direction: CardinalDirection,
+  action: TurnAction
+): CardinalDirection | null {
+  if (action === 'move-forward') {
+    return direction
+  }
+  if (action !== 'move-backward') {
+    return null
+  }
+
+  return direction === 'north'
+    ? 'south'
+    : direction === 'south'
+      ? 'north'
+      : direction === 'east'
+        ? 'west'
+        : 'east'
+}
+
 function SceneSfxRuntime({
   activatedAltarIds,
   audioSettings,
@@ -24832,6 +24868,10 @@ export default function App() {
   const [controlsOpen, setControlsOpen] = useState(false)
   const [creditsOpen, setCreditsOpen] = useState(false)
   const [gameComplete, setGameComplete] = useState(false)
+  const gameCompleteRef = useRef(false)
+  useEffect(() => {
+    gameCompleteRef.current = gameComplete
+  }, [gameComplete])
   const [levelMenuOpen, setLevelMenuOpen] = useState(false)
   const [fps, setFps] = useState(0)
   const [overlayVisible, setOverlayVisible] = useState(true)
@@ -24914,6 +24954,10 @@ export default function App() {
       return new Set()
     }
   })
+  const activatedAltarIdsRef = useRef(activatedAltarIds)
+  useEffect(() => {
+    activatedAltarIdsRef.current = activatedAltarIds
+  }, [activatedAltarIds])
   const [enteredLevelIds, setEnteredLevelIds] = useState<Set<string>>(
     () => new Set(startupSave?.enteredLevelIds ?? [])
   )
@@ -25268,101 +25312,262 @@ export default function App() {
     const wait = (ms: number) => new Promise<void>((resolve) => {
       window.setTimeout(resolve, ms)
     })
-    const completedAltarIds = new Set<string>()
-    const activateLevelById = async (mazeId: string, reset = false) => {
-      await loadLevelNeighborhood(mazeId)
-      const layout = loadedMazeLayoutsRef.current.get(mazeId)
+    const waitUntil = async (
+      predicate: () => boolean,
+      label: string,
+      timeoutMs = 45_000
+    ) => {
+      const startedAt = performance.now()
+
+      while (!predicate()) {
+        if (performance.now() - startedAt > timeoutMs) {
+          throw new Error(`Walkthrough timed out waiting for ${label}`)
+        }
+        await wait(WALKTHROUGH_DISPATCH_RETRY_MS)
+      }
+    }
+    const getActiveLayout = () => {
+      const activeLevelId = globalTurnStateRef.current?.activeLevelId ?? instantiatedMazeId ?? mazeLayout?.maze.id ?? null
+      return activeLevelId
+        ? loadedMazeLayoutsRef.current.get(activeLevelId) ?? mazeLayout
+        : mazeLayout
+    }
+    const getActiveTurnState = (layout: MazeLayout) => {
+      const current = globalTurnStateRef.current
+
+      return current
+        ? getGlobalTurnStateForLevel(current, layout.maze.id, layout.maze)
+        : createInitialTurnState(layout.maze)
+    }
+    const getReplayControllerSnapshot = () => (
+      (window as Window & {
+        __levelsjamDebug?: {
+          getReplayControllerState?: () => {
+            inputEnabled?: boolean
+            inputQueueLength?: number
+            levelTransitionCommitTarget?: string | null
+            playerAnimationAction?: TurnAction | null
+            replayActive?: boolean
+          }
+        }
+      }).__levelsjamDebug?.getReplayControllerState?.() ?? null
+    )
+    const isTurnInputReady = () => {
+      const replayController = getReplayControllerSnapshot()
+
+      return Boolean(replayController?.inputEnabled) &&
+        !replayController?.replayActive &&
+        !replayController?.playerAnimationAction &&
+        !replayController?.levelTransitionCommitTarget &&
+        (replayController?.inputQueueLength ?? 0) === 0 &&
+        document.body.dataset.pendingLevelTransitionId !== 'true' &&
+        !document.body.dataset.pendingLevelTransitionId &&
+        !document.body.dataset.committingLevelTransitionId &&
+        document.body.dataset.altarCutsceneActive !== 'true'
+    }
+    const getTurnActionSignature = () => {
+      const activeLevelId = globalTurnStateRef.current?.activeLevelId ?? instantiatedMazeId ?? mazeLayout?.maze.id ?? null
+      const layout = activeLevelId
+        ? loadedMazeLayoutsRef.current.get(activeLevelId) ?? mazeLayout
+        : mazeLayout
+      const state = layout ? getActiveTurnState(layout) : null
+
+      return JSON.stringify({
+        activeLevelId,
+        dead: state?.dead ?? null,
+        direction: state?.player.direction ?? null,
+        playerCell: state?.player.cell ?? null,
+        turn: state?.turn ?? null
+      })
+    }
+    const isTurnActionInFlight = () => {
+      const replayController = getReplayControllerSnapshot()
+
+      return Boolean(
+        replayController?.playerAnimationAction ||
+        replayController?.levelTransitionCommitTarget ||
+        (replayController?.inputQueueLength ?? 0) > 0 ||
+        document.body.dataset.pendingLevelTransitionId ||
+        document.body.dataset.committingLevelTransitionId
+      )
+    }
+    const performAction = async (action: TurnAction) => {
+      await waitUntil(isTurnInputReady, 'turn input readiness', 45_000)
+      const previousSignature = getTurnActionSignature()
+      const startedAt = performance.now()
+
+      while (
+        getTurnActionSignature() === previousSignature &&
+        !isTurnActionInFlight()
+      ) {
+        if (performance.now() - startedAt > 5_000) {
+          throw new Error(`Walkthrough timed out waiting for ${action} to be accepted`)
+        }
+        window.dispatchEvent(new CustomEvent('levelsjam:turn-action', { detail: action }))
+        await wait(WALKTHROUGH_POLL_MS)
+      }
+      await waitUntil(isTurnInputReady, 'turn animation completion', 45_000)
+      await wait(WALKTHROUGH_POLL_MS)
+      if (document.body.dataset.altarCutsceneActive === 'true') {
+        await waitUntil(
+          () => document.body.dataset.altarCutsceneActive !== 'true',
+          'altar cutscene',
+          WALKTHROUGH_ALTAR_SETTLE_MS + 2500
+        )
+        await wait(WALKTHROUGH_POLL_MS)
+      }
+    }
+    const performActions = async (actions: TurnAction[]) => {
+      for (const action of actions) {
+        await performAction(action)
+      }
+    }
+    const waitForActiveLevel = async (levelId: string) => {
+      await waitUntil(
+        () => (globalTurnStateRef.current?.activeLevelId ?? instantiatedMazeId) === levelId,
+        `active level ${levelId}`
+      )
+    }
+    const directionBetweenCells = (
+      from: { x: number, y: number },
+      to: { x: number, y: number }
+    ): CardinalDirection | null => {
+      const dx = to.x - from.x
+      const dy = to.y - from.y
+
+      return dx === 1 && dy === 0
+        ? 'east'
+        : dx === -1 && dy === 0
+          ? 'west'
+          : dx === 0 && dy === 1
+            ? 'south'
+            : dx === 0 && dy === -1
+              ? 'north'
+              : null
+    }
+    const rotationActions = (
+      from: CardinalDirection,
+      to: CardinalDirection
+    ): TurnAction[] => {
+      const directions: CardinalDirection[] = ['north', 'east', 'south', 'west']
+      const fromIndex = directions.indexOf(from)
+      const toIndex = directions.indexOf(to)
+      const rightTurns = (toIndex - fromIndex + directions.length) % directions.length
+
+      if (rightTurns === 0) {
+        return []
+      }
+      if (rightTurns === 1) {
+        return ['rotate-right']
+      }
+      if (rightTurns === 2) {
+        return ['rotate-right', 'rotate-right']
+      }
+      return ['rotate-left']
+    }
+    const findPathActions = (
+      layout: MazeLayout,
+      startCell: { x: number, y: number },
+      startDirection: CardinalDirection,
+      targetCell: { x: number, y: number },
+      targetExitSide: CardinalDirection | null = null
+    ): TurnAction[] => {
+      const cells = new Set((layout.maze.cells ?? []).map((cell) => `${cell.x},${cell.y}`))
+      const blocked = new Set((layout.maze.altars ?? []).map((altar) => `${altar.cell.x},${altar.cell.y}`))
+      const openNeighbors = new Map<string, Array<{ cell: { x: number, y: number }, direction: CardinalDirection }>>()
+
+      for (const edge of layout.maze.openEdges ?? []) {
+        const direction = directionBetweenCells(edge.from, edge.to)
+        const reverseDirection = directionBetweenCells(edge.to, edge.from)
+
+        if (direction) {
+          const key = `${edge.from.x},${edge.from.y}`
+          openNeighbors.set(key, [...(openNeighbors.get(key) ?? []), { cell: edge.to, direction }])
+        }
+        if (reverseDirection) {
+          const key = `${edge.to.x},${edge.to.y}`
+          openNeighbors.set(key, [...(openNeighbors.get(key) ?? []), { cell: edge.from, direction: reverseDirection }])
+        }
+      }
+
+      const startKey = `${startCell.x},${startCell.y}:${startDirection}`
+      const queue = [{ actions: [] as TurnAction[], cell: startCell, direction: startDirection }]
+      const seen = new Set([startKey])
+
+      for (let index = 0; index < queue.length; index += 1) {
+        const current = queue[index]
+
+        if (
+          current.cell.x === targetCell.x &&
+          current.cell.y === targetCell.y
+        ) {
+          return targetExitSide
+            ? [...current.actions, ...rotationActions(current.direction, targetExitSide), 'move-forward']
+            : current.actions
+        }
+
+        for (const neighbor of openNeighbors.get(`${current.cell.x},${current.cell.y}`) ?? []) {
+          const key = `${neighbor.cell.x},${neighbor.cell.y}`
+
+          if (!cells.has(key) || blocked.has(key)) {
+            continue
+          }
+
+          const actions = [
+            ...current.actions,
+            ...rotationActions(current.direction, neighbor.direction),
+            'move-forward' as TurnAction
+          ]
+          const stateKey = `${neighbor.cell.x},${neighbor.cell.y}:${neighbor.direction}`
+
+          if (!seen.has(stateKey)) {
+            seen.add(stateKey)
+            queue.push({ actions, cell: neighbor.cell, direction: neighbor.direction })
+          }
+        }
+      }
+
+      throw new Error(`Walkthrough could not path through "${layout.maze.id}"`)
+    }
+    const walkToExit = async (exit: { cell: { x: number, y: number }, side: CardinalDirection, targetLevelId?: string }) => {
+      const layout = getActiveLayout()
 
       if (!layout) {
-        throw new Error(`Walkthrough could not load "${mazeId}"`)
+        throw new Error('Walkthrough has no active layout')
       }
 
-      instantiateLoadedMaze(mazeId, { reset })
-      await wait(0)
-      return layout
+      const state = getActiveTurnState(layout)
+      await performActions(findPathActions(layout, state.player.cell, state.player.direction, exit.cell, exit.side))
+      if (exit.targetLevelId) {
+        await waitForActiveLevel(exit.targetLevelId)
+      }
     }
-    const completeAdjacentAltar = async (
-      layout: MazeLayout,
-      cell: { x: number, y: number },
-      direction: CardinalDirection
-    ) => {
-      const altar =
-        (layout.altars ?? []).find((candidate) =>
-          !completedAltarIds.has(candidate.id) &&
-          areCellsCardinallyAdjacent(cell, candidate.cell)
-        ) ??
-        (layout.altars ?? []).find((candidate) => !completedAltarIds.has(candidate.id))
+    const walkActiveSolution = async (targetLevelId: string | null = null) => {
+      const layout = getActiveLayout()
 
-      if (!altar) {
-        throw new Error(`Walkthrough found no available altar in "${layout.maze.id}"`)
+      if (!layout?.maze.solution?.actions?.length) {
+        throw new Error(`Walkthrough found no solution for "${layout?.maze.id ?? 'unknown'}"`)
       }
 
-      const facingDirection = directionFromCellToCell(cell, altar.cell) ?? direction
+      await performActions(layout.maze.solution.actions as TurnAction[])
+      if (targetLevelId) {
+        await waitForActiveLevel(targetLevelId)
+      }
+    }
+    const offerAdjacentAltar = async () => {
+      const offered = (window as Window & {
+        __levelsjamDebug?: {
+          offerHeldTrophyToAdjacentAltar?: () => boolean
+        }
+      }).__levelsjamDebug?.offerHeldTrophyToAdjacentAltar?.() ?? false
 
-      setGlobalTurnState((current) => {
-        const ensuredState = current
-          ? ensureGlobalTurnStateLevel(current, layout)
-          : createInitialGlobalTurnState(layout, Array.from(loadedMazeLayoutsRef.current.values()))
-        const levelTurnState = getGlobalTurnStateForLevel(
-          ensuredState,
-          layout.maze.id,
-          layout.maze
+      if (offered) {
+        await waitUntil(
+          () => document.body.dataset.altarCutsceneActive === 'true' || gameCompleteRef.current,
+          'altar cutscene start',
+          5_000
         )
-        const nextGlobalState = replaceGlobalTurnStateForLevel(ensuredState, layout.maze.id, {
-          ...levelTurnState,
-          player: {
-            ...levelTurnState.player,
-            cell: { x: cell.x, y: cell.y },
-            direction: facingDirection,
-            hasTrophy: false
-          },
-          trophyState: 'consumed'
-        })
-        const nextItemStates = { ...(nextGlobalState.worldTurnState.itemStates ?? {}) }
-
-        for (const [itemId, itemState] of Object.entries(nextItemStates)) {
-          if (itemState === 'held' && itemId.endsWith(':trophy')) {
-            nextItemStates[itemId] = 'consumed'
-          }
-        }
-
-        return {
-          ...nextGlobalState,
-          player: {
-            ...nextGlobalState.player,
-            cell: { x: cell.x, y: cell.y },
-            direction: facingDirection,
-            levelId: layout.maze.id,
-            hasTrophy: false
-          },
-          worldTurnState: {
-            ...nextGlobalState.worldTurnState,
-            itemStates: nextItemStates,
-            player: {
-              ...nextGlobalState.worldTurnState.player,
-              cell: { x: cell.x, y: cell.y },
-              direction: facingDirection,
-              levelId: layout.maze.id,
-              hasTrophy: false
-            }
-          }
-        }
-      }, { transition: false })
-      document.body.dataset.altarCutsceneActive = 'true'
-      document.body.dataset.altarCutsceneStartedAt = performance.now().toFixed(1)
-      setAltarCutscene({
-        altarId: altar.id,
-        levelId: layout.maze.id,
-        startedAt: Number(document.body.dataset.altarCutsceneStartedAt)
-      })
-      await wait(WALKTHROUGH_ALTAR_SETTLE_MS)
-      completedAltarIds.add(altar.id)
-      setActivatedAltarIds((current) => {
-        const next = new Set(current)
-
-        next.add(altar.id)
-        return next
-      })
+      }
     }
 
     setWalkthroughActive(true)
@@ -25383,34 +25588,63 @@ export default function App() {
       resetClosedMazeIdsRef.current.clear()
       loadedMazeLayoutsRef.current.clear()
       unloadMazeLayoutById(getDefaultRuntimeLevelId())
+      globalAnimationSpeedMultiplier = 100
 
-      await activateLevelById(getDefaultRuntimeLevelId(), true)
-      for (const levelId of STORY_WALKTHROUGH_LEVEL_SEQUENCE) {
-        await activateLevelById(levelId)
+      await loadLevelNeighborhood(getDefaultRuntimeLevelId())
+      instantiateLoadedMaze(getDefaultRuntimeLevelId(), { reset: true })
+      await waitForActiveLevel(getDefaultRuntimeLevelId())
+      await waitUntil(isTurnInputReady, 'initial turn input readiness')
+
+      for (const targetLevelId of STORY_WALKTHROUGH_LEVEL_SEQUENCE) {
+        await walkActiveSolution(targetLevelId)
       }
 
       for (const step of STORY_WALKTHROUGH_ALTAR_STEPS) {
-        for (const levelId of step.activateAfter ?? []) {
-          await activateLevelById(levelId)
+        if ((globalTurnStateRef.current?.activeLevelId ?? instantiatedMazeId) !== step.chamberId) {
+          const currentLayout = getActiveLayout()
+          const chamberExit = currentLayout?.maze.levelExits.find((candidate) => (
+            candidate.targetLevelId === step.chamberId
+          ))
+
+          if (!currentLayout || !chamberExit) {
+            throw new Error(`Walkthrough could not reach "${step.chamberId}"`)
+          }
+          await walkToExit(chamberExit)
         }
+        await waitForActiveLevel(step.chamberId)
+        const chamberLayout = getActiveLayout()
+        const exit = chamberLayout?.maze.levelExits.find((candidate) => (
+          candidate.targetLevelId === step.mazeId
+        ))
 
-        await activateLevelById(step.mazeId)
-        const chamberLayout = await activateLevelById(step.chamberId)
-
-        await completeAdjacentAltar(
-          chamberLayout,
-          step.exitCell,
-          step.altarDirection
+        if (!chamberLayout || !exit) {
+          throw new Error(`Walkthrough could not find chamber exit to "${step.mazeId}"`)
+        }
+        await walkToExit(exit)
+        await walkActiveSolution(step.chamberId)
+        await offerAdjacentAltar()
+        await waitUntil(
+          () => activatedAltarIdsRef.current.has(`${step.chamberId}-altar-${step.mazeId}`),
+          `${step.mazeId} altar lighting`,
+          WALKTHROUGH_ALTAR_SETTLE_MS + 5000
         )
       }
 
-      const finalLayout = await activateLevelById(STORY_WALKTHROUGH_FINAL_LEVEL)
-      const finalCell = finalLayout.maze.trophy?.cell ?? finalLayout.maze.playerStart.cell
-      await completeAdjacentAltar(
-        finalLayout,
-        finalCell,
-        finalLayout.maze.playerStart.direction
-      )
+      if ((globalTurnStateRef.current?.activeLevelId ?? instantiatedMazeId) !== STORY_WALKTHROUGH_FINAL_LEVEL) {
+        const currentLayout = getActiveLayout()
+        const finalExit = currentLayout?.maze.levelExits.find((candidate) => (
+          candidate.targetLevelId === STORY_WALKTHROUGH_FINAL_LEVEL
+        ))
+
+        if (!currentLayout || !finalExit) {
+          throw new Error(`Walkthrough could not reach "${STORY_WALKTHROUGH_FINAL_LEVEL}"`)
+        }
+        await walkToExit(finalExit)
+      }
+      await waitForActiveLevel(STORY_WALKTHROUGH_FINAL_LEVEL)
+      await walkActiveSolution(null)
+      await offerAdjacentAltar()
+      await waitUntil(() => gameCompleteRef.current, 'throne room credits', 20_000)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
 
@@ -25470,7 +25704,10 @@ export default function App() {
 
         if (committedState) {
           nextState = activateGlobalTurnStateLevel(
-            ensureGlobalTurnStateLevel(committedState, targetLayout),
+            ensureGlobalTurnStateLevels(
+              committedState,
+              Array.from(loadedMazeLayoutsRef.current.values())
+            ),
             targetLayout
           )
         } else {
@@ -25568,9 +25805,38 @@ export default function App() {
     const ensuredState = currentState
       ? ensureGlobalTurnStateLevel(currentState, layout)
       : createInitialGlobalTurnState(layout, Array.from(loadedMazeLayoutsRef.current.values()))
+    const localTurnState = getGlobalTurnStateForLevel(ensuredState, mazeId, layout.maze)
+    const moveDirection = getMoveDirectionForTurnAction(localTurnState.player.direction, action)
+    const levelExit = moveDirection
+      ? (layout.maze.levelExits ?? []).find((exit) => (
+          exit.cell.x === localTurnState.player.cell.x &&
+          exit.cell.y === localTurnState.player.cell.y &&
+          exit.side === moveDirection
+        ))
+      : null
+    const missingRequiredAltar = levelExit?.requiredAltarIds?.some((altarId) => (
+      !activatedAltarIds.has(altarId)
+    )) ?? false
+
+    if (missingRequiredAltar) {
+      return {
+        outcome: {
+          blocked: true,
+          escaped: false,
+          killed: false,
+          levelTransition: null,
+          pickedUpSword: false,
+          pickedUpTrophy: false,
+          playerEffect: null,
+          previous: localTurnState,
+          state: localTurnState
+        },
+        state: ensuredState
+      }
+    }
 
     return applyGlobalTurnActionForLevel(ensuredState, mazeId, layout.maze, action)
-  }, [])
+  }, [activatedAltarIds])
 
   const loadAndActivateLevel = async (level: AuthoredLevel, index: number) => {
     const mazeIds = availableMazeIdsRef.current.length > 0
@@ -26787,13 +27053,13 @@ export default function App() {
           }
         })
       }
-    }, 3000)
+    }, getScaledAnimationDuration(3000))
 
     const restoreControlHandle = window.setTimeout(() => {
       setAltarCutscene(null)
       delete document.body.dataset.altarCutsceneActive
       delete document.body.dataset.altarCutsceneStartedAt
-    }, 4000)
+    }, getScaledAnimationDuration(4000))
 
     return () => {
       window.clearTimeout(replaceWithFlameHandle)

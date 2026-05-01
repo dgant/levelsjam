@@ -22,6 +22,7 @@ import {
   createAuthoredRuntimeMaze,
   getAuthoredRuntimeLevelIds,
   getStoryMazeParentLevelId,
+  getStoryRuntimeMazeIds,
   isAuthoredRuntimeLevelId
 } from './levels.js'
 import type { MazeLayout, WallBounds } from './sceneLayout.js'
@@ -51,6 +52,7 @@ type PersistedMaze = {
   isAuthoredLevel?: boolean
   levelExits?: Array<{
     cell: { x: number; y: number }
+    requiredAltarIds?: string[]
     side: 'north' | 'east' | 'south' | 'west'
     targetLevelId?: string
   }>
@@ -121,6 +123,7 @@ async function loadAvailableMazeIds() {
         AVAILABLE_MAZE_IDS.length = 0
         AVAILABLE_MAZE_IDS.push(...Array.from(new Set([
           ...getAuthoredRuntimeLevelIds(),
+          ...getStoryRuntimeMazeIds(),
           ...mazeIds
         ])))
         return {
@@ -143,8 +146,11 @@ export async function getRuntimeLevelMenuEntries() {
   }
 
   const manifest = await mazeManifestPromise
-
-  return (manifest?.challenges ?? [])
+  const storyMazeIds = Array.from(new Set([
+    ...getStoryRuntimeMazeIds(),
+    ...(manifest?.storyMazeIds ?? [])
+  ]))
+  const challengeEntries = (manifest?.challenges ?? [])
     .filter((entry) => (
       typeof entry?.id === 'string' &&
       typeof entry?.name === 'string'
@@ -154,6 +160,15 @@ export async function getRuntimeLevelMenuEntries() {
       name: entry.name,
       runtimeLevelId: entry.id
     }))
+
+  return [
+    ...storyMazeIds.map((id) => ({
+      description: `Story maze in ${getStoryMazeParentLevelId(id) ?? 'the main path'}.`,
+      name: id,
+      runtimeLevelId: id
+    })),
+    ...challengeEntries.filter((entry) => !storyMazeIds.includes(entry.runtimeLevelId))
+  ]
 }
 
 async function loadPersistedMaze(id: string) {

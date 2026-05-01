@@ -17,6 +17,8 @@ export function isAuthoredRuntimeLevelId(id: string): boolean
 
 export function getAuthoredRuntimeLevelIds(): string[]
 
+export function getStoryRuntimeMazeIds(): string[]
+
 export function getAdjacentRuntimeLevelIds(id: string): string[]
 
 export function getDirectedRuntimeLevelGraph(): Record<string, string[]>

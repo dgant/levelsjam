@@ -20,6 +20,56 @@ async function authoredLayout(id) {
   }
 }
 
+async function createStoryStateAtLevel(targetLevelId) {
+  const progression = [
+    'entrance',
+    'hallway-1-1',
+    'hallway-1-2',
+    'hallway-1-3',
+    'hallway-1-4',
+    'hallway-1-5'
+  ]
+  const layouts = new Map()
+
+  for (const levelId of progression) {
+    layouts.set(levelId, await authoredLayout(levelId))
+  }
+
+  let globalState = createInitialGlobalTurnState(
+    layouts.get(progression[0]),
+    [...layouts.values()]
+  )
+
+  for (const levelId of progression) {
+    const layout = layouts.get(levelId)
+
+    if (levelId === targetLevelId) {
+      return { globalState: activateGlobalTurnStateLevel(globalState, layout), layout, layouts }
+    }
+
+    for (const action of layout.maze.solution.actions) {
+      const result = applyGlobalTurnActionForLevel(
+        globalState,
+        levelId,
+        layout.maze,
+        action
+      )
+
+      globalState = result.state
+
+      if (result.outcome.levelTransition) {
+        globalState = activateGlobalTurnStateLevel(
+          globalState,
+          layouts.get(result.outcome.levelTransition.targetLevelId)
+        )
+        break
+      }
+    }
+  }
+
+  throw new Error(`Story state never reached ${targetLevelId}`)
+}
+
 function testMaze(overrides = {}) {
   return {
     height: 3,
@@ -154,9 +204,9 @@ test('activating a reset side level uses that level player start', () => {
 })
 
 test('resetting all global levels clears active monster state after death', async () => {
-  const hallway = await authoredLayout('hallway-1-2')
-  const nextHallway = await authoredLayout('hallway-1-3')
-  let globalState = createInitialGlobalTurnState(hallway, [nextHallway])
+  const { layout: hallway, globalState: startingGlobalState } =
+    await createStoryStateAtLevel('hallway-1-2')
+  let globalState = startingGlobalState
 
   for (const action of hallway.maze.solution.actions.slice(0, 8)) {
     globalState = applyGlobalTurnActionForLevel(
@@ -187,9 +237,9 @@ test('resetting all global levels clears active monster state after death', asyn
 })
 
 test('Hallway 1-2 recorded solution reaches Hallway 1-3', async () => {
-  const hallway = await authoredLayout('hallway-1-2')
-  const nextHallway = await authoredLayout('hallway-1-3')
-  let globalState = createInitialGlobalTurnState(hallway, [nextHallway])
+  const { layout: hallway, globalState: startingGlobalState } =
+    await createStoryStateAtLevel('hallway-1-2')
+  let globalState = startingGlobalState
   let transition = null
 
   for (const action of hallway.maze.solution.actions) {

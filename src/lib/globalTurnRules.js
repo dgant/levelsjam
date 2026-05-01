@@ -2,7 +2,9 @@ import {
   applyEntryTurn,
   applyMonsterTurn,
   applyTurnAction,
-  createInitialTurnState
+  createInitialTurnState,
+  getExitForMove,
+  OPPOSITE_DIRECTIONS
 } from './turnRules.js'
 import {
   buildWorldGridFromLayouts,
@@ -530,6 +532,19 @@ export function applyGlobalTurnAction(state, action) {
 
 export function applyGlobalTurnActionForLevel(state, levelId, maze, action) {
   const ensuredState = ensureGlobalTurnStateLevel(state, getLayoutForLevel(state, levelId, maze))
+  const sourceLocalState = projectWorldTurnStateToLevel(
+    ensuredState,
+    levelId,
+    maze
+  )
+  const moveDirection = action === 'move-backward'
+    ? OPPOSITE_DIRECTIONS[sourceLocalState.player.direction]
+    : action === 'move-forward'
+      ? sourceLocalState.player.direction
+      : null
+  const directLevelTransition = moveDirection
+    ? getExitForMove(maze, sourceLocalState.player.cell, moveDirection)
+    : null
   const layouts = getRegisteredLayouts(ensuredState)
   const worldGrid = buildWorldGridFromLayouts(layouts)
   const result = applyGlobalTurnAction(ensuredState, action)
@@ -541,6 +556,7 @@ export function applyGlobalTurnActionForLevel(state, levelId, maze, action) {
     return !levelCells || levelCells.has(`${owner.localCell.x},${owner.localCell.y}`)
   }
   const nextLevelId =
+    directLevelTransition?.targetLevelId ??
     owners.find((owner) => owner.levelId !== levelId && isRealOwner(owner))?.levelId ??
     owners.find((owner) => owner.levelId === levelId && isRealOwner(owner))?.levelId ??
     owners.find((owner) => owner.levelId !== levelId)?.levelId ??

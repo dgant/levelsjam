@@ -190,12 +190,12 @@ test('doors use generated Minoan-door ORM textures and baked dynamic lighting', 
   )
   assert.match(
     appSource,
-    /activePlayerTurn > 0 &&\s*!completedMazeLevelIds\.has\(layout\.maze\.id\) &&\s*doorWorldPosition/,
+    /activePlayerTurn > 0 &&\s*!completedMazeLevelIds\.has\(layout\.maze\.id\) &&\s*door\.requiredAltarIds\.every/,
     'maze entrance doors should open from world-space adjacency after gameplay movement without starting open'
   )
   assert.match(
     appSource,
-    /isOpen=\{\s*!isPermanentlyClosed &&[\s\S]*?\(isActive && isDoorOpenForTurnState\(door, layout\.maze, turnState\)\) \|\|\s*isAdjacentToActivePlayer/,
+    /isOpen=\{\s*!isPermanentlyClosed &&\s*isUnlocked &&[\s\S]*?\(isActive && isDoorOpenForTurnState\(door, layout\.maze, turnState\)\) \|\|\s*isAdjacentToActivePlayer/,
     'maze entrance doors should be driven by active rules state or active world-space player adjacency'
   )
   assert.match(
