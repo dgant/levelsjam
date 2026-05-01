@@ -87,7 +87,7 @@ void main() {
 precision highp float;
 precision highp int;
 
-const int MAX_WALLS = 320;
+const int MAX_WALLS = 768;
 const int MAX_TORCHES = 96;
 const int SKY_DIRECTION_COUNT = 13;
 const int DIRECT_SPHERE_SAMPLE_COUNT = 6;
@@ -215,11 +215,12 @@ void getSurfaceSample(float u, float v, out vec3 position, out vec3 normal) {
     float localAlong = (u - 0.5) * uSurfaceA.z;
     float localY = (v - 0.5) * uWallHeight;
     float localZ = uSurfaceB.x * (uWallThickness * 0.5);
+    float baseY = uSurfaceB.y;
     vec2 rotatedPosition = rotateWallLocalVector(localAlong, localZ, uSurfaceA.w);
     vec2 rotatedNormal = rotateWallLocalVector(0.0, uSurfaceB.x, uSurfaceA.w);
     position = vec3(
       uSurfaceA.x + rotatedPosition.x,
-      GROUND_Y + (uWallHeight * 0.5) + localY,
+      baseY + (uWallHeight * 0.5) + localY,
       uSurfaceA.y + rotatedPosition.y
     );
     normal = vec3(rotatedNormal.x, 0.0, rotatedNormal.y);
@@ -250,6 +251,16 @@ void getSurfaceSample(float u, float v, out vec3 position, out vec3 normal) {
     return;
   }
 
+  if (uSurfaceType == 5) {
+    position = vec3(
+      uSurfaceA.x + ((u - 0.5) * uSurfaceA.z),
+      uSurfaceA.w,
+      uSurfaceA.y + ((v - 0.5) * uSurfaceA.z)
+    );
+    normal = vec3(0.0, -1.0, 0.0);
+    return;
+  }
+
   float localY = (v - 0.5) * uWallHeight;
   float localZ = (u - 0.5) * uWallThickness;
   float localX = uSurfaceB.x * (uCellSize * 0.5);
@@ -257,7 +268,7 @@ void getSurfaceSample(float u, float v, out vec3 position, out vec3 normal) {
   vec2 rotatedNormal = rotateWallLocalVector(uSurfaceB.x, 0.0, uSurfaceA.z);
   position = vec3(
     uSurfaceA.x + rotatedPosition.x,
-    GROUND_Y + (uWallHeight * 0.5) + localY,
+    uSurfaceA.w + (uWallHeight * 0.5) + localY,
     uSurfaceA.y + rotatedPosition.y
   );
   normal = vec3(rotatedNormal.x, 0.0, rotatedNormal.y);

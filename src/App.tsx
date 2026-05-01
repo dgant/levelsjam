@@ -5280,7 +5280,7 @@ function isIndoorExteriorWallVisible(
   layout: MazeLayout,
   wall: MazeLayout['walls'][number]
 ) {
-  return isIndoorLayout(layout) && wall.id.endsWith(':exterior')
+  return isIndoorLayout(layout) && wall.id.includes(':exterior')
 }
 
 function isMazeWallVisible(
@@ -8406,21 +8406,18 @@ function createCeilingPatchGeometry(
   const center = getMazeCellWorldPosition(maze, cell, GROUND_Y + (WALL_HEIGHT * 2))
   const geometry = new PlaneGeometry(MAZE_CELL_SIZE, MAZE_CELL_SIZE, 1, 1)
   const positions = geometry.getAttribute('position')
+  const rect = lightmap.ceilingRects?.[getMazeCellKey(cell)] ?? lightmap.neutralRect
   const lightmapUvs: number[] = []
 
   for (let index = 0; index < positions.count; index += 1) {
     const localX = positions.getX(index)
     const localY = positions.getY(index)
-    const worldX = center.x + localX
-    const worldZ = center.z + localY
-    const { u: localLightmapU, v: localLightmapV } =
-      mapGroundWorldToLightmapLocalUv(lightmap.groundBounds, worldX, worldZ)
     const [lightmapU, lightmapV] = mapLightmapRectUvToAtlas(
-      lightmap.groundRect,
+      rect,
       lightmap.atlasWidth,
       lightmap.atlasHeight,
-      localLightmapU,
-      localLightmapV
+      MathUtils.clamp((localX / MAZE_CELL_SIZE) + 0.5, 0, 1),
+      MathUtils.clamp((localY / MAZE_CELL_SIZE) + 0.5, 0, 1)
     )
 
     lightmapUvs.push(lightmapU, lightmapV)
@@ -8516,7 +8513,74 @@ function isIndoorLayout(layout: MazeLayout) {
     return false
   }
 
-  return /^(maze|hallway|throne room)/i.test(levelName) || /^maze-/i.test(layout.maze.id)
+  return (
+    /^(maze|hallway|throne room)/i.test(levelName) ||
+    /^(maze-\d{3}|challenge-\d{3}|werewolf-tutorial)$/i.test(layout.maze.id)
+  )
+}
+
+function getSecondFloorMazeWalls(layout: MazeLayout) {
+  const upperWalls = layout.walls.map((wall) => ({
+    ...wall,
+    bounds: {
+      ...wall.bounds,
+      id: `${wall.id}:upper`,
+      maxY: wall.bounds.maxY + WALL_HEIGHT,
+      minY: wall.bounds.minY + WALL_HEIGHT
+    },
+    id: `${wall.id}:upper`
+  }))
+  const addDoorWall = (
+    boundary: {
+      cell: MazeCell
+      side: CardinalDirection
+    } | null | undefined
+  ) => {
+    if (!boundary) {
+      return
+    }
+
+    const center = getMazeCellWorldPosition(layout.maze, boundary.cell, GROUND_Y)
+    if (boundary.side === 'north') {
+      center.z -= MAZE_CELL_SIZE / 2
+    } else if (boundary.side === 'south') {
+      center.z += MAZE_CELL_SIZE / 2
+    } else if (boundary.side === 'east') {
+      center.x += MAZE_CELL_SIZE / 2
+    } else {
+      center.x -= MAZE_CELL_SIZE / 2
+    }
+
+    const axis = boundary.side === 'east' || boundary.side === 'west' ? 'z' : 'x'
+    const halfLength = axis === 'x' ? MAZE_CELL_SIZE / 2 : WALL_WIDTH / 2
+    const halfWidth = axis === 'x' ? WALL_WIDTH / 2 : MAZE_CELL_SIZE / 2
+    const id = `${boundary.cell.x},${boundary.cell.y}:${boundary.side}:door:upper`
+
+    upperWalls.push({
+      axis,
+      bounds: {
+        id,
+        maxX: center.x + halfLength,
+        maxY: GROUND_Y + (WALL_HEIGHT * 2),
+        maxZ: center.z + halfWidth,
+        minX: center.x - halfLength,
+        minY: GROUND_Y + WALL_HEIGHT,
+        minZ: center.z - halfWidth
+      },
+      center: { x: center.x, z: center.z },
+      id,
+      yaw: axis === 'x' ? 0 : Math.PI / 2
+    } as MazeLayout['walls'][number])
+  }
+
+  if (!layout.maze.isAuthoredLevel) {
+    addDoorWall(layout.maze.opening)
+  }
+  for (const exit of layout.maze.levelExits ?? []) {
+    addDoorWall(exit)
+  }
+
+  return upperWalls
 }
 
 function mapLightmapRectUvToAtlas(
@@ -12036,6 +12100,10 @@ function MazeWalls({
     [visibleWalls]
   )
   const mountedWalls = layout.walls
+  const mountedSecondFloorWalls = useMemo(
+    () => isIndoorLayout(layout) ? getSecondFloorMazeWalls(layout) : [],
+    [layout]
+  )
   const mountedDecals = layout.decals
   const mountedCornerFillers = layout.cornerFillers
   const indoorLayout = isIndoorLayout(layout)
@@ -12087,12 +12155,12 @@ function MazeWalls({
           wallMaterialMaps={wall}
         />
       ))}
-      {indoorLayout ? mountedWalls.map((mazeWall, wallIndex) => (
+      {mountedSecondFloorWalls.map((mazeWall, wallIndex) => (
         <MazeWallMesh
           environmentTexture={environmentTexture}
           environmentIntensity={environmentIntensity}
           iblContributionIntensity={staticVolumetricContributionIntensity}
-          key={`${mazeWall.id}:upper`}
+          key={mazeWall.id}
           lightmap={layout.maze.lightmap}
           lightmapTexture={lightmapTexture}
           lightmapTextureEncoding={lightmapTextureEncoding}
@@ -12105,12 +12173,11 @@ function MazeWalls({
           reflectionProbeCoefficients={reflectionProbeCoefficients}
           reflectionProbeDepthTextures={reflectionProbeDepthTextures}
           reflectionProbeTextures={reflectionProbeTextures}
-          verticalOffset={WALL_HEIGHT}
           visible={isMazeWallVisible(layout, visibilityState, mazeWall)}
           wallIndex={wallIndex}
           wallMaterialMaps={wall}
         />
-      )) : null}
+      ))}
       {mountedCeilingCells.map((cell, cellIndex) => (
         <CeilingPatchMesh
           cell={cell}
@@ -12129,7 +12196,7 @@ function MazeWalls({
           reflectionProbeCoefficients={reflectionProbeCoefficients}
           reflectionProbeDepthTextures={reflectionProbeDepthTextures}
           reflectionProbeTextures={reflectionProbeTextures}
-          visible={isCellVisible(visibilityState, cell)}
+          visible={mountAllGeometry || isCellVisible(visibilityState, cell)}
           wallMaterialMaps={wall}
         />
       ))}
@@ -12744,7 +12811,7 @@ function MazeWallMesh({
       castShadow
       position={[
         mazeWall.center.x,
-        GROUND_Y + (WALL_HEIGHT / 2) + verticalOffset,
+        (mazeWall.bounds?.minY ?? GROUND_Y) + (WALL_HEIGHT / 2) + verticalOffset,
         mazeWall.center.z
       ]}
       receiveShadow
@@ -13803,6 +13870,9 @@ function MazeDoors({
         )
         const isPermanentlyClosed = completedMazeLevelIds.has(layout.maze.id)
         const isUnlocked = door.requiredAltarIds.every((altarId) => activatedAltarIds.has(altarId))
+        const isBlockedByMonster = turnState.monsters.some((monster) =>
+          monster.cell.x === door.cell.x && monster.cell.y === door.cell.y
+        )
 
         return (
           <MazeDoorActor
@@ -13811,6 +13881,7 @@ function MazeDoors({
             isOpen={
               !isPermanentlyClosed &&
               isUnlocked &&
+              !isBlockedByMonster &&
               (
                 (isActive && isDoorOpenForTurnState(door, layout.maze, turnState)) ||
                 isAdjacentToActivePlayer
@@ -24310,7 +24381,7 @@ function CreditsModal({
           "Droop cup 4th century BC" (<a href="https://skfb.ly/oyB9X">https://skfb.ly/oyB9X</a>) by The Hunt Museum is licensed under Creative Commons Attribution (<a href="http://creativecommons.org/licenses/by/4.0/">http://creativecommons.org/licenses/by/4.0/</a>).
         </p>
         <p>
-          "Metal Rust" texture pack (<a href="https://www.sharetextures.com/textures/metal/metal-rust">https://www.sharetextures.com/textures/metal/metal-rust</a>) by ShareTextures is used under the ShareTextures license.
+          "Metal Rust" texture pack (<a href="https://www.sharetextures.com/textures/metal/metal-rust">https://www.sharetextures.com/textures/metal/metal-rust</a>) by ShareTextures is licensed under CC0.
         </p>
         <p>
           "Qwantani Moon Noon Puresky" (<a href="https://polyhaven.com/a/qwantani_moon_noon_puresky">https://polyhaven.com/a/qwantani_moon_noon_puresky</a>) by Poly Haven is licensed under CC0.
@@ -25144,6 +25215,62 @@ export default function App() {
       : createInitialTurnState(layout.maze)
   }, [])
 
+  const isInactiveLevelDoorBlockedByMonster = useCallback((
+    state: GlobalTurnState,
+    layout: MazeLayout
+  ) => {
+    const doors = [
+      ...(layout.maze.levelExits ?? []),
+      ...(layout.maze.isAuthoredLevel ? [] : [layout.maze.opening])
+    ].filter(Boolean)
+    const turnState = getGlobalTurnStateForLevel(state, layout.maze.id, layout.maze)
+
+    return doors.some((door) =>
+      turnState.monsters.some((monster) =>
+        monster.cell.x === door.cell.x && monster.cell.y === door.cell.y
+      )
+    )
+  }, [])
+
+  useEffect(() => {
+    if (!globalTurnState) {
+      return
+    }
+
+    const resettableLevelIds = Array.from(loadedMazeLayoutsRef.current.values())
+      .filter((layout) => (
+        layout.maze.id !== globalTurnState.activeLevelId &&
+        !resetClosedMazeIdsRef.current.has(layout.maze.id) &&
+        isInactiveLevelDoorBlockedByMonster(globalTurnState, layout)
+      ))
+      .map((layout) => layout.maze.id)
+
+    if (resettableLevelIds.length === 0) {
+      return
+    }
+
+    setGlobalTurnState((current) => {
+      if (!current) {
+        return current
+      }
+
+      let next = current
+
+      for (const levelId of resettableLevelIds) {
+        const layout = loadedMazeLayoutsRef.current.get(levelId)
+
+        if (!layout || layout.maze.id === next.activeLevelId) {
+          continue
+        }
+
+        next = resetGlobalTurnStateLevel(next, layout)
+        resetClosedMazeIdsRef.current.add(levelId)
+      }
+
+      return next
+    })
+  }, [globalTurnState, isInactiveLevelDoorBlockedByMonster, setGlobalTurnState])
+
   const updateRenderedMazeLayouts = useCallback((centerMazeId: string | null) => {
     if (!centerMazeId) {
       setRenderedMazeLayouts([])
@@ -25721,9 +25848,8 @@ export default function App() {
           })
         }
 
-        return sourceLayout && request.sourceLevelId !== request.targetLevelId
-          ? resetGlobalTurnStateLevel(nextState, sourceLayout)
-          : nextState
+        resetClosedMazeIdsRef.current.delete(request.targetLevelId)
+        return nextState
       })
       setInstantiatedMazeId(request.targetLevelId)
       setMazeLayout(targetLayout)

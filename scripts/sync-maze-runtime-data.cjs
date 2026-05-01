@@ -83,6 +83,7 @@ function createNeutralRuntimeLightmap(maze) {
       y: 0
     },
     altarRects: {},
+    lightingGeometryVersion: 2,
     version: 32,
     wallRects: {}
   }
@@ -99,9 +100,26 @@ function isReusableGpuBakedMaze(maze, sourceSignature) {
     typeof maze.sourceSignature === 'string' &&
     !maze.sourceSignature.startsWith('neutral-') &&
     maze.lightmap?.encoding === 'rgb16f' &&
+    maze.lightmap?.lightingGeometryVersion === 2 &&
     (hasEmbeddedLightmap || hasRuntimeLightmap) &&
     typeof maze.lightmap.bakeRenderer === 'string' &&
-    maze.lightmap.bakeRenderer.length > 0
+    maze.lightmap.bakeRenderer.length > 0 &&
+    hasExpectedIndoorLightmapData(maze)
+  )
+}
+
+function isIndoorRuntimeMazeId(id) {
+  return /^(maze-\d{3}|challenge-\d{3}|werewolf-tutorial|hallway-|throne-room)/.test(String(id ?? ''))
+}
+
+function hasExpectedIndoorLightmapData(maze) {
+  if (!isIndoorRuntimeMazeId(maze?.id)) {
+    return true
+  }
+
+  return (
+    Object.keys(maze.lightmap?.ceilingRects ?? {}).length > 0 &&
+    Object.keys(maze.lightmap?.wallRects ?? {}).some((wallId) => wallId.endsWith(':upper'))
   )
 }
 
@@ -294,7 +312,9 @@ async function main() {
 
         if (
           existing.sourceSignature === sourceSignature &&
-          existing.lightmap?.atlasUrl
+          existing.lightmap?.lightingGeometryVersion === 2 &&
+          existing.lightmap?.atlasUrl &&
+          hasExpectedIndoorLightmapData(existing)
         ) {
           return {
             ...maze,

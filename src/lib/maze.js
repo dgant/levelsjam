@@ -990,7 +990,7 @@ function hasValidMazeLightmap(maze) {
     return false
   }
 
-  const walls = getMazeWallSegments(maze)
+  const walls = getMazeLightmapWallSegments(maze)
 
   return walls.every((wall) => {
     const rects = lightmap.wallRects[wall.id]
@@ -1698,6 +1698,94 @@ export function getMazeWallSegments(maze) {
   return walls
 }
 
+export function isIndoorMazeForRendering(maze) {
+  const levelName = String(maze.levelName ?? maze.id ?? '')
+
+  if (/^(entrance|chamber\b|chamber\s+\d+)/i.test(levelName)) {
+    return false
+  }
+
+  return (
+    /^(maze|hallway|throne room)/i.test(levelName) ||
+    /^(maze-\d{3}|challenge-\d{3}|werewolf-tutorial)$/i.test(String(maze.id ?? ''))
+  )
+}
+
+function getMazeUpperWallSegments(maze, lowerWalls = getMazeWallSegments(maze)) {
+  if (!isIndoorMazeForRendering(maze)) {
+    return []
+  }
+
+  const doorWalls = [
+    ...(Array.isArray(maze.levelExits) ? maze.levelExits : []),
+    ...(maze.isAuthoredLevel ? [] : [maze.opening])
+  ]
+    .filter(Boolean)
+    .map((boundary) => {
+      const descriptor = getWallDescriptorFromCellSide(maze, boundary.cell, boundary.side)
+      const halfLength = descriptor.axis === 'x'
+        ? MAZE_CELL_SIZE / 2
+        : MAZE_WALL_THICKNESS / 2
+      const halfWidth = descriptor.axis === 'x'
+        ? MAZE_WALL_THICKNESS / 2
+        : MAZE_CELL_SIZE / 2
+      const id = `${cellKey(boundary.cell)}:${boundary.side}:door`
+
+      return {
+        axis: descriptor.axis,
+        bounds: {
+          id,
+          maxX: descriptor.center.x + halfLength,
+          maxY: GROUND_Y + (MAZE_WALL_HEIGHT * 2),
+          maxZ: descriptor.center.z + halfWidth,
+          minX: descriptor.center.x - halfLength,
+          minY: GROUND_Y + MAZE_WALL_HEIGHT,
+          minZ: descriptor.center.z - halfWidth
+        },
+        center: descriptor.center,
+        id,
+        yaw: descriptor.axis === 'x' ? 0 : Math.PI / 2
+      }
+    })
+
+  const upperWalls = [
+    ...lowerWalls.map((wall) => ({
+      ...wall,
+      bounds: {
+        ...wall.bounds,
+        id: `${wall.id}:upper`,
+        maxY: wall.bounds.maxY + MAZE_WALL_HEIGHT,
+        minY: wall.bounds.minY + MAZE_WALL_HEIGHT
+      },
+      id: `${wall.id}:upper`
+    })),
+    ...doorWalls.map((wall) => ({
+      ...wall,
+      id: `${wall.id}:upper`,
+      bounds: {
+        ...wall.bounds,
+        id: `${wall.id}:upper`
+      }
+    }))
+  ]
+
+  assignWallSurfaceGroups(upperWalls)
+  return upperWalls
+}
+
+function getMazeLightmapWallSegments(maze) {
+  const lowerWalls = getMazeWallSegments(maze)
+
+  return [
+    ...lowerWalls,
+    ...getMazeUpperWallSegments(maze, lowerWalls)
+  ]
+}
+
+function getMazeCeilingLightmapCells(maze) {
+  return isIndoorMazeForRendering(maze) ? allCells(maze) : []
+}
+
 function getVisibilitySamplePoints(maze, cell) {
   const center = getCellCenter(maze, cell)
   const inset = (MAZE_CELL_SIZE / 2) - 0.08
@@ -1917,9 +2005,10 @@ function assignWallSurfaceGroups(walls) {
   const wallLines = new Map()
 
   for (const wall of walls) {
+    const baseY = Number.isFinite(wall.bounds?.minY) ? wall.bounds.minY : GROUND_Y
     const lineKey = wall.axis === 'x'
-      ? `x:${wall.center.z.toFixed(6)}`
-      : `z:${wall.center.x.toFixed(6)}`
+      ? `y:${baseY.toFixed(6)}:x:${wall.center.z.toFixed(6)}`
+      : `y:${baseY.toFixed(6)}:z:${wall.center.x.toFixed(6)}`
     const alongCoordinate = wall.axis === 'x'
       ? wall.center.x
       : wall.center.z
@@ -2007,7 +2096,7 @@ function getWallSurfaceGroups(walls) {
 }
 
 function getExteriorWallSide(wall) {
-  const match = String(wall.id).match(/:(north|east|south|west):exterior$/)
+  const match = String(wall.id).match(/:(north|east|south|west):exterior(?::upper)?$/)
   return match ? match[1] : null
 }
 
@@ -2826,7 +2915,7 @@ export async function bakeMazeLightmap(
     mazeId: maze.id,
     quality
   })
-  const walls = getMazeWallSegments(maze)
+  const walls = getMazeLightmapWallSegments(maze)
   const surfaceGroups = getWallSurfaceGroups(walls)
   const torchPlacements = getMazeTorchPlacements(maze, sconceRadius)
   const groundBounds = getMazeFloorLightmapBounds(maze)
@@ -2851,6 +2940,7 @@ export async function bakeMazeLightmap(
     MAZE_LIGHTMAP_NEUTRAL_TILE_SIZE
   )
   const altarRects = {}
+  const ceilingRects = {}
   const wallRects = {}
   const surfaceGroupRects = {}
   const surfaces = [{
@@ -2932,7 +3022,12 @@ export async function bakeMazeLightmap(
           surfaceGroup.length,
           surfaceGroup.yaw
         ],
-        surfaceB: [faceKey === 'pz' ? 1 : -1, 0, 0, 0],
+        surfaceB: [
+          faceKey === 'pz' ? 1 : -1,
+          surfaceGroup.walls[0]?.bounds?.minY ?? GROUND_Y,
+          0,
+          0
+        ],
         supersampleGrid: MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID,
         type: 1
       })
@@ -2964,7 +3059,7 @@ export async function bakeMazeLightmap(
           wall.center.x,
           wall.center.z,
           wall.yaw,
-          0
+          wall.bounds?.minY ?? GROUND_Y
         ],
         surfaceB: [faceKey === 'px' ? 1 : -1, 0, 0, 0],
         supersampleGrid: MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID,
@@ -3019,6 +3114,30 @@ export async function bakeMazeLightmap(
         type: 4
       })
     }
+  }
+
+  for (const cell of getMazeCeilingLightmapCells(maze)) {
+    const rect = allocateLightmapRect(
+      packer,
+      wallTileWidth,
+      wallTileWidth
+    )
+    const center = getCellCenter(maze, cell)
+
+    ceilingRects[cellKey(cell)] = rect
+    surfaces.push({
+      alignUToRectEdges: false,
+      rect,
+      surfaceA: [
+        center.x,
+        center.z,
+        MAZE_CELL_SIZE,
+        GROUND_Y + (MAZE_WALL_HEIGHT * 2)
+      ],
+      surfaceB: [0, -1, 0, 0],
+      supersampleGrid: MAZE_LIGHTMAP_WALL_SUPERSAMPLE_GRID,
+      type: 5
+    })
   }
 
   const atlasHeight = getLightmapAtlasHeight(packer)
@@ -3096,14 +3215,31 @@ export async function bakeMazeLightmap(
       : undefined,
     indirectRayCount,
     torches: torchPlacements,
-    walls: walls.map((wall) => ({
-      maxX: wall.bounds.maxX,
-      maxY: wall.bounds.maxY,
-      maxZ: wall.bounds.maxZ,
-      minX: wall.bounds.minX,
-      minY: wall.bounds.minY,
-      minZ: wall.bounds.minZ
-    }))
+    walls: [
+      ...walls.map((wall) => ({
+        maxX: wall.bounds.maxX,
+        maxY: wall.bounds.maxY,
+        maxZ: wall.bounds.maxZ,
+        minX: wall.bounds.minX,
+        minY: wall.bounds.minY,
+        minZ: wall.bounds.minZ
+      })),
+      ...getMazeCeilingLightmapCells(maze).map((cell) => {
+        const center = getCellCenter(maze, cell)
+        const halfSize = MAZE_CELL_SIZE / 2
+        const ceilingY = GROUND_Y + (MAZE_WALL_HEIGHT * 2)
+        const thickness = MAZE_WALL_THICKNESS / 2
+
+        return {
+          maxX: center.x + halfSize,
+          maxY: ceilingY + thickness,
+          maxZ: center.z + halfSize,
+          minX: center.x - halfSize,
+          minY: ceilingY - thickness,
+          minZ: center.z - halfSize
+        }
+      })
+    ]
   })
   reportProgress({
     action: 'gpu-job-finish',
@@ -3122,8 +3258,10 @@ export async function bakeMazeLightmap(
     dataBase64: result.dataBase64,
     ...(options.bakeModes ? { debugVariantDataBase64: result.variants } : {}),
     encoding: 'rgb16f',
+    ceilingRects,
     groundBounds,
     groundRect,
+    lightingGeometryVersion: 2,
     neutralRect,
     altarRects,
     version: MAZE_LIGHTMAP_VERSION,
@@ -3499,6 +3637,7 @@ function bakeMazeLightmapCpu(
     encoding: 'rgb16f',
     groundBounds,
     groundRect,
+    lightingGeometryVersion: 2,
     neutralRect,
     version: MAZE_LIGHTMAP_VERSION,
     wallRects

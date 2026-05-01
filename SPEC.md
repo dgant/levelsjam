@@ -134,6 +134,7 @@
 - `Hallway 1-4` has a recorded solution that reaches the `Hallway 1-5` exit under the normal monster and sword rules.
 - `Hallway 1-5` follows the `LEVELS.md` altar tutorial diagram with a two-cell upper row, a four-cell trophy row, and a single lower ingress cell.
 - `Hallway 1-5` places its altar in the upper row, its trophy in the far-right trophy-row cell, and its north exit door on the upper-left cell; the north exit door requires the hallway altar to be lit.
+- `Hallway 1-5` has an open edge between the altar cell and the trophy-return path so the altar animation never targets through a wall.
 - `Throne Room` follows the `LEVELS.md` throne-room diagram with a five-cell-wide main hall, a two-cell south connector to `Chamber 2`, the player start at the south connector, the trophy on the center cell below the north minotaur row, eight minotaurs on the indicated side cells, and the final altar on the north-center cell.
 - Chamber torch fixtures are mounted on solid wall faces immediately adjacent to each door; a chamber torch must not be mounted on the doorway edge itself or on an open/interior edge.
 
@@ -159,6 +160,12 @@
 - Each maze uses a grid of cells with walls on cell edges rather than filling the cells themselves.
 - Each maze wall is represented in the scene by a `0.25m x 2m x 2m` wall mesh.
 - Each maze wall has its base at `Y = 0`.
+- Indoor levels render a second-floor `0.25m x 2m x 2m` wall mesh above every ground-floor wall and door edge, including doorway edges that are open at ground level.
+- Indoor second-floor wall meshes have their own baked surface-lightmap rectangles instead of reusing the ground-floor wall rectangles.
+- Indoor second-floor wall meshes do not receive torch fixtures or point lights.
+- Indoor ceiling patches render as `2m x 2m` downward-facing wall-material planes at the top of the second-floor walls.
+- Indoor ceiling patches have their own baked surface-lightmap rectangles and follow the same visibility behavior as indoor second-floor walls.
+- Indoor second-floor walls and ceiling patches occlude bake-time moonlight, skylight, torch light, and indirect light during surface lightmap baking.
 - Each maze wall uses the extracted ShareTextures `stone-wall-29` PBR pack rather than preview imagery.
 - Each maze wall uses the full authored `stone-wall-29` PBR material stack rather than a reduced compatibility material.
 - Each maze wall short end face uses wall-material UV scale that preserves the same texel density as the larger wall faces.
@@ -832,7 +839,7 @@
 - The credits modal includes `"Bronze Sword Mycean" (https://skfb.ly/6RZxG) by Ryoce is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
 - The credits modal includes `"Priest's Throne" (https://skfb.ly/QH8R) by cachgill is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
 - The credits modal includes `"Droop cup 4th century BC" (https://skfb.ly/oyB9X) by The Hunt Museum is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).`
-- The credits modal includes the ShareTextures `metal-rust` texture pack credit for `https://www.sharetextures.com/textures/metal/metal-rust`.
+- The credits modal includes the ShareTextures `metal-rust` texture pack credit for `https://www.sharetextures.com/textures/metal/metal-rust` as a CC0 asset.
 
 ## Debug Controls
 - The debug controls panel can be opened and closed with backquote.

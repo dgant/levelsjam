@@ -144,3 +144,4 @@
 - Do not change authored post-process default settings unless the task is specifically to tune those defaults. Temporary post-process overrides for testing are allowed, but they must be applied at runtime or reverted before handoff or commit.
 - For agent browser checks, host the current repository on a private headless server using a non-5173 port and test only against that server. Do not use `localhost:5173`, because the human may run unrelated experiments there.
 - Monitor GPU utilization during offline lighting bakes and parallelize independent surface/probe workers when utilization and memory headroom remain low.
+- For story lighting probe exports, prefer the highest proven reliable parallel width over unbounded process count; on this machine six concurrent Playwright exporters completed while nineteen concurrent exporters starved probe capture.

@@ -222,7 +222,8 @@ test('completed altar target mazes keep entrance doors closed after resume', () 
   assert.match(appSource, /const completedMazeLevelIds = useMemo/)
   assert.match(appSource, /altar\.targetLevelId && activatedAltarIds\.has\(altar\.id\)/)
   assert.match(appSource, /completedMazeLevelIds\.has\(layout\.maze\.id\)/)
-  assert.match(appSource, /!isPermanentlyClosed &&[\s\S]*?isDoorOpenForTurnState/)
+  assert.match(appSource, /const isBlockedByMonster = turnState\.monsters\.some/)
+  assert.match(appSource, /!isPermanentlyClosed &&[\s\S]*?!isBlockedByMonster &&[\s\S]*?isDoorOpenForTurnState/)
 })
 
 test('closed completed mazes reset when player is outside them', () => {
@@ -231,7 +232,8 @@ test('closed completed mazes reset when player is outside them', () => {
   assert.match(appSource, /resetClosedMazeIdsRef/)
   assert.match(appSource, /resetGlobalTurnStateLevel\(next, targetLayout\)/)
   assert.match(appSource, /targetLevelId !== globalTurnStateRef\.current\?\.player\.levelId/)
-  assert.match(appSource, /resetGlobalTurnStateLevel\(nextState, sourceLayout\)/)
+  assert.match(appSource, /isInactiveLevelDoorBlockedByMonster/)
+  assert.doesNotMatch(appSource, /resetGlobalTurnStateLevel\(nextState, sourceLayout\)/)
   assert.match(appSource, /resetGlobalTurnStateAllLevels\(activeAnimation\.committedGlobalState\)/)
 })
 
@@ -385,7 +387,7 @@ test('indoor exterior walls bypass per-cell visibility culling', () => {
   const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
 
   assert.match(appSource, /function isIndoorExteriorWallVisible/)
-  assert.match(appSource, /isIndoorLayout\(layout\) && wall\.id\.endsWith\(':exterior'\)/)
+  assert.match(appSource, /isIndoorLayout\(layout\) && wall\.id\.includes\(':exterior'\)/)
   assert.match(appSource, /function isMazeWallVisible/)
   assert.match(appSource, /isIndoorExteriorWallVisible\(layout, wall\) \|\| isWallVisible\(visibility, wall\)/)
   assert.match(appSource, /visible=\{isMazeWallVisible\(layout, visibilityState, mazeWall\)\}/)
@@ -555,7 +557,7 @@ test('indoor ceiling patches use static surface lightmaps', () => {
   const appSource = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8')
 
   assert.match(appSource, /function createCeilingPatchGeometry\(\s*maze: MazeLayout\['maze'\],\s*cell: \{ x: number; y: number \},\s*lightmap: MazeLightmap\s*\)/)
-  assert.match(appSource, /mapGroundWorldToLightmapLocalUv\(lightmap\.groundBounds, worldX, worldZ\)/)
+  assert.match(appSource, /lightmap\.ceilingRects\?\.\[getMazeCellKey\(cell\)\] \?\? lightmap\.neutralRect/)
   assert.match(appSource, /createCeilingPatchGeometry\(layout\.maze, cell, layout\.maze\.lightmap\)/)
   assert.match(appSource, /function CeilingPatchMesh[\s\S]*?lightMap=\{lightmapTexture\}[\s\S]*?lightMapIntensity=\{lightMapIntensity\}/)
 })

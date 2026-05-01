@@ -305,6 +305,15 @@ test('Hallway 1-5 matches the altar tutorial ASCII topology', async () => {
   )
   assert.deepEqual(hallway.altars, [{ cell: { x: 1, y: 0 }, id: 'hallway-1-5-altar' }])
   assert.deepEqual(hallway.trophy, { cell: { x: 3, y: 1 } })
+  assert.ok(
+    hallway.openEdges.some((edge) => (
+      edge.from.x === 1 &&
+      edge.from.y === 0 &&
+      edge.to.x === 1 &&
+      edge.to.y === 1
+    )),
+    'Hallway 1-5 should open the altar cell to the trophy return path'
+  )
   assert.deepEqual(
     hallway.levelExits.find((exit) => exit.targetLevelId === 'chamber-1'),
     {

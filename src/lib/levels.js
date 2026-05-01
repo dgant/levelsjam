@@ -794,6 +794,7 @@ function createAuthoredMazeDefinition(id) {
       openEdges: [
         { from: { x: 0, y: 0 }, to: { x: 1, y: 0 } },
         { from: { x: 0, y: 0 }, to: { x: 0, y: 1 } },
+        { from: { x: 1, y: 0 }, to: { x: 1, y: 1 } },
         { from: { x: 0, y: 1 }, to: { x: 1, y: 1 } },
         { from: { x: 1, y: 1 }, to: { x: 2, y: 1 } },
         { from: { x: 2, y: 1 }, to: { x: 3, y: 1 } },

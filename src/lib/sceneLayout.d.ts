@@ -84,6 +84,7 @@ export type MazeLayout = {
         width: number
       }
       groundRect: { height: number; width: number; x: number; y: number }
+      lightingGeometryVersion?: number
       neutralRect: { height: number; width: number; x: number; y: number }
       altarRects?: Record<
         string,
@@ -95,6 +96,7 @@ export type MazeLayout = {
           pz?: { height: number; width: number; x: number; y: number }
         }
       >
+      ceilingRects?: Record<string, { height: number; width: number; x: number; y: number }>
       version: number
       wallRects: Record<
         string,
